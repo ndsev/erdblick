@@ -12,16 +12,31 @@ import {
     ViewChild
 } from "@angular/core";
 import {basicSetup} from "codemirror";
-import {Compartment, EditorState, Extension, Prec} from "@codemirror/state";
-import {EditorView, keymap, placeholder, ViewUpdate} from "@codemirror/view";
+import {
+    Compartment,
+    EditorState,
+    Extension,
+    Prec
+} from "@codemirror/state";
+import {
+    EditorView,
+    keymap,
+    placeholder,
+    ViewUpdate
+} from "@codemirror/view";
 import {syntaxHighlighting} from "@codemirror/language";
-import {debounceTime, distinctUntilChanged, Subject, Subscription} from "rxjs";
-import {FeatureSearchMapLayerRef, FeatureSearchScope} from "../shared/feature-search-state";
-import {currentInlineCodeMirrorTheme} from "../shared/codemirror-theme";
+import {
+    debounceTime,
+    distinctUntilChanged,
+    Subject,
+    Subscription
+} from "rxjs";
+import {FeatureSearchMapLayerRef, FeatureSearchScope} from "./search-definition.model";
+import {currentInlineCodeMirrorTheme} from "../editor/codemirror-theme.extension";
 import {CompletionCandidate} from "./search.model";
-import {FeatureSearchService} from "./feature.search.service";
+import {SearchService} from "./search.service";
 import {SearchCompletionPopupComponent} from "./search-completion-popup.component";
-import {simfilHighlightStyle, simfilLanguage} from "./simfil-language";
+import {simfilHighlightStyle, simfilLanguage} from "./simfil-language.extension";
 
 @Component({
     selector: "simfil-expression-input",
@@ -95,7 +110,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
     };
 
     /** Wires the completion service and DOM renderer used by the inline editor. */
-    constructor(private readonly searchService: FeatureSearchService,
+    constructor(private readonly searchService: SearchService,
                 private readonly renderer: Renderer2) {
         this.subscriptions.add(this.completionRequests.pipe(debounceTime(this.completionDelay)).subscribe(() => {
             this.completeCurrentQuery();

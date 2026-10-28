@@ -7,7 +7,7 @@ import {
     FeatureSearchGeometryKind,
     FeatureSearchRuleFilter,
     FeatureSearchStyleRule
-} from "../shared/feature-search-state";
+} from "./search-definition.model";
 import {searchStyleColorProperties} from "./search-style-color.util";
 
 const SUPPORTED_SEARCH_STYLE_OPERATORS = new Set(["=", "==", "!=", "<", "<=", ">", ">=", "contains"]);

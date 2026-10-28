@@ -1,28 +1,36 @@
-import {AfterViewInit, Component, OnDestroy, ViewContainerRef} from '@angular/core';
-import {HttpClient} from "@angular/common/http";
-import {MapInfoService} from "./mapdata/map-info.service";
-import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
+import { DiagnosticsState } from "./diagnostics/diagnostics.state";
+import { HttpClient } from "@angular/common/http";
 import {
-    AppStateService,
+    AfterViewInit,
+    Component,
+    OnDestroy,
+    ViewContainerRef
+} from '@angular/core';
+import { Title } from "@angular/platform-browser";
+import { AppActionRegistry } from "./action/action-registry.service";
+import { DebugWindow, ErdblickDebugApi } from "./app-debugapi.adapter";
+import { AppConfigService } from "./config/appconfig.service";
+import type { DistributionVersion } from "./diagnostics/version.model";
+import { DiagnosticsFacadeService } from "./diagnostics/diagnostics-facade.service";
+import { environment } from "./environments/environment";
+import {
     CACHE_RESET_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID,
-    FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID,
-    Versions
-} from "./shared/appstate.service";
-import {DebugWindow, ErdblickDebugApi} from "./app.debugapi.component";
-import {InfoMessageService} from "./shared/info.service";
-import {environment} from "./environments/environment";
-import {DialogStackService} from "./shared/dialog-stack.service";
-import {Title} from "@angular/platform-browser";
-import {KeyboardService} from "./shared/keyboard.service";
-import {AppConfigService} from "./shared/app-config.service";
-import {StyleService} from "./styledata/style.service";
-import {DiagnosticsFacadeService} from "./diagnostics/diagnostics.facade.service";
+    FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID
+} from "./layout/layout.model";
+import { LayoutService } from "./layout/layout.service";
+import { DialogStackService } from "./layout/dialog-stack.service";
+import { MapDataService } from "./mapdata/mapdata.service";
+import { MapTileStreamService } from "./mapdata/map-tile-stream.service";
 import {
     TileSubsetLayerRenderService
 } from "./mapview/deck/tile-subset-layer-render.service";
+import { InfoMessageService } from "./diagnostics/info.service";
+import { KeyboardService } from "./keyboard/keyboard.service";
+import { AppStateService } from "./appstate/appstate.service";
+import { MapStyleService } from "./mapstyle/mapstyle.service";
 
 // Redeclare window with extended interface
 declare let window: DebugWindow;
@@ -35,22 +43,22 @@ declare let window: DebugWindow;
             <datasources></datasources>
             <advanced-preferences></advanced-preferences>
             <map-panel></map-panel>
-            @if (stateService.isDialogOpen(cacheResetDialogLayoutId)) {
+            @if (layout.isDialogOpen(cacheResetDialogLayoutId)) {
                 <cache-reset-dialog></cache-reset-dialog>
             }
-            @if (stateService.isDialogOpen(diagnosticsPerformanceDialogLayoutId)) {
+            @if (layout.isDialogOpen(diagnosticsPerformanceDialogLayoutId)) {
                 <diagnostics-performance-dialog></diagnostics-performance-dialog>
             }
-            @if (stateService.isDialogOpen(diagnosticsLogDialogLayoutId)) {
+            @if (layout.isDialogOpen(diagnosticsLogDialogLayoutId)) {
                 <diagnostics-log-dialog></diagnostics-log-dialog>
             }
-            @if (stateService.isDialogOpen(diagnosticsExportDialogLayoutId)) {
+            @if (layout.isDialogOpen(diagnosticsExportDialogLayoutId)) {
                 <diagnostics-export-dialog></diagnostics-export-dialog>
             }
             <style-panel></style-panel>
             <inspection-dialogs></inspection-dialogs>
             <feature-search-dialogs></feature-search-dialogs>
-            @if (stateService.isDialogOpen(featureSearchExportDialogLayoutId)) {
+            @if (layout.isDialogOpen(featureSearchExportDialogLayoutId)) {
                 <feature-search-export-dialog></feature-search-export-dialog>
             }
             <keyboard-dialog></keyboard-dialog>
@@ -91,18 +99,21 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     private dialogDragActive = false;
 
     constructor(public stateService: AppStateService,
-                private httpClient: HttpClient,
-                private mapInfo: MapInfoService,
-                private tileStream: MapTileStreamService,
-                private subsetRenderer: TileSubsetLayerRenderService,
-                private styleService: StyleService,
-                private keyboardService: KeyboardService,
-                private viewContainerRef: ViewContainerRef,
-                private infoMessageService: InfoMessageService,
-                private dialogStack: DialogStackService,
-                private configService: AppConfigService,
-                private diagnostics: DiagnosticsFacadeService,
-                private titleService: Title) {
+        private httpClient: HttpClient,
+        private mapInfo: MapDataService,
+        private tileStream: MapTileStreamService,
+        private subsetRenderer: TileSubsetLayerRenderService,
+        private styleService: MapStyleService,
+        private keyboardService: KeyboardService,
+        private viewContainerRef: ViewContainerRef,
+        private infoMessageService: InfoMessageService,
+        private dialogStack: DialogStackService,
+        private configService: AppConfigService,
+        private readonly diagnosticsState: DiagnosticsState,
+        private diagnostics: DiagnosticsFacadeService,
+        private titleService: Title,
+        public readonly layout: LayoutService,
+        private readonly actions: AppActionRegistry) {
         // Register a default container for alert dialogs
         this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
         this.titleService.setTitle(this.capitalizeTitle(this.title));
@@ -111,7 +122,9 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         window.ebDebug = new ErdblickDebugApi(
             this.tileStream,
             this.subsetRenderer,
-            this.stateService
+            this.stateService,
+            this.mapInfo.viewSettings,
+            this.actions
         );
 
         this.loadDistributionVersions();
@@ -143,7 +156,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         this.detachDialogDragEndListener?.();
     }
 
-    /** Keeps dialogs and the search wrapper in a deterministic z-order based on focus clicks. */
+    /** Keeps dialogs and the omnibar wrapper in a deterministic z-order based on focus clicks. */
     private bindDialogFocusStacking() {
         const handler = (event: MouseEvent) => {
             const target = event.target as HTMLElement | null;
@@ -152,12 +165,12 @@ export class AppComponent implements AfterViewInit, OnDestroy {
             }
             const dialogElement = target.closest('.p-dialog') as HTMLElement | null;
             if (dialogElement) {
-                if (dialogElement.closest('.search-menu-dialog')) {
+                if (dialogElement.closest('.omnibar-menu-dialog')) {
                     const mainBar = document.querySelector('.main-bar') as HTMLElement | null;
                     if (mainBar) {
                         this.dialogStack.bringToFront(mainBar);
                     }
-                    const wrapper = dialogElement.closest('.search-wrapper') as HTMLElement | null;
+                    const wrapper = dialogElement.closest('.omnibar-wrapper') as HTMLElement | null;
                     this.dialogStack.bringToFront(wrapper ?? dialogElement);
                     return;
                 }
@@ -166,12 +179,12 @@ export class AppComponent implements AfterViewInit, OnDestroy {
             }
 
             const mainBar = target.closest('.main-bar') as HTMLElement | null;
-            const searchWrapper = target.closest('.search-wrapper') as HTMLElement | null;
+            const omnibarWrapper = target.closest('.omnibar-wrapper') as HTMLElement | null;
             if (mainBar) {
                 this.dialogStack.bringToFront(mainBar);
             }
-            if (searchWrapper) {
-                this.dialogStack.bringToFront(searchWrapper);
+            if (omnibarWrapper) {
+                this.dialogStack.bringToFront(omnibarWrapper);
             }
         };
         document.addEventListener('mousedown', handler, true);
@@ -190,9 +203,9 @@ export class AppComponent implements AfterViewInit, OnDestroy {
 
         const distribVersionsPath = `/static-config/${distribVersions}.js`;
         import(/* @vite-ignore */ distribVersionsPath)
-            .then((plugin) => plugin.default() as Array<Versions>)
-            .then((versions: Array<Versions>) => {
-                this.stateService.distributionVersions.next(versions);
+            .then((plugin) => plugin.default() as Array<DistributionVersion>)
+            .then((versions: Array<DistributionVersion>) => {
+                this.diagnosticsState.setRuntimeVersions({ distributionVersions: versions, erdblickVersion: "" });
                 if (versions[0]?.name.trim()) {
                     this.titleService.setTitle(this.capitalizeTitle(versions[0].name.trim()));
                 } else {
@@ -262,9 +275,9 @@ export class AppComponent implements AfterViewInit, OnDestroy {
 
     /** Loads the bundled fallback version string when distribution metadata is unavailable. */
     getBasicVersion() {
-        this.httpClient.get('./bundle/VERSION', {responseType: 'text'}).subscribe(
+        this.httpClient.get('./bundle/VERSION', { responseType: 'text' }).subscribe(
             data => {
-                this.stateService.erdblickVersion.next(`${this.title} ${data.toString()}`);
+                this.diagnosticsState.setRuntimeVersions({ distributionVersions: [], erdblickVersion: `${this.title} ${data.toString()}` });
                 this.titleService.setTitle(this.capitalizeTitle(this.title));
             });
     }

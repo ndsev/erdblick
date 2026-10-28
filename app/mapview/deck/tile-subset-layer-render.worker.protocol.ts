@@ -1,4 +1,4 @@
-import type {PointCloudRenderPolicy} from "../../shared/point-cloud-policy";
+import type {PointCloudRenderPolicy} from "../point-cloud-policy.model";
 /** Scene-owned identity assigned to one subset before worker rendering starts. */
 export interface TileSubsetGpuContribution {
     keyLow: number;

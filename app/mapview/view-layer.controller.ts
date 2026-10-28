@@ -1,20 +1,39 @@
-import {Subject, Subscription} from "rxjs";
-import type {FilterTileState} from "../mapdata/filter-tile-state.model";
-import type {MapInfoService} from "../mapdata/map-info.service";
-import type {MapTileStreamService} from "../mapdata/map-tile-stream.service";
+import { NgZone } from "@angular/core";
+import { Subject, Subscription } from "rxjs";
+import type {
+    InspectionSelectionService
+} from "../inspection/inspection-selection.service";
+import type { InspectionPanelModel, TileFeatureId } from "../inspection/inspection.model";
+import { coreLib } from "../integrations/wasm.adapter";
+import type { FilterTileState } from "../mapdata/filter-tile-state.model";
+import type { HoverDetailService } from "../mapdata/hover-detail.service";
+import type { MapDataService } from "../mapdata/mapdata.service";
+import type { MapTileStreamService } from "../mapdata/map-tile-stream.service";
+import type { MapgetLayer } from "../mapdata/mapget-layer.model";
 import {
-    StyledMapgetLayer,
-    type StyleFilterPlan,
-    type StyledMapgetLayerEvent
-} from "../mapdata/styled-mapget-layer.model";
-import type {MapgetLayer} from "../mapdata/mapget-layer.model";
-import type {StyleService, ErdblickStyle} from "../styledata/style.service";
-import {coreLib} from "../integrations/wasm";
-import type {IRenderSceneHandle} from "./render-view.model";
+    parseMapPartitionKey,
+    partitionKey,
+    tilePartition,
+    type PartitionId
+} from "../mapdata/partition.model";
+import { StyledMapgetLayer } from "../mapdata/styled-mapget-layer.presentation";
+import { type StyleFilterPlan, type StyledMapgetLayerEvent } from "../mapdata/styled-mapget-layer.model";
+import type { SearchService } from "../search/search.service";
+import { MAX_STYLE_LOD } from "../mapstyle/style-lod.model";
+import { tileFeatureInteractionTargetsEqual } from "../inspection/feature-identity.model";
+import { sipHash64Hex } from "../utils/hash.util";
+import type {
+    StyleValidationReportService
+} from "../mapstyle/style-validation-report.service";
+import type { MapStyleService } from "../mapstyle/mapstyle.service";
+import type { ErdblickStyle } from "../mapstyle/mapstyle.model";
 import {
-    MapViewStateService,
-    ViewRecalculationReason
-} from "./map-view-state.service";
+    resolveDeckInteractionEffect,
+    type DeckInteractionEffect
+} from "./deck/deck-interaction-effect.util";
+import type { GpuSceneSnapshot } from "./deck/gpu-scene.visualization";
+import { tileCoordinateOrigin } from "./deck/tile-coordinate-origin.util";
+import { INTERACTION_STYLE_ORDER_BASE } from "./deck/tile-subset-interaction.model";
 import {
     TileSubsetLayerRenderService
 } from "./deck/tile-subset-layer-render.service";
@@ -23,47 +42,18 @@ import {
     type TileSubsetInteractionOverlay
 } from "./deck/tile-subset-layer.visualization";
 import {
-    resolveDeckInteractionEffect,
-    type DeckInteractionEffect
-} from
-    "./deck/deck-interaction-effect";
-import {tileCoordinateOrigin} from "./deck/tile-coordinate-origin";
-import type {FeatureSearchService} from "../search/feature.search.service";
-import type {
-    InspectionSelectionService
-} from "../inspection/inspection-selection.service";
-import type {
-    InspectionPanelModel,
-    TileFeatureId
-} from "../shared/appstate.service";
-import {sipHash64Hex} from "../styledata/hash";
-import {
-    tileFeatureInteractionTargetsEqual
-} from "../shared/tile-feature-id";
-import {
     hasAuthoredInteractionHighlight,
     interactionTargetKey,
     planRemoteInteractionHighlights
-} from "./interaction-highlight-plan";
+} from "./interaction-highlight-plan.util";
+import {
+    MapViewService,
+    ViewRecalculationReason
+} from "./mapview.service";
+import type { IRenderSceneHandle } from "./render-view.model";
 import type {
     ViewLayerDiagnosticsService
 } from "./view-layer-diagnostics.service";
-import type {
-    StyleValidationReportService
-} from "../styledata/style-validation-report.service";
-import type {HoverDetailService} from "../mapdata/hover-detail.service";
-import {NgZone} from "@angular/core";
-import type {GpuSceneSnapshot} from "./deck/gpu-scene";
-import {INTERACTION_STYLE_ORDER_BASE} from
-    "./deck/tile-subset-interaction.model";
-import {MAX_STYLE_LOD} from "../shared/lod-policy";
-import {
-    parseMapPartitionKey,
-    parsePartition,
-    partitionKey,
-    tilePartition,
-    type PartitionId
-} from "../mapdata/partition.model";
 
 export type ViewTileOccupancy = "unknown" | "empty" | "non-empty" | "error";
 
@@ -146,12 +136,12 @@ export class ViewLayerController {
     /** Bind one logical view to catalog, style, search, inspection, and worker state. */
     constructor(
         readonly viewIndex: number,
-        private readonly mapInfo: MapInfoService,
-        private readonly viewState: MapViewStateService,
+        private readonly mapInfo: MapDataService,
+        private readonly viewState: MapViewService,
         private readonly tileStream: MapTileStreamService,
-        private readonly styleService: StyleService,
+        private readonly styleService: MapStyleService,
         private readonly renderService: TileSubsetLayerRenderService,
-        private readonly featureSearch: FeatureSearchService,
+        private readonly featureSearch: SearchService,
         private readonly inspection: InspectionSelectionService,
         private readonly hoverDetails: HoverDetailService,
         private readonly diagnostics: ViewLayerDiagnosticsService,
@@ -201,7 +191,7 @@ export class ViewLayerController {
                 }
                 previousCloudWorkingMiB = workingMiB;
                 const owners = [...this.styledLayers.values(),
-                    ...[...this.retiringRegularLayers.values()].map(value => value.owned)];
+                ...[...this.retiringRegularLayers.values()].map(value => value.owned)];
                 for (const owned of owners)
                     for (const visualization of owned.visualizations.values())
                         visualization.setPointCloudScale(this.viewState.viewStateFor(this.viewIndex)?.metersPerPixel ?? null, reclaim);
@@ -224,7 +214,7 @@ export class ViewLayerController {
                     this.queueVisualizationRender(visualization);
                 }
             }
-            for (const {owned} of this.retiringRegularLayers.values()) {
+            for (const { owned } of this.retiringRegularLayers.values()) {
                 for (const visualization of owned.visualizations.values()) {
                     visualization.reattach(sceneHandle);
                     this.queueVisualizationRender(visualization);
@@ -249,8 +239,7 @@ export class ViewLayerController {
         }
 
         for (const [slot, fallback] of
-             [...this.retiringRegularLayers])
-        {
+            [...this.retiringRegularLayers]) {
             if (fallback.owned.layer.identity.mapId !== mapId) {
                 continue;
             }
@@ -261,8 +250,7 @@ export class ViewLayerController {
         let refreshed = false;
         for (const owned of this.styledLayers.values()) {
             if (owned.layer.identity.mapId !== mapId ||
-                owned.layer.identity.presentationKind === "search")
-            {
+                owned.layer.identity.presentationKind === "search") {
                 continue;
             }
             this.clearOwnedVisualizations(owned);
@@ -291,7 +279,7 @@ export class ViewLayerController {
 
     /** Exposes view-owned Deck counters to diagnostics without sampling every frame. */
     setDeckPresentationDiagnosticsProvider(
-        provider: () => {layers: number; scene: GpuSceneSnapshot}
+        provider: () => { layers: number; scene: GpuSceneSnapshot }
     ): void {
         this.renderService.setDeckPresentationDiagnosticsProvider(
             this.viewIndex,
@@ -319,7 +307,7 @@ export class ViewLayerController {
     /** Resolves source occupancy without interpreting filtered entry counts. */
     occupancyForTile(
         tileId: number,
-        visibleLayers: ReadonlyArray<{mapId: string; layerId: string}>
+        visibleLayers: ReadonlyArray<{ mapId: string; layerId: string }>
     ): ViewTileOccupancy {
         let sawPending = false;
         let sawObservation = false;
@@ -383,7 +371,7 @@ export class ViewLayerController {
             this.destroyOwnedLayer(owned);
         }
         this.styledLayers.clear();
-        for (const {owned} of this.retiringRegularLayers.values()) {
+        for (const { owned } of this.retiringRegularLayers.values()) {
             this.destroyOwnedLayer(owned);
         }
         this.retiringRegularLayers.clear();
@@ -764,7 +752,7 @@ export class ViewLayerController {
             this.interactionViewportSignature();
         if (this.interactionReconcileRequired ||
             interactionViewportSignature !==
-                this.lastInteractionViewportSignature) {
+            this.lastInteractionViewportSignature) {
             this.interactionReconcileRequired = false;
             this.reconcileHighlightLayers(orderedStyles);
             this.lastInteractionViewportSignature =
@@ -863,7 +851,7 @@ export class ViewLayerController {
             this.destroyOwnedLayer(previous.owned);
         }
         owned.layer.setSuspended(true);
-        this.retiringRegularLayers.set(slot, {key, owned});
+        this.retiringRegularLayers.set(slot, { key, owned });
     }
 
     /**
@@ -1007,29 +995,29 @@ export class ViewLayerController {
             features: TileFeatureId[];
             mode: typeof coreLib.HighlightMode.SELECTION_HIGHLIGHT;
         }> = [
-            ...this.inspection.selectionIdsTopic.getValue().map(
-                (panel: InspectionPanelModel<TileFeatureId>) => ({
-                    kind: "selection" as const,
-                    id: String(panel.id),
-                    color: panel.color,
-                    features: panel.features,
-                    mode: coreLib.HighlightMode.SELECTION_HIGHLIGHT
-                })
-            ),
-            {
-                kind: "hover",
-                id: "current",
-                // Selection dominates hover only for the exact same semantic
-                // target. Nested attribute/validity rows remain hoverable so
-                // their authored inspection visualizations can still run.
-                features: this.inspection.hoverIdsTopic.getValue().filter(
-                    hovered => !selectedTargets.some(selected =>
-                        tileFeatureInteractionTargetsEqual(
-                            hovered,
-                            selected))),
-                mode: coreLib.HighlightMode.HOVER_HIGHLIGHT
-            }
-        ];
+                ...this.inspection.selectionIdsTopic.getValue().map(
+                    (panel: InspectionPanelModel<TileFeatureId>) => ({
+                        kind: "selection" as const,
+                        id: String(panel.id),
+                        color: panel.color,
+                        features: panel.features,
+                        mode: coreLib.HighlightMode.SELECTION_HIGHLIGHT
+                    })
+                ),
+                {
+                    kind: "hover",
+                    id: "current",
+                    // Selection dominates hover only for the exact same semantic
+                    // target. Nested attribute/validity rows remain hoverable so
+                    // their authored inspection visualizations can still run.
+                    features: this.inspection.hoverIdsTopic.getValue().filter(
+                        hovered => !selectedTargets.some(selected =>
+                            tileFeatureInteractionTargetsEqual(
+                                hovered,
+                                selected))),
+                    mode: coreLib.HighlightMode.HOVER_HIGHLIGHT
+                }
+            ];
         const desired = new Map<string, {
             mapgetLayer: MapgetLayer;
             style: ErdblickStyle;
@@ -1039,7 +1027,7 @@ export class ViewLayerController {
             options: Record<string, boolean | number | string>;
             plan: StyleFilterPlan;
             partitions: PartitionId[];
-            roots: Array<{partition: PartitionId; featureId: string}>;
+            roots: Array<{ partition: PartitionId; featureId: string }>;
             styleOrder: number;
             plannedLod: number;
         }>();
@@ -1051,31 +1039,31 @@ export class ViewLayerController {
         for (const group of groups) {
             const byLayer = new Map<string, {
                 mapgetLayer: MapgetLayer;
-                features: Array<TileFeatureId & {partition: PartitionId}>;
+                features: Array<TileFeatureId & { partition: PartitionId }>;
             }>();
             for (const feature of group.features) {
                 const resolved = this.resolveInteractionTargetLayer(feature);
                 if (!resolved) {
                     continue;
                 }
-                const {mapgetLayer, partition} = resolved;
+                const { mapgetLayer, partition } = resolved;
                 let entry = byLayer.get(mapgetLayer.key);
                 if (!entry) {
-                    entry = {mapgetLayer, features: []};
+                    entry = { mapgetLayer, features: [] };
                     byLayer.set(mapgetLayer.key, entry);
                 }
                 if (!entry.features.some(candidate =>
                     candidate.mapTileKey === feature.mapTileKey &&
                     candidate.featureId === feature.featureId
                 )) {
-                    entry.features.push({...feature, partition});
+                    entry.features.push({ ...feature, partition });
                 }
             }
 
-            for (const {mapgetLayer, features} of byLayer.values()) {
+            for (const { mapgetLayer, features } of byLayer.values()) {
                 for (let styleIndex = 0;
-                     styleIndex < orderedStyles.length;
-                     ++styleIndex) {
+                    styleIndex < orderedStyles.length;
+                    ++styleIndex) {
                     const style = orderedStyles[styleIndex];
                     if (!this.hasInteractionLayerAffinity(
                         style,
@@ -1145,7 +1133,7 @@ export class ViewLayerController {
                             remotePlans = planRemoteInteractionHighlights(
                                 rawPlan,
                                 features,
-                                {localTargetKeys}
+                                { localTargetKeys }
                             );
                         }
                     }
@@ -1183,7 +1171,7 @@ export class ViewLayerController {
                             if (existing) {
                                 if (!existing.targets.some(target =>
                                     interactionTargetKey(target) ===
-                                        interactionTargetKey(feature))) {
+                                    interactionTargetKey(feature))) {
                                     byId.set(overlayId, {
                                         ...existing,
                                         targets: [...existing.targets, feature]
@@ -1429,7 +1417,7 @@ export class ViewLayerController {
         const applicable = overlays.flatMap(overlay => {
             const targets = overlay.targets.filter(target =>
                 visualization.hasLocalInteractionTarget(target));
-            return targets.length ? [{...overlay, targets}] : [];
+            return targets.length ? [{ ...overlay, targets }] : [];
         });
         visualization.setInteractionOverlays(applicable);
         if (applicable.length) {
@@ -1485,7 +1473,7 @@ export class ViewLayerController {
         for (const owned of this.styledLayers.values()) {
             collect(owned);
         }
-        for (const {owned} of this.retiringRegularLayers.values()) {
+        for (const { owned } of this.retiringRegularLayers.values()) {
             collect(owned);
         }
         return result;
@@ -1500,7 +1488,7 @@ export class ViewLayerController {
         if (!parsed) {
             return null;
         }
-        const {mapId, layerId, partition} = parsed;
+        const { mapId, layerId, partition } = parsed;
         const mapgetLayer = this.mapInfo.mapgetLayer(mapId, layerId);
         if (!mapgetLayer) {
             return null;
@@ -1508,7 +1496,7 @@ export class ViewLayerController {
         // A hidden ordinary layer has no local contribution by definition;
         // its exact selected/hovered tile is therefore authored-fallback
         // demand, not ineligible interaction demand.
-        return {mapgetLayer, partition};
+        return { mapgetLayer, partition };
     }
 
     /** Test exact entity presence in any regular/search contribution for this map layer. */
@@ -1542,7 +1530,7 @@ export class ViewLayerController {
             }
         }
         return [...this.retiringRegularLayers.values()]
-            .some(({owned}) => matches(owned));
+            .some(({ owned }) => matches(owned));
     }
 
     /** Re-evaluate local-versus-authored highlighting after scene geometry changes. */
@@ -1620,7 +1608,7 @@ export class ViewLayerController {
             .sort((left, right) =>
                 left.mapId.localeCompare(right.mapId) ||
                 left.layerId.localeCompare(right.layerId))
-            .map(({mapId, layerId, partition}) => {
+            .map(({ mapId, layerId, partition }) => {
                 const visible = this.mapInfo.maps.getMapLayerVisibility(
                     this.viewIndex,
                     mapId,

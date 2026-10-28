@@ -1,9 +1,16 @@
-import {COORDINATE_SYSTEM, CompositeLayer, Layer, project32, type LayerProps, type UpdateParameters} from "@deck.gl/core";
+import {
+    COORDINATE_SYSTEM,
+    CompositeLayer,
+    Layer,
+    project32,
+    type LayerProps,
+    type UpdateParameters
+} from "@deck.gl/core";
 import {SolidPolygonLayer} from "@deck.gl/layers";
 import {Buffer} from "@luma.gl/core";
 import {Geometry, Model} from "@luma.gl/engine";
 import type {LocationPolygon} from "../render-view.model";
-import {buildLocationOutlineBuffer, LOCATION_OUTLINE_RECORD_FLOATS} from "./location-outline-buffer";
+import {buildLocationOutlineBuffer, LOCATION_OUTLINE_RECORD_FLOATS} from "./location-outline-buffer.util";
 import {LOCATION_OUTLINE_FRAGMENT_SHADER, LOCATION_OUTLINE_VERTEX_SHADER} from "./location-outline.shaders";
 
 /** Immutable, already clipped polygons shared by the fill and complete boundary. */

@@ -17,7 +17,7 @@ the YAML rules; **Export** saves the sheet for reuse in another session.
 <!-- mcp:
 title: "Style lifecycle and local editing"
 keywords: ["styles", "import", "create", "edit", "reset", "browser local"]
-hint: "Discover exact style IDs with viewer_get_catalog(kind=\"styles\"), then read YAML with viewer_get_style. Validate candidate YAML with viewer_validate_style before viewer_edit_style. Edits are browser-local; they do not update deployment files. Search help for \"Style document shape\" and \"Style options and presets\" when authoring."
+hint: "Discover exact style IDs with viewer_list_styles, then read YAML with viewer_get_style. Validate candidate YAML with viewer_validate_style before viewer_edit_style. Edits are browser-local; they do not update deployment files. Search help for \"Style document shape\" and \"Style options and presets\" when authoring."
 -->
 ## Managing Styles in the UI
 
@@ -57,7 +57,7 @@ The **brush** opens the sheet that owns this group of lane options.
 <!-- mcp:
 title: "Bundled style presets for Live Classic and generic maps"
 keywords: ["cinematic", "topology", "travel direction", "BMD", "point cloud", "preset"]
-hint: "Discover available options and presets for the actual map/layer with viewer_get_catalog. Names in this guide describe bundled configurations, not a guarantee that every deployment has loaded them. Apply qualified IDs through view.layerPreset or view.mapPreset; absence of a stock option does not establish absence of map attributes."
+hint: "Discover available options and presets for the actual map/layer with viewer_list_style_options and viewer_list_presets. Names in this guide describe bundled configurations, not a guarantee that every deployment has loaded them. Apply qualified IDs through view.layerPreset or view.mapPreset; absence of a stock option does not establish absence of map attributes."
 -->
 ## Pre-defined Styles
 
@@ -248,7 +248,7 @@ presentation expressions without rewriting the stylesheet.
 <!-- mcp:
 title: "Style options and presets"
 keywords: ["option", "preset", "layer preset", "map preset", "Boolean", "visibility"]
-hint: "Discover IDs with viewer_get_catalog(kind=\"options\") or kind=\"presets\" scoped to the target map/layer/style. Apply existing choices with view.styleOption, view.layerPreset or view.mapPreset. Read state first, observe viewLayoutRevision and check app.viewSync; preset application can affect synchronized views."
+hint: "Discover IDs with viewer_list_style_options or viewer_list_presets scoped to the target map/layer/style. Apply existing choices with view.styleOption, view.layerPreset or view.mapPreset. Read state first, use the selected viewId and check app.viewSync; preset application can affect synchronized views."
 -->
 ## Options and layer presets
 

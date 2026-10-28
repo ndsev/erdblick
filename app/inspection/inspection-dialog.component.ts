@@ -1,0 +1,507 @@
+import {
+    Component,
+    OnDestroy,
+    Renderer2,
+    ViewChild,
+    effect,
+    input
+} from "@angular/core";
+import { Popover } from "primeng/popover";
+import { coreLib } from "../integrations/wasm.adapter";
+import { FeatureWrapper } from "../mapdata/feature-inspection.adapter";
+import { MapDataService } from "../mapdata/mapdata.service";
+import {
+    parseMapPartitionKey,
+    partitionKeySuffix
+} from "../mapdata/partition.model";
+import { AppDialogComponent } from "../layout/app-dialog.component";
+import { LayoutService } from "../layout/layout.service";
+import type {
+    AppSurfaceHeaderAction,
+    AppSurfaceHeaderActionCommandEvent
+} from "../layout/app-surface-header.component";
+import { AppStateService } from "../appstate/appstate.service";
+import { DialogStackService } from "../layout/dialog-stack.service";
+import { displayFeatureId } from "./feature-identity.model";
+import { FeaturePanelComponent } from "./feature-panel.component";
+import { InspectionSelectionService } from "./inspection-selection.service";
+import { InspectionComparisonOption, InspectionPanelModel } from "./inspection.model";
+import { InspectionPanelService } from "./inspection-panel.service";
+import { SourceDataPanelComponent } from "./sourcedata-panel.component";
+
+@Component({
+    selector: 'inspection-panel-dialog',
+    template: `
+        <app-dialog #dialog class="inspection-dialog" [modal]="false" [closable]="false" [visible]="true"
+                  [style]="dialogStyle" [persistLayout]="true" [layoutId]="layoutId"
+                  [dockDropCue]="true"
+                  (onShow)="onDialogShow()" (onDragEnd)="onDialogDragEnd()" (onResizeEnd)="onDialogResizeEnd()"
+                  (pointerdown)="focusPanel()" (focusin)="focusPanel()">
+            <ng-template #header>
+                @if (panel()) {
+                    <app-surface-header [title]="title"
+                                        [lockable]="true"
+                                        [locked]="panel().locked"
+                                        [featureTitle]="panel().sourceData === undefined"
+                                        [focusable]="true"
+                                        [focused]="panel().focused === true"
+                                        [hasSmartControl]="panel().sourceData === undefined && panel().features.length > 0"
+                                        dockMode="dock"
+                                        [sizeToggleVisible]="false"
+                                        [dragEnabled]="true"
+                                        [extraActions]="featureHeaderActions()"
+                                        (titleClick)="toggleLockedState($event)"
+                                        (dockRequest)="dock($event)"
+                                        (closeRequest)="unsetPanel()"
+                                        (focusRequest)="focusPanel()"
+                                        (dragPointerDown)="beginDrag($event)">
+                        @if (isMetadata) {
+                            <p-tag surfaceHeaderIndicator severity="info" value="META" [rounded]="true" />
+                        } @else if (panel().sourceData !== undefined) {
+                            <p-tag surfaceHeaderIndicator severity="success" value="DATA" [rounded]="true" />
+                        }
+                        @if (panel().sourceData !== undefined) {
+                            <p-select surfaceHeaderAfterTitle class="source-layer-dropdown" [options]="layerMenuItems"
+                                      [(ngModel)]="selectedLayerItem"
+                                      (click)="onDropdownClick($event)" (mousedown)="onDropdownClick($event)"
+                                      scrollHeight="20em" (ngModelChange)="onSelectedLayerItem()"
+                                      appendTo="body"
+                                      [overlayOptions]="sourceLayerDropdownOverlayOptions"
+                                      optionLabel="label"
+                                      optionDisabled="disabled"/>
+                        } @else if (panel().features.length > 0) {
+                            <p-colorpicker surfaceHeaderSmartControl
+                                           [ngModel]="panel().color"
+                                           appendTo="body"
+                                           [overlayOptions]="{autoZIndex: true, baseZIndex: 9500}"
+                                           (click)="$event.stopPropagation()"
+                                           (mousedown)="$event.stopPropagation()"
+                                           (ngModelChange)="onPanelColorChange($event)">
+                            </p-colorpicker>
+                        }
+                    </app-surface-header>
+                }
+            </ng-template>
+
+            <ng-template #content>
+                @if (panel()) {
+                    <div class="resizable-container">
+                        <div style="width: 100%; height: 100%">
+                            @if (errorMessage) {
+                                <div>
+                                    <strong>Error</strong><br>{{ errorMessage }}
+                                </div>
+                            } @else if (panel().sourceData) {
+                                <sourcedata-panel [panel]="panel()"
+                                                  (errorOccurred)="onSourceDataError($event)"></sourcedata-panel>
+                            } @else {
+                                <feature-panel [panel]="panel()"></feature-panel>
+                            }
+                        </div>
+                    </div>
+                }
+            </ng-template>
+        </app-dialog>
+        <p-popover #comparePopover [baseZIndex]="30000">
+            <div style="display: flex; flex-direction: row; align-content: center; gap: 0.25em">
+                <div class="comparison-popover">
+                    <p-multiSelect [options]="compareOptions"
+                                   [(ngModel)]="selectedCompareIds"
+                                   (onPanelShow)="refreshCompareOptions()"
+                                   optionLabel="label"
+                                   optionValue="value"
+                                   [showClear]="true"
+                                   [selectionLimit]="3"
+                                   placeholder="Compare with..."
+                                   [overlayOptions]="{ autoZIndex: true, baseZIndex: 30010 }"/>
+                    @if (selectedCompareIds.length > 0) {
+                        <div class="comparison-popover-actions">
+                            <p-button icon="pi pi-check" label="" (click)="applyComparison($event)"/>
+                        </div>
+                    }
+                </div>
+            </div>
+        </p-popover>
+    `,
+    standalone: false
+})
+/**
+ * Hosts one undocked inspection panel dialog, including dock-drop cues, comparison actions,
+ * and source-data layer switching.
+ */
+export class InspectionPanelDialogComponent implements OnDestroy {
+    panel = input.required<InspectionPanelModel<FeatureWrapper>>();
+    dialogIndex = input.required<number>();
+    title = "";
+    errorMessage: string = "";
+    layoutId = '';
+    dialogStyle: { [key: string]: string } = {};
+    layerMenuItems: { label: string, disabled: boolean, command: () => void }[] = [];
+    selectedLayerItem?: { label: string, disabled: boolean, command: () => void };
+    compareOptions: InspectionComparisonOption[] = [];
+    selectedCompareIds: number[] = [];
+    isMetadata: boolean = false;
+    protected readonly sourceLayerDropdownOverlayOptions = { autoZIndex: true, baseZIndex: 30000 };
+
+    @ViewChild('dialog') dialog?: AppDialogComponent;
+    @ViewChild('comparePopover') comparePopover!: Popover;
+    @ViewChild(FeaturePanelComponent) featurePanel?: FeaturePanelComponent;
+    @ViewChild(SourceDataPanelComponent) sourceDataPanel?: SourceDataPanelComponent;
+
+    private detachPointerUpListener?: () => void;
+
+    /** Wires dialog state to the active inspection panel and floating-dialog helpers. */
+    constructor(private mapService: MapDataService,
+        private inspectionSelection: InspectionSelectionService,
+        public stateService: AppStateService,
+        private renderer: Renderer2,
+        private dialogStack: DialogStackService,
+        public readonly inspectionState: InspectionPanelService,
+        public readonly layout: LayoutService) {
+        effect(() => {
+            const panel = this.panel();
+            this.errorMessage = "";
+            this.updateHeaderFor(panel);
+            this.layoutId = `inspection:${panel.id}`;
+            this.dialogStyle = this.buildDialogStyle(panel);
+        });
+    }
+
+    /** Rebuilds the dialog title and source-data layer selector for the active panel content. */
+    private updateHeaderFor(panel: InspectionPanelModel<FeatureWrapper>) {
+        if (panel.sourceData !== undefined) {
+            const selection = panel.sourceData!;
+            const [mapId, layerId, partition] = parseMapPartitionKey(
+                coreLib,
+                selection.mapTileKey
+            );
+            this.isMetadata = partition.kind === "tile" && partition.id === 0;
+            this.title = this.isMetadata
+                ? `${mapId}:`
+                : `${partitionKeySuffix(partition)}.`;
+            const map = this.mapService.maps.maps.get(mapId);
+            if (map) {
+                this.layerMenuItems = Array.from(map.layers.values())
+                    .filter(item => item.type === "SourceData")
+                    .filter(item => (item.id.startsWith("SourceData") && !this.isMetadata) ||
+                        (item.id.startsWith("Metadata") && this.isMetadata))
+                    .map(item => {
+                        return {
+                            label: this.mapService.layerNameForSourceDataLayerId(item.id, item.id.startsWith("Metadata")),
+                            disabled: item.id === layerId,
+                            command: () => {
+                                const sourceData = { ...selection };
+                                sourceData.mapTileKey = coreLib.createMapTileKey(
+                                    "SourceData",
+                                    mapId,
+                                    item.id,
+                                    partitionKeySuffix(partition)
+                                );
+                                sourceData.address = undefined;
+                                this.inspectionState.setSelection(sourceData, panel.id);
+                            }
+                        }
+                    }).sort((a, b) => a.label.localeCompare(b.label));
+                this.selectedLayerItem = this.layerMenuItems.filter(item => item.disabled).pop();
+            } else {
+                this.layerMenuItems = [];
+                this.title = "";
+                this.selectedLayerItem = undefined;
+            }
+        } else {
+            this.title = panel.loading ? "Loading inspection…" : panel.features.length > 1
+                ? `Selected ${panel.features.length} features`
+                : panel.features.length
+                    ? displayFeatureId(panel.features[0].featureId)
+                    : "Inspection";
+            this.layerMenuItems = [];
+            this.selectedLayerItem = undefined;
+        }
+    }
+
+    /** Returns from a nested selection back to the panel's top-level feature selection. */
+    protected onGoBack(event: MouseEvent) {
+        event.stopPropagation();
+        const p = this.panel();
+        if (p.features.length) {
+            this.title = p.features.length > 1 ? `Selected ${p.features.length} features` : displayFeatureId(p.features[0].featureId);
+        }
+        this.errorMessage = "";
+        this.inspectionState.setSelection(p.features, p.id);
+    }
+
+    /** Applies the currently selected source-data layer menu entry. */
+    protected onSelectedLayerItem() {
+        if (this.selectedLayerItem && !this.selectedLayerItem.disabled) {
+            this.selectedLayerItem.command();
+        }
+    }
+
+    /** Stops header click handling when interacting with the layer dropdown. */
+    protected onDropdownClick(event: MouseEvent) {
+        event.stopPropagation();
+    }
+
+    /** Displays source-data rendering errors in the dialog body. */
+    protected onSourceDataError(errorMessage: string) {
+        this.errorMessage = errorMessage;
+        console.error("Error while processing SourceData tree:", errorMessage);
+    }
+
+    /** Toggles whether the panel survives global deselection. */
+    protected toggleLockedState(event: MouseEvent) {
+        event.stopPropagation();
+        const p = this.panel();
+        this.inspectionState.setInspectionPanelLockedState(p.id, !p.locked);
+    }
+
+    /** Marks this floating dialog as the active target for inspection shortcuts. */
+    protected focusPanel() {
+        this.inspectionState.setFocusedInspectionPanel(this.panel().id);
+    }
+
+    /** Persists the highlight color selected from the shared surface header. */
+    protected onPanelColorChange(color: string) {
+        const panel = this.panel();
+        panel.color = color;
+        this.inspectionState.setInspectionPanelColor(panel.id, color);
+    }
+
+    /** Closes and removes the inspection panel entirely. */
+    protected unsetPanel() {
+        this.inspectionState.unsetPanel(this.panel().id);
+    }
+
+    /** Zooms the map to the primary feature represented by the panel. */
+    private focusOnFeature(event?: MouseEvent) {
+        event?.stopPropagation();
+        const panel = this.panel();
+        if (!panel.features.length) {
+            return;
+        }
+        this.inspectionSelection.zoomToFeature(undefined, panel.features[0]);
+    }
+
+    /** Menu/header action wrapper for focusing the primary feature. */
+    protected focusOnFeatureAction(event: MouseEvent) {
+        this.focusOnFeature(event);
+    }
+
+    /** Opens the panel's GeoJSON export in a new browser tab. */
+    protected openGeoJsonInNewTabAction(event: MouseEvent) {
+        event.stopPropagation();
+        this.featurePanel?.openGeoJsonInNewTab();
+    }
+
+    /** Downloads the panel's GeoJSON export. */
+    protected downloadGeoJsonAction(event: MouseEvent) {
+        event.stopPropagation();
+        this.featurePanel?.downloadGeoJson();
+    }
+
+    /** Copies the panel's GeoJSON export to the clipboard. */
+    protected copyGeoJsonAction(event: MouseEvent) {
+        event.stopPropagation();
+        this.featurePanel?.copyGeoJson();
+    }
+
+    /** Extra feature actions rendered and collapsed by the shared surface header. */
+    protected featureHeaderActions(): AppSurfaceHeaderAction[] {
+        const panel = this.panel();
+        if (panel.sourceData !== undefined || panel.features.length === 0) {
+            return [];
+        }
+        return [
+            {
+                label: 'Focus on feature',
+                tooltip: 'Focus on feature',
+                materialIcon: 'my_location',
+                menuIcon: 'pi pi-bullseye',
+                command: event => this.focusOnFeatureAction(event.originalEvent)
+            },
+            {
+                label: 'Open GeoJSON in new tab',
+                tooltip: 'Open GeoJSON in new tab',
+                materialIcon: 'open_in_new',
+                menuIcon: 'pi pi-external-link',
+                command: event => this.openGeoJsonInNewTabAction(event.originalEvent)
+            },
+            {
+                label: 'Download GeoJSON',
+                tooltip: 'Download GeoJSON',
+                materialIcon: 'download',
+                menuIcon: 'pi pi-download',
+                command: event => this.downloadGeoJsonAction(event.originalEvent)
+            },
+            {
+                label: 'Copy GeoJSON',
+                tooltip: 'Copy GeoJSON',
+                materialIcon: 'content_copy',
+                menuIcon: 'pi pi-copy',
+                command: event => this.copyGeoJsonAction(event.originalEvent)
+            },
+            {
+                label: 'Compare',
+                tooltip: 'Compare',
+                materialIcon: 'compare_arrows',
+                menuIcon: 'pi pi-arrow-right-arrow-left',
+                command: event => this.openCompareAction(event)
+            }
+        ];
+    }
+
+    /** Re-docks the floating inspection panel into the dock area. */
+    protected dock(event: MouseEvent) {
+        event.stopPropagation();
+        this.inspectionState.setInspectionPanelUndockedState(this.panel().id, false);
+    }
+
+    /** Opens the compare popover from either an inline action or the collapsed action menu. */
+    private openCompareAction(actionEvent: AppSurfaceHeaderActionCommandEvent) {
+        this.refreshCompareOptions();
+        if (actionEvent.source === 'menu') {
+            this.comparePopover.show(actionEvent.originalEvent, actionEvent.anchor);
+            return;
+        }
+        this.comparePopover.toggle(actionEvent.originalEvent);
+    }
+
+    /** Rebuilds valid comparison targets for the current selection context. */
+    protected refreshCompareOptions() {
+        this.compareOptions = this.inspectionState.buildCompareOptions(this.inspectionSelection.selectionTopic.getValue(), this.panel().id);
+        this.selectedCompareIds = this.selectedCompareIds.filter(id =>
+            this.compareOptions.some(option => option.value === id)
+        );
+    }
+
+    /** Opens the comparison dialog for the currently checked comparison targets. */
+    protected applyComparison(event: MouseEvent) {
+        event.stopPropagation();
+        if (!this.selectedCompareIds.length) {
+            return;
+        }
+        const model = this.inspectionState.createComparisonModel(
+            this.panel().id,
+            this.selectedCompareIds,
+            this.inspectionSelection.selectionTopic.getValue()
+        );
+        if (!model) {
+            return;
+        }
+        this.inspectionState.openInspectionComparison(model);
+        this.selectedCompareIds = [];
+        this.comparePopover.hide();
+    }
+
+    /** Restores persisted layout state and wires dock-drag cues when the dialog opens. */
+    protected onDialogShow() {
+        this.focusPanel();
+        this.dialogStack.bringToFront(this.dialog);
+        const panel = this.panel();
+        const layout = this.inspectionState.ensureInspectionDialogLayout(
+            panel.id,
+            this.dialogIndex(),
+            () => {
+                const container = this.getDialogContainer();
+                if (!container) {
+                    const baseFontSize = this.layout.baseFontSize;
+                    return {
+                        position: { left: 0, top: 0 },
+                        size: {
+                            width: Math.round(panel.size[0] * baseFontSize),
+                            height: Math.round(panel.size[1] * baseFontSize)
+                        }
+                    };
+                }
+                const rect = container.getBoundingClientRect();
+                return {
+                    position: { left: Math.round(rect.left), top: Math.round(rect.top) },
+                    size: { width: Math.round(rect.width), height: Math.round(rect.height) }
+                };
+            }
+        );
+        const baseFontSize = this.layout.baseFontSize;
+        if (baseFontSize) {
+            const widthEm = layout.size.width / baseFontSize;
+            const heightEm = layout.size.height / baseFontSize;
+            panel.size[0] = widthEm;
+            panel.size[1] = heightEm;
+            this.dialogStyle = this.buildDialogStyle(panel);
+            this.inspectionState.setInspectionPanelSize(panel.id, [widthEm, heightEm]);
+        }
+        setTimeout(() => this.featurePanel?.refresh(), 0);
+    }
+
+    /** Finalizes floating drag state and docks when the dialog overlaps the dock area enough. */
+    protected onDialogDragEnd() {
+        this.endDrag();
+        if (this.shouldDock()) {
+            this.inspectionState.setInspectionPanelUndockedState(this.panel().id, false);
+        }
+        this.dialogStack.bringToFront(this.dialog);
+    }
+
+    /** Persists the dialog size after user-driven resize. */
+    protected onDialogResizeEnd() {
+        const panel = this.panel();
+        const container = this.getDialogContainer();
+        if (!panel || !container || !container.offsetWidth || !container.offsetHeight) {
+            return;
+        }
+        const baseFontSize = this.layout.baseFontSize;
+        if (!baseFontSize) {
+            return;
+        }
+        const currentEmWidth = container.offsetWidth / baseFontSize;
+        const currentEmHeight = container.offsetHeight / baseFontSize;
+        panel.size[0] = currentEmWidth;
+        panel.size[1] = currentEmHeight;
+        this.dialogStyle = this.buildDialogStyle(panel);
+        this.inspectionState.setInspectionPanelSize(panel.id, [currentEmWidth, currentEmHeight]);
+    }
+
+    /** Converts panel size in em units into the dialog style object expected by PrimeNG. */
+    private buildDialogStyle(panel: InspectionPanelModel<FeatureWrapper>): { [key: string]: string } {
+        return {
+            width: `${panel.size[0]}em`,
+            height: `${panel.size[1]}em`
+        };
+    }
+
+    /** Tears down drag listeners and temporary dock cues owned by the dialog. */
+    ngOnDestroy() {
+        this.endDrag();
+    }
+
+    /** Freezes expensive inspection trees while the floating dialog is being dragged. */
+    protected beginDrag(event?: PointerEvent): void {
+        this.focusPanel();
+        if (event) {
+            this.dialog?.startDrag(event);
+        }
+        this.featurePanel?.freezeTree();
+        this.sourceDataPanel?.freezeTree();
+        this.detachPointerUpListener?.();
+        this.detachPointerUpListener = this.renderer.listen('window', 'pointerup', () => {
+            this.endDrag();
+        });
+    }
+
+    /** Unfreezes inspection trees and clears transient pointer listeners after dragging. */
+    protected endDrag(): void {
+        this.detachPointerUpListener?.();
+        this.detachPointerUpListener = undefined;
+        this.featurePanel?.unfreezeTree();
+        this.sourceDataPanel?.unfreezeTree();
+    }
+
+    /** Returns whether the current floating dialog position should snap back into the dock. */
+    private shouldDock(): boolean {
+        return this.dialog?.overlapsDockDropTarget() ?? false;
+    }
+
+    /** Returns the rendered PrimeNG dialog container, if present. */
+    private getDialogContainer(): HTMLElement | undefined {
+        return this.dialog?.container() ?? undefined;
+    }
+}

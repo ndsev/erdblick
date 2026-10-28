@@ -71,7 +71,8 @@ endif()
 add_subdirectory(libs/core)
 
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
-  add_subdirectory(test)
+  enable_testing()
+  add_subdirectory(tests/core)
 else()
   add_dependencies(erdblick-core erdblick-npm-dependencies)
   set_property(TARGET erdblick-core PROPERTY RULE_LAUNCH_LINK

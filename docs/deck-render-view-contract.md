@@ -18,12 +18,12 @@ Purpose: freeze the renderer-agnostic contract from current call sites before in
 - `getCameraHeadingDegrees(): number`
 
 During an active split-view gesture, `DeckMapView` coalesces the newest camera
-pose to one preview per animation frame. `MapViewStateService` applies the
+pose to one preview per animation frame. `MapViewService` applies the
 selected position or movement synchronization policy and routes that preview
 directly to sibling Deck renderers. Preview consumers update only their
-controlled Deck camera; the settled gesture then commits one canonical
-`AppStateService` update that owns tile coverage, storage, URL state, and
-Angular-facing state notifications.
+controlled Deck camera. The settled gesture calls `MapViewState.setView`
+to commit synchronized cameras atomically. `MapViewService` derives tile coverage;
+`AppStateService` coordinates completed notifications, storage and URL persistence.
 
 ### Interaction and picking
 - `pickFeature(screenPos: {x: number; y: number}): unknown[]`
@@ -58,15 +58,15 @@ Angular-facing state notifications.
 - uses `mapView.hoveredFeatureIds`
 - uses canvas rect for popover anchoring
 
-### `app/mapview/view.ui.component.ts`
+### `app/mapview/view-ui.component.ts`
 - uses scene mode state for 2D/3D toggle button
 - uses tick callback + camera heading for compass
 - uses navigation methods for buttons
 
-### `app/mapview/view.container.component.ts`
+### `app/mapview/view-container.component.ts`
 - binds keyboard shortcuts to navigation methods
 
-### `app/mapview/deck/deck-view.ts`
+### `app/mapview/deck/deck-view.controller.ts`
 - subscribes to map service topics for render/destroy/pick/move updates
 
 ## 3D navigation ownership
@@ -74,11 +74,11 @@ Angular-facing state notifications.
 Feature-relative navigation is split into generic camera behavior and Erdblick representation policy:
 
 - deck.gl's base `Controller` owns target acquisition, gesture lifetime, input origins and public numeric state behind the experimental `_targetNavigation` option. Concrete states and viewports own camera invariants; target-aware transitions reuse that geometry. Erdblick uses `MapController`: pan translates the common-space viewport centre only in Web Mercator X/Y, while rotate/zoom use the radius-aware orbit transform. The fork also supports Globe and Terrain composition, but Erdblick does not enable those controllers.
-- `app/mapview/deck/navigation/erdblick-target-navigation-adapter.ts` uses the package-root `InteractionTarget` and `InteractionTargetContext<WebMercatorViewport>` contracts to map Erdblick's rich feature target to a numeric snapshot and public `interactionTargetPosition` changes back to the product indicator lifecycle. No deep imports or downstream controller subclass are needed.
-- `app/mapview/deck/navigation/web-mercator-feature-navigation.ts` owns Erdblick's settled ground-centre conversion and shared map-projection contract. Erdblick chooses the minimum-distance preference; deck.gl applies its analytical metric clamp, without a downstream scalar zoom search. `ErdblickMapView` and direct viewport consumers use the same custom `WebMercatorViewport`: the ordinary far-plane margin is supplemented by a physical -100 m altitude floor for close below-sea-level geometry, while Erdblick's longer bounded horizon cap prevents grazing views from being cut off by math.gl's short default cap. Active camera reconstruction is delegated to deck.gl's public `WebMercatorViewport` planar-pan and orbit/zoom operations.
-- `app/mapview/deck/navigation/erdblick-navigation-anchor.ts` owns deep picking, eligible-representation traversal, path snapping, point anchors, and coordinate conversion.
-- `app/mapview/deck/deck-viewport-coverage.ts` owns the geographic footprint calculation used for tile coverage. It consumes the shared projection viewport so every renderable ground point is requestable, while keeping geographic normalization and padding separate from navigation math.
-- `app/mapview/deck/deck-view.ts` owns one provider-time filtered physical pick, feature identity, retained pointerless-command policy, the navigation indicator, first-person switching, and controller wiring. It does not cache a DOM pointer/touch target for controller acquisition.
+- `app/mapview/deck/navigation/erdblick-target-navigation.adapter.ts` uses the package-root `InteractionTarget` and `InteractionTargetContext<WebMercatorViewport>` contracts to map Erdblick's rich feature target to a numeric snapshot and public `interactionTargetPosition` changes back to the product indicator lifecycle. No deep imports or downstream controller subclass are needed.
+- `app/mapview/deck/navigation/web-mercator-feature-navigation.adapter.ts` owns Erdblick's settled ground-centre conversion and shared map-projection contract. Erdblick chooses the minimum-distance preference; deck.gl applies its analytical metric clamp, without a downstream scalar zoom search. `ErdblickMapView` and direct viewport consumers use the same custom `WebMercatorViewport`: the ordinary far-plane margin is supplemented by a physical -100 m altitude floor for close below-sea-level geometry, while Erdblick's longer bounded horizon cap prevents grazing views from being cut off by math.gl's short default cap. Active camera reconstruction is delegated to deck.gl's public `WebMercatorViewport` planar-pan and orbit/zoom operations.
+- `app/mapview/deck/navigation/erdblick-navigation-anchor.util.ts` owns deep picking, eligible-representation traversal, path snapping, point anchors, and coordinate conversion.
+- `app/mapview/deck/deck-viewport-coverage.util.ts` owns the geographic footprint calculation used for tile coverage. It consumes the shared projection viewport so every renderable ground point is requestable, while keeping geographic normalization and padding separate from navigation math.
+- `app/mapview/deck/deck-view.controller.ts` owns one provider-time filtered physical pick, feature identity, retained pointerless-command policy, the navigation indicator, first-person switching, and controller wiring. It does not cache a DOM pointer/touch target for controller acquisition.
 - `CameraViewState.position` may be nonzero in active target-relative Deck state and is accepted for backward-compatible exact input. When interaction settles, Erdblick re-expresses the equivalent camera with a ground-centred `[0, 0, 0]` offset for TileLayer LOD, persistence, and view synchronization; longitude/latitude/zoom may change while the projected camera pose remains equivalent. Orthographic views use zero explicitly.
 
 Erdblick passes deck.gl only `[longitude, latitude, altitude]` and view-local screen coordinates. Deck reconstructs pointer/touch gesture origins and owns view-to-canvas offsets; the provider uses the supplied viewport for one synchronous filtered pick and returns the target's honest projected view-local pixel. Feature IDs, picking records, surface normals, and rendered layer objects remain application state because their lifetime is tied to tile and visualization updates.

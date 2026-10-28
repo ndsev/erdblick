@@ -1,11 +1,11 @@
 import {
-  COORDINATE_SYSTEM,
-  Layer,
-  picking,
-  project32,
-  type LayerProps,
-  type PickingInfo,
-  type UpdateParameters,
+    COORDINATE_SYSTEM,
+    Layer,
+    picking,
+    project32,
+    type LayerProps,
+    type PickingInfo,
+    type UpdateParameters
 } from "@deck.gl/core";
 import type {
   BufferLayout,
@@ -14,46 +14,46 @@ import type {
 } from "@luma.gl/core";
 import { Geometry, Model } from "@luma.gl/engine";
 
-import { GpuMaterialFlag, GpuPrimitiveKind } from "./gpu-render-packet";
-import { GpuScene, type GpuSceneMaterialStore } from "./gpu-scene";
+import { GpuMaterialFlag, GpuPrimitiveKind } from "./gpu-render-packet.model";
+import { GpuScene, type GpuSceneMaterialStore } from "./gpu-scene.visualization";
 import {
-  ARROW_FRAGMENT_SHADER,
-  ARROW_BILLBOARD_VERTEX_SHADER,
-  ARROW_WORLD_VERTEX_SHADER,
-  COMPACT_PATH_BILLBOARD_VERTEX_SHADER,
-  COMPACT_PATH_FRAGMENT_SHADER,
-  COMPACT_PATH_WORLD_VERTEX_SHADER,
-  DUAL_COMPACT_PATH_BILLBOARD_VERTEX_SHADER,
-  DUAL_COMPACT_PATH_FRAGMENT_SHADER,
-  DUAL_COMPACT_PATH_WORLD_VERTEX_SHADER,
-  DUAL_SIMPLE_PATH_BILLBOARD_VERTEX_SHADER,
-  DUAL_SIMPLE_PATH_FRAGMENT_SHADER,
-  DUAL_SIMPLE_PATH_WORLD_VERTEX_SHADER,
-  GpuSceneMaskMode,
-  type GpuSceneShaderProps,
-  gpuSceneShaderModule,
-  gpuSceneSemanticOverlayShaderModule,
-  gpuSceneSemanticSupportShaderModule,
-  gpuSceneMaskShaderModule,
-  gpuSceneMaskFragmentShader,
-  gpuSceneMaskVertexShader,
-  ICON_BILLBOARD_VERTEX_SHADER,
-  ICON_FRAGMENT_SHADER,
-  ICON_VERTEX_SHADER,
-  PATH_BILLBOARD_VERTEX_SHADER,
-  PATH_FRAGMENT_SHADER,
-  PATH_WORLD_VERTEX_SHADER,
-  POINT_BILLBOARD_VERTEX_SHADER,
-  POINT_FRAGMENT_SHADER,
-  POINT_RING_FRAGMENT_SHADER,
-  POINT_VERTEX_SHADER,
-  SIMPLE_PATH_BILLBOARD_VERTEX_SHADER,
-  SIMPLE_PATH_FRAGMENT_SHADER,
-  SIMPLE_PATH_WORLD_VERTEX_SHADER,
-  SURFACE_FRAGMENT_SHADER,
-  SURFACE_VERTEX_SHADER,
+    ARROW_FRAGMENT_SHADER,
+    ARROW_BILLBOARD_VERTEX_SHADER,
+    ARROW_WORLD_VERTEX_SHADER,
+    COMPACT_PATH_BILLBOARD_VERTEX_SHADER,
+    COMPACT_PATH_FRAGMENT_SHADER,
+    COMPACT_PATH_WORLD_VERTEX_SHADER,
+    DUAL_COMPACT_PATH_BILLBOARD_VERTEX_SHADER,
+    DUAL_COMPACT_PATH_FRAGMENT_SHADER,
+    DUAL_COMPACT_PATH_WORLD_VERTEX_SHADER,
+    DUAL_SIMPLE_PATH_BILLBOARD_VERTEX_SHADER,
+    DUAL_SIMPLE_PATH_FRAGMENT_SHADER,
+    DUAL_SIMPLE_PATH_WORLD_VERTEX_SHADER,
+    GpuSceneMaskMode,
+    type GpuSceneShaderProps,
+    gpuSceneShaderModule,
+    gpuSceneSemanticOverlayShaderModule,
+    gpuSceneSemanticSupportShaderModule,
+    gpuSceneMaskShaderModule,
+    gpuSceneMaskFragmentShader,
+    gpuSceneMaskVertexShader,
+    ICON_BILLBOARD_VERTEX_SHADER,
+    ICON_FRAGMENT_SHADER,
+    ICON_VERTEX_SHADER,
+    PATH_BILLBOARD_VERTEX_SHADER,
+    PATH_FRAGMENT_SHADER,
+    PATH_WORLD_VERTEX_SHADER,
+    POINT_BILLBOARD_VERTEX_SHADER,
+    POINT_FRAGMENT_SHADER,
+    POINT_RING_FRAGMENT_SHADER,
+    POINT_VERTEX_SHADER,
+    SIMPLE_PATH_BILLBOARD_VERTEX_SHADER,
+    SIMPLE_PATH_FRAGMENT_SHADER,
+    SIMPLE_PATH_WORLD_VERTEX_SHADER,
+    SURFACE_FRAGMENT_SHADER,
+    SURFACE_VERTEX_SHADER
 } from "./erdblick-vector.shaders";
-import { gpuIconAtlasService } from "./gpu-icon-atlas.service";
+import { gpuIconAtlas } from "./gpu-icon-atlas.visualization";
 import { INTERACTION_STYLE_ORDER_BASE } from "./tile-subset-interaction.model";
 
 const DEPTH_PARAMETERS: RenderPipelineParameters = {
@@ -860,7 +860,7 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
       }
       if (source.kind === GpuPrimitiveKind.Icon) {
         item.model.setBindings({
-          gpuIconAtlasTexture: gpuIconAtlasService.texture(
+          gpuIconAtlasTexture: gpuIconAtlas.texture(
             this.context.device,
             source.atlasPage,
           ),
@@ -1128,7 +1128,7 @@ export class ErdblickVectorMaskLayer extends Layer<ErdblickVectorMaskLayerProps>
       }
       if (source.kind === GpuPrimitiveKind.Icon) {
         item.model.setBindings({
-          gpuIconAtlasTexture: gpuIconAtlasService.texture(
+          gpuIconAtlasTexture: gpuIconAtlas.texture(
             this.context.device,
             source.atlasPage,
           ),

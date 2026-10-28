@@ -1,30 +1,33 @@
-import {TileDeliveryError} from "../mapdata/tile-diagnostics";
-import {Injectable, NgZone} from "@angular/core";
-import {BehaviorSubject} from "rxjs";
+import { Injectable, NgZone } from "@angular/core";
+import { BehaviorSubject } from "rxjs";
+import { z } from "zod";
+import { Feature } from "../../build/libs/core/erdblick-core";
+
 import {
-    MapTileStreamService,
-    RetainedTileExpiryOwner
-} from "../mapdata/map-tile-stream.service";
-import {MapViewStateService} from "../mapview/map-view-state.service";
-import {
-    featureSetsEqual,
-    FeatureWrapper
-} from "../mapdata/feature-inspection.model";
-import {Feature} from "../../build/libs/core/erdblick-core";
-import {
-    AppStateService,
-    InspectionPanelModel,
-    SelectedSourceData,
-    TileFeatureId
-} from "../shared/appstate.service";
-import {KeyboardService} from "../shared/keyboard.service";
-import {InfoMessageService} from "../shared/info.service";
-import {Cartesian3} from "../integrations/geo";
-import {coreLib} from "../integrations/wasm";
-import {deepEquals} from "../shared/app-state";
-import {
-    tileFeatureInteractionTargetsEqual
-} from "../shared/tile-feature-id";
+    colorSchema,
+    ControlReadContext,
+    identifierSchema,
+    indexSchema,
+    rejectAction
+} from "../action/action.model";
+import { AppActionContributor, AppActionRegistration } from "../action/action-contributor.model";
+import { Cartesian3 } from "../integrations/geo.adapter";
+import { coreLib } from "../integrations/wasm.adapter";
+import { featureSetsEqual, FeatureWrapper } from "../mapdata/feature-inspection.adapter";
+import { MapTileStreamService, RetainedTileExpiryOwner } from "../mapdata/map-tile-stream.service";
+import { parsePartition, partitionKeySuffix } from "../mapdata/partition.model";
+import { TileDeliveryError } from "../mapdata/tile-diagnostics.model";
+import { MapViewService } from "../mapview/mapview.service";
+import { MapViewState } from "../mapview/mapview.state";
+import { InfoMessageService } from "../diagnostics/info.service";
+import { KeyboardService } from "../keyboard/keyboard.service";
+import { tileFeatureInteractionTargetsEqual } from "./feature-identity.model";
+import { boundedUnicodeString } from "../utils/unicode-string.util";
+import { deepEquals } from "../appstate/appstate.model";
+import { AppStateService } from "../appstate/appstate.service";
+import { featureIdentitySchema } from "./feature-identity.model";
+import { InspectionPanelService } from "./inspection-panel.service";
+import { InspectionPanelModel, SelectedSourceData, TileFeatureId } from "./inspection.model";
 
 interface Wgs84Point {
     x: number;
@@ -49,8 +52,8 @@ interface InspectionExpiryOwner extends RetainedTileExpiryOwner {
 /**
  * Owns selected and hovered feature interaction state, including focus/zoom navigation.
  */
-@Injectable({providedIn: "root"})
-export class InspectionSelectionService {
+@Injectable({ providedIn: "root" })
+export class InspectionSelectionService implements AppActionContributor {
     readonly selectionTopic = new BehaviorSubject<InspectionPanelModel<FeatureWrapper>[]>([]);
     readonly hoverIdsTopic = new BehaviorSubject<TileFeatureId[]>([]);
     readonly selectionIdsTopic =
@@ -67,20 +70,22 @@ export class InspectionSelectionService {
     constructor(
         private readonly stateService: AppStateService,
         private readonly tileStream: MapTileStreamService,
-        private readonly viewState: MapViewStateService,
+        private readonly viewState: MapViewService,
         private readonly keyboardService: KeyboardService,
         private readonly messageService: InfoMessageService,
-        private readonly ngZone: NgZone
+        private readonly ngZone: NgZone,
+        public readonly inspectionState: InspectionPanelService,
+        public readonly viewSettings: MapViewState
     ) {
         this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFocusedInspectionPanel.bind(this));
     }
 
     /** Wires app-state selection projection once the tile stream can serve feature loads. */
     initialize(): void {
-        this.stateService.selectionState.subscribe(selected => {
+        this.inspectionState.state.selectionState.subscribe((selected) => {
             this.ngZone.run(() => this.selectionIdsTopic.next(selected));
             const revision = ++this.selectionConversionRevision;
-            const demanded = new Set(selected.map(panel => this.featureLoadKey(panel.features)));
+            const demanded = new Set(selected.map((panel) => this.featureLoadKey(panel.features)));
             for (const [key, controller] of this.pendingFeatureLoadControllers) {
                 if (!demanded.has(key)) {
                     controller.abort();
@@ -90,19 +95,25 @@ export class InspectionSelectionService {
             }
             const pendingSelections: InspectionPanelModel<FeatureWrapper>[] = [];
             const pendingPanelUpdates: Array<{
-                panel: InspectionPanelModel<FeatureWrapper>,
-                selection: InspectionPanelModel<TileFeatureId>
-            }> = [];
-            const existingPanels = new Map(this.selectionTopic.getValue().map(panel => [panel.id, panel]));
-            const featureLoads: Array<Promise<{
+                panel: InspectionPanelModel<FeatureWrapper>;
                 selection: InspectionPanelModel<TileFeatureId>;
-                features: FeatureWrapper[];
-            } | null>> = [];
+            }> = [];
+            const existingPanels = new Map(this.selectionTopic.getValue().map((panel) => [panel.id, panel]));
+            const featureLoads: Array<
+                Promise<{
+                    selection: InspectionPanelModel<TileFeatureId>;
+                    features: FeatureWrapper[];
+                } | null>
+            > = [];
             for (const selection of selected) {
                 const existing = existingPanels.get(selection.id);
-                if (existing && featureSetsEqual(selection.features, existing.features) && deepEquals(existing.sourceData, selection.sourceData)) {
+                if (
+                    existing &&
+                    featureSetsEqual(selection.features, existing.features) &&
+                    deepEquals(existing.sourceData, selection.sourceData)
+                ) {
                     pendingSelections.push(existing);
-                    pendingPanelUpdates.push({panel: existing, selection});
+                    pendingPanelUpdates.push({ panel: existing, selection });
                     continue;
                 }
 
@@ -112,48 +123,53 @@ export class InspectionSelectionService {
                 }
 
                 pendingSelections.push(this.runtimePanel(selection, [], true));
-                featureLoads.push(this.loadFeaturesOnce(selection.features)
-                    .then(features => ({selection, features}))
-                    .catch(error => {
-                        console.error(
-                            `Failed to resolve inspection selection for panel ${selection.id}.`,
-                            error
-                        );
-                        return null;
-                    }));
+                featureLoads.push(
+                    this.loadFeaturesOnce(selection.features)
+                        .then((features) => ({ selection, features }))
+                        .catch((error) => {
+                            console.error(
+                                `Failed to resolve inspection selection for panel ${selection.id}.`,
+                                error
+                            );
+                            return null;
+                        })
+                );
             }
 
             // Publish panel shells before restricted feature loads finish so
             // docked and floating hosts can show progress immediately.
             this.ngZone.run(() => {
-                pendingPanelUpdates.forEach(update => {
+                pendingPanelUpdates.forEach((update) => {
                     update.panel.locked = update.selection.locked;
                     update.panel.focused = update.selection.focused;
                     update.panel.color = update.selection.color;
                     update.panel.size = update.selection.size;
                     update.panel.undocked = update.selection.undocked ?? false;
                 });
-                this.selectionIdsTopic.next(
-                    this.selectionIdsForRuntime(selected, pendingSelections)
-                );
+                this.selectionIdsTopic.next(this.selectionIdsForRuntime(selected, pendingSelections));
                 this.selectionTopic.next(pendingSelections);
             });
 
             if (!featureLoads.length) {
                 return;
             }
-            void Promise.all(featureLoads).then(results => {
+            void Promise.all(featureLoads).then((results) => {
                 if (revision !== this.selectionConversionRevision) {
                     return;
                 }
-                const resolvedByPanelId = new Map(results
-                    .filter((result): result is NonNullable<typeof result> => result !== null)
-                    .map(result => [result.selection.id, result]));
+                const resolvedByPanelId = new Map(
+                    results
+                        .filter((result): result is NonNullable<typeof result> => result !== null)
+                        .map((result) => [result.selection.id, result])
+                );
                 const convertedSelections: InspectionPanelModel<FeatureWrapper>[] = [];
                 for (const selection of selected) {
                     const existing = existingPanels.get(selection.id);
-                    if (existing && featureSetsEqual(selection.features, existing.features) &&
-                        deepEquals(existing.sourceData, selection.sourceData)) {
+                    if (
+                        existing &&
+                        featureSetsEqual(selection.features, existing.features) &&
+                        deepEquals(existing.sourceData, selection.sourceData)
+                    ) {
                         convertedSelections.push(existing);
                         continue;
                     }
@@ -171,26 +187,29 @@ export class InspectionSelectionService {
                 // callback outside Angular. Publish the resolved model in-zone
                 // so both docked and floating inspection views are checked.
                 this.ngZone.run(() => {
-                    this.selectionIdsTopic.next(
-                        this.selectionIdsForRuntime(selected, convertedSelections)
-                    );
+                    this.selectionIdsTopic.next(this.selectionIdsForRuntime(selected, convertedSelections));
                     this.selectionTopic.next(convertedSelections);
                 });
             });
         });
-        this.selectionTopic.subscribe(selectedPanels => {
+        this.selectionTopic.subscribe((selectedPanels) => {
             this.reconcileInspectionExpiries(
-                selectedPanels.flatMap(panel => panel.features.map(feature => ({
-                    panelId: panel.id,
-                    feature
-                })))
+                selectedPanels.flatMap((panel) =>
+                    panel.features.map((feature) => ({
+                        panelId: panel.id,
+                        feature
+                    }))
+                )
             );
-            const selectedTargets = this.selectionIdsTopic.getValue()
-                .flatMap(panel => panel.features);
-            const hoverIds = this.hoverIdsTopic.getValue().filter(feature =>
-                !selectedTargets.some(selected =>
-                    tileFeatureInteractionTargetsEqual(feature, selected))
-            );
+            const selectedTargets = this.selectionIdsTopic.getValue().flatMap((panel) => panel.features);
+            const hoverIds = this.hoverIdsTopic
+                .getValue()
+                .filter(
+                    (feature) =>
+                        !selectedTargets.some((selected) =>
+                            tileFeatureInteractionTargetsEqual(feature, selected)
+                        )
+                );
             if (hoverIds.length !== this.hoverIdsTopic.getValue().length) {
                 if (!hoverIds.length) {
                     this.remoteHoverHighlightAllowed = false;
@@ -274,69 +293,70 @@ export class InspectionSelectionService {
      * Opens one inspection per exact rendered-feature hit, bounded by the configured panel limit.
      * The warning reports logical features after merged-object expansion, not raw render objects.
      */
-    inspectFeatureIds(
-        tileFeatureIds: TileFeatureId[],
-        lockNewPanels = false
-    ): MultiInspectionResult {
+    inspectFeatureIds(tileFeatureIds: TileFeatureId[], lockNewPanels = false): MultiInspectionResult {
         const featureIds = this.uniqueTileFeatureIds(tileFeatureIds);
         const foundFeatureCount = featureIds.length;
         if (!foundFeatureCount) {
-            return {foundFeatureCount: 0, inspectedFeatureCount: 0};
+            return { foundFeatureCount: 0, inspectedFeatureCount: 0 };
         }
 
-        if (foundFeatureCount === 1) {
-            const currentPanels = this.stateService.selection;
-            const featureAlreadyInspected = this.panelsContainFeature(currentPanels, featureIds[0]);
-            const reusableFeaturePanel = currentPanels.some(panel =>
-                panel.sourceData === undefined && !panel.locked
-            );
-            if (featureAlreadyInspected
-                || reusableFeaturePanel
-                || currentPanels.length < this.stateService.inspectionsLimit) {
-                const panelId = this.stateService.setSelection(
-                    [featureIds[0]],
-                    undefined,
-                    lockNewPanels
+        this.stateService.transaction(() => {
+            if (foundFeatureCount === 1) {
+                const currentPanels = this.inspectionState.state.selection;
+                const featureAlreadyInspected = this.panelsContainFeature(currentPanels, featureIds[0]);
+                const reusableFeaturePanel = currentPanels.some(
+                    (panel) => panel.sourceData === undefined && !panel.locked
                 );
-                if (lockNewPanels && panelId !== undefined) {
-                    this.stateService.setInspectionPanelLockedState(panelId, true);
+                if (
+                    featureAlreadyInspected ||
+                    reusableFeaturePanel ||
+                    currentPanels.length < this.inspectionState.state.inspectionsLimit
+                ) {
+                    const panelId = this.inspectionState.setSelection(
+                        [featureIds[0]],
+                        undefined,
+                        lockNewPanels
+                    );
+                    if (lockNewPanels && panelId !== undefined) {
+                        this.inspectionState.setInspectionPanelLockedState(panelId, true);
+                    }
                 }
-            }
-        } else {
-            // Match the existing merged-feature flow: preserve pinned/source-data panels and
-            // create one new inspection panel for each candidate that still fits.
-            this.stateService.unsetUnlockedSelections();
-            let remainingSlots = Math.max(
-                0,
-                this.stateService.inspectionsLimit - this.stateService.selection.length
-            );
-            for (const featureId of featureIds) {
-                if (this.panelsContainFeature(this.stateService.selection, featureId)) {
-                    continue;
-                }
-                if (remainingSlots <= 0) {
-                    break;
-                }
-                const panelId = this.stateService.setSelection([featureId], undefined, true);
-                if (panelId !== undefined) {
-                    remainingSlots -= 1;
-                    if (lockNewPanels) {
-                        this.stateService.setInspectionPanelLockedState(panelId, true);
+            } else {
+                // Match the existing merged-feature flow: preserve pinned/source-data panels and
+                // create one new inspection panel for each candidate that still fits.
+                this.inspectionState.unsetUnlockedSelections();
+                let remainingSlots = Math.max(
+                    0,
+                    this.inspectionState.state.inspectionsLimit - this.inspectionState.state.selection.length
+                );
+                for (const featureId of featureIds) {
+                    if (this.panelsContainFeature(this.inspectionState.state.selection, featureId)) {
+                        continue;
+                    }
+                    if (remainingSlots <= 0) {
+                        break;
+                    }
+                    const panelId = this.inspectionState.setSelection([featureId], undefined, true);
+                    if (panelId !== undefined) {
+                        remainingSlots -= 1;
+                        if (lockNewPanels) {
+                            this.inspectionState.setInspectionPanelLockedState(panelId, true);
+                        }
                     }
                 }
             }
-        }
+        });
 
-        const inspectedFeatureCount = featureIds.filter(featureId =>
-            this.panelsContainFeature(this.stateService.selection, featureId)
+        const inspectedFeatureCount = featureIds.filter((featureId) =>
+            this.panelsContainFeature(this.inspectionState.state.selection, featureId)
         ).length;
         if (inspectedFeatureCount < foundFeatureCount) {
             this.messageService.showWarning(
                 `Inspecting ${inspectedFeatureCount} features out of ${foundFeatureCount} found features. ` +
-                "Decrease the selection or increase your max inspections limit to see more."
+                    "Decrease the selection or increase your max inspections limit to see more."
             );
         }
-        return {foundFeatureCount, inspectedFeatureCount};
+        return { foundFeatureCount, inspectedFeatureCount };
     }
 
     /** Deduplicates full map-tile/feature identities without changing traversal order. */
@@ -369,22 +389,19 @@ export class InspectionSelectionService {
     }
 
     /** Publishes hover ids without loading feature data; inspection hovers may opt into remote styles. */
-    setHoveredFeatures(
-        tileFeatureIds: (TileFeatureId | null)[],
-        allowRemoteHighlight = false
-    ): void {
-        const requestedTargets = tileFeatureIds
-            .filter((id): id is TileFeatureId => !!id);
-        const selectedTargets = this.stateService.selectionState.getValue()
-            .flatMap(panel => panel.features);
-        const hoverTargets = requestedTargets.filter(id =>
-            !selectedTargets.some(selected =>
-                tileFeatureInteractionTargetsEqual(id, selected))
+    setHoveredFeatures(tileFeatureIds: (TileFeatureId | null)[], allowRemoteHighlight = false): void {
+        const requestedTargets = tileFeatureIds.filter((id): id is TileFeatureId => !!id);
+        const selectedTargets = this.inspectionState.state.selectionState
+            .getValue()
+            .flatMap((panel) => panel.features);
+        const hoverTargets = requestedTargets.filter(
+            (id) => !selectedTargets.some((selected) => tileFeatureInteractionTargetsEqual(id, selected))
         );
-        const remoteHighlightAllowed =
-            hoverTargets.length > 0 && allowRemoteHighlight;
-        if (featureSetsEqual(this.hoverIdsTopic.getValue(), hoverTargets) &&
-            this.remoteHoverHighlightAllowed === remoteHighlightAllowed) {
+        const remoteHighlightAllowed = hoverTargets.length > 0 && allowRemoteHighlight;
+        if (
+            featureSetsEqual(this.hoverIdsTopic.getValue(), hoverTargets) &&
+            this.remoteHoverHighlightAllowed === remoteHighlightAllowed
+        ) {
             return;
         }
         this.remoteHoverHighlightAllowed = remoteHighlightAllowed;
@@ -393,7 +410,7 @@ export class InspectionSelectionService {
 
     /** Reconciles one shared-heap handle per retained inspection tile value. */
     private reconcileInspectionExpiries(
-        values: Array<{panelId: number; feature: FeatureWrapper}>
+        values: Array<{ panelId: number; feature: FeatureWrapper }>
     ): void {
         const grouped = new Map<string, {
             panelId: number;
@@ -402,7 +419,7 @@ export class InspectionSelectionService {
             expiresAtMs: number | null;
             featureIds: TileFeatureId[];
         }>();
-        for (const {panelId, feature} of values) {
+        for (const { panelId, feature } of values) {
             const tile = feature.featureTile;
             const key = `${panelId}:${tile.mapTileKey}`;
             const rawExpiry = Number(tile.expiresAtMs);
@@ -424,7 +441,7 @@ export class InspectionSelectionService {
             group.featureIds.push(feature.key());
             if (expiresAtMs !== null &&
                 (group.expiresAtMs === null ||
-                 expiresAtMs < group.expiresAtMs)) {
+                    expiresAtMs < group.expiresAtMs)) {
                 group.expiresAtMs = expiresAtMs;
             }
         }
@@ -522,19 +539,40 @@ export class InspectionSelectionService {
     }
 
     /** Loads a feature and centers the target view on its reported center point. */
-    async focusOnFeature(viewIndex: number|undefined, tileFeatureId: TileFeatureId) {
+    async focusOnFeature(viewIndex: number | undefined, tileFeatureId: TileFeatureId) {
+        // Capture every eligible renderer before loading. An unspecified target still
+        // means all matching visible views, with the captured focused view as fallback.
+        const targets = (viewIndex === undefined ? this.viewSettings.viewIds : [this.viewSettings.viewIds[viewIndex]])
+            .flatMap(id => { const target = id ? this.viewState.captureView(id) : undefined; return target ? [target] : []; });
+        const focusedId = this.viewSettings.viewIdAt(this.viewSettings.focusedView);
+        if (!targets.length) return;
         this.viewState.navigationStarted.next();
         const features = await this.tileStream.loadFeatures([tileFeatureId]);
+        const liveTargets = targets.filter(target => this.viewState.resolveCapturedView(target));
+        if (!liveTargets.length) return;
         if (!features.length) {
-            this.showErrorMessage(`Could not locate feature ${tileFeatureId.featureId} in ${tileFeatureId.mapTileKey}!`)
+            this.showErrorMessage(`Could not locate feature ${tileFeatureId.featureId} in ${tileFeatureId.mapTileKey}!`);
             return;
         }
-        this.zoomToFeature(viewIndex, features[0]);
+        const feature = features[0];
+        let selected = liveTargets;
+        if (viewIndex === undefined) {
+            selected = liveTargets.filter(target => {
+                const index = this.viewSettings.indexOfView(target.viewId);
+                return feature.featureTile.tileId !== null && this.viewState.showsFeatureSearchTileInView(index,
+                    feature.featureTile.mapName, feature.featureTile.layerName, feature.featureTile.tileId);
+            });
+            if (!selected.length) selected = liveTargets.filter(target => target.viewId === focusedId);
+        }
+        const destination = this.featureSetZoomTarget([feature]);
+        if (destination) selected.forEach(target => this.viewState.moveToWgs84PositionTopic.next({
+            targetView: this.viewSettings.indexOfView(target.viewId), ...destination
+        }));
     }
 
     /** Moves the focused view to the inspection panel most recently focused by the user. */
     zoomToFocusedInspectionPanel() {
-        const focusedPanelId = this.stateService.focusedInspectionPanelId;
+        const focusedPanelId = this.inspectionState.focusedInspectionPanelId;
         if (focusedPanelId === undefined) {
             return;
         }
@@ -542,7 +580,7 @@ export class InspectionSelectionService {
         if (!panel) {
             return;
         }
-        const targetView = this.stateService.focusedView;
+        const targetView = this.viewSettings.focusedView;
         if (panel.features.length) {
             this.zoomToFeature(targetView, panel.features[0]);
             return;
@@ -556,13 +594,13 @@ export class InspectionSelectionService {
      * Moves one or more views to a feature using Deck's WGS84 camera path.
      * Passing `undefined` targets every view that currently shows the feature tile.
      */
-    zoomToFeature(viewIndex: number|undefined, featureWrapper: FeatureWrapper) {
+    zoomToFeature(viewIndex: number | undefined, featureWrapper: FeatureWrapper) {
         const targetViews = this.targetViewsForFeatureZoom(viewIndex, featureWrapper.featureTile);
         if (!targetViews.length) {
             return;
         }
         const target = this.featureSetZoomTarget([featureWrapper]);
-        if (target) targetViews.forEach(vi => this.viewState.moveToWgs84PositionTopic.next({targetView: vi, ...target}));
+        if (target) targetViews.forEach(vi => this.viewState.moveToWgs84PositionTopic.next({ targetView: vi, ...target }));
     }
 
     /** Computes the ordinary fit target for a small explicit feature set before any camera/focus mutation. */
@@ -570,15 +608,15 @@ export class InspectionSelectionService {
         const spheres = features.flatMap(wrapper => wrapper.peek((feature: Feature) => {
             const center = feature.center() as Wgs84Point;
             return this.isFiniteWgs84Point(center)
-                ? [{center, radius: this.featureBoundingRadiusMeters(center, feature.boundingRadiusEndPoint())}] : [];
+                ? [{ center, radius: this.featureBoundingRadiusMeters(center, feature.boundingRadiusEndPoint()) }] : [];
         }) ?? []);
         if (!spheres.length || spheres.length !== features.length) return undefined;
         if (spheres.length === 1) {
-            const {center, radius} = spheres[0];
-            return {x: center.x, y: center.y, z: this.featureZoomAltitude(center.z, radius)};
+            const { center, radius } = spheres[0];
+            return { x: center.x, y: center.y, z: this.featureZoomAltitude(center.z, radius) };
         }
         const reference = spheres[0].center.x;
-        const center: Wgs84Point = {x: 0, y: 0, z: 0};
+        const center: Wgs84Point = { x: 0, y: 0, z: 0 };
         for (const sphere of spheres) {
             const delta = ((sphere.center.x - reference + 540) % 360) - 180;
             center.x += reference + delta;
@@ -588,17 +626,17 @@ export class InspectionSelectionService {
         center.x = ((center.x / spheres.length + 540) % 360) - 180;
         center.y /= spheres.length;
         const radius = Math.max(...spheres.map(sphere => this.featureBoundingRadiusMeters(center, sphere.center) + sphere.radius));
-        return {x: center.x, y: center.y, z: this.featureZoomAltitude(center.z, radius)};
+        return { x: center.x, y: center.y, z: this.featureZoomAltitude(center.z, radius) };
     }
 
     /** Resolves the view indices affected by a feature zoom request. */
-    private targetViewsForFeatureZoom(viewIndex: number|undefined, featureTile: FeatureWrapper["featureTile"]): number[] {
+    private targetViewsForFeatureZoom(viewIndex: number | undefined, featureTile: FeatureWrapper["featureTile"]): number[] {
         if (viewIndex !== undefined) {
-            return viewIndex >= 0 && viewIndex < this.stateService.numViews ? [viewIndex] : [];
+            return viewIndex >= 0 && viewIndex < this.viewSettings.numViews ? [viewIndex] : [];
         }
 
         const targetViews: number[] = [];
-        for (let i = 0; i < this.stateService.numViews; ++i) {
+        for (let i = 0; i < this.viewSettings.numViews; ++i) {
             if (featureTile.tileId !== null &&
                 this.viewState.showsFeatureSearchTileInView(
                     i,
@@ -609,12 +647,12 @@ export class InspectionSelectionService {
                 targetViews.push(i);
             }
         }
-        return targetViews.length ? targetViews : [this.stateService.focusedView];
+        return targetViews.length ? targetViews : [this.viewSettings.focusedView];
     }
 
     /** Fits the target view to the tile represented by a focused source-data inspection. */
     private zoomToSourceDataSelection(viewIndex: number, sourceData: SelectedSourceData) {
-        if (viewIndex < 0 || viewIndex >= this.stateService.numViews) {
+        if (viewIndex < 0 || viewIndex >= this.viewSettings.numViews) {
             return;
         }
         const parsedKey = this.tileStream.parseMapTileKeySafe(sourceData.mapTileKey);
@@ -667,4 +705,350 @@ export class InspectionSelectionService {
     private showErrorMessage(message: string) {
         this.messageService.showError(message);
     }
+    /** Registers semantic operations and their live omnibar candidates. */
+    registerActions(actions: AppActionRegistration): void {
+        actions.registerAction(
+            {
+                name: "viewer_inspect",
+                description:
+                    "Open feature/entity inspections in the ordinary UI. For an attribute validity, copy the base " +
+                    "featureId plus attributeIndex and validityIndex from native extraction or search results. " +
+                    "relationIndex similarly addresses a relation. Existing suffixed IDs remain supported; do not " +
+                    "combine a suffix with numeric selectors. Returns panel IDs immediately; loading remains " +
+                    "observable via app.selections. panelId must address an unlocked feature panel; newPanel opens " +
+                    "one grouped panel. To distinguish groups (e.g. predecessors versus successors), call " +
+                    "separately with newPanel:true and different color values. color requires newPanel:true and " +
+                    "colors only that new panel. lock=true pins the resulting panels. Use mapget extraction for " +
+                    "model content.",
+                mutation: true,
+                inputSchema: z.strictObject({
+                    features: z.array(featureIdentitySchema).min(1).max(50),
+                    lock: z.boolean().optional(),
+                    panelId: indexSchema.optional(),
+                    newPanel: z.boolean().optional(),
+                    color: colorSchema.optional()
+                }),
+                outputSchema: z.strictObject({
+                    status: z.literal("applied"),
+                    panelIds: z.array(indexSchema).max(50),
+                    features: z
+                        .array(z.strictObject({ mapTileKey: identifierSchema, featureId: identifierSchema }))
+                        .max(50),
+                    complete: z.boolean(),
+                    reason: z.enum(["item_limit", "byte_limit", "text_limit", "loading"]).optional()
+                })
+            },
+            (input, signal) => this.inspect(input, signal)
+        );
+        actions.registerAction(
+            {
+                name: "viewer_open_source_data",
+                description:
+                    "Open a source-data inspection at a lossless uint64 address. Use a native SourceData " +
+                    "mapTileKey, or map/partition and a mapget-native source reference returned by extraction. The " +
+                    "existing panel owns loading and reveals the reference.",
+                mutation: true,
+                inputSchema: z.strictObject({
+                    source: z.union([
+                        z.strictObject({
+                            mapTileKey: identifierSchema,
+                            address: z
+                                .string()
+                                .regex(/^[0-9]+$/)
+                                .max(20)
+                                .optional()
+                        }),
+                        z.strictObject({
+                            mapId: identifierSchema,
+                            partition: z.union([
+                                z.strictObject({
+                                    kind: z.literal("tile"),
+                                    id: z.number().int().min(-2147483648).max(2147483647)
+                                }),
+                                z.strictObject({
+                                    kind: z.literal("object"),
+                                    id: z
+                                        .string()
+                                        .regex(/^(0|[1-9][0-9]*)$/)
+                                        .max(20)
+                                })
+                            ]),
+                            reference: z.strictObject({
+                                layerId: identifierSchema,
+                                address: z
+                                    .string()
+                                    .regex(/^[0-9]+$/)
+                                    .max(20),
+                                qualifier: boundedUnicodeString(4096).optional()
+                            })
+                        })
+                    ]),
+                    newPanel: z.boolean().optional()
+                }),
+                outputSchema: z.strictObject({
+                    status: z.literal("applied"),
+                    panelId: indexSchema,
+                    mapTileKey: identifierSchema
+                })
+            },
+            (input) => this.openSourceData(input)
+        );
+    }
+
+    /** Registers typed state readers and writers without exposing persistence keys. */
+    registerControls(actions: AppActionRegistration): void {
+        actions.registerControl(
+            {
+                name: "app.selections",
+                description:
+                    "Inspection identities and panel/loading state, including undocked panels; never inspection trees.",
+                selectorSchema: z.strictObject({ panelId: indexSchema.optional() }),
+                valueSchema: z
+                    .array(
+                        z.strictObject({
+                            panelId: indexSchema,
+                            lifetime: indexSchema.describe(
+                                "Current panel lifetime; supply it to viewer_close_inspection to reject a reused panel identity."
+                            ),
+                            locked: z.boolean(),
+                            undocked: z.boolean(),
+                            loading: z
+                                .boolean()
+                                .nullable()
+                                .describe(
+                                    "Feature resolution state; null when owned by a source-data panel."
+                                ),
+                            features: z
+                                .array(
+                                    z.strictObject({
+                                        mapTileKey: identifierSchema,
+                                        featureId: identifierSchema,
+                                        mapId: identifierSchema.optional(),
+                                        layerId: identifierSchema.optional(),
+                                        partition: z
+                                            .union([
+                                                z.strictObject({
+                                                    kind: z.literal("tile"),
+                                                    id: z.number().int().min(-2147483648).max(2147483647)
+                                                }),
+                                                z.strictObject({
+                                                    kind: z.literal("object"),
+                                                    id: z.string().regex(/^[0-9]{1,20}$/)
+                                                })
+                                            ])
+                                            .optional()
+                                    })
+                                )
+                                .max(100),
+                            sourceData: z
+                                .strictObject({
+                                    mapTileKey: identifierSchema,
+                                    address: z
+                                        .string()
+                                        .regex(/^[0-9]+$/)
+                                        .max(20)
+                                        .optional()
+                                        .describe("Unsigned 64-bit address as a lossless decimal string.")
+                                })
+                                .optional()
+                        })
+                    )
+                    .max(100),
+                readable: true,
+                writable: false,
+                persistence: "runtime-summary",
+                synchronization: "none"
+            },
+            {
+                read: (selector, context) => this.inspectionSummary(selector.panelId, context),
+                defaultTargets: () => [{}]
+            }
+        );
+    }
+
+
+    /** Inspection identities and loading flags, without loading features or traversing trees. */
+    inspectionSummary(panelId: number | undefined, context: ControlReadContext) {
+        const panels = this.inspectionState.state.selection;
+        if (panelId !== undefined && !panels.some((panel) => panel.id === panelId))
+            rejectAction("The inspection no longer exists");
+        const runtime = new Map(this.selectionTopic.value.map((panel) => [panel.id, panel]));
+        const stream = this.tileStream;
+        const state = this.inspectionState;
+        function* summaries() {
+            for (const panel of panels) {
+                if (panelId !== undefined && panel.id !== panelId) continue;
+                function* features() {
+                    for (const feature of panel.features) {
+                        const identity = stream.parseMapPartitionKeySafe(feature.mapTileKey);
+                        yield identity
+                            ? { ...feature, mapId: identity[0], layerId: identity[1], partition: identity[2] }
+                            : feature;
+                    }
+                }
+                yield {
+                    panelId: panel.id,
+                    lifetime: state.panelLifetime(panel.id)!,
+                    locked: panel.locked,
+                    undocked: panel.undocked,
+                    loading: panel.sourceData
+                        ? null
+                        : runtime.has(panel.id)
+                          ? !!runtime.get(panel.id)!.loading
+                          : true,
+                    features: context.collect(features(), 32 * 1024),
+                    ...(panel.sourceData
+                        ? {
+                              sourceData: {
+                                  mapTileKey: panel.sourceData.mapTileKey,
+                                  ...(panel.sourceData.address !== undefined
+                                      ? { address: panel.sourceData.address.toString() }
+                                      : {})
+                              }
+                          }
+                        : {})
+                };
+            }
+        }
+        return context.collect(summaries());
+    }
+
+    /** Uses the native key factory for backend-returned source references; the panel owns address resolution. */
+    openSourceData(input: {
+        source:
+            | { mapTileKey: string; address?: string }
+            | {
+                  mapId: string;
+                  partition: { kind: "tile"; id: number } | { kind: "object"; id: string };
+                  reference: { layerId: string; address: string; qualifier?: string };
+              };
+        newPanel?: boolean;
+    }) {
+        const source = input.source;
+        if (
+            !("mapTileKey" in source) &&
+            source.partition.kind === "object" &&
+            BigInt(source.partition.id) > 18446744073709551615n
+        ) {
+            rejectAction("Object partition exceeds uint64", "invalid_arguments");
+        }
+        const mapTileKey =
+            "mapTileKey" in source
+                ? source.mapTileKey
+                : coreLib.createMapTileKey(
+                      "SourceData",
+                      source.mapId,
+                      source.reference.layerId,
+                      partitionKeySuffix(parsePartition(source.partition))
+                  );
+        const parsed = this.tileStream.parseMapPartitionKeySafe(mapTileKey);
+        if (!parsed || !mapTileKey.startsWith("SourceData:"))
+            rejectAction("Expected a native SourceData key", "invalid_arguments");
+        const address = "mapTileKey" in source ? source.address : source.reference.address;
+        if (address !== undefined && BigInt(address) > 18446744073709551615n)
+            rejectAction("Address exceeds uint64", "invalid_arguments");
+        const panelId = this.inspectionState.setSelection(
+            { mapTileKey, ...(address === undefined ? {} : { address: BigInt(address) }) },
+            undefined,
+            input.newPanel ?? false
+        );
+        if (panelId === undefined) rejectAction("An inspection could not be opened");
+        return { status: "applied" as const, panelId, mapTileKey };
+    }
+
+    /** Publishes inspection shells after locate only; the existing selection owner performs asynchronous feature loading. */
+    async inspect(
+        input: {
+            features: Array<z.infer<typeof featureIdentitySchema>>;
+            lock?: boolean;
+            panelId?: number;
+            newPanel?: boolean;
+            color?: string;
+        },
+        signal?: AbortSignal
+    ) {
+        if (input.color !== undefined && !input.newPanel)
+            rejectAction(
+                "color requires newPanel:true; use the inspection.panel control to recolor an existing panel",
+                "invalid_arguments"
+            );
+        if (input.panelId !== undefined && input.newPanel)
+            rejectAction("panelId and newPanel are mutually exclusive", "invalid_arguments");
+        if (input.panelId !== undefined) {
+            const panel = this.inspectionState.state.selection.find((panel) => panel.id === input.panelId);
+            if (!panel || panel.locked || panel.sourceData)
+                rejectAction("An explicit target must be an existing unlocked feature panel");
+        }
+        // Reject a stale intent if any selection edit completes while identities are being located.
+        let changed: boolean;
+        const guard = this.inspectionState.state.selectionState.subscribe(() => {
+            changed = true;
+        });
+        changed = false;
+        let features: TileFeatureId[];
+        try {
+            features = await this.tileStream.resolveFeatureIdentities(input.features, signal);
+            signal?.throwIfAborted();
+            if (changed) rejectAction("Inspections changed while locating the feature", "cancelled");
+        } finally {
+            guard.unsubscribe();
+        }
+        let result!: {
+            complete: boolean;
+            status: "applied";
+            panelIds: number[];
+            features: { mapTileKey: string; featureId: string }[];
+            reason?: "item_limit" | "byte_limit" | "text_limit" | "loading";
+        };
+        this.ngZone.run(() =>
+            this.stateService.transaction(() => {
+                let newPanelId: number | undefined;
+                if (input.panelId !== undefined || input.newPanel) {
+                    newPanelId = this.inspectionState.setSelection(
+                        features,
+                        input.panelId,
+                        input.newPanel ?? false
+                    );
+                } else this.inspectFeatureIds(features, input.lock ?? false);
+                const panels = this.inspectionState.state.selection.filter(
+                    (panel) =>
+                        !panel.sourceData &&
+                        (!input.newPanel || panel.id === newPanelId) &&
+                        panel.features.some((candidate) =>
+                            features.some(
+                                (feature) =>
+                                    candidate.mapTileKey === feature.mapTileKey &&
+                                    candidate.featureId === feature.featureId
+                            )
+                        )
+                );
+                if (input.lock)
+                    panels.forEach((panel) =>
+                        this.inspectionState.setInspectionPanelLockedState(panel.id, true)
+                    );
+                if (input.color !== undefined)
+                    panels.forEach((panel) =>
+                        this.inspectionState.setInspectionPanelColor(panel.id, input.color!)
+                    );
+                const represented = features.filter((feature) =>
+                    panels.some((panel) =>
+                        panel.features.some(
+                            (candidate) =>
+                                candidate.mapTileKey === feature.mapTileKey &&
+                                candidate.featureId === feature.featureId
+                        )
+                    )
+                );
+                result = {
+                    status: "applied" as const,
+                    panelIds: panels.map((panel) => panel.id),
+                    features: represented,
+                    complete: represented.length === features.length,
+                    ...(represented.length < features.length ? { reason: "item_limit" as const } : {})
+                };
+            })
+        );
+        return result;
+    }
+
 }

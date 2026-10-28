@@ -10,8 +10,8 @@
   },
   "include": [
     "app/zone-flags.ts",
-    "app/**/*.spec.ts",
+    "tests/app/**/*.spec.ts",
     "app/**/*.d.ts",
-    "test/**/*.ts"
+    "tests/support/**/*.ts"
   ]
 }

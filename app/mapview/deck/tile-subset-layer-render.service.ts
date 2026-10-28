@@ -1,25 +1,24 @@
-import {Injectable, Optional} from "@angular/core";
-import {auditTime, combineLatest, skip, Subject} from "rxjs";
-import {DEFAULT_POINT_CLOUD_POLICY, pointCloudSpacingMeters, type PointCloudRenderPolicy} from "../../shared/point-cloud-policy";
-import {gpuMemoryBudget, type GpuMemoryReservation} from "./gpu-memory-budget";
-import {pointCloudInputBudget} from "../../shared/point-cloud-input-budget";
-import {AppStateService} from "../../shared/appstate.service";
-import {AUTO_TILE_SUBSET_RENDER_WORKER_COUNT} from
-    "../../shared/tile-render-policy";
+import { Injectable, Optional } from "@angular/core";
+import { skip, Subject } from "rxjs";
+import { pointCloudInputBudget } from "../../mapdata/point-cloud-input-budget.model";
+import {
+    DEFAULT_POINT_CLOUD_POLICY,
+    pointCloudSpacingMeters,
+    type PointCloudRenderPolicy
+} from "../point-cloud-policy.model";
+import { AUTO_TILE_SUBSET_RENDER_WORKER_COUNT } from "../tile-render-policy.model";
+import { MapViewState } from "../mapview.state";
+import { gpuIconAtlas } from "./gpu-icon-atlas.visualization";
+import { gpuMemoryBudget, type GpuMemoryReservation } from "./gpu-memory-budget.model";
+import { GPU_RENDER_PACKET_MAX_BYTES } from "./gpu-render-packet.model";
+import type { GpuSceneSnapshot } from "./gpu-scene.visualization";
 import type {
+    TileSubsetGpuContribution,
     TileSubsetLayerRenderBuffers,
     TileSubsetLayerRenderResult,
     TileSubsetLayerRenderTask,
-    TileSubsetGpuContribution,
     TileSubsetLayerRenderWorkerOutbound
 } from "./tile-subset-layer-render.worker.protocol";
-import type {
-    GpuSceneSnapshot
-} from "./gpu-scene";
-import {gpuIconAtlasService} from "./gpu-icon-atlas.service";
-import {
-    GPU_RENDER_PACKET_MAX_BYTES
-} from "./gpu-render-packet";
 
 const AUTO_WORKER_MIN = 2;
 const AUTO_WORKER_FALLBACK_CPU_COUNT = 4;
@@ -276,14 +275,13 @@ export class TileSubsetLayerRenderService {
     /** Track runtime worker-count changes when application state is available. */
     constructor(
         @Optional()
-        private readonly appState: AppStateService | null = null
+        private readonly appState: MapViewState | null = null
     ) {
         if (!appState) {
             return;
         }
         let previousPolicy = this.pointCloudPolicy;
-        combineLatest([appState.pointCloudDownsamplingEnabledState, appState.pointCloudDetailPixelsState,
-            appState.pointCloudWorkingMemoryMiBState, appState.pointCloudGpuMemoryMiBState]).pipe(auditTime(0)).subscribe(() => {
+        appState.pointCloudPolicyChanges.subscribe(() => {
             gpuMemoryBudget.setLimit(this.pointCloudPolicy.gpuMemoryMiB * 1048576);
             pointCloudInputBudget.setWorkingLimit(this.pointCloudPolicy.workingMemoryMiB * 1048576);
             const policy = this.pointCloudPolicy;
@@ -719,7 +717,7 @@ export class TileSubsetLayerRenderService {
                 fieldDictBlob,
                 styleSource,
                 iconCatalogEntries: needsIconCatalog
-                    ? gpuIconAtlasService.catalogEntries().map(entry => ({
+                    ? gpuIconAtlas.catalogEntries().map(entry => ({
                         uri: entry.uri,
                         atlasPage: entry.atlasPage,
                         uv: entry.uv,

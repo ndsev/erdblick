@@ -1,4 +1,9 @@
-import type {LayerInfoItem} from "./map.tree.model";
+/**
+ * Immutable identity and catalog metadata for one mapget feature layer.
+ * A layer can be referenced by transport, search and rendering without creating
+ * the interactive map tree or opening a filter subscription.
+ */
+import type { LayerInfoItem } from "./source-catalog.model";
 
 /**
  * Immutable catalog identity for one mapget feature layer.

@@ -1,17 +1,25 @@
-import {Injectable, NgZone, OnDestroy} from "@angular/core";
-import {BehaviorSubject, interval, Subscription} from "rxjs";
-import {MapTileStreamService} from "../mapdata/map-tile-stream.service";
+import { Injectable, NgZone, OnDestroy } from "@angular/core";
+import { BehaviorSubject, interval, Subscription } from "rxjs";
+import { MapTileStreamService } from "../mapdata/map-tile-stream.service";
 import {
     TileSubsetLayerRenderService
 } from "../mapview/deck/tile-subset-layer-render.service";
+import { ViewLayerDiagnosticsService } from "../mapview/view-layer-diagnostics.service";
+import { type SubsetDiagnosticsError } from "../mapview/view-layer-diagnostics.model";
+import { DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID } from "../layout/layout.model";
+import { LayoutService } from "../layout/layout.service";
+import { AppStateService } from "../appstate/appstate.service";
 import {
-    type SubsetDiagnosticsError,
-    ViewLayerDiagnosticsService
-} from "../mapview/view-layer-diagnostics.service";
+    StyleValidationReportService
+} from "../mapstyle/style-validation-report.service";
+import type { StyleValidationIssue } from "../mapstyle/style-validation.model";
 import {
-    AppStateService,
-    DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
-} from "../shared/appstate.service";
+    LOG_INTERVAL_MS,
+    MAX_LOGS,
+    PEAK_TILE_LIMIT,
+    PERF_INTERVAL_MS,
+    SNAPSHOT_INTERVAL_MS
+} from "./diagnostics.constants";
 import {
     DiagnosticsSnapshot,
     LogEntry,
@@ -20,18 +28,7 @@ import {
     TilePipelineProgress,
     TileStateCounts
 } from "./diagnostics.model";
-import {
-    LOG_INTERVAL_MS,
-    MAX_LOGS,
-    PEAK_TILE_LIMIT,
-    PERF_INTERVAL_MS,
-    SNAPSHOT_INTERVAL_MS
-} from "./diagnostics.constants";
-import {buildAggregatedPerfStats} from "./diagnostics.perf-aggregation";
-import {
-    StyleValidationReportService
-} from "../styledata/style-validation-report.service";
-import type {StyleValidationIssue} from "../styledata/style-validation.model";
+import { buildAggregatedPerfStats } from "./diagnostics-perf-aggregation.util";
 
 /**
  * Current-generation diagnostics assembled from live StyledMapgetLayers.
@@ -60,14 +57,22 @@ export class DiagnosticsDatasource implements OnDestroy {
 
     /** Subscribe to low-frequency diagnostics sources while keeping timers outside Angular. */
     constructor(
-        private readonly mapService: MapTileStreamService,
-        private readonly renderService: TileSubsetLayerRenderService,
+        protected readonly mapService: MapTileStreamService,
+        protected readonly renderService: TileSubsetLayerRenderService,
         private readonly viewDiagnostics: ViewLayerDiagnosticsService,
         private readonly appStateService: AppStateService,
-        private readonly styleValidationReportService:
+        protected readonly styleValidationReportService:
             StyleValidationReportService,
-        private readonly ngZone: NgZone
-    ) {
+        private readonly ngZone: NgZone,
+        public readonly layout: LayoutService
+    ) { }
+
+    private initialized = false;
+
+    /** Starts background sampling after state and configuration registration are complete. */
+    initialize(): void {
+        if (this.initialized) return;
+        this.initialized = true;
         this.patchConsoleLogging();
         let wasPaused = this.mapService.tilePipelinePaused;
         const backgroundSubscriptions = this.ngZone.runOutsideAngular(() => [
@@ -91,8 +96,10 @@ export class DiagnosticsDatasource implements OnDestroy {
             }),
             this.viewDiagnostics.tileWarning.subscribe(warning => this.appendLogEntries([{
                 at: Date.now(), level: "warn", message: `Tile warning: ${warning.message}`,
-                data: {tileId: warning.mapTileKey, mapName: warning.mapName,
-                       layerName: warning.layerName, presentation: warning.presentationKind}
+                data: {
+                    tileId: warning.mapTileKey, mapName: warning.mapName,
+                    layerName: warning.layerName, presentation: warning.presentationKind
+                }
             }])),
             this.viewDiagnostics.tileError.subscribe(error =>
                 this.appendTileError(error)
@@ -113,9 +120,11 @@ export class DiagnosticsDatasource implements OnDestroy {
             return;
         }
         const recovery = this.mapService.getConnectionDiagnostics();
-        this.snapshot$.next({...this.snapshot$.getValue(),
-            backend: {connected: this.mapService.isTileStreamConnected()},
-            recovery, loading: recovery.loading});
+        this.snapshot$.next({
+            ...this.snapshot$.getValue(),
+            backend: { connected: this.mapService.isTileStreamConnected() },
+            recovery, loading: recovery.loading
+        });
     }
 
     /** Stop every timer and event subscription owned by this dialog datasource. */
@@ -264,7 +273,7 @@ export class DiagnosticsDatasource implements OnDestroy {
                 presentation.capacityRecords > 0
                     ? (presentation.highWaterRecords -
                         presentation.fragmentedRecords) /
-                        presentation.capacityRecords * 100
+                    presentation.capacityRecords * 100
                     : 0,
                 "%"
             );
@@ -282,7 +291,7 @@ export class DiagnosticsDatasource implements OnDestroy {
 
     /** Avoid expensive aggregation while the performance dialog is closed. */
     refreshPerfStatsIfVisible(): void {
-        if (this.appStateService.isDialogOpen(
+        if (this.layout.isDialogOpen(
             DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
         )) {
             this.refreshPerfStats();
@@ -351,8 +360,8 @@ export class DiagnosticsDatasource implements OnDestroy {
             this.mapService.markCurrentViewportRendered();
         }
         const progress: TilePipelineProgress = {
-            backend: {done: backend.done, total: backend.total},
-            rendered: {done: loaded, total: expected},
+            backend: { done: backend.done, total: backend.total },
+            rendered: { done: loaded, total: expected },
             bubbles: {
                 downstreamBytesPerSecond:
                     this.mapService.getDownstreamBytesPerSecond(),
@@ -381,7 +390,7 @@ export class DiagnosticsDatasource implements OnDestroy {
             at: Date.now(),
             tiles: tileCounts,
             progress,
-            backend: {connected: this.mapService.isTileStreamConnected()},
+            backend: { connected: this.mapService.isTileStreamConnected() },
             recovery,
             loading: recovery.loading || parseQueueSize > 0 || renderQueueSize > 0
         };

@@ -28,7 +28,7 @@
             "assets": [
               {
                 "glob": "web-mcp-actions.json",
-                "input": "app/actions/generated",
+                "input": "app/action/generated",
                 "output": "/"
               },
               {
@@ -107,7 +107,7 @@
               "assets": [
                 {
                   "glob": "web-mcp-actions.json",
-                  "input": "app/actions/generated",
+                  "input": "app/action/generated",
                   "output": "/"
                 },
                 {
@@ -227,7 +227,7 @@
               "assets": [
                 {
                   "glob": "web-mcp-actions.json",
-                  "input": "app/actions/generated",
+                  "input": "app/action/generated",
                   "output": "/"
                 },
                 {
@@ -325,7 +325,7 @@
               "assets": [
                 {
                   "glob": "web-mcp-actions.json",
-                  "input": "app/actions/generated",
+                  "input": "app/action/generated",
                   "output": "/"
                 },
                 {
@@ -428,7 +428,7 @@
             "tsConfig": "tsconfig.spec.json",
             "buildTarget": "erdblick:build:test",
             "setupFiles": [
-              "test/vitest.setup.ts"
+              "tests/support/vitest.setup.ts"
             ],
             "coverage": true,
             "coverageReporters": [
@@ -438,11 +438,11 @@
               "json-summary"
             ],
             "coverageExclude": [],
-            "exclude": [
-              "app/app.component.spec.ts"
-            ],
             "reporters": [
               "verbose"
+            ],
+            "include": [
+              "../tests/app/**/*.spec.ts"
             ]
           }
         }

@@ -1,5 +1,6 @@
 .clang-format
 build/
+build-test/
 ci/emsdk/
 .idea
 cmake-build-debug-wsl
@@ -8,17 +9,15 @@ cmake-build-*
 static
 static-visualization-only
 .angular
-app/actions/generated/
+app/action/generated/
 node_modules
-config
-config/*
-config/styles/*
+/config/
 out-tsc
 config/config.json
 dist
 coverage
 test-results
-playwright/.cache/*
+tests/playwright/.cache/*
 *-todo.md
 venv/
 dev-screenshots/

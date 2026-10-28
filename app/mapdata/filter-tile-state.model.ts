@@ -1,4 +1,9 @@
-import {pointCloudInputBudget} from "../shared/point-cloud-input-budget";
+/**
+ * The current immutable subset value and delivery status for one partition.
+ * Replacement and retention preserve exact generation and expiry semantics
+ * while transport and renderer owners control when values are installed or used.
+ */
+import {pointCloudInputBudget} from "./point-cloud-input-budget.model";
 import type {TileSubsetDelivery} from "./filter-subscription.model";
 import {
     partitionKey,

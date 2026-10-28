@@ -1,4 +1,4 @@
-import {TileLayer} from "../../integrations/deckgl";
+import {TileLayer} from "../../integrations/deckgl.adapter";
 
 const TILE_UPDATE_QUIET_MS = 100;
 const TILE_UPDATE_MAX_LATENCY_MS = 1_000;

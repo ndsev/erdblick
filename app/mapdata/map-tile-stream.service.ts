@@ -1,15 +1,26 @@
-import {Injectable, NgZone, OnDestroy} from "@angular/core";
-import {auditTime, BehaviorSubject, combineLatest, Subject, Subscription} from "rxjs";
-import {MapInfoService} from "./map-info.service";
+import { Injectable, NgZone, OnDestroy } from "@angular/core";
+import { BehaviorSubject, Subject, Subscription } from "rxjs";
+import { z } from "zod";
+import { rejectAction } from "../action/action.model";
+import { featureIdentitySchema } from "../inspection/feature-identity.model";
+import { TileFeatureId } from "../inspection/inspection.model";
+import { coreLib, uint8ArrayToWasmOrThrow } from "../integrations/wasm.adapter";
 import {
-    MapTileRequestStatus,
-    MapTileStreamClientInteractive,
-    MapTileStreamClientTiles,
-    type MapTileStreamFilterStatusPayload,
-    type MapTileStreamSourceCatalogChangePayload,
-    type MapTileStreamStatusPayload,
-    type MapTileStreamTransportCompressionStats
-} from "./tilestream";
+    ConnectionRetryAttempt,
+    connectionRetryDeadline,
+    ConnectionRetryPolicy,
+    recordConnectionFailure
+} from "./connection-retry-policy.model";
+import { InfoMessageService } from "../diagnostics/info.service";
+import {
+    formatFeatureInspectionTarget,
+    parseFeatureInspectionTarget,
+    stripFeatureInspectionTarget
+} from "../inspection/feature-identity.model";
+
+import { AppStateService } from "../appstate/appstate.service";
+import { MapDataState } from "./mapdata.state";
+import { FeatureWrapper, InspectionFeatureTile } from "./feature-inspection.adapter";
 import {
     FilterSubscriptionCallbacks,
     FilterSubscriptionCoverage,
@@ -19,27 +30,8 @@ import {
     TileAttachmentValue,
     TileSubsetDelivery
 } from "./filter-subscription.model";
-import {
-    FeatureWrapper,
-    InspectionFeatureTile
-} from "./feature-inspection.model";
-import {
-    coreLib,
-    uint8ArrayToWasm,
-    uint8ArrayToWasmOrThrow
-} from "../integrations/wasm";
-import {
-    AppStateService,
-    MAX_NUM_TILES_TO_LOAD,
-    TileFeatureId
-} from "../shared/appstate.service";
-import {InfoMessageService} from "../shared/info.service";
-import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
-import {TileExpiryScheduler} from "./tile-expiry-scheduler";
-import {
-    ConnectionRetryAttempt, ConnectionRetryPolicy, connectionRetryDeadline,
-    recordConnectionFailure
-} from "../shared/connection-retry-policy";
+import { MapDataService } from "./mapdata.service";
+import type { MapgetLayer } from "./mapget-layer.model";
 import {
     parseMapPartitionKey,
     parsePartition,
@@ -49,7 +41,15 @@ import {
     type ObjectPartitionId,
     type PartitionId
 } from "./partition.model";
-import type {MapgetLayer} from "./mapget-layer.model";
+import { TileExpiryScheduler } from "./tile-expiry-scheduler.util";
+import { MapTileStreamClientInteractive, MapTileStreamClientTiles } from "./map-tile-stream.client";
+import {
+    MapTileRequestStatus,
+    type MapTileStreamFilterStatusPayload,
+    type MapTileStreamSourceCatalogChangePayload,
+    type MapTileStreamStatusPayload,
+    type MapTileStreamTransportCompressionStats
+} from "./map-tile-stream.protocol";
 
 export interface RetainedTileExpiryOwner {
     expireTiles(tokens: ReadonlyArray<{
@@ -93,6 +93,9 @@ interface ObjectDiscoveryCacheEntry {
 
 const MAX_OBJECT_DISCOVERY_CACHE_TILES = 4096;
 
+/** Bound the distinct partitions in a one-shot inspection request, independently of viewport settings. */
+const MAX_ONE_SHOT_PARTITIONS = 512;
+
 /**
  * Owns interactive filter transport and attachment refs.
  *
@@ -100,11 +103,11 @@ const MAX_OBJECT_DISCOVERY_CACHE_TILES = 4096;
  * Complete feature data is fetched only through feature-restricted, one-shot
  * `/tiles` requests for inspection and is never inserted into a viewport cache.
  */
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class MapTileStreamService implements OnDestroy {
     readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
     readonly actionClientId$ = new BehaviorSubject<string | null>(null);
-    readonly actionControlReceived = new Subject<{payload: unknown; receivedAt: number}>();
+    readonly actionControlReceived = new Subject<{ payload: unknown; receivedAt: number }>();
     readonly filterStatusReceived =
         new Subject<MapTileStreamFilterStatusPayload>();
 
@@ -140,11 +143,13 @@ export class MapTileStreamService implements OnDestroy {
     private activeInspectionLoads = 0;
     private retryPolicy: ConnectionRetryPolicy;
     private readonly stateSubscriptions = new Subscription();
-    private readonly connectionRetryOwner: RetainedTileExpiryOwner = {expireTiles: () => {
-        if (this.connectionRetry) this.connectionRetry.at = 0;
-        this.forceNextUpdate = true;
-        this.scheduleUpdate();
-    }};
+    private readonly connectionRetryOwner: RetainedTileExpiryOwner = {
+        expireTiles: () => {
+            if (this.connectionRetry) this.connectionRetry.at = 0;
+            this.forceNextUpdate = true;
+            this.scheduleUpdate();
+        }
+    };
     private readonly connectionRetryScheduler = new TileExpiryScheduler<RetainedTileExpiryOwner, string>(
         (owner, tokens) => {
             if (!this.backendProtocolMismatchActive) owner.expireTiles(tokens);
@@ -176,18 +181,14 @@ export class MapTileStreamService implements OnDestroy {
 
     constructor(
         private readonly stateService: AppStateService,
-        private readonly mapInfo: MapInfoService,
+        private readonly mapInfo: MapDataService,
         private readonly messageService: InfoMessageService,
-        private readonly ngZone: NgZone
+        private readonly ngZone: NgZone,
+        public readonly state: MapDataState
     ) {
-        this.retryPolicy = this.stateService.connectionRetryPolicy;
-        this.stateSubscriptions.add(combineLatest([
-            this.stateService.connectionRetryEnabledState,
-            this.stateService.connectionRetryInitialDelayMsState,
-            this.stateService.connectionRetryBackoffMultiplierState,
-            this.stateService.connectionRetryMaxDelayMsState
-        ]).pipe(auditTime(0)).subscribe(() => this.applyRetryPolicy()));
-        this.stateService.tilePullCompressionEnabledState.subscribe(enabled =>
+        this.retryPolicy = this.state.connectionRetryPolicy;
+        this.stateSubscriptions.add(this.state.connectionRetryPolicyChanges.subscribe(() => this.applyRetryPolicy()));
+        this.state.tilePullCompressionEnabledState.subscribe(enabled =>
             this.tileStream?.setPullCompressionEnabled(enabled)
         );
         this.mapInfo.dataSourceInfoChanged.subscribe(() => {
@@ -204,9 +205,9 @@ export class MapTileStreamService implements OnDestroy {
             this.mapInfo.tileLayerParser
         );
         this.tileStream.onClientId = clientId => this.actionClientId$.next(clientId);
-        this.tileStream.onActionControl = (payload, receivedAt) => this.actionControlReceived.next({payload, receivedAt});
+        this.tileStream.onActionControl = (payload, receivedAt) => this.actionControlReceived.next({ payload, receivedAt });
         this.tileStream.setPullCompressionEnabled(
-            this.stateService.tilePullCompressionEnabled
+            this.state.tilePullCompressionEnabled
         );
         this.tileStream.setFrameProcessingPaused(this.tilePipelinePaused);
         this.tileStream.onSubsets = payload =>
@@ -394,7 +395,7 @@ export class MapTileStreamService implements OnDestroy {
         }
         const uniqueTiles = [...new Set(discoveryTileIds.map(Number))];
         if (!uniqueTiles.length) {
-            return {associations: [], expiresAtMs: null};
+            return { associations: [], expiresAtMs: null };
         }
         let cache = this.objectDiscoveryCache.get(layer);
         if (!cache) {
@@ -413,11 +414,11 @@ export class MapTileStreamService implements OnDestroy {
             const batch = this.fetchObjectDiscoveryBatch(layer, tileIds);
             tileIds.forEach((tileId, index) => {
                 const pending = batch.then(values => values[index]);
-                const entry: ObjectDiscoveryCacheEntry = {pending};
+                const entry: ObjectDiscoveryCacheEntry = { pending };
                 cache!.set(tileId, entry);
                 pending.then(value => {
                     if (cache!.get(tileId) === entry) {
-                        cache!.set(tileId, {value});
+                        cache!.set(tileId, { value });
                     }
                 }).catch(() => {
                     if (cache!.get(tileId) === entry) {
@@ -456,12 +457,12 @@ export class MapTileStreamService implements OnDestroy {
                 seen.add(key);
                 associations.push({
                     partition: object.partition,
-                    ...(object.bounds ? {bounds: object.bounds} : {}),
+                    ...(object.bounds ? { bounds: object.bounds } : {}),
                     discoveryTileId: uniqueTiles[tileIndex]
                 });
             }
         });
-        return {associations, expiresAtMs};
+        return { associations, expiresAtMs };
     }
 
     /** Bound long-running pan sessions without evicting current or in-flight discovery. */
@@ -489,12 +490,12 @@ export class MapTileStreamService implements OnDestroy {
     ): Promise<ObjectDiscoveryTileValue[]> {
         const response = await fetch("/objects/discover", {
             method: "POST",
-            headers: {"Content-Type": "application/json"},
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 requests: [{
                     mapId: layer.mapId,
                     layerId: layer.layerId,
-                    ...(layer.sourceId ? {sourceId: layer.sourceId} : {}),
+                    ...(layer.sourceId ? { sourceId: layer.sourceId } : {}),
                     tileIds
                 }]
             })
@@ -505,7 +506,7 @@ export class MapTileStreamService implements OnDestroy {
                 `${response.status} ${response.statusText}.`
             );
         }
-        const body = await response.json() as {responses?: unknown[]};
+        const body = await response.json() as { responses?: unknown[] };
         if (!Array.isArray(body.responses) ||
             body.responses.length !== tileIds.length) {
             throw new Error(
@@ -580,7 +581,7 @@ export class MapTileStreamService implements OnDestroy {
             );
         }
         return value.map(raw => {
-            const item = raw as {id?: unknown; bounds?: unknown};
+            const item = raw as { id?: unknown; bounds?: unknown };
             const partition = parsePartition({
                 kind: "object",
                 id: item.id
@@ -589,7 +590,7 @@ export class MapTileStreamService implements OnDestroy {
                 throw new Error("Object discovery returned a tile partition.");
             }
             if (item.bounds === undefined) {
-                return {partition};
+                return { partition };
             }
             if (!Array.isArray(item.bounds) || item.bounds.length !== 4 ||
                 item.bounds.some(coordinate =>
@@ -866,13 +867,13 @@ export class MapTileStreamService implements OnDestroy {
             const groupKey = `${mapId}\n${layerId}`;
             let group = groups.get(groupKey);
             if (!group) {
-                group = {mapId, layerId, partitions: new Map()};
+                group = { mapId, layerId, partitions: new Map() };
                 groups.set(groupKey, group);
             }
             const key = partitionKey(partition);
             let entry = group.partitions.get(key);
             if (!entry) {
-                entry = {partition, ids: []};
+                entry = { partition, ids: [] };
                 group.partitions.set(key, entry);
             }
             const baseId = stripFeatureInspectionTarget(feature.featureId);
@@ -882,10 +883,10 @@ export class MapTileStreamService implements OnDestroy {
         }
         const distinctPartitionCount = [...groups.values()]
             .reduce((count, group) => count + group.partitions.size, 0);
-        if (distinctPartitionCount > MAX_NUM_TILES_TO_LOAD) {
+        if (distinctPartitionCount > MAX_ONE_SHOT_PARTITIONS) {
             throw new Error(
                 `Inspection feature request exceeds ` +
-                `${MAX_NUM_TILES_TO_LOAD} partitions.`
+                `${MAX_ONE_SHOT_PARTITIONS} partitions.`
             );
         }
 
@@ -923,7 +924,7 @@ export class MapTileStreamService implements OnDestroy {
         try {
             const cancelled = new Promise<never>((_, reject) => {
                 abort = () => reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
-                signal?.addEventListener("abort", abort, {once: true});
+                signal?.addEventListener("abort", abort, { once: true });
                 if (signal?.aborted) abort();
             });
             const timeoutPromise = new Promise<never>((_, reject) => {
@@ -942,7 +943,7 @@ export class MapTileStreamService implements OnDestroy {
             if (tiles.size < distinctPartitionCount) {
                 console.warn(
                     "Inspection feature request returned fewer partitions than requested.",
-                    {requested: distinctPartitionCount, received: tiles.size}
+                    { requested: distinctPartitionCount, received: tiles.size }
                 );
             }
         } finally {
@@ -995,8 +996,8 @@ export class MapTileStreamService implements OnDestroy {
             const response = await fetch("/locate", {
                 signal,
                 method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({requests: validRequests})
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ requests: validRequests })
             });
             if (!response.ok) {
                 throw new Error(
@@ -1018,7 +1019,7 @@ export class MapTileStreamService implements OnDestroy {
                 const candidates = [...(payload.responses?.[validIndex++] ?? [])]
                     .filter(candidate =>
                         typeof (candidate.partitionKey ?? candidate.tileId) ===
-                            "string" &&
+                        "string" &&
                         this.parseMapPartitionKeySafe(
                             candidate.partitionKey ?? candidate.tileId!
                         ) !== null
@@ -1052,20 +1053,20 @@ export class MapTileStreamService implements OnDestroy {
     async locateFeature(mapId: string, featureId: string, layerId?: string, signal?: AbortSignal): Promise<TileFeatureId[]> {
         signal?.throwIfAborted();
         const response = await fetch("/locate", {
-            method: "POST", headers: {"Content-Type": "application/json"}, signal,
-            body: JSON.stringify({requests: [{mapId, ...(layerId ? {layerId} : {}), featureId: stripFeatureInspectionTarget(featureId)}]})
+            method: "POST", headers: { "Content-Type": "application/json" }, signal,
+            body: JSON.stringify({ requests: [{ mapId, ...(layerId ? { layerId } : {}), featureId: stripFeatureInspectionTarget(featureId) }] })
         });
         if (!response.ok) throw new Error(`Feature locate failed: HTTP ${response.status}`);
         const content = await response.text();
         signal?.throwIfAborted();
         if (content.length > 256 * 1024) throw new Error("Feature locate response exceeds the bound");
-        const payload: {responses?: Array<Array<{partitionKey?: string; tileId?: string; canonicalFeatureId?: string}>>} = JSON.parse(content);
+        const payload: { responses?: Array<Array<{ partitionKey?: string; tileId?: string; canonicalFeatureId?: string }>> } = JSON.parse(content);
         const candidates = payload.responses?.[0] ?? [];
         if (candidates.length > 100) throw new Error("Feature locate is ambiguous; provide a layer or partition");
         return candidates.flatMap(candidate => {
             const mapTileKey = candidate.partitionKey ?? candidate.tileId;
             return mapTileKey && this.parseMapPartitionKeySafe(mapTileKey)
-                ? [{mapTileKey, featureId: candidate.canonicalFeatureId ?? stripFeatureInspectionTarget(featureId)}] : [];
+                ? [{ mapTileKey, featureId: candidate.canonicalFeatureId ?? stripFeatureInspectionTarget(featureId) }] : [];
         });
     }
 
@@ -1154,7 +1155,7 @@ export class MapTileStreamService implements OnDestroy {
 
     /** Recomputes waiting deadlines when preferences change, retaining attempts and live work. */
     private applyRetryPolicy(): void {
-        this.retryPolicy = this.stateService.connectionRetryPolicy;
+        this.retryPolicy = this.state.connectionRetryPolicy;
         if (this.connectionRetry && this.connectionRetry.at > 0) {
             this.connectionRetry.at = connectionRetryDeadline(this.retryPolicy, this.connectionRetry);
             this.connectionRetryScheduler.schedule(this.connectionRetryOwner, "connection", 0, this.connectionRetry.at);
@@ -1164,7 +1165,7 @@ export class MapTileStreamService implements OnDestroy {
     /** Coalesces error/close callbacks for one failed connection attempt. */
     private scheduleConnectionRetry(message: string): void {
         if (this.pageHidden || this.backendProtocolMismatchActive || this.connectionTerminalError) return;
-        this.backendRequestProgress = {done: 0, total: 0, allDone: true};
+        this.backendRequestProgress = { done: 0, total: 0, allDone: true };
         this.connectionRetry = recordConnectionFailure(this.connectionRetry, message);
         this.connectionRetry.at = connectionRetryDeadline(this.retryPolicy, this.connectionRetry);
         this.connectionRetryScheduler.schedule(this.connectionRetryOwner, "connection", 0, this.connectionRetry.at);
@@ -1178,7 +1179,7 @@ export class MapTileStreamService implements OnDestroy {
     }
 
     /** Current owner state drives the circle; historical logs and pending counts do not. */
-    getConnectionDiagnostics(): {retrying: boolean; failed: boolean; loading: boolean; message: string} {
+    getConnectionDiagnostics(): { retrying: boolean; failed: boolean; loading: boolean; message: string } {
         const catalog = this.mapInfo.getSourceRecoveryState();
         const browserRetrying = this.retryPolicy.enabled && !!this.connectionRetry;
         const activeFilters = [...this.filterSubscriptionsById.values()].some(ref =>
@@ -1191,7 +1192,7 @@ export class MapTileStreamService implements OnDestroy {
             return `${source}: ${retry.message} ${action}`;
         };
         const messages = [catalog.message, this.connectionTerminalError,
-            this.connectionRetry && describe(this.connectionRetry, "Backend")].filter(Boolean);
+        this.connectionRetry && describe(this.connectionRetry, "Backend")].filter(Boolean);
         return {
             retrying: catalog.retrying || (!this.pageHidden && !this.tilePipelinePaused && browserRetrying),
             failed: catalog.failed || !!this.connectionRetry ||
@@ -1224,7 +1225,7 @@ export class MapTileStreamService implements OnDestroy {
     }
 
     getBackendRequestProgress(): BackendRequestProgress {
-        return {...this.backendRequestProgress};
+        return { ...this.backendRequestProgress };
     }
 
     currentViewportRenderSeconds(): number {
@@ -1252,7 +1253,7 @@ export class MapTileStreamService implements OnDestroy {
             tileExpiry: {
                 scheduledTiles: this.tileExpiryScheduler.size,
                 pendingFilterTiles: [...this.filterSubscriptionsById.values()]
-                .reduce((count, ref) => count + ref.pendingPartitionCount, 0)
+                    .reduce((count, ref) => count + ref.pendingPartitionCount, 0)
             },
             activeFilters: [...this.filterSubscriptionsById.values()].map(ref => ({
                 filterId: ref.filterId,
@@ -1310,7 +1311,7 @@ export class MapTileStreamService implements OnDestroy {
         const dueAt = Math.min(
             now + this.acknowledgementQuietMs,
             this.acknowledgementBurstStartedAt +
-                this.acknowledgementMaxLatencyMs
+            this.acknowledgementMaxLatencyMs
         );
         if (this.acknowledgementTimer) {
             clearTimeout(this.acknowledgementTimer);
@@ -1418,7 +1419,7 @@ export class MapTileStreamService implements OnDestroy {
         } catch (error) {
             throw new Error(
                 "Failed to read TileSubsetLayer metadata (256 KiB browser metadata limit).",
-                {cause: error}
+                { cause: error }
             );
         }
         const filterId = String(metadata.filterId);
@@ -1445,7 +1446,7 @@ export class MapTileStreamService implements OnDestroy {
             }
             const scalarFields =
                 metadata.layer.scalarFields &&
-                typeof metadata.layer.scalarFields === "object"
+                    typeof metadata.layer.scalarFields === "object"
                     ? metadata.layer.scalarFields as Record<string, unknown>
                     : {};
             const rawEntryCount = Number(
@@ -1516,7 +1517,7 @@ export class MapTileStreamService implements OnDestroy {
                 `Failed to install filter '${filterId}' generation ${generation}: ` +
                 (error instanceof Error ? error.message : String(error));
             subscription.reportError(message);
-            throw new Error(message, {cause: error});
+            throw new Error(message, { cause: error });
         }
     }
 
@@ -1668,7 +1669,7 @@ export class MapTileStreamService implements OnDestroy {
             const normalized = Math.max(0, Math.floor(targetRevision));
             this.sourceCatalogRefreshTargetRevision =
                 resetRevisionEpoch ||
-                this.sourceCatalogRefreshTargetRevision === null
+                    this.sourceCatalogRefreshTargetRevision === null
                     ? normalized
                     : Math.max(
                         this.sourceCatalogRefreshTargetRevision,
@@ -1739,4 +1740,35 @@ export class MapTileStreamService implements OnDestroy {
             this.messageService.showBackendProtocolError(message)
         );
     }
+
+    /** Resolves only explicitly requested identities; never guesses between ambiguous backend matches. */
+    async resolveFeatureIdentities(features: Array<z.infer<typeof featureIdentitySchema>>, signal?: AbortSignal): Promise<TileFeatureId[]> {
+        const result: TileFeatureId[] = [];
+        for (const feature of features) {
+            signal?.throwIfAborted();
+            let featureId = feature.featureId;
+            if (feature.attributeIndex !== undefined || feature.relationIndex !== undefined || feature.validityIndex !== undefined) {
+                if (feature.attributeIndex !== undefined && feature.relationIndex !== undefined) rejectAction("attributeIndex and relationIndex are mutually exclusive", "invalid_arguments");
+                if (feature.attributeIndex === undefined && feature.relationIndex === undefined) rejectAction("validityIndex requires attributeIndex or relationIndex", "invalid_arguments");
+                const target = parseFeatureInspectionTarget(featureId);
+                if (target.scope !== "feature") rejectAction("Use either a suffixed featureId or numeric inspection selectors, not both", "invalid_arguments");
+                featureId = formatFeatureInspectionTarget(feature.attributeIndex !== undefined
+                    ? { scope: "attribute", baseFeatureId: target.baseFeatureId, attributeIndex: feature.attributeIndex, validityIndex: feature.validityIndex }
+                    : { scope: "relation", baseFeatureId: target.baseFeatureId, relationIndex: feature.relationIndex!, validityIndex: feature.validityIndex });
+            }
+            if ("mapTileKey" in feature) {
+                if (!this.parseMapPartitionKeySafe(feature.mapTileKey) || !feature.mapTileKey.startsWith("Features:")) rejectAction("Invalid feature partition key", "invalid_arguments");
+                result.push({ mapTileKey: feature.mapTileKey, featureId });
+            } else {
+                const matches = await this.locateFeature(feature.mapId, featureId, feature.layerId, signal);
+                signal?.throwIfAborted();
+                if (matches.length !== 1) rejectAction(matches.length ? "Feature identity is ambiguous; supply its partition" :
+                    "Feature was not found. For a relation target, discover its owning layer using mapget_list_sources/schemaFeatureTypes; featureTypes may be reference-only. Do not bypass this failure by copying the source feature's mapTileKey into a new inspection.");
+                const target = parseFeatureInspectionTarget(featureId);
+                result.push({ ...matches[0], featureId: formatFeatureInspectionTarget({ ...target, baseFeatureId: matches[0].featureId }) });
+            }
+        }
+        return result.filter((feature, index) => result.findIndex(other => other.mapTileKey === feature.mapTileKey && other.featureId === feature.featureId) === index);
+    }
+
 }
