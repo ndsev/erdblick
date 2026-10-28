@@ -30,7 +30,7 @@ search owners.
 | `app/mapview/`, `app/mapdata/`, `app/inspection/`, `app/coordinates/`, `app/mapstyle/`, `app/diagnostics/` | The corresponding domain's state, controllers and presentation |
 | `app/alert/`, `app/editor/`, `app/clipboard/`, `app/keyboard/` | Reusable UI capabilities, each with its own components/services |
 | `app/survey/` | Configured announcement banner, its value contracts and HTML validation |
-| `app/utils/` | Stateless helpers shared across domains; no controllers or UI components |
+| `app/utils/` | Domain-independent reusable mechanisms shared across domains; no controllers or UI components |
 | `app/scss/` | Application CSS; map-feature style documents belong to `app/mapstyle/` |
 
 Each domain owning shared application state has one `<domain>.state.ts`, containing
@@ -42,9 +42,12 @@ controls. Preference dialogs and deployment configuration supply values, but do
 not own the behavior those values control.
 
 Use `.model.ts` for domain value models, such as background layers, retry policies
-and retained point-cloud input budgets. Use `.util.ts` for stateless helpers, kept
-beside their domain unless several domains need them. Shared public contracts stay
-with their values. `appconfig.model.ts` composes domain contracts from mapview,
+and retained point-cloud input budgets. Use `.util.ts` for reusable operations and
+mechanisms, including caller-managed queues, timers and cleanup. Domain-specific
+utilities stay beside their domain; shared domain-independent mechanisms belong
+in `utils/`. See [Source roles and dependencies](erdblick-source-structure.md) for
+the precise boundaries and mechanical checks. Shared public contracts stay with
+their values. `appconfig.model.ts` composes domain contracts from mapview,
 geolocation, navigation, mapstyle and coordinates without importing their controllers. Infrastructure/stateless domains
 do not acquire empty state containers or speculative `types/` directories.
 
@@ -139,10 +142,12 @@ such as closing a particular inspection or starting a search. Neither name is a
 persistence key, and state containers are not automatically exposed to MCP.
 
 Controllers implement `AppActionContributor`. Its two optional methods distinguish
-operations from controls without requiring empty implementations:
+operations from controls without requiring empty implementations. They accept the
+narrow `AppActionRegistration` contract implemented by `AppActionRegistry`, so
+declaring operations does not require importing the dispatch service:
 
 ```ts
-registerActions(actions: AppActionRegistry): void {
+registerActions(actions: AppActionRegistration): void {
     actions.registerAction(
         {
             name: "viewer_close_inspection",
