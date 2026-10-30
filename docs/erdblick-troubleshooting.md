@@ -2,6 +2,11 @@
 
 This guide collects the fixes and workarounds that previously lived in scattered README sections. Use it when the UI appears empty, runs slowly, or needs a hard reset.
 
+<!-- mcp:
+title: "Nothing renders"
+keywords: ["blank", "empty", "invisible", "missing data", "NoDataSource"]
+hint: "Check current view/layer visibility, discovered source availability, coverage, style visibility and viewer_get_diagnostics before changing data or resetting state. Use mapget tools for source/schema evidence. A catalog entry alone does not establish loaded/rendered geometry."
+-->
 ## Nothing Renders
 
 When the map stays blank or appears to render nothing at all, work through these checks in order:
@@ -40,6 +45,31 @@ If the UI feels sluggish or frame rates drop when you move the camera, a few sim
 - Use Chromium-based browsers for the best WebGL throughput. Firefox/Safari generally render fewer tiles per frame.
 - Open **Tools -> Performance Statistics** and capture the relevant diagnostics before changing the scene further.
 
+### GPU allocation allowance exhausted
+
+This warning means some rendering work is paused because it cannot fit the
+application's GPU allowance. Hide unused layers/styles or restrict a style's
+filter to reduce demand. Eligible work resumes automatically as buffers or
+reusable ranges are released; a page reload is unnecessary. You can also raise
+**GPU allocation allowance (MiB)** under **Edit → Preferences → Rendering →
+Memory**, then press **Apply**. The allowance is shared
+across views and also applies to ordinary primitive buffers.
+
+Turning off **Manage GPU memory** in the same section resumes paused work without
+enforcing the application GPU allowance. Normal resource disposal continues;
+point-cloud sampling and its separate working-memory allowance still apply.
+
+Point clouds keep their configured point-count quota under memory pressure.
+Work that still cannot fit remains paused with a deduplicated warning. The
+allowance is not a measurement or guarantee of physical GPU memory. See
+[point-cloud rendering and memory behavior](erdblick-stylesystem.md#ndslive-point-clouds)
+for browser working-memory limits and point-count sampling.
+
+<!-- mcp:
+title: "Styles look wrong"
+keywords: ["wrong color", "missing label", "style reset", "overlay", "per view"]
+hint: "Inspect view.styleOption and loaded YAML before resetting a style. viewer_validate_style checks a candidate without installing it; viewer_get_diagnostics exposes runtime style errors. Search help for \"Style validation and runtime failures\"."
+-->
 ## Styles Look Wrong
 
 When only the styling looks off—colors, labels, or overlays—but the tiles themselves are present, focus on the style configuration before suspecting the data:
@@ -68,6 +98,11 @@ When you report a problem, including a few concrete details makes it much easier
 - The URL that reproduces the issue for you.
 - Relevant snippets of your backend configuration (for example the mapget configuration YAML that defines your sources) if the bug affects only specific maps or layers.
 
+<!-- mcp:
+title: "Recovering from a datasource tile error"
+keywords: ["failed tile", "datasource error", "unavailable source", "reload"]
+hint: "Distinguish an unavailable datasource from a hidden layer or style issue. Check mapget_list_sources and permitted backend diagnostics. If a configuration repair is needed, mapget_get_config/mapget_set_config require separate configuration permissions and deployment support; ordinary viewer state changes do not repair the datasource. Search help for \"Datasource editor permissions\"."
+-->
 ## Recovering from a datasource tile error
 
 With the tile grid enabled, a red tile overlay indicates a failed tile request.

@@ -1,11 +1,14 @@
+import {POINT_CLOUD_MAX_POINTS} from "../point-cloud-policy.model";
 import {
     coreLib,
     initializeLibrary,
-    uint8ArrayToWasmOrThrow
-} from "../../integrations/wasm";
+    uint8ArrayToWasmOrThrow,
+    type ErdblickCore_
+} from "../../integrations/wasm.adapter";
 import type {
     FeatureLayerStyle,
-    TileLayerParser
+    TileLayerParser,
+    TileSubsetLayerRenderer
 } from "../../../build/libs/core/erdblick-core";
 import type {
     TileSubsetLayerRenderResult,
@@ -24,10 +27,11 @@ interface ParserCacheEntry {
 
 const parserCache = new Map<string, ParserCacheEntry>();
 const styleCache = new Map<string, FeatureLayerStyle>();
-const rendererCache = new Map<string, any>();
+const rendererCache = new Map<string, TileSubsetLayerRenderer>();
 const maxRendererCacheEntries = 4;
 const iconCatalog = new Map<string, TileSubsetGpuIconCatalogEntry>();
 let iconCatalogVersion = -1;
+let cachedPointCloudInput: {key: string; subset: ReturnType<TileLayerParser["readTileSubsetLayer"]>} | null = null;
 
 /** Install a complete small catalog snapshot only when the main version advances. */
 function installIconCatalog(task: TileSubsetLayerRenderTask): void {
@@ -135,11 +139,12 @@ function styleFor(key: string, source?: string): FeatureLayerStyle {
 }
 
 /** Reuse native scratch and packet storage for one immutable style context. */
-function rendererFor(task: TileSubsetLayerRenderTask): any {
+function rendererFor(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderer {
     const key = JSON.stringify([
         task.styleKey,
         task.highlightModeValue,
-        task.lod
+        task.lod,
+        task.pointCloud?.cacheKey
     ]);
     const cached = rendererCache.get(key);
     if (cached) {
@@ -147,15 +152,16 @@ function rendererFor(task: TileSubsetLayerRenderTask): any {
         rendererCache.set(key, cached);
         return cached;
     }
-    if (rendererCache.size >= maxRendererCacheEntries) {
+    while (rendererCache.size >= (task.pointCloud ? 1 : maxRendererCacheEntries)) {
         const oldest = rendererCache.entries().next().value as
-            [string, any] | undefined;
+            [string, TileSubsetLayerRenderer] | undefined;
         if (oldest) {
             oldest[1].delete();
             rendererCache.delete(oldest[0]);
         }
     }
-    const renderer = new coreLib.TileSubsetLayerRenderer(
+    const module: ErdblickCore_ = coreLib;
+    const renderer = new module.TileSubsetLayerRenderer(
         task.viewIndex,
         task.renderKey,
         styleFor(task.styleKey, task.styleSource),
@@ -170,7 +176,7 @@ function rendererFor(task: TileSubsetLayerRenderTask): any {
 function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
     const startedAt = performance.now();
     let subset: ReturnType<TileLayerParser["readTileSubsetLayer"]> | null = null;
-    let renderer: any = null;
+    let renderer: TileSubsetLayerRenderer | null = null;
     let result: TileSubsetLayerRenderResult | null = null;
     try {
         const parserEntry = parserFor(task);
@@ -178,12 +184,17 @@ function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
         installIconCatalog(task);
         const parser = parserEntry.parser;
         const deserializeStartedAt = performance.now();
-        subset = uint8ArrayToWasmOrThrow(
-            data => parser.readTileSubsetLayer(data),
-            task.subsetBlob
-        );
-        if (!subset) {
-            throw new Error("Failed to deserialize TileSubsetLayer.");
+        if (task.reusePointCloudInput) {
+            if (!task.pointCloud || cachedPointCloudInput?.key !== task.pointCloud.cacheKey)
+                throw new Error("Point-cloud input cache does not match the requested revision.");
+            subset = cachedPointCloudInput.subset;
+        } else {
+            cachedPointCloudInput?.subset.delete();
+            cachedPointCloudInput = null;
+            subset = uint8ArrayToWasmOrThrow(
+                data => parser.readTileSubsetLayer(data), task.subsetBlob);
+            if (!subset) throw new Error("Failed to deserialize TileSubsetLayer.");
+            if (task.pointCloud) cachedPointCloudInput = {key: task.pointCloud.cacheKey, subset};
         }
         const deserializeMs = performance.now() - deserializeStartedAt;
 
@@ -199,6 +210,8 @@ function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
         renderer.setLineSimplificationTolerance(
             task.lineSimplificationToleranceMeters
         );
+        renderer.setPointCloudPolicy(task.pointCloud?.enabled ?? true, task.pointCloud?.maxPoints ?? POINT_CLOUD_MAX_POINTS,
+            task.pointCloud?.spacingMeters ?? 0, task.pointCloud?.cacheKey ?? task.taskId);
         renderer.configureGpuPacket(
             task.sceneGeneration,
             task.packetSequence,
@@ -247,6 +260,9 @@ function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
             packets,
             bridge,
             vertexCount: Number(renderer.vertexCount()),
+            pointCloudDeliveredCount: Number(renderer.pointCloudDeliveredCount()),
+            pointCloudRenderedCount: Number(renderer.pointCloudRenderedCount()),
+            wasmMemoryBytes: Number(coreLib.getTotalMemory()),
             timings: {
                 deserializeMs,
                 runMs,
@@ -270,8 +286,9 @@ function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
         };
         return result;
     } finally {
-        renderer?.resetForNextTile?.();
-        subset?.delete();
+        renderer?.resetForNextTile();
+        if (subset !== cachedPointCloudInput?.subset) subset?.delete();
+        if (result) result.wasmMemoryBytes = Number(coreLib.getTotalMemory());
         if (result?.timings) {
             result.timings.totalMs = performance.now() - startedAt;
         }
@@ -288,8 +305,20 @@ self.onmessage = async (event: MessageEvent<TileSubsetLayerRenderWorkerInbound>)
         self.postMessage(ready);
         return;
     }
-    await initializeLibrary();
-    const result = render(event.data);
+    let result: TileSubsetLayerRenderResult;
+    try {
+        await initializeLibrary();
+        result = render(event.data);
+    } catch (error) {
+        // Initialization failures must return the task's admission credit too.
+        result = {
+            type: "TileSubsetLayerRenderResult",
+            taskId: event.data.taskId,
+            visualizationId: event.data.visualizationId,
+            renderSignature: event.data.renderSignature,
+            error: error instanceof Error ? error.message : String(error)
+        };
+    }
     const transferables = result.packets && result.bridge
         ? [
             ...result.packets.map(packet => packet.buffer),

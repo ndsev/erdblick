@@ -1,51 +1,52 @@
-import {Matrix4} from "@math.gl/core";
-import type {Device} from "@luma.gl/core";
-import type {FilterTileState} from "../../mapdata/filter-tile-state.model";
-import type {StyledMapgetLayer} from "../../mapdata/styled-mapget-layer.model";
-import type {TileFeatureId} from "../../shared/appstate.service";
+import {GpuAllocationError, gpuMemoryBudget} from "./gpu-memory-budget.model";
+import type { Device } from "@luma.gl/core";
+import { Matrix4 } from "@math.gl/core";
+import type { TileFeatureId } from "../../inspection/inspection.model";
+import { SceneMode } from "../../integrations/geo.adapter";
+import { coreLib, uint8ArrayToWasm } from "../../integrations/wasm.adapter";
+import type { FilterTileState } from "../../mapdata/filter-tile-state.model";
+import type { StyledMapgetLayer } from "../../mapdata/styled-mapget-layer.presentation";
+import type { PointCloudRenderPolicy } from "../point-cloud-policy.model";
 import {
     formatFeatureInspectionTarget,
     parseFeatureInspectionTarget
-} from "../../shared/tile-feature-id";
-import {sipHash64Hex} from "../../styledata/hash";
-import {SceneMode} from "../../integrations/geo";
-import {coreLib, uint8ArrayToWasm} from "../../integrations/wasm";
-import type {IRenderSceneHandle} from "../render-view.model";
-import {DeckLayerRegistry} from "./deck-layer-registry";
-import {StaleSubsetRenderError, TileSubsetLayerRenderService} from
-    "./tile-subset-layer-render.service";
-import type {
-    TileSubsetLayerRenderBuffers,
-    TileSubsetPickResult
-} from "./tile-subset-layer-render.worker.protocol";
-import type {StyleValidationReportService} from "../../styledata/style-validation-report.service";
+} from "../../inspection/feature-identity.model";
+import { sipHash64Hex } from "../../utils/hash.util";
+import type { StyleValidationReportService } from "../../mapstyle/style-validation-report.service";
+import type { IRenderSceneHandle } from "../render-view.model";
+import { DeckLayerRegistry } from "./deck-layer-registry.util";
 import {
     deckSubsetInteractionProps,
     type SubsetPickResolver as PickResolver
-} from "./deck-subset-picking";
+} from "./deck-subset-picking.util";
+import { gpuIconAtlas } from "./gpu-icon-atlas.visualization";
 import {
-    TileSubsetGltfPresentation,
-    type TileSubsetGltfSource
-} from "./tile-subset-gltf-presentation";
-import {
-    type TileSubsetInteractionOverlay
-} from "./tile-subset-interaction.model";
+    GpuResourceKind,
+    type GpuResourceRequestView,
+    type GpuRuntimeIssueView
+} from "./gpu-render-packet.model";
 import {
     GpuScene,
     type GpuSceneApplyResult,
     type GpuScenePickReference,
     type GpuSceneRenderReservation
-} from "./gpu-scene";
+} from "./gpu-scene.visualization";
+import type { GpuSceneMaskController } from "./gpu-scene-mask.controller";
 import {
-    GpuResourceKind,
-    type GpuResourceRequestView,
-    type GpuRuntimeIssueView
-} from "./gpu-render-packet";
-import type {GpuSceneMaskController} from "./gpu-scene-mask.controller";
-import {gpuIconAtlasService} from "./gpu-icon-atlas.service";
+    TileSubsetGltfPresentation,
+    type TileSubsetGltfSource
+} from "./tile-subset-gltf.presentation";
+import {
+    type TileSubsetInteractionOverlay
+} from "./tile-subset-interaction.model";
+import { StaleSubsetRenderError, TileSubsetLayerRenderService } from "./tile-subset-layer-render.service";
+import type {
+    PointCloudPickResult,
+    TileSubsetLayerRenderBuffers,
+    TileSubsetPickResult
+} from "./tile-subset-layer-render.worker.protocol";
 
-export type {TileSubsetInteractionOverlay} from
-    "./tile-subset-interaction.model";
+export type { TileSubsetInteractionOverlay } from "./tile-subset-interaction.model";
 
 interface DeckScene {
     layerRegistry?: DeckLayerRegistry;
@@ -87,16 +88,31 @@ export class TileSubsetLayerVisualization {
     private interactionGltf: TileSubsetGltfSource | null = null;
     private renderedSignature = "";
     private requestedSignature = "";
+    private failedSignature = "";
+    private failedGpuCapacity: {availableBytes: number; reclamationVersion: number} | null = null;
     private disposed = false;
+    private pointCloud: PointCloudRenderPolicy | undefined;
+    private pointCloudScale: number | null = null;
     private sceneHandle: IRenderSceneHandle | null = null;
     private sceneRevision = 0;
     private lod: number;
-    private readonly lineSimplificationToleranceMeters: number;
+    private lineSimplificationToleranceMeters: number;
     private readonly reportedRuntimeIssueIds = new Set<string>();
     private readonly pendingIconUris = new Set<string>();
     private readonly failedIconUris = new Set<string>();
     private pickSubset: GpuPickSubset | null = null;
     private pickSubsetValueVersion = -1;
+
+    get waitingForGpuMemory(): boolean {
+        return !this.disposed && !!this.failedGpuCapacity;
+    }
+
+    /** Retry only when other work has released bytes or reusable installed ranges. */
+    canRetryGpuAllocation(): boolean {
+        return this.waitingForGpuMemory && !!this.failedGpuCapacity &&
+            (gpuMemoryBudget.availableBytes > this.failedGpuCapacity.availableBytes ||
+                gpuMemoryBudget.reclamationVersion !== this.failedGpuCapacity.reclamationVersion);
+    }
 
     /** Retain one immutable tile subset and its stable scene contribution identity. */
     constructor(
@@ -162,14 +178,40 @@ export class TileSubsetLayerVisualization {
         }
     }
 
-    /** Test whether reconciliation can preserve this exact visualization owner. */
-    hasSameState(
-        state: FilterTileState,
-        lineSimplificationToleranceMeters: number
-    ): boolean {
-        return this.lineSimplificationToleranceMeters ===
-                lineSimplificationToleranceMeters &&
-            state === this.state;
+    /** Refresh density before presentation checks; smaller budgets retire old GPU ownership first. */
+    setPointCloudScale(metersPerPixel: number | null, reclaim = false): void {
+        this.pointCloudScale = metersPerPixel;
+        // The allowance covers all primitive stores, including ordinary map geometry.
+        if (reclaim) {
+            this.renderService.cancel(this.visualizationId);
+            this.renderedSignature = "";
+            this.requestedSignature = "";
+            ++this.sceneRevision;
+            TileSubsetLayerVisualization.retireContributions(this.sceneHandle, this.contributionIdentities);
+        }
+        if (!this.owner.filterPlan.channels.some(channel => channel.pointCloudMaxPoints !== undefined)) return;
+        this.renderService.registerPointCloud(this.visualizationId, this.viewIndex, this.state.subsetBlob?.byteLength ?? 0);
+        const next = this.renderService.pointCloudPolicyFor(this.visualizationId, metersPerPixel,
+            this.pointCloud?.spacingMeters);
+        next.cacheKey = JSON.stringify([this.owner.mapInfo.sourceCatalogRevision, this.owner.ownerId,
+        this.state.mapTileKey, this.state.valueVersion]);
+        if (JSON.stringify(next) === JSON.stringify(this.pointCloud) && !reclaim) return;
+        this.pointCloud = next;
+        this.renderService.cancel(this.visualizationId);
+        this.renderedSignature = "";
+        this.requestedSignature = "";
+    }
+
+    /** Rerender changed line detail without tearing down the installed GLTF asset. */
+    setLineSimplificationTolerance(lineSimplificationToleranceMeters: number): void {
+        if (this.lineSimplificationToleranceMeters === lineSimplificationToleranceMeters) {
+            return;
+        }
+        this.lineSimplificationToleranceMeters = lineSimplificationToleranceMeters;
+        // Keep the current geometry visible until its successor is ready, but
+        // reject in-flight output using the previous camera's simplification.
+        this.renderedSignature = "";
+        this.requestedSignature = "";
     }
 
     /** Update GPU-filtered entry and label visibility without rerendering the subset. */
@@ -231,24 +273,40 @@ export class TileSubsetLayerVisualization {
         const renderOrigin: [number, number, number] =
             this.coordinateOrigin ?? [0, 0, 0];
         const nativeOrigin = this.state.partition.kind === "object";
+        this.setPointCloudScale(this.pointCloudScale);
         const signature = [
             `${this.state.mapTileKey}:${this.state.valueVersion}`,
             this.owner.plannedLod,
             this.lineSimplificationToleranceMeters,
+            JSON.stringify(this.pointCloud),
+            this.renderService.pointCloudPolicy.workingMemoryMiB,
+            this.renderService.pointCloudPolicy.gpuMemoryMiB,
+            this.renderService.gpuMemoryManagementEnabled,
             this.owner.style.id,
             this.owner.renderStyleKey,
             this.owner.styleOrder,
             nativeOrigin ? "native-origin" : renderOrigin.join(","),
             this.sceneRevision,
-            gpuIconAtlasService.catalogVersion
+            gpuIconAtlas.catalogVersion
         ].join("|");
         if (signature === this.renderedSignature || signature === this.requestedSignature) {
             return true;
         }
+        // A rejected immutable job must not be resubmitted on every scheduler tick.
+        // GPU work becomes eligible again when reclamation provides its missing capacity.
+        if (signature === this.failedSignature && !this.canRetryGpuAllocation())
+            return false;
+        const capacityBeforeRender = {availableBytes: gpuMemoryBudget.availableBytes,
+            reclamationVersion: gpuMemoryBudget.reclamationVersion};
+        this.failedGpuCapacity = null;
         this.requestedSignature = signature;
         const valueVersion = this.state.valueVersion;
         const sceneRevision = this.sceneRevision;
         const startedAt = performance.now();
+        // Each installed GPU revision keeps its own identities. Populate them
+        // during preparation, before packet admission can resolve any picks.
+        let pointCloudPicks: readonly PointCloudPickResult[] | undefined =
+            this.pointCloud ? [] : undefined;
         const reservation = scene.prepareRender(
             `${this.viewIndex}:${nativeOrigin
                 ? this.state.mapTileKey
@@ -260,13 +318,13 @@ export class TileSubsetLayerVisualization {
                 styleOrder: this.owner.styleOrder,
                 lod: this.lod,
                 resolvePick: reference =>
-                    this.resolveGpuPick(reference),
+                    this.resolveGpuPick(reference, pointCloudPicks),
                 findPickReferences: targetFeatureId =>
-                    this.findGpuPickReferences(targetFeatureId)
+                    this.findGpuPickReferences(targetFeatureId, pointCloudPicks)
             }]
         );
         const contribution = reservation.contributions[0];
-        const admitted = {result: null as GpuSceneApplyResult | null};
+        const admitted = { result: null as GpuSceneApplyResult | null };
         try {
             const result = await this.renderService.render({
                 visualizationId: this.visualizationId,
@@ -274,10 +332,10 @@ export class TileSubsetLayerVisualization {
                 viewIndex: this.viewIndex,
                 renderKey: this.renderKey,
                 mapTileKey: this.state.mapTileKey,
-                ...(nativeOrigin ? {} : {coordinateOrigin: renderOrigin}),
+                ...(nativeOrigin ? {} : { coordinateOrigin: renderOrigin }),
                 sceneGeneration: reservation.sceneGeneration,
                 packetSequence: reservation.packetSequence,
-                iconCatalogVersion: gpuIconAtlasService.catalogVersion,
+                iconCatalogVersion: gpuIconAtlas.catalogVersion,
                 originSlot: reservation.origin.slot,
                 originKeyLow: Number(reservation.origin.key & 0xffffffffn),
                 originKeyHigh: Number(
@@ -302,7 +360,8 @@ export class TileSubsetLayerVisualization {
                 highlightModeValue: this.owner.highlightMode.value,
                 lod: this.owner.plannedLod,
                 lineSimplificationToleranceMeters:
-                    this.lineSimplificationToleranceMeters
+                    this.lineSimplificationToleranceMeters,
+                pointCloud: this.pointCloud
             }, packet => {
                 if (!this.isRenderCurrent(
                     sceneHandle,
@@ -337,6 +396,9 @@ export class TileSubsetLayerVisualization {
                         "Subset renderer returned an invalid geometry anchor."
                     );
                 }
+                if (pointCloudPicks !== undefined) {
+                    pointCloudPicks = buffers.bridge.pointCloudPicks ?? [];
+                }
                 scene.resolveRenderOrigin(reservation, origin);
                 this.coordinateOrigin = origin;
             });
@@ -362,6 +424,8 @@ export class TileSubsetLayerVisualization {
                 return false;
             }
             this.renderedSignature = signature;
+            this.failedSignature = "";
+            this.failedGpuCapacity = null;
             this.requestedSignature = "";
             this.installRenderStats(
                 result,
@@ -375,6 +439,14 @@ export class TileSubsetLayerVisualization {
                 return false;
             }
             this.requestedSignature = "";
+            this.failedSignature = signature;
+            this.failedGpuCapacity = error instanceof GpuAllocationError ? capacityBeforeRender : null;
+            if (error instanceof GpuAllocationError) {
+                this.renderedSignature = "";
+                TileSubsetLayerVisualization.retireContributions(this.sceneHandle, this.contributionIdentities);
+                this.renderService.reportAllocationFailure(error);
+                return false;
+            }
             throw error;
         } finally {
             scene.finishRender(reservation);
@@ -422,7 +494,7 @@ export class TileSubsetLayerVisualization {
                 severity: "warning",
                 phase: "runtime",
                 impact: "runtime-sample-skipped",
-                source: {...this.owner.style.sourceRef},
+                source: { ...this.owner.style.sourceRef },
                 message: issue.occurrenceCount > 1
                     ? `${issue.message} (${issue.occurrenceCount} occurrences)`
                     : issue.message,
@@ -456,7 +528,12 @@ export class TileSubsetLayerVisualization {
             renderMs: result.timings.renderMs,
             totalMs: result.timings.deserializeMs + result.timings.renderMs,
             clientWallMs,
-            vertexCount: result.vertexCount
+            vertexCount: result.vertexCount,
+            ...(this.pointCloud ? {
+                pointCloudDeliveredCount: result.pointCloudDeliveredCount ?? 0,
+                pointCloudRenderedCount: result.pointCloudRenderedCount ?? 0,
+                workerMemoryBytes: result.wasmMemoryBytes ?? 0
+            } : {})
         };
     }
 
@@ -540,6 +617,7 @@ export class TileSubsetLayerVisualization {
             return null;
         }
         this.disposed = true;
+        this.renderService.unregisterPointCloud(this.visualizationId);
         const preservedIdentity = preserveContribution && sceneHandle
             ? this.contributionIdentity(this.state)
             : null;
@@ -645,7 +723,7 @@ export class TileSubsetLayerVisualization {
                 continue;
             }
             this.pendingIconUris.add(uri);
-            gpuIconAtlasService.ensureResource(uri).then(loaded => {
+            gpuIconAtlas.ensureResource(uri).then(loaded => {
                 this.pendingIconUris.delete(uri);
                 if (!loaded) {
                     this.failedIconUris.add(uri);
@@ -708,8 +786,15 @@ export class TileSubsetLayerVisualization {
 
     /** Resolve one compact GPU tuple only after Deck reports an actual interaction. */
     private resolveGpuPick(
-        reference: GpuScenePickReference
+        reference: GpuScenePickReference,
+        pointCloudPicks?: readonly PointCloudPickResult[]
     ): string | readonly string[] | undefined {
+        if (pointCloudPicks !== undefined) {
+            return this.featureIdsForPickResult(pointCloudPicks.find(pick =>
+                pick.channelOrdinal === reference.channelOrdinal &&
+                pick.entryOrdinal === reference.entryOrdinal &&
+                pick.endpointRole === reference.endpointRole));
+        }
         const subset = this.gpuPickSubset();
         return subset
             ? this.featureIdsForPickResult(subset.resolvePick(
@@ -722,8 +807,30 @@ export class TileSubsetLayerVisualization {
 
     /** Locate packet tuples for one restored semantic target without scanning strings. */
     private findGpuPickReferences(
-        targetFeatureId: string
+        targetFeatureId: string,
+        pointCloudPicks?: readonly PointCloudPickResult[]
     ): readonly GpuScenePickReference[] {
+        if (pointCloudPicks !== undefined) {
+            const target = parseFeatureInspectionTarget(targetFeatureId);
+            return pointCloudPicks.filter(pick => {
+                if (target.scope === "relation" && pick.relationId) {
+                    // A merged two-way identity contains both source descriptor
+                    // ordinals. Mirror the native lookup for either endpoint.
+                    const marker = `:${target.baseFeatureId}#`;
+                    const offset = pick.relationId.indexOf(marker);
+                    const ordinal = offset < 0 ? undefined :
+                        pick.relationId.slice(offset + marker.length).match(/^\d+/)?.[0];
+                    return ordinal !== undefined && Number(ordinal) === target.relationIndex;
+                }
+                if (target.scope === "feature" &&
+                    (pick.attributeIndex !== undefined || pick.relationIndex !== undefined)) {
+                    return false;
+                }
+                const ids = this.featureIdsForPickResult(pick);
+                return (typeof ids === "string" ? [ids] : ids ?? []).some(id =>
+                    id === targetFeatureId);
+            });
+        }
         const subset = this.gpuPickSubset();
         if (!subset) {
             return [];
@@ -786,12 +893,12 @@ export class TileSubsetLayerVisualization {
                 ...(result.hasValidity &&
                     typeof validityIndex === "number" &&
                     Number.isInteger(validityIndex)
-                    ? {validityIndex}
+                    ? { validityIndex }
                     : {})
             });
         } else if (result.relationSourceFeatureId &&
-                   typeof relationIndex === "number" &&
-                   Number.isInteger(relationIndex)) {
+            typeof relationIndex === "number" &&
+            Number.isInteger(relationIndex)) {
             featureId = formatFeatureInspectionTarget({
                 scope: "relation",
                 baseFeatureId: result.relationSourceFeatureId,

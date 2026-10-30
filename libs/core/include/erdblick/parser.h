@@ -36,6 +36,12 @@ public:
     void setDataSourceInfo(SharedUint8Array const& dataSourceInfoJson);
 
     /**
+     * Append newly ready maps without resetting existing metadata or string pools.
+     * Rejects already registered map ids; replacements must use setDataSourceInfo.
+     */
+    void addDataSourceInfo(SharedUint8Array const& dataSourceInfoJson);
+
+    /**
      * Get the data source info JSON that was set earlier.
      */
     void getDataSourceInfo(SharedUint8Array& dataSourceInfoJson, std::string const& mapId);
@@ -44,6 +50,9 @@ public:
      * Parse a TileFeatureLayer from a buffer as returned by writeTileFeatureLayer.
      */
     TileFeatureLayer readTileFeatureLayer(SharedUint8Array const& buffer);
+
+    /** Query explicit deferred relation declarations for a selected feature in the current catalog. */
+    bool hasIncomingRelations(TileFeatureLayer const& layer, std::string const& featureId) const;
 
     /**
      * Parse a TileSourceDataLayer from a buffer.
@@ -211,12 +220,14 @@ public:
     std::vector<FilteredFeatureJumpTarget> filterFeatureJumpTargets(std::string const& queryString) const;
 
     std::map<std::string, mapget::DataSourceInfo> info_;
+    /** Backend-derived capability hints retained when the shared parser omits full schemas. */
+    std::map<std::pair<std::string, std::string>, std::set<std::string>> incomingRelationTargets_;
     std::unique_ptr<mapget::TileLayerStream::Reader> reader_;
     std::shared_ptr<mapget::TileLayerStream::StringPoolCache> cachedStrings_;
     std::function<void(mapget::TileFeatureLayer::Ptr)> tileParsedFun_;
     std::shared_ptr<mapget::LayerInfo> fallbackLayerInfo_;
-    struct SchemaCompletionRoot;
-    std::map<std::string, std::shared_ptr<SchemaCompletionRoot>> schemaCompletionRoots_;
+    struct SchemaCompletionBinding;
+    std::map<mapget::LayerSchema const*, std::shared_ptr<SchemaCompletionBinding>> schemaCompletionBindings_;
 
     /**
      * Resolve layer metadata for a `(mapId, layerId)` pair using loaded datasource info

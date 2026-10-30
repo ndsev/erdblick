@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mapget/model/geometry.h"
+#include "mapget/model/pointcloud-sampler.h"
 #include "simfil/model/nodes.h"
 #include "simfil/overlay.h"
 #include "yaml-cpp/yaml.h"
@@ -241,6 +242,10 @@ public:
     [[nodiscard]] ZIndexRole zIndexRole() const;
     /** Return the billboard override, or `std::nullopt` to use renderer defaults. */
     [[nodiscard]] std::optional<bool> const& billboard() const;
+    /** Opt in to spatial point-cloud sampling; ordinary point rules stay exact. */
+    [[nodiscard]] bool pointCloud() const { return pointCloud_; }
+    /** Backend quota per source partition/channel. Zero requests exact delivery. */
+    [[nodiscard]] uint32_t pointCloudMaxPoints() const { return pointCloudMaxPoints_; }
     /** Report whether geometry should be flattened onto the 2D/ground plane. */
     [[nodiscard]] bool flat() const;
     /** Report whether polyline rendering should use a dash pattern. */
@@ -454,6 +459,8 @@ private:
     std::string zIndexGroupExpression_;
     ZIndexRole zIndexRole_ = ZIndexRole::None;
     std::optional<bool> billboard_;
+    bool pointCloud_ = false;
+    uint32_t pointCloudMaxPoints_ = mapget::DefaultPointCloudMaxPoints;
     bool flat_ = false;
     bool dashed_ = false;
     float dashLength_ = 16.0F;

@@ -6,7 +6,7 @@ slice were reviewed on the target branch.
 
 ## Done
 - [x] `app/*.ts`
-- [x] `app/auxiliaries`
+- [x] Former auxiliary dialogs and banner, now in `app/keyboard`, `app/survey`, `app/config` and `app/mapdata`
 - [x] `app/coords`
 - [x] `app/diagnostics`
 - [x] `app/environments`

@@ -1,0 +1,747 @@
+import {
+    ChangeDetectorRef,
+    Component,
+    effect,
+    input,
+    NgZone,
+    OnDestroy,
+    output,
+    ViewChild
+} from "@angular/core";
+import { TreeTableNode } from "primeng/api";
+import { Subscription } from "rxjs";
+import { Feature } from '../../build/libs/core/erdblick-core';
+import { coreLib } from "../integrations/wasm.adapter";
+import { FeatureWrapper, IncomingInspectionResult } from "../mapdata/feature-inspection.adapter";
+import { MapDataService } from "../mapdata/mapdata.service";
+import {
+    hasFeatureInspectionValidity,
+    isFeatureInspectionSubTarget,
+    stripFeatureInspectionTarget,
+    stripFeatureInspectionValidity
+} from "./feature-identity.model";
+import { InspectionPanelModel } from "./inspection.model";
+import { Column, FeatureFilterOptions, InspectionTreeComponent } from "./inspection-tree.component";
+
+/** Click target metadata emitted by C++ for propagated scalar value pills. */
+interface InspectionValueBubble {
+    label: string;
+    targetNodeId?: string;
+    hoverTargetNodeId?: string;
+    kind?: string;
+    colorKey?: string;
+    children?: InspectionValueBubble[];
+}
+
+/** Non-interactive key-column badge emitted by C++ for node metadata. */
+interface InspectionKeyBubble {
+    label: string;
+    kind?: string;
+}
+
+/** Shape emitted by the WASM inspection converter for one inspection subtree. */
+interface InspectionModelData {
+    key: string;
+    type: number;
+    value: any;
+    info?: string;
+    hoverId?: string;
+    geoJsonPath?: string;
+    mapId?: string;
+    mapTileKey?: string;
+    incomingLoading?: boolean;
+    retryIncoming?: () => void;
+    nodeId?: string;
+    valueCount?: string;
+    keyBubbles?: InspectionKeyBubble[];
+    valueBubbles?: InspectionValueBubble[];
+    sourceDataReferences?: Array<object>;
+    children: Array<InspectionModelData>;
+}
+
+/** Lifetime of one deferred section, independent of the ordinary feature load. */
+interface IncomingSectionState {
+    controller: AbortController;
+    loading: boolean;
+    result?: IncomingInspectionResult;
+    error?: string;
+    timer?: ReturnType<typeof setTimeout>;
+}
+
+@Component({
+    selector: 'feature-panel',
+    template: `
+        <div style="position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; min-height: 0;">
+            @if (loading) {
+                <div style="position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--p-content-background) 55%, transparent);">
+                    <p-progressSpinner ariaLabel="loading"/>
+                </div>
+            }
+            @for (warning of selectionWarnings; track warning) {
+                <div role="status" data-testid="feature-representation-warning" style="padding: .5rem;">{{ warning }}</div>
+            }
+            <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
+                             [geoJson]="geoJson"
+                             [featureIds]="featureIds"
+                             [firstHighlightedItemIndex]="firstHighlightedItemIndex"
+                             [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
+                             [showFilter]="showFilter()"
+                             [enableSourceDataNavigation]="enableSourceDataNavigation()"
+                             style="flex: 1 1 auto; min-height: 0;">
+            </inspection-tree>
+        </div>
+    `,
+    standalone: false
+})
+/** Renders feature-restricted inspection data. */
+export class FeaturePanelComponent implements OnDestroy {
+
+    panel = input.required<InspectionPanelModel<FeatureWrapper>>();
+    enableSourceDataNavigation = input<boolean>(true);
+    filterText = input<string | undefined>();
+    filterTextChange = output<string>();
+    showFilter = input<boolean>(true);
+
+    treeData: TreeTableNode[] = [];
+    columns: Column[] = [
+        { key: "key", header: "Key", width: '0*', transform: this.formatData.bind(this) },
+        { key: "value", header: "Value", width: '0*', transform: this.formatData.bind(this) }
+    ];
+    filterOptions = new FeatureFilterOptions();
+    /** Serialize complete geometry only when the user requests an export. */
+    geoJson = (): string => this.exportGeoJson();
+    featureIds: string[] = [];
+    selectedFeatures?: FeatureWrapper[];
+    loading: boolean = false;
+    firstHighlightedItemIndex?: number;
+    private rebuildQueued = false;
+    private destroyed = false;
+    private catalogSubscription?: Subscription;
+    private readonly incoming = new Map<FeatureWrapper, IncomingSectionState>();
+
+    /** Keep source fidelity and incomplete-data notices visible beside inspection/export controls. */
+    get selectionWarnings(): string[] {
+        return [...new Set((this.selectedFeatures ?? []).flatMap(feature => feature.featureTile.warnings))];
+    }
+
+    /** Export the full current selection, skipping wrappers whose native tile was released. */
+    private exportGeoJson(): string {
+        const features = (this.selectedFeatures ?? []).map(wrapper =>
+            this.inspectionFeature(wrapper).peek((feature: Feature) => feature.geojson() as string)).filter(value => value !== null);
+        return `{"type":"FeatureCollection","features":[${features.join(",")}]}`;
+    }
+
+    @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
+
+    constructor(private cdr: ChangeDetectorRef,
+        private ngZone: NgZone,
+        mapInfo: MapDataService) {
+        this.catalogSubscription = mapInfo.dataSourceInfoChanged.subscribe(() => {
+            for (const state of this.incoming.values()) {
+                state.controller.abort();
+                clearTimeout(state.timer);
+            }
+            this.incoming.clear();
+            this.scheduleInspectionTreeRebuild();
+        });
+        effect(() => {
+            this.panel();
+            this.scheduleInspectionTreeRebuild();
+        });
+    }
+
+    /** Prevents queued inspection work from touching a destroyed component. */
+    ngOnDestroy() {
+        this.destroyed = true;
+        this.catalogSubscription?.unsubscribe();
+        for (const state of this.incoming.values()) {
+            state.controller.abort();
+            clearTimeout(state.timer);
+        }
+        this.incoming.clear();
+    }
+
+    /** Rebuilds the tree immediately and refreshes the virtual scroller geometry. */
+    refresh() {
+        this.rebuildInspectionTree();
+        this.inspectionTree?.refreshLayout();
+    }
+
+    /** Forwards layout refreshes to the shared inspection tree component. */
+    refreshLayout() {
+        this.inspectionTree?.refreshLayout();
+    }
+
+    /** Returns the current content height so docked panels can auto-expand to fit. */
+    measurePreferredHeightEm(): number | undefined {
+        return this.inspectionTree?.measurePreferredContentHeightEm();
+    }
+
+    /** Coalesces multiple tile updates into one rebuild to avoid thrashing Angular change detection. */
+    private scheduleInspectionTreeRebuild(): void {
+        if (this.rebuildQueued || this.destroyed) {
+            return;
+        }
+        this.rebuildQueued = true;
+        queueMicrotask(() => {
+            this.rebuildQueued = false;
+            if (this.destroyed) {
+                return;
+            }
+            this.ngZone.run(() => {
+                this.rebuildInspectionTree();
+                this.cdr.markForCheck();
+            });
+        });
+    }
+
+    /** Re-reads bounded inspection trees from the selected feature values. */
+    private rebuildInspectionTree() {
+        const previousExpansionState = this.captureTreeExpansionState(this.treeData);
+        const panel = this.panel();
+        this.selectedFeatures = panel.features ?? [];
+        for (const [feature, state] of this.incoming) {
+            if (!this.selectedFeatures.includes(feature)) {
+                state.controller.abort();
+                clearTimeout(state.timer);
+                this.incoming.delete(feature);
+            }
+        }
+        this.loading = panel.loading === true;
+        if (!this.selectedFeatures.length) {
+            this.featureIds = [];
+            this.treeData = [];
+            this.firstHighlightedItemIndex = undefined;
+            return;
+        }
+
+        this.featureIds = Array.from(new Set(
+            this.selectedFeatures.map(feature => stripFeatureInspectionTarget(feature.featureId))
+        ));
+        this.loading = false;
+
+        const selectedFeatureInspectionModels: InspectionModelData[][] = [];
+        this.selectedFeatures.forEach(featureWrapper => {
+            try {
+                this.inspectionFeature(featureWrapper).peek((feature: Feature) => {
+                    const model = feature.inspectionModel() as InspectionModelData[];
+                    const incoming = this.incomingSection(featureWrapper);
+                    if (incoming) {
+                        // Keep Geometry last, including while incoming relations are loading.
+                        const geometryIndex = model.findIndex(section => section.geoJsonPath === "geometry");
+                        model.splice(geometryIndex < 0 ? model.length : geometryIndex, 0, incoming);
+                    }
+                    selectedFeatureInspectionModels.push(model);
+                });
+            } catch (error) {
+                console.error("Failed to read inspection model for selected feature.", {
+                    panelId: this.panel().id,
+                    mapTileKey: featureWrapper.mapTileKey,
+                    featureId: featureWrapper.featureId,
+                    error
+                });
+            }
+        });
+        let nextTreeData: TreeTableNode[] = [];
+        try {
+            nextTreeData = this.getFeatureTreeDataFromModel(selectedFeatureInspectionModels);
+        } catch (error) {
+            console.error("getFeatureTreeDataFromModel failed.", {
+                panelId: this.panel().id,
+                selectedFeatureCount: this.selectedFeatures.length,
+                error
+            });
+        }
+
+        this.restoreTreeExpansionState(nextTreeData, previousExpansionState);
+        this.firstHighlightedItemIndex = this.highlightSelectedInspectionTarget(nextTreeData);
+        this.treeData = nextTreeData;
+        this.inspectionTree?.refreshLayout();
+    }
+
+    /** Use the bundle's canonical target without changing selection identity or restarting discovery. */
+    private inspectionFeature(feature: FeatureWrapper): FeatureWrapper {
+        const target = this.incoming?.get(feature)?.result?.target;
+        return target ? new FeatureWrapper(feature.featureId, target) : feature;
+    }
+
+    /** Begin eligible incoming work only after the ordinary model is available. */
+    private incomingSection(feature: FeatureWrapper): InspectionModelData | undefined {
+        let state = this.incoming.get(feature);
+        if (!state) {
+            let eligibilityError: string | undefined;
+            try {
+                if (!feature.featureTile.hasIncomingRelations(feature.featureId)) return undefined;
+            } catch (error) {
+                eligibilityError = `Incoming discovery unavailable: ${error instanceof Error ? error.message : String(error)}`;
+            }
+            state = { controller: new AbortController(), loading: !eligibilityError, error: eligibilityError };
+            this.incoming.set(feature, state);
+            if (state.loading) void this.loadIncoming(feature, state);
+        }
+        const result = state.result;
+        const section: InspectionModelData = result?.model[0] ?? {
+            key: "Incoming Relations", type: coreLib.ValueType.SECTION.value, value: "", children: []
+        };
+        return {
+            ...section, nodeId: "incoming-relations", incomingLoading: state.loading,
+            value: state.loading ? "Loading…" : state.error ?? (result?.complete
+                ? (section.children?.length ? "" : "No matching relations in this partition")
+                : "Partial result"),
+            info: state.error ?? result?.issues.join("\n") ?? section.info,
+            retryIncoming: !state.loading ? () => this.retryIncoming(feature) : undefined
+        };
+    }
+
+    /** Publish only while the selected wrapper and request generation remain current. */
+    private async loadIncoming(feature: FeatureWrapper, state: IncomingSectionState): Promise<void> {
+        try {
+            const result = await feature.featureTile.loadIncoming(feature.featureId, state.controller.signal);
+            if (this.destroyed || this.incoming.get(feature) !== state) return;
+            state.result = result;
+            if (result.expiresAtMs !== undefined) {
+                state.timer = setTimeout(() => this.retryIncoming(feature),
+                    Math.min(2147483647, Math.max(1000, result.expiresAtMs - Date.now())));
+            }
+        } catch (error) {
+            if (state.controller.signal.aborted) return;
+            state.error = error instanceof Error ? error.message : String(error);
+        } finally {
+            if (!state.controller.signal.aborted && this.incoming.get(feature) === state) {
+                state.loading = false;
+                this.scheduleInspectionTreeRebuild();
+            }
+        }
+    }
+
+    /** Retry or renew only the incoming section, preserving the base inspection and its state. */
+    private retryIncoming(feature: FeatureWrapper): void {
+        const previous = this.incoming.get(feature);
+        if (!previous || this.destroyed) return;
+        previous.controller.abort();
+        clearTimeout(previous.timer);
+        const state: IncomingSectionState = {
+            controller: new AbortController(), loading: true, result: previous?.result
+        };
+        this.incoming.set(feature, state);
+        void this.loadIncoming(feature, state);
+        this.scheduleInspectionTreeRebuild();
+    }
+
+    /** Captures user-expanded and user-collapsed tree rows before rebuilding equivalent inspection nodes. */
+    private captureTreeExpansionState(nodes: TreeTableNode[]): Map<string, boolean> {
+        const expansionState = new Map<string, boolean>();
+        const visit = (nodeList: TreeTableNode[]) => {
+            for (const node of nodeList) {
+                const nodeId = node.data?.["nodeId"];
+                if (typeof nodeId === "string" && typeof node.expanded === "boolean") {
+                    expansionState.set(nodeId, node.expanded);
+                }
+                visit(node.children ?? []);
+            }
+        };
+        visit(nodes);
+        return expansionState;
+    }
+
+    /** Restores expansion state for stable inspection row ids without blocking target-highlight auto-expansion. */
+    private restoreTreeExpansionState(nodes: TreeTableNode[], expansionState: Map<string, boolean>): void {
+        if (!expansionState.size) {
+            return;
+        }
+        const visit = (nodeList: TreeTableNode[]) => {
+            for (const node of nodeList) {
+                const nodeId = node.data?.["nodeId"];
+                if (typeof nodeId === "string" && expansionState.has(nodeId)) {
+                    node.expanded = expansionState.get(nodeId);
+                }
+                visit(node.children ?? []);
+            }
+        };
+        visit(nodes);
+    }
+
+    /** Marks and expands the inspection row or subtree addressed by a suffixed selected feature id. */
+    private highlightSelectedInspectionTarget(nodes: TreeTableNode[]): number | undefined {
+        const selectedTargetIds = (this.selectedFeatures ?? [])
+            .map(feature => feature.featureId)
+            .filter(isFeatureInspectionSubTarget);
+        const exactTargetIds = new Set(selectedTargetIds);
+        const parentTargetIds = new Set(selectedTargetIds
+            .map(stripFeatureInspectionValidity)
+            .filter(isFeatureInspectionSubTarget));
+        if (!exactTargetIds.size) {
+            return undefined;
+        }
+
+        let highlightedNode: TreeTableNode | undefined;
+        let highlightedParents: TreeTableNode[] = [];
+        let selectedHighlightTarget: string | undefined;
+        let selectedHighlightMode: "soft" | "strong" = "soft";
+        const rowTargetsForNode = (node: TreeTableNode): string[] => {
+            const data = node.data as Record<string, unknown> | undefined;
+            return [
+                data?.["hoverId"],
+                data?.["strongHoverGroupId"],
+                data?.["softHoverGroupId"]
+            ].filter((value): value is string => typeof value === "string");
+        };
+        const findTarget = (
+            node: TreeTableNode,
+            parents: TreeTableNode[],
+            targetIds: ReadonlySet<string>
+        ): boolean => {
+            const rowTargets = rowTargetsForNode(node);
+            const matchedTarget = rowTargets.find(target => targetIds.has(target));
+            const rowMatches = matchedTarget !== undefined;
+            if (rowMatches && !highlightedNode) {
+                highlightedNode = node;
+                highlightedParents = parents;
+                selectedHighlightTarget = matchedTarget;
+                selectedHighlightMode = matchedTarget &&
+                    hasFeatureInspectionValidity(matchedTarget)
+                    ? "strong"
+                    : "soft";
+                for (const parent of parents) {
+                    parent.expanded = true;
+                }
+                node.expanded = true;
+                return true;
+            }
+
+            let childMatches = false;
+            for (const child of node.children ?? []) {
+                childMatches = findTarget(child, [...parents, node], targetIds) || childMatches;
+            }
+            if (childMatches) {
+                node.expanded = true;
+            }
+            return rowMatches || childMatches;
+        };
+
+        const findInTree = (targetIds: ReadonlySet<string>) => {
+            for (const node of nodes) {
+                findTarget(node, [], targetIds);
+            }
+        };
+        findInTree(exactTargetIds);
+        if (!highlightedNode) {
+            findInTree(parentTargetIds);
+        }
+        if (!highlightedNode || !selectedHighlightTarget) {
+            return undefined;
+        }
+        for (const parent of highlightedParents) {
+            parent.expanded = true;
+        }
+        highlightedNode.expanded = true;
+
+        const applySelectionHighlight = (nodeList: TreeTableNode[]) => {
+            for (const node of nodeList) {
+                const data = node.data as Record<string, unknown> | undefined;
+                const rowTargetMatches = selectedHighlightMode === "strong"
+                    ? data?.["hoverId"] === selectedHighlightTarget ||
+                    data?.["strongHoverGroupId"] === selectedHighlightTarget
+                    : data?.["hoverId"] === selectedHighlightTarget ||
+                    data?.["softHoverGroupId"] === selectedHighlightTarget;
+                if (rowTargetMatches) {
+                    node.data = {
+                        ...(node.data ?? {}),
+                        selectionHighlight: selectedHighlightMode
+                    };
+                }
+                applySelectionHighlight(node.children ?? []);
+            }
+        };
+        applySelectionHighlight(nodes);
+
+        let visibleIndex = 0;
+        const visibleIndexOf = (nodeList: TreeTableNode[]): number | undefined => {
+            for (const node of nodeList) {
+                if (node === highlightedNode) {
+                    return visibleIndex;
+                }
+                visibleIndex += 1;
+                if (node.expanded && node.children?.length) {
+                    const childIndex = visibleIndexOf(node.children);
+                    if (childIndex !== undefined) {
+                        return childIndex;
+                    }
+                }
+            }
+            return undefined;
+        };
+        return visibleIndexOf(nodes);
+    }
+
+    /** Converts the WASM inspection model into PrimeNG tree nodes and annotates hover/highlight groups. */
+    getFeatureTreeDataFromModel(inspectionModelsByFeature: InspectionModelData[][]) {
+        interface HoverAnnotationContext {
+            mapTileKey: string;
+            mapId?: string;
+            softHoverGroupId?: string;
+            strongHoverGroupId?: string;
+            nodePath: string;
+            nodeIdPrefix: string;
+        }
+
+        /** Checks whether an inspection value identifies a geometry type. */
+        const isGeometryTypeValue = (value: unknown): boolean => {
+            if (typeof value !== "string") {
+                return false;
+            }
+            return value === "Points" || value === "Polyline" || value === "Polygon" || value === "Mesh";
+        };
+
+        /** Extracts the geometry name bubble from an inspection tree node. */
+        const extractGeometryNameBubble = (children: TreeTableNode[]): string | null => {
+            const nameNode = children.find(child => child.data?.["key"] === "name");
+            const name = nameNode?.data?.["value"];
+            if (typeof name !== "string") {
+                return null;
+            }
+            const trimmed = name.trim();
+            if (!trimmed.length) {
+                return null;
+            }
+            return trimmed;
+        };
+
+        /** Builds a stable tree node id from the current traversal path. */
+        const makeNodeId = (context: HoverAnnotationContext, key: string, ordinal: number): string =>
+            `${context.nodePath}/${ordinal}:${key}`;
+
+        /** Prefixes WASM-local bubble targets with the feature namespace used by the merged tree. */
+        const prefixValueBubbleTargets = (
+            bubbles: InspectionValueBubble[] | undefined,
+            nodeIdPrefix: string
+        ): InspectionValueBubble[] | undefined => {
+            if (!Array.isArray(bubbles) || !bubbles.length) {
+                return undefined;
+            }
+            return bubbles.map(bubble => ({
+                ...bubble,
+                targetNodeId: typeof bubble.targetNodeId === "string"
+                    ? `${nodeIdPrefix}${bubble.targetNodeId}`
+                    : bubble.targetNodeId,
+                hoverTargetNodeId: typeof bubble.hoverTargetNodeId === "string"
+                    ? `${nodeIdPrefix}${bubble.hoverTargetNodeId}`
+                    : bubble.hoverTargetNodeId,
+                children: prefixValueBubbleTargets(bubble.children, nodeIdPrefix)
+            }));
+        };
+
+        /** Converts inspection model sections into PrimeNG tree table nodes. */
+        const convertToTreeTableNodes = (
+            dataNodes: Array<InspectionModelData> | undefined,
+            context: HoverAnnotationContext
+        ): TreeTableNode[] => {
+            if (!Array.isArray(dataNodes) || !dataNodes.length) {
+                return [];
+            }
+            const treeNodes: TreeTableNode[] = [];
+            for (let nodeIndex = 0; nodeIndex < dataNodes.length; nodeIndex++) {
+                const data = dataNodes[nodeIndex];
+                const node: TreeTableNode = {};
+                const valueType = Number(data?.type ?? coreLib.ValueType.NULL.value);
+                let value = data?.value;
+                if (valueType === coreLib.ValueType.NULL.value && data?.children === undefined) {
+                    value = "NULL";
+                } else if ((valueType & coreLib.ValueType.ARRAY.value)
+                    && (valueType & coreLib.ValueType.NUMBER.value)
+                    && Array.isArray(value)) {
+                    for (let i = 0; i < value.length; i++) {
+                        if (!Number.isInteger(value[i])) {
+                            const strValue = String(value[i]);
+                            const index = strValue.indexOf(".");
+                            if (index !== -1 && strValue.length - index - 1 > 8) {
+                                value[i] = Number(value[i]).toFixed(8);
+                            }
+                        }
+                    }
+                }
+
+                if (valueType & coreLib.ValueType.ARRAY.value) {
+                    if (Array.isArray(value)) {
+                        value = value.join(", ");
+                    } else if (value === null || value === undefined) {
+                        value = "";
+                    } else {
+                        value = String(value);
+                    }
+                }
+
+                const nodeId = typeof data?.nodeId === "string"
+                    ? `${context.nodeIdPrefix}${data.nodeId}`
+                    : makeNodeId(context, data?.key ?? "", nodeIndex);
+                node.data = {
+                    key: data?.key ?? "",
+                    value: value ?? "",
+                    type: valueType,
+                    mapTileKey: data?.mapTileKey ?? context.mapTileKey,
+                    incomingLoading: data?.incomingLoading,
+                    retryIncoming: data?.retryIncoming,
+                    nodeId,
+                    mapId: context.mapId ?? ""
+                };
+                if (data?.hasOwnProperty("info")) {
+                    node.data["info"] = data.info;
+                }
+                if (data?.hasOwnProperty("hoverId")) {
+                    node.data["hoverId"] = data.hoverId;
+                }
+                if (data?.hasOwnProperty("mapId")) {
+                    node.data["mapId"] = data.mapId;
+                }
+                if (data?.hasOwnProperty("geoJsonPath")) {
+                    node.data["geoJsonPath"] = data.geoJsonPath;
+                }
+                if (data?.hasOwnProperty("sourceDataReferences")) {
+                    node.data["sourceDataReferences"] = data.sourceDataReferences;
+                }
+                if (data?.hasOwnProperty("valueCount")) {
+                    node.data["valueCount"] = data.valueCount;
+                }
+                if (Array.isArray(data?.keyBubbles) && data.keyBubbles.length) {
+                    node.data["keyBubbles"] = data.keyBubbles;
+                }
+                const valueBubbles = prefixValueBubbleTargets(data?.valueBubbles, context.nodeIdPrefix);
+                if (valueBubbles) {
+                    node.data["valueBubbles"] = valueBubbles;
+                }
+
+                let nextSoftHoverGroupId = context.softHoverGroupId;
+                let nextStrongHoverGroupId = context.strongHoverGroupId;
+                if (typeof data?.hoverId === "string") {
+                    if (hasFeatureInspectionValidity(data.hoverId)) {
+                        nextSoftHoverGroupId =
+                            stripFeatureInspectionValidity(data.hoverId);
+                        nextStrongHoverGroupId = data.hoverId;
+                    } else {
+                        nextSoftHoverGroupId = data.hoverId;
+                        nextStrongHoverGroupId = undefined;
+                    }
+                }
+                if (nextSoftHoverGroupId) {
+                    node.data["softHoverGroupId"] = nextSoftHoverGroupId;
+                }
+                if (nextStrongHoverGroupId) {
+                    node.data["strongHoverGroupId"] = nextStrongHoverGroupId;
+                }
+
+                const children = convertToTreeTableNodes(
+                    Array.isArray(data?.children) ? data.children : [],
+                    {
+                        mapTileKey: node.data["mapTileKey"],
+                        mapId: typeof node.data["mapId"] === "string" ? node.data["mapId"] : context.mapId,
+                        softHoverGroupId: nextSoftHoverGroupId,
+                        strongHoverGroupId: nextStrongHoverGroupId,
+                        nodePath: node.data["nodeId"],
+                        nodeIdPrefix: context.nodeIdPrefix
+                    }
+                );
+                if (isGeometryTypeValue(node.data["value"])) {
+                    const nameBubble = extractGeometryNameBubble(children);
+                    if (nameBubble) {
+                        node.data["geometryNameBubble"] = nameBubble;
+                    }
+                }
+                node.children = children;
+                treeNodes.push(node);
+            }
+            return treeNodes;
+        };
+
+        const treeNodes: Array<TreeTableNode> = [];
+        if (!Array.isArray(inspectionModelsByFeature)) {
+            return treeNodes;
+        }
+        for (let featureIndex = 0; featureIndex < inspectionModelsByFeature.length; featureIndex++) {
+            const inspectionModels = inspectionModelsByFeature[featureIndex];
+            if (!Array.isArray(inspectionModels)) {
+                continue;
+            }
+            const mapTileKey = this.selectedFeatures?.[featureIndex]?.mapTileKey ?? "";
+            const mapId = this.selectedFeatures?.[featureIndex]?.featureTile.mapName ?? "";
+            const nodeIdPrefix = `feature-${featureIndex}:`;
+            for (const section of inspectionModels) {
+                const node: TreeTableNode = {};
+                const sectionNodeId = typeof section?.nodeId === "string"
+                    ? `${nodeIdPrefix}${section.nodeId}`
+                    : `${nodeIdPrefix}${section?.key ?? ""}`;
+                node.data = {
+                    key: section?.key ?? "",
+                    value: section?.value ?? "",
+                    type: section?.type ?? coreLib.ValueType.NULL.value,
+                    incomingLoading: section?.incomingLoading,
+                    retryIncoming: section?.retryIncoming,
+                    nodeId: sectionNodeId,
+                    mapId
+                };
+                if (section?.hasOwnProperty("info")) {
+                    node.data["info"] = section.info;
+                }
+                if (section?.hasOwnProperty("sourceDataReferences")) {
+                    node.data["sourceDataReferences"] = section.sourceDataReferences;
+                }
+                if (Array.isArray(section?.keyBubbles) && section.keyBubbles.length) {
+                    node.data["keyBubbles"] = section.keyBubbles;
+                }
+                const valueBubbles = prefixValueBubbleTargets(section?.valueBubbles, nodeIdPrefix);
+                if (valueBubbles) {
+                    node.data["valueBubbles"] = valueBubbles;
+                }
+                node.children = convertToTreeTableNodes(
+                    Array.isArray(section?.children) ? section.children : [],
+                    {
+                        mapTileKey,
+                        mapId,
+                        nodePath: sectionNodeId,
+                        nodeIdPrefix
+                    }
+                );
+                treeNodes.push(node);
+            }
+        }
+        return treeNodes;
+    }
+
+    /** Column adapter used by the tree table to render the preformatted inspection fields. */
+    formatData(colKey: string, rowData: any) {
+        if (!colKey || !rowData.hasOwnProperty(colKey)) {
+            return "";
+        }
+
+        return rowData[colKey];
+    }
+
+    /** Opens the delegated GeoJSON actions menu for the current feature selection. */
+    showGeoJsonMenu(event: MouseEvent) {
+        this.inspectionTree?.showGeoJsonMenu(event);
+    }
+
+    /** Delegates GeoJSON viewing to the shared inspection tree implementation. */
+    openGeoJsonInNewTab() {
+        this.inspectionTree?.openGeoJsonInNewTab();
+    }
+
+    /** Delegates GeoJSON download to the shared inspection tree implementation. */
+    downloadGeoJson() {
+        this.inspectionTree?.downloadGeoJson();
+    }
+
+    /** Delegates GeoJSON clipboard export to the shared inspection tree implementation. */
+    copyGeoJson() {
+        this.inspectionTree?.copyGeoJson();
+    }
+
+    /** Freezes the tree while outer drag gestures are active so PrimeNG does not relayout mid-drag. */
+    freezeTree() {
+        this.inspectionTree?.freeze();
+    }
+
+    /** Re-enables the tree after a temporary drag freeze. */
+    unfreezeTree() {
+        this.inspectionTree?.unfreeze();
+    }
+}

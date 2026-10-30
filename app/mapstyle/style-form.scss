@@ -1,0 +1,25 @@
+:host { display: block; min-width: 0; }
+:host([hidden]) { display: none; }
+.style-form { padding: .5rem; }
+.style-form-body { border: 0; margin: 0; padding: 0; min-width: 0; }
+.style-form-field { display: grid; gap: .35rem; margin: .65rem 0; min-width: 0; }
+.style-field-heading, .style-item-heading { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.style-field-heading > label, .style-item-title { flex: 1; font-weight: 600; text-align: left; }
+.style-unset, small { opacity: .75; font-size: .8rem; overflow-wrap: anywhere; }
+.style-form-error { color: var(--p-red-500, #d33); opacity: 1; }
+.style-form-issues { max-height: 12rem; overflow: auto; padding-left: 1.2rem; font-size: .85rem; }
+.style-form-group { border-top: 1px solid var(--p-content-border-color, #8885); margin-top: .7rem; padding-top: .5rem; }
+summary { cursor: pointer; font-weight: 600; padding: .25rem 0; }
+.style-list-item, .style-nested-record { border-left: 2px solid var(--p-content-border-color, #8885); padding: .5rem; margin: .5rem 0; }
+input:not([type=checkbox]), select { background: var(--p-inputtext-background, transparent); color: inherit;
+    border: 1px solid var(--p-inputtext-border-color, #8888); border-radius: .25rem; padding: .4rem; min-width: 0; width: 100%; }
+button { color: inherit; background: var(--p-button-secondary-background, #8882); border: 1px solid var(--p-content-border-color, #8885);
+    border-radius: .25rem; padding: .3rem .5rem; cursor: pointer; }
+button:disabled { opacity: .45; cursor: default; }
+.style-choices, .style-vector, .style-color, .style-stop { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+.style-choices label { display: flex; gap: .25rem; align-items: center; }
+.style-vector input { flex: 1; width: 5rem; }
+.style-color input[type=color] { width: 2.8rem; padding: .15rem; }
+.style-color input:not([type=color]), .style-color select { flex: 1; width: 7rem; }
+.style-stop-list { display: grid; gap: .5rem; }
+.style-stop input, .style-stop select { flex: 1; width: 5rem; }

@@ -1,3 +1,4 @@
+#include "erdblick/style-authoring.h"
 #include "style-validation.h"
 
 #include "color.h"
@@ -230,7 +231,8 @@ bool validateRegexValue(
             "error",
             "schema",
             std::move(impact),
-            "Invalid regular expression in " + property + ": " + e.what(),
+            "Invalid regular expression in " + property + ": " + e.what() +
+                ". Use regex syntax such as .*SPEED.*, not shell wildcards such as *SPEED*.",
             locationForNode(parent[property]));
         issue.ruleIndex = ruleIndex;
         issue.rulePath = rulePath;
@@ -560,7 +562,7 @@ bool validateGeometry(YAML::Node const& ruleYaml, std::string const& rulePath, S
     if (!node.IsDefined()) {
         return true;
     }
-    static const std::set<std::string> allowed = {"point", "mesh", "line", "polygon", "aabb", "gltf"};
+    static const auto allowed = styleAuthoringEnumValues("rule", "geometry");
     auto validateOne = [&](YAML::Node const& valueNode) {
         if (!valueNode.IsScalar()) {
             auto& issue = report.addIssue("error", "schema", "rule-skipped", "geometry entries must be scalar.", locationForNode(valueNode));
@@ -626,7 +628,7 @@ bool validateColorScale(
     if (!validateEnumValue(
             scale,
             "mode",
-            {"linear", "categorical"},
+            styleAuthoringEnumValues("color-scale", "mode"),
             rulePath,
             report,
             ruleIndex) ||
@@ -751,7 +753,7 @@ bool validateWidthScale(
     if (!validateEnumValue(
             scale,
             "mode",
-            {"linear", "categorical"},
+            styleAuthoringEnumValues("color-scale", "mode"),
             rulePath,
             report,
             ruleIndex) ||
@@ -1309,7 +1311,7 @@ bool validateStyleOptionYaml(
         issue.property = "id";
         return false;
     }
-    if (!validateEnumValue(optionYaml, "type", {"bool", "color", "string"}, optionPath, report, std::nullopt)) {
+    if (!validateEnumValue(optionYaml, "type", styleAuthoringEnumValues("option", "type"), optionPath, report, std::nullopt)) {
         report.issues.back().severity = "warning";
         report.issues.back().impact = "option-skipped";
         report.valid = std::ranges::none_of(report.issues, [](auto const& issue) { return issue.severity == "error"; });
@@ -1513,69 +1515,17 @@ bool validateStyleRuleYamlImpl(
     };
 
     markInvalid(validateGeometry(ruleYaml, rulePath, report, sourceRuleIndex));
-    markInvalid(validateEnumValue(ruleYaml, "scope", {"feature", "relation", "attribute"}, rulePath, report, sourceRuleIndex));
-    markInvalid(validateEnumValues(ruleYaml, "mode", {"none", "hover", "selection"}, rulePath, report, sourceRuleIndex));
-    markInvalid(validateEnumValue(ruleYaml, "fidelity", {"any", "high", "low"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateLodRange(ruleYaml, rulePath, report, sourceRuleIndex));
-    markInvalid(validateEnumValue(ruleYaml, "arrow", {"none", "forward", "backward", "double"}, rulePath, report, sourceRuleIndex));
-    markInvalid(validateEnumValue(
-        ruleYaml,
-        "z-index-role",
-        {"support", "overlay"},
-        rulePath,
-        report,
-        sourceRuleIndex));
-    markInvalid(validateEnumValue(
-        ruleYaml,
-        "relation-line-geometry",
-        {"centers", "connection-stubs"},
-        rulePath,
-        report,
-        sourceRuleIndex));
-    markInvalid(validateEnumValue(ruleYaml, "attribute-validity-geom", {"any", "required", "none"}, rulePath, report, sourceRuleIndex));
-    markInvalid(validateEnumValue(ruleYaml, "offset-type", {"miter"}, rulePath, report, sourceRuleIndex));
-    markInvalid(validateEnumValue(
-        ruleYaml,
-        "lateral-offset-unit",
-        {"meter", "meters", "m", "pixel", "pixels", "px"},
-        rulePath,
-        report,
-        sourceRuleIndex));
-    markInvalid(validateEnumValue(
-        ruleYaml,
-        "dash-unit",
-        {"meter", "meters", "m", "pixel", "pixels", "px"},
-        rulePath,
-        report,
-        sourceRuleIndex));
-    markInvalid(validateEnumValue(
-        ruleYaml,
-        "label-size-units",
-        {"meters", "common", "pixels"},
-        rulePath,
-        report,
-        sourceRuleIndex));
-    markInvalid(validateEnumValue(
-        ruleYaml,
-        "label-text-anchor",
-        {"start", "middle", "end"},
-        rulePath,
-        report,
-        sourceRuleIndex));
-    markInvalid(validateEnumValue(
-        ruleYaml,
-        "label-alignment-baseline",
-        {"top", "center", "bottom"},
-        rulePath,
-        report,
-        sourceRuleIndex));
-    markInvalid(validateEnumValue(
-        ruleYaml,
-        "label-word-break",
-        {"break-word", "break-all"},
-        rulePath,
-        report,
-        sourceRuleIndex));
+    for (auto const& [property, field] : styleAuthoringSchema().at("records").at("rule").items()) {
+        auto const kind = field.at("kind").get<std::string>();
+        if (property == "geometry" || (kind != "enum" && kind != "enum-list")) {
+            continue;
+        }
+        auto const allowed = styleAuthoringEnumValues("rule", property);
+        markInvalid(kind == "enum-list"
+            ? validateEnumValues(ruleYaml, property, allowed, rulePath, report, sourceRuleIndex)
+            : validateEnumValue(ruleYaml, property, allowed, rulePath, report, sourceRuleIndex));
+    }
 
     rejectRemoved(
         "aspect",
@@ -1656,6 +1606,9 @@ bool validateStyleRuleYamlImpl(
         ok = false;
     }
 
+    markInvalid(readScalar<bool>(ruleYaml, "point-cloud", rulePath, report, sourceRuleIndex));
+    markInvalid(validateNumericRange(ruleYaml, "point-cloud-max-points", 0., double(mapget::DefaultPointCloudMaxPoints), rulePath, report, sourceRuleIndex));
+    markInvalid(readScalar<uint32_t>(ruleYaml, "point-cloud-max-points", rulePath, report, sourceRuleIndex));
     if (ruleYaml["geometry-name"].IsDefined()) {
         std::string geometryName;
         if (!readScalar(

@@ -1,137 +1,150 @@
-import {inject, NgModule, provideAppInitializer} from '@angular/core';
-import {BrowserModule} from '@angular/platform-browser';
-import {AppRoutingModule} from './app.routing.module';
-import {AppComponent} from './app.component';
-import {provideHttpClient, withFetch} from "@angular/common/http";
-import {DialogModule} from "primeng/dialog";
-import {BrowserAnimationsModule} from "@angular/platform-browser/animations";
-import {AnimateOnScroll} from "primeng/animateonscroll";
-import {FormsModule} from "@angular/forms";
-import {ScrollPanelModule} from "primeng/scrollpanel";
-import {BadgeModule} from "primeng/badge";
-import {TreeModule} from "primeng/tree";
-import {MessageModule} from "primeng/message";
-import {AccordionModule} from "primeng/accordion";
-import {DividerModule} from "primeng/divider";
-import {PanelMenuModule} from "primeng/panelmenu";
-import {TreeTableModule} from "primeng/treetable";
-import {ToastModule} from "primeng/toast";
-import {ConfirmationService, MessageService} from "primeng/api";
-import {InputNumberModule} from "primeng/inputnumber";
-import {FieldsetModule} from "primeng/fieldset";
-import {InfoMessageService} from "./shared/info.service";
-import {SearchPanelComponent} from "./search/search.panel.component";
-import {JumpTargetService} from "./search/jump.service";
-import {MapInfoService} from "./mapdata/map-info.service";
-import {MapTileStreamService} from "./mapdata/map-tile-stream.service";
-import {InspectionSelectionService} from "./inspection/inspection-selection.service";
-import {SliderModule} from "primeng/slider";
-import {StyleService} from "./styledata/style.service";
-import {FeatureSearchComponent} from "./search/feature.search.component";
-import {SearchStyleColorComponent} from "./search/search-style-color.component";
-import {SearchStyleRuleEditorComponent} from "./search/search-style-rule-editor.component";
-import {FeatureSearchDialogsComponent} from "./search/feature.search.dialogs.component";
-import {FeatureSearchExportDialogComponent} from "./search/feature-search-export.dialog.component";
-import {SearchStyleSaveDialogComponent} from "./search/search-style-save.dialog.component";
-import {MapPanelComponent} from "./mapdata/map.panel.component";
-import {InspectionPanelComponent} from "./inspection/inspection.panel.component";
-import {FeaturePanelComponent} from "./inspection/feature.panel.component";
-import {SourceDataPanelComponent} from "./inspection/sourcedata.panel.component";
-import {AppStateService} from "./shared/appstate.service";
-import {PreferencesComponent} from "./auxiliaries/preferences.component";
-import {FileUploadModule} from "primeng/fileupload";
-import {EditorComponent} from "./shared/editor.component";
-import {CoordinatesPanelComponent} from "./coords/coordinates.panel.component";
-import {initializeLibrary} from "./integrations/wasm";
-import {CheckboxModule} from "primeng/checkbox";
-import {InputTextModule} from "primeng/inputtext";
-import {MenuModule} from "primeng/menu";
-import {CardModule} from "primeng/card";
-import {CoordinatesService} from "./coords/coordinates.service";
-import {ColorPickerModule} from "primeng/colorpicker";
-import {ListboxModule} from "primeng/listbox";
-import {FeatureSearchService} from "./search/feature.search.service";
-import {ClipboardService} from "./shared/clipboard.service";
-import {MultiSelectModule} from "primeng/multiselect";
-import {TreeSelectModule} from "primeng/treeselect";
-import {ButtonGroupModule} from "primeng/buttongroup";
-import {BreadcrumbModule} from "primeng/breadcrumb";
-import {TableModule} from "primeng/table";
-import {HighlightSearch} from "./inspection/highlight.pipe";
-import {HighlightRegion} from "./inspection/highlight.region.pipe";
-import {TreeTableFilterPatchDirective} from "./inspection/treetablefilter-patch.directive";
-import {Textarea} from "primeng/textarea";
-import {FloatLabelModule} from "primeng/floatlabel";
-import {IftaLabelModule} from "primeng/iftalabel";
-import {TabsModule} from "primeng/tabs";
-import {OnEnterClickDirective} from "./shared/keyboard.service";
-import {SelectModule} from 'primeng/select';
-import {AutoCompleteModule} from 'primeng/autocomplete';
-import {DatasourcesComponent} from "./auxiliaries/datasources.component";
-import {EditorService} from "./shared/editor.service";
-import {ReactiveFormsModule} from '@angular/forms';
-import {ProgressSpinnerModule} from "primeng/progressspinner";
-import {ProgressBarModule} from "primeng/progressbar";
-import {MeterGroupModule} from "primeng/metergroup";
-import {ButtonModule} from "primeng/button";
-import {TooltipModule} from "primeng/tooltip";
-import {SourceDataLayerSelectionDialogComponent} from "./inspection/sourcedata.selection.dialog.component";
-import {ContextMenuModule} from "primeng/contextmenu";
-import {ConfirmPopupModule} from "primeng/confirmpopup";
-import {RightClickMenuService} from "./mapview/rightclickmenu.service";
-import {LegalInfoDialogComponent} from "./auxiliaries/legalinfo.component";
-import {AboutComponent} from "./auxiliaries/about.component";
-import {KeyboardComponent} from "./auxiliaries/keyboard.component";
-import {MainBarComponent} from "./app.mainbar.component";
-import {IconFieldModule} from 'primeng/iconfield';
-import {InputIconModule} from 'primeng/inputicon';
-import {PopoverModule} from "primeng/popover";
-import {RadioButtonModule} from "primeng/radiobutton";
-import {provideAnimationsAsync} from "@angular/platform-browser/animations/async";
-import {providePrimeNG} from "primeng/config";
-import {definePreset} from '@primeng/themes';
+import {LocationPolicyService} from "./geolocation/location-policy.service";
+import {LocationTermsDialogComponent} from "./geolocation/location-terms-dialog.component";
+import {LocationAttributionComponent} from "./geolocation/location-attribution.component";
+import {StyleDocumentEditorComponent} from "./mapstyle/style-document-editor.component";
+import { provideHttpClient, withFetch } from "@angular/common/http";
+import {
+    inject,
+    Injector,
+    NgModule,
+    provideAppInitializer
+} from "@angular/core";
+import { FormsModule, ReactiveFormsModule } from "@angular/forms";
+import { BrowserModule } from '@angular/platform-browser';
+import { BrowserAnimationsModule } from "@angular/platform-browser/animations";
+import { provideAnimationsAsync } from "@angular/platform-browser/animations/async";
+import { definePreset } from '@primeng/themes';
 import Aura from "@primeng/themes/aura";
-import {ErdblickViewUIComponent} from "./mapview/view.ui.component";
-import {SelectButtonModule} from 'primeng/selectbutton';
-import {ChipModule} from "primeng/chip";
-import {StyleComponent} from "./styledata/style.component";
-import {MapViewContainerComponent} from "./mapview/view.container.component";
-import {MapViewComponent} from "./mapview/view.component";
-import {Splitter} from "primeng/splitter";
-import {InspectionContainerComponent} from "./inspection/inspection.container.component";
-import {InspectionTreeComponent} from "./inspection/inspection.tree.component";
-import {InspectionComparisonDialogComponent} from "./inspection/inspection-comparison.dialog.component";
-import {ToggleSwitch} from "primeng/toggleswitch";
-import {ToggleButton} from "primeng/togglebutton";
-import {DockableLayoutComponent} from "./app.dockable.layout.component";
-import {Menubar} from "primeng/menubar";
-import {DynamicDialogModule} from "primeng/dynamicdialog";
-import {DialogService} from "primeng/dynamicdialog";
-import {InspectionPanelDialogComponent} from "./inspection/inspection.dialog.component";
-import {InspectionDialogsComponent} from "./inspection/inspection.dialogs.component";
-import {Ripple} from "primeng/ripple";
-import {SurveyComponent} from "./auxiliaries/survey.component";
-import {DiagnosticsIndicatorComponent} from "./diagnostics/diagnostics.indicator.component";
-import {DiagnosticsProgressComponent} from "./diagnostics/diagnostics.progress.component";
-import {DiagnosticsPerformanceDialogComponent} from "./diagnostics/diagnostics.perf.component";
-import {DiagnosticsLogDialogComponent} from "./diagnostics/diagnostics.log.component";
-import {DiagnosticsExportDialogComponent} from "./diagnostics/diagnostics.export.component";
-import {Tag} from "primeng/tag";
-import {AppDialogComponent} from "./shared/app-dialog.component";
-import {AppPanelComponent} from "./shared/app-panel.component";
-import {AppSurfaceHeaderComponent} from "./shared/app-surface-header.component";
-import {AppConfirmPopupComponent} from "./shared/app-confirm-popup.component";
-import {SearchCompletionPopupComponent} from "./search/search-completion-popup.component";
-import {SimfilExpressionInputComponent} from "./search/simfil-expression-input.component";
-import {AdvancedPreferencesComponent} from "./auxiliaries/advanced-preferences.component";
-import {AppConfigService} from "./shared/app-config.service";
-import {CoordinatesPolicyService} from "./coords/coordinates-policy.service";
-import {CoordinatesLegalTermsDialogComponent} from "./coords/coordinates-legal-terms-dialog.component";
-import {CacheResetComponent} from "./auxiliaries/cache-reset.component";
-import {MapPresetService} from "./styledata/map-preset.service";
-import {TileSubsetLayerRenderService} from
-    "./mapview/deck/tile-subset-layer-render.service";
-import {PresentationStateBridgeService} from "./shared/presentation-state-bridge.service";
+import { AccordionModule } from "primeng/accordion";
+import { AnimateOnScroll } from "primeng/animateonscroll";
+import { ConfirmationService, MessageService } from "primeng/api";
+import { AutoCompleteModule } from 'primeng/autocomplete';
+import { BadgeModule } from "primeng/badge";
+import { BreadcrumbModule } from "primeng/breadcrumb";
+import { ButtonModule } from "primeng/button";
+import { ButtonGroupModule } from "primeng/buttongroup";
+import { CardModule } from "primeng/card";
+import { CheckboxModule } from "primeng/checkbox";
+import { ChipModule } from "primeng/chip";
+import { ColorPickerModule } from "primeng/colorpicker";
+import { providePrimeNG } from "primeng/config";
+import { ConfirmPopupModule } from "primeng/confirmpopup";
+import { ContextMenuModule } from "primeng/contextmenu";
+import { DialogModule } from "primeng/dialog";
+import { DividerModule } from "primeng/divider";
+import { DialogService, DynamicDialogModule } from "primeng/dynamicdialog";
+import { FieldsetModule } from "primeng/fieldset";
+import { FileUploadModule } from "primeng/fileupload";
+import { FloatLabelModule } from "primeng/floatlabel";
+import { IconFieldModule } from 'primeng/iconfield';
+import { IftaLabelModule } from "primeng/iftalabel";
+import { InputIconModule } from 'primeng/inputicon';
+import { InputNumberModule } from "primeng/inputnumber";
+import { InputTextModule } from "primeng/inputtext";
+import { ListboxModule } from "primeng/listbox";
+import { MenuModule } from "primeng/menu";
+import { Menubar } from "primeng/menubar";
+import { MessageModule } from "primeng/message";
+import { MeterGroupModule } from "primeng/metergroup";
+import { MultiSelectModule } from "primeng/multiselect";
+import { PanelMenuModule } from "primeng/panelmenu";
+import { PopoverModule } from "primeng/popover";
+import { ProgressBarModule } from "primeng/progressbar";
+import { ProgressSpinnerModule } from "primeng/progressspinner";
+import { RadioButtonModule } from "primeng/radiobutton";
+import { Ripple } from "primeng/ripple";
+import { ScrollPanelModule } from "primeng/scrollpanel";
+import { SelectModule } from 'primeng/select';
+import { SelectButtonModule } from 'primeng/selectbutton';
+import { SliderModule } from "primeng/slider";
+import { Splitter } from "primeng/splitter";
+import { TableModule } from "primeng/table";
+import { TabsModule } from "primeng/tabs";
+import { Tag } from "primeng/tag";
+import { Textarea } from "primeng/textarea";
+import { ToastModule } from "primeng/toast";
+import { ToggleButton } from "primeng/togglebutton";
+import { ToggleSwitch } from "primeng/toggleswitch";
+import { TooltipModule } from "primeng/tooltip";
+import { TreeModule } from "primeng/tree";
+import { TreeSelectModule } from "primeng/treeselect";
+import { TreeTableModule } from "primeng/treetable";
+import { McpActionService } from "./action/mcp-action.service";
+import { OmnibarComponent } from "./omnibar/omnibar.component";
+import { ViewerActionStatusComponent } from "./action/viewer-action-status.component";
+import { WebMcpService } from "./action/web-mcp.service";
+import { AppComponent } from './app.component';
+import { MainBarComponent } from "./layout/app-mainbar.component";
+import { AppRoutingModule } from './app-routing.module';
+import { registerApplication } from "./application-registration";
+import { AboutComponent } from "./config/about.component";
+import { AdvancedPreferencesComponent } from "./preferences/advanced-preferences.component";
+import { CacheResetComponent } from "./mapdata/cache-reset.component";
+import { DatasourcesComponent } from "./mapdata/datasources.component";
+import { KeyboardComponent } from "./keyboard/keyboard.component";
+import { LegalInfoDialogComponent } from "./mapdata/legalinfo.component";
+import { PreferencesComponent } from "./preferences/preferences.component";
+import { SurveyComponent } from "./survey/survey.component";
+import { AppConfigService } from "./config/appconfig.service";
+import { CoordinatesLegalTermsDialogComponent } from "./coordinates/coordinates-legal-terms-dialog.component";
+import { CoordinatesPolicyService } from "./coordinates/coordinates-policy.service";
+import { CoordinatesPanelComponent } from "./coordinates/coordinates-panel.component";
+import { CoordinatesService } from "./coordinates/coordinates.service";
+import { DiagnosticsExportDialogComponent } from "./diagnostics/diagnostics-export.component";
+import { DiagnosticsFacadeService } from "./diagnostics/diagnostics-facade.service";
+import { DiagnosticsIndicatorComponent } from "./diagnostics/diagnostics-indicator.component";
+import { DiagnosticsLogDialogComponent } from "./diagnostics/diagnostics-log.component";
+import { DiagnosticsPerformanceDialogComponent } from "./diagnostics/diagnostics-perf.component";
+import { DiagnosticsProgressComponent } from "./diagnostics/diagnostics-progress.component";
+import { FeaturePanelComponent } from "./inspection/feature-panel.component";
+import { HighlightSearch } from "./inspection/highlight.pipe";
+import { HighlightRegion } from "./inspection/highlight-region.pipe";
+import { InspectionComparisonDialogComponent } from "./inspection/inspection-comparison-dialog.component";
+import { InspectionSelectionService } from "./inspection/inspection-selection.service";
+import { InspectionContainerComponent } from "./inspection/inspection-container.component";
+import { InspectionPanelDialogComponent } from "./inspection/inspection-dialog.component";
+import { InspectionDialogsComponent } from "./inspection/inspection-dialogs.component";
+import { InspectionPanelComponent } from "./inspection/inspection-panel.component";
+import { InspectionTreeComponent } from "./inspection/inspection-tree.component";
+import { SourceDataPanelComponent } from "./inspection/sourcedata-panel.component";
+import { SourceDataLayerSelectionDialogComponent } from "./inspection/sourcedata-selection-dialog.component";
+import { TreeTableFilterPatchDirective } from "./inspection/treetablefilter-patch.directive";
+import { initializeLibrary } from "./integrations/wasm.adapter";
+import { AppDialogComponent } from "./layout/app-dialog.component";
+import { AppPanelComponent } from "./layout/app-panel.component";
+import { AppSurfaceHeaderComponent } from "./layout/app-surface-header.component";
+import { DockableLayoutComponent } from "./layout/dockable-layout.component";
+import { MapDataService } from "./mapdata/mapdata.service";
+import { MapTileStreamService } from "./mapdata/map-tile-stream.service";
+import { MapPanelComponent } from "./mapdata/map-panel.component";
+import { TileSubsetLayerRenderService } from "./mapview/deck/tile-subset-layer-render.service";
+import { RightClickMenuService } from "./mapview/rightclickmenu.service";
+import { MapViewComponent } from "./mapview/view.component";
+import { MapViewContainerComponent } from "./mapview/view-container.component";
+import { ErdblickViewUIComponent } from "./mapview/view-ui.component";
+import { JumpTargetService } from "./navigation/jump.service";
+import { FeatureSearchExportDialogComponent } from "./search/feature-search-export-dialog.component";
+import { SearchComponent } from "./search/search.component";
+import { SearchDialogsComponent } from "./search/search-dialogs.component";
+import { SearchService } from "./search/search.service";
+import { GeolocationService } from "./geolocation/geolocation.service";
+import { SearchCompletionPopupComponent } from "./search/search-completion-popup.component";
+import { SearchStyleColorComponent } from "./search/search-style-color.component";
+import { SearchStyleRuleEditorComponent } from "./search/search-style-rule-editor.component";
+import { SearchStyleSaveDialogComponent } from "./search/search-style-save-dialog.component";
+import { SimfilExpressionInputComponent } from "./search/simfil-expression-input.component";
+import { AppConfirmPopupComponent } from "./alert/app-confirm-popup.component";
+import { ClipboardService } from "./clipboard/clipboard.service";
+import { EditorComponent } from "./editor/editor.component";
+import { EditorService } from "./editor/editor.service";
+import { InfoMessageService } from "./diagnostics/info.service";
+import { OnEnterClickDirective } from "./keyboard/keyboard.service";
+import { PresentationStateBridgeService } from "./action/presentation-state-bridge.service";
+import { AppStateService } from "./appstate/appstate.service";
+import { AppUrlStateService } from "./appstate/appstate-url.service";
+import { MapPresetService } from "./mapstyle/map-preset.service";
+import { StyleComponent } from "./mapstyle/mapstyle.component";
+import { MapStyleService } from "./mapstyle/mapstyle.service";
 
 /** PrimeNG theme preset used across the application. */
 export const ErdblickTheme = definePreset(Aura, {
@@ -169,17 +182,25 @@ const updateGlobalSpinner = (message: string) => {
 
 /** App initializer that loads config and then brings up the WASM core, styles, map data, and search state in order. */
 export const initializeServices = () => {
+    registerApplication(inject(Injector));
     const configService = inject(AppConfigService);
     const stateService = inject(AppStateService);
-    const styleService = inject(StyleService);
+    const styleService = inject(MapStyleService);
     const mapPresetService = inject(MapPresetService);
     const tileStream = inject(MapTileStreamService);
     const inspectionSelection = inject(InspectionSelectionService);
     const coordService = inject(CoordinatesService);
     const coordinatesPolicy = inject(CoordinatesPolicyService);
+    const locationPolicy = inject(LocationPolicyService);
     const subsetRenderService = inject(TileSubsetLayerRenderService);
     const presentationBridge = inject(PresentationStateBridgeService);
-    inject(FeatureSearchService);
+    const viewerActions = inject(McpActionService);
+    const webMcp = inject(WebMcpService);
+    const featureSearch = inject(SearchService);
+    const diagnostics = inject(DiagnosticsFacadeService);
+    inject(GeolocationService);
+    const urlState = inject(AppUrlStateService);
+    const jumps = inject(JumpTargetService);
 
     return (async () => {
         updateGlobalSpinner('Loading app config');
@@ -194,6 +215,7 @@ export const initializeServices = () => {
         await subsetRenderService.preloadWorkerSource();
         stateService.initializePersistence();
         coordinatesPolicy.initialize();
+        locationPolicy.initialize();
         updateGlobalSpinner('Initializing coordinates');
         coordService.initialize();
         updateGlobalSpinner('Loading styles');
@@ -201,15 +223,20 @@ export const initializeServices = () => {
         mapPresetService.initialize();
         updateGlobalSpinner('Initializing map data');
         await tileStream.initialize();
+        jumps.initialize();
         inspectionSelection.initialize();
+        featureSearch.initialize();
+        diagnostics.initialize();
         presentationBridge.initialize();
+        viewerActions.initialize();
+        webMcp.initialize();
     })();
 }
 
 @NgModule({
     declarations: [
         AppComponent,
-        SearchPanelComponent,
+        OmnibarComponent,
         MapPanelComponent,
         InspectionPanelComponent,
         FeaturePanelComponent,
@@ -217,10 +244,12 @@ export const initializeServices = () => {
         PreferencesComponent,
         EditorComponent,
         CoordinatesPanelComponent,
-        FeatureSearchComponent,
+        LocationTermsDialogComponent,
+        LocationAttributionComponent,
+        SearchComponent,
         SearchStyleColorComponent,
         SearchStyleRuleEditorComponent,
-        FeatureSearchDialogsComponent,
+        SearchDialogsComponent,
         FeatureSearchExportDialogComponent,
         DatasourcesComponent,
         OnEnterClickDirective,
@@ -244,6 +273,7 @@ export const initializeServices = () => {
         InspectionComparisonDialogComponent,
         SurveyComponent,
         DiagnosticsIndicatorComponent,
+        ViewerActionStatusComponent,
         DiagnosticsProgressComponent,
         DiagnosticsPerformanceDialogComponent,
         DiagnosticsLogDialogComponent,
@@ -255,6 +285,7 @@ export const initializeServices = () => {
         AppComponent
     ],
     imports: [
+        StyleDocumentEditorComponent,
         BrowserModule,
         BrowserAnimationsModule,
         AnimateOnScroll,
@@ -323,7 +354,7 @@ export const initializeServices = () => {
     ],
     providers: [
         provideAppInitializer(initializeServices),
-        MapInfoService,
+        MapDataService,
         MapTileStreamService,
         InspectionSelectionService,
         MessageService,
@@ -331,7 +362,7 @@ export const initializeServices = () => {
         InfoMessageService,
         JumpTargetService,
         AppStateService,
-        FeatureSearchService,
+        SearchService,
         ClipboardService,
         EditorService,
         RightClickMenuService,

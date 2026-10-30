@@ -1,6 +1,12 @@
-import {BehaviorSubject, type Observable} from "rxjs";
-import {CameraViewState, TileFeatureId} from "../shared/appstate.service";
-import {Viewport} from "../../build/libs/core/erdblick-core";
+/**
+ * Renderer-independent view, camera, navigation and scene contracts.
+ * Application services and components use these public shapes without loading
+ * a particular Deck controller or owning its rendering resources.
+ */
+import { BehaviorSubject, type Observable } from "rxjs";
+import { Viewport } from "../../build/libs/core/erdblick-core";
+import { TileFeatureId } from "../inspection/inspection.model";
+import { CameraViewState } from "./mapview.model";
 
 /** WGS84 rectangle used for fit-to-bounds navigation requests. */
 export interface RenderRectangle {
@@ -8,6 +14,17 @@ export interface RenderRectangle {
     south: number;
     east: number;
     north: number;
+}
+
+/** Ground coordinates of one polygon: exterior ring followed by its holes. */
+export type LocationPolygon = [number, number][][];
+
+/** Transient area navigation; boundaries are never persisted in camera or search state. */
+export interface LocationArea {
+    rectangle: RenderRectangle;
+    polygons?: LocationPolygon[];
+    label: string;
+    representativePoint?: [number, number];
 }
 
 /** Generic 3D vector payload used by view-agnostic navigation topics. */
@@ -67,6 +84,7 @@ export interface IRenderSceneHandle {
  * Views expose picking, camera sync, and movement without leaking deck-specific details upward.
  */
 export interface IRenderView {
+    readonly viewId: string;
     readonly viewIndex: number;
     readonly hoveredFeatureIds: BehaviorSubject<TileFeatureId[]>;
     readonly firstPersonViewActive: BehaviorSubject<boolean>;
@@ -77,7 +95,9 @@ export interface IRenderView {
     destroy(): Promise<void>;
     isAvailable(): boolean;
     requestRender(): void;
-    prepareForLayoutResize(targetCssSize: {width: number; height: number}): void;
+    /** Forces a frame and freezes its canvas before a non-preserved WebGL drawing buffer is cleared. */
+    captureCanvas(scale: number): { canvas: HTMLCanvasElement; dataUrl: string };
+    prepareForLayoutResize(targetCssSize: { width: number; height: number }): void;
     setDesktopDrillPickingEnabled(enabled: boolean): void;
 
     getCanvasClientRect(): DOMRect;
@@ -87,15 +107,19 @@ export interface IRenderView {
     getSceneMode(): unknown;
     getSceneHandle(): IRenderSceneHandle;
 
-    pickCartographic(screenPos: {x: number; y: number}): {lon: number; lat: number; alt: number} | undefined;
-    pickNavigationTarget(screenPos: {x: number; y: number}): RenderNavigationTarget | undefined;
+    pickCartographic(screenPos: { x: number; y: number }): { lon: number; lat: number; alt: number } | undefined;
+    pickNavigationTarget(screenPos: { x: number; y: number }): RenderNavigationTarget | undefined;
     drillPickFeatures(
-        screenPos: {x: number; y: number},
+        screenPos: { x: number; y: number },
         radius: number,
         maxObjects: number
     ): RenderedFeaturePickResult;
     setViewFromState(cameraData: CameraViewState): void;
     getViewState(): CameraViewState;
+    /** Reads the live renderer pose without persisting it; unavailable in first-person mode. */
+    getLiveCameraState(): CameraViewState | undefined;
+    /** Whether a human camera gesture currently owns this view. */
+    isCameraInteractionActive(): boolean;
     prepareForViewRemoval(): RenderViewCameraState;
     restoreCameraState(state: RenderViewCameraState): void;
     computeViewport(): Viewport | undefined;

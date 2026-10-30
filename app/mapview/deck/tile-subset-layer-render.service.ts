@@ -1,22 +1,25 @@
-import {Injectable, Optional} from "@angular/core";
-import {skip, Subject} from "rxjs";
-import {AppStateService} from "../../shared/appstate.service";
-import {AUTO_TILE_SUBSET_RENDER_WORKER_COUNT} from
-    "../../shared/tile-render-policy";
+import { Injectable, Optional } from "@angular/core";
+import { auditTime, skip, Subject } from "rxjs";
+import { pointCloudInputBudget } from "../../mapdata/point-cloud-input-budget.model";
+import {
+    DEFAULT_POINT_CLOUD_POLICY,
+    POINT_CLOUD_MAX_POINTS,
+    type PointCloudRenderPolicy
+} from "../point-cloud-policy.model";
+import { AUTO_TILE_SUBSET_RENDER_WORKER_COUNT } from "../tile-render-policy.model";
+import { MapViewState } from "../mapview.state";
+import { gpuIconAtlas } from "./gpu-icon-atlas.visualization";
+import { GpuAllocationError, gpuMemoryBudget, type GpuMemoryReservation } from "./gpu-memory-budget.model";
+import { InfoMessageService } from "../../diagnostics/info.service";
+import { GPU_RENDER_PACKET_MAX_BYTES } from "./gpu-render-packet.model";
+import type { GpuSceneSnapshot } from "./gpu-scene.visualization";
 import type {
+    TileSubsetGpuContribution,
     TileSubsetLayerRenderBuffers,
     TileSubsetLayerRenderResult,
     TileSubsetLayerRenderTask,
-    TileSubsetGpuContribution,
     TileSubsetLayerRenderWorkerOutbound
 } from "./tile-subset-layer-render.worker.protocol";
-import type {
-    GpuSceneSnapshot
-} from "./gpu-scene";
-import {gpuIconAtlasService} from "./gpu-icon-atlas.service";
-import {
-    GPU_RENDER_PACKET_MAX_BYTES
-} from "./gpu-render-packet";
 
 const AUTO_WORKER_MIN = 2;
 const AUTO_WORKER_FALLBACK_CPU_COUNT = 4;
@@ -75,6 +78,7 @@ export interface TileSubsetLayerRenderRequest {
     highlightModeValue: number;
     lod: number;
     lineSimplificationToleranceMeters: number;
+    pointCloud?: PointCloudRenderPolicy;
 }
 
 interface PendingRender {
@@ -85,6 +89,8 @@ interface PendingRender {
     reject: (reason?: unknown) => void;
     queuedAt: number;
     dispatchedAt?: number;
+    workingBytes?: number;
+    gpuReservation?: GpuMemoryReservation;
 }
 
 interface ReadyRender {
@@ -97,6 +103,11 @@ interface ReadyRender {
 }
 
 export interface TileSubsetLayerRenderDebugSnapshot {
+    pointCloudInputBytes: number;
+    workerHeapBytes: number;
+    pointCloudPendingBytes: number;
+    gpuAllocatedBytes: number;
+    gpuReservedBytes: number;
     workers: number;
     allocatedWorkers: number;
     idleWorkers: number;
@@ -208,14 +219,88 @@ export class TileSubsetLayerRenderService {
     private latestGeometryVertices = 0;
     private maxGeometryVertices = 0;
 
+    /** True requests reclamation before admitting a replacement under smaller limits. */
+    readonly pointCloudPolicyChanged = new Subject<boolean>();
+    /** Release superseded fallback presentations when they prevent their successors from fitting. */
+    readonly allocationPressure = new Subject<void>();
+    private readonly workerHeapBytes: number[] = [];
+    private readonly workerInputKeys: Array<string | undefined> = [];
+    private readonly pointCloudWorkerByVisualization = new Map<string, number>();
+    private readonly pointCloudDemand = new Map<string, {view: number; bytes: number}>();
+    private workingBytes = 0;
+    private gpuRetirementWait: Promise<void> | null = null;
+    private allocationWarningShown = false;
+
+    /** Explain paused work once per preference change, without flooding the UI or console. */
+    reportAllocationFailure(error: GpuAllocationError): void {
+        this.allocationPressure.next();
+        if (this.allocationWarningShown) return;
+        this.allocationWarningShown = true;
+        this.infoMessages?.showWarning(error.message);
+        console.warn(error.message);
+    }
+
+    /** Current persisted limits, also usable by isolated renderer tests. */
+    get pointCloudPolicy() { return this.appState?.pointCloudPolicy ?? DEFAULT_POINT_CLOUD_POLICY; }
+
+    get gpuMemoryManagementEnabled(): boolean {
+        return this.appState?.gpuMemoryManagementEnabledState.getValue() ?? true;
+    }
+
+    /** Include retained input and view demand in the shared allocation. */
+    registerPointCloud(id: string, view: number, bytes: number): void {
+        const old = this.pointCloudDemand.get(id);
+        if (old?.view === view && old.bytes === bytes) return;
+        this.pointCloudDemand.set(id, {view, bytes});
+    }
+    /** Retire input ownership and reclaim the worker when its cloud is no longer visible. */
+    unregisterPointCloud(id: string): void {
+        const worker = this.pointCloudWorkerByVisualization.get(id);
+        this.pointCloudWorkerByVisualization.delete(id);
+        if (worker !== undefined && !this.runningTaskIdByWorker[worker]) this.retireWorker(worker);
+        this.pointCloudDemand.delete(id);
+    }
+    /** Apply the per-object fidelity policy independently of visible work and memory admission. */
+    pointCloudPolicyFor(id: string, _metersPerPixel: number | null, _previousSpacing = 0): PointCloudRenderPolicy {
+        return {enabled: this.pointCloudPolicy.enabled, maxPoints: POINT_CLOUD_MAX_POINTS,
+            spacingMeters: 0, cacheKey: id};
+    }
+
     /** Track runtime worker-count changes when application state is available. */
     constructor(
         @Optional()
-        private readonly appState: AppStateService | null = null
+        private readonly appState: MapViewState | null = null,
+        @Optional()
+        private readonly infoMessages: InfoMessageService | null = null
     ) {
+        gpuMemoryBudget.reclaimed.subscribe(() => this.capacityChanged.next());
         if (!appState) {
             return;
         }
+        let previousPolicy = this.pointCloudPolicy;
+        let previousManagement = this.gpuMemoryManagementEnabled;
+        appState.renderingMemoryPolicyChanges.pipe(auditTime(0)).subscribe(() => {
+            const managed = this.gpuMemoryManagementEnabled;
+            gpuMemoryBudget.setEnabled(managed);
+            gpuMemoryBudget.setLimit(this.pointCloudPolicy.gpuMemoryMiB * 1048576);
+            pointCloudInputBudget.setWorkingLimit(this.pointCloudPolicy.workingMemoryMiB * 1048576);
+            const policy = this.pointCloudPolicy;
+            const reclaim = policy.workingMemoryMiB < previousPolicy.workingMemoryMiB ||
+                (managed && (!previousManagement || policy.gpuMemoryMiB < previousPolicy.gpuMemoryMiB));
+            previousPolicy = policy;
+            previousManagement = managed;
+            this.allocationWarningShown = false;
+            if (reclaim) {
+                // Running jobs retain the old allowance too. Termination returns their
+                // WASM high-water heaps and rejects their partial presentations as stale.
+                for (const index of this.workers.keys()) this.retireWorker(index);
+            }
+            this.pointCloudPolicyChanged.next(reclaim);
+            // Disabling management also wakes jobs already queued behind the GPU allowance.
+            const resumed = this.queue.length ? this.pump() : Promise.resolve();
+            void resumed.then(() => this.capacityChanged.next())
+                .catch(error => console.error("Could not apply rendering memory preferences.", error));
+        });
         appState.tileSubsetRenderWorkerCountState.pipe(skip(1)).subscribe(() => {
             this.ensureWorkers()
                 .then(() => {
@@ -266,10 +351,10 @@ export class TileSubsetLayerRenderService {
     }
 
     /** Return the worst per-view rolling p90 frame interval used by diagnostics. */
-    currentFrameTimeMs(): number {
+    currentFrameTimeMs(viewIndex?: number): number {
         return Math.max(
             0,
-            ...[...this.deckFrameIntervalsMsByView.values()]
+            ...(viewIndex === undefined ? [...this.deckFrameIntervalsMsByView.values()] : [this.deckFrameIntervalsMsByView.get(viewIndex) ?? []])
                 .map(samples => {
                     if (!samples.length) {
                         return 0;
@@ -372,6 +457,13 @@ export class TileSubsetLayerRenderService {
         return result;
     }
 
+    /** Constant-size control-plane metrics; unlike debugSnapshot, never walks queued packets or tiles. */
+    queueSummary() {
+        return {workers: this.activeWorkerCount(), queued: this.queue.length, inFlight: this.inFlight.size,
+            ready: this.ready.length, completed: this.completedTaskCount, failed: this.failedTaskCount,
+            stale: this.staleTaskCount, latestRoundTripMs: this.latestRoundTripMs, latestNativeMs: this.latestNativeRenderMs};
+    }
+
     /** Capture queue, worker, packet, and timing state for diagnostics. */
     debugSnapshot(): TileSubsetLayerRenderDebugSnapshot {
         const now = performance.now();
@@ -379,6 +471,11 @@ export class TileSubsetLayerRenderService {
             .map(pending => pending.dispatchedAt)
             .filter((value): value is number => value !== undefined);
         return {
+            pointCloudInputBytes: pointCloudInputBudget.retainedBytes,
+            workerHeapBytes: this.workerHeapBytes.reduce((sum, value) => sum + value, 0),
+            pointCloudPendingBytes: this.workingBytes,
+            gpuAllocatedBytes: gpuMemoryBudget.allocatedBytes,
+            gpuReservedBytes: gpuMemoryBudget.reservedBytes,
             workers: this.activeWorkerCount(),
             allocatedWorkers: this.workers.length,
             idleWorkers: this.idleWorkers.filter(
@@ -496,9 +593,11 @@ export class TileSubsetLayerRenderService {
     private async pump(): Promise<void> {
         await this.ensureWorkers();
         const activeLimit = this.activeWorkerCount();
-        while (this.queue.length &&
+        let remaining = this.queue.length;
+        while (this.queue.length && remaining-- > 0 &&
             this.inFlight.size < activeLimit) {
-            const workerIndex = this.takeIdleWorker(activeLimit);
+            const preferred = this.pointCloudWorkerByVisualization.get(this.queue[0].task.visualizationId);
+            const workerIndex = this.takeIdleWorker(activeLimit, preferred);
             if (workerIndex === undefined) {
                 break;
             }
@@ -508,6 +607,71 @@ export class TileSubsetLayerRenderService {
                 pending.reject(new StaleSubsetRenderError());
                 this.idleWorkers.push(workerIndex);
                 continue;
+            }
+            if (pending.task.pointCloud) {
+                // Budget admission never changes fidelity. The backend has already applied
+                // the per-object point limit; multiple objects retain independent allowances.
+                const points = pending.task.inputGeometryVertexCount;
+                const gpuBytes = 160 * points;
+                if (this.gpuMemoryManagementEnabled && gpuBytes > gpuMemoryBudget.availableBytes &&
+                    (this.inFlight.size || gpuMemoryBudget.retirement)) {
+                    this.queue.push(pending);
+                    this.idleWorkers.push(workerIndex);
+                    this.waitForGpuRetirement();
+                    continue;
+                }
+                const admittedPolicy = pending.task.pointCloud;
+                const warm = this.workerInputKeys[workerIndex] === admittedPolicy.cacheKey;
+                const bytes = (warm ? 0 : 3 * pending.task.subsetBlob.byteLength) + 256 * points + 16 * 1048576;
+                const retained = pointCloudInputBudget.retainedBytes;
+                const limit = this.pointCloudPolicy.workingMemoryMiB * 1048576;
+                if (retained + bytes > limit) {
+                    pending.reject(new Error("Point-cloud input and render work exceed the browser working allowance."));
+                    this.idleWorkers.push(workerIndex);
+                    continue;
+                }
+                let heaps = this.workerHeapBytes.reduce((sum, value) => sum + value, 0);
+                for (const idle of [...this.idleWorkers]) {
+                    if (retained + bytes + this.workingBytes + heaps <= limit) break;
+                    heaps -= this.workerHeapBytes[idle] ?? 0;
+                    this.retireWorker(idle);
+                }
+                if (retained + bytes + this.workingBytes + heaps > limit && !this.inFlight.size &&
+                    (this.workerHeapBytes[workerIndex] ?? 0) > 0) {
+                    // WASM cannot shrink. Recreate this idle worker to release its high-water heap.
+                    this.retireWorker(workerIndex);
+                    this.queue.unshift(pending);
+                    void this.pump();
+                    break;
+                }
+                if (retained + bytes + this.workingBytes + heaps > limit) {
+                    this.queue.push(pending);
+                    this.idleWorkers.push(workerIndex);
+                    continue;
+                }
+                try {
+                    // The estimate schedules concurrent work; it cannot decide whether a
+                    // packet fits reused ranges in existing stores. At idle, try once with
+                    // available headroom. Every physical allocation still checks the budget.
+                    if (this.gpuMemoryManagementEnabled) {
+                        pending.gpuReservation = gpuMemoryBudget.reserve(
+                            Math.min(gpuBytes, gpuMemoryBudget.availableBytes));
+                        const admit = pending.admit;
+                        pending.admit = packet => pending.gpuReservation!.run(() => admit(packet));
+                    }
+                    pending.workingBytes = bytes;
+                    this.workingBytes += bytes;
+                } catch (error) {
+                    if (this.inFlight.size) {
+                        this.queue.unshift(pending);
+                        this.idleWorkers.push(workerIndex);
+                        break;
+                    }
+                    pending.reject(error);
+                    this.idleWorkers.push(workerIndex);
+                    continue;
+                }
+                this.pointCloudWorkerByVisualization.set(pending.task.visualizationId, workerIndex);
             }
             pending.dispatchedAt = performance.now();
             this.inFlight.set(pending.task.taskId, pending);
@@ -537,7 +701,9 @@ export class TileSubsetLayerRenderService {
             // context recovery. Structured clone performs the unavoidable
             // worker copy natively; an explicit JS slice here only added a
             // second geometry-sized allocation on the interaction thread.
-            const subsetBlob = pending.task.subsetBlob;
+            const reusePointCloudInput = !!pending.task.pointCloud &&
+                this.workerInputKeys[workerIndex] === pending.task.pointCloud.cacheKey;
+            const subsetBlob = reusePointCloudInput ? new Uint8Array(0) : pending.task.subsetBlob;
             const dataSourceInfoBlob = needsCatalog
                 ? pending.task.dataSourceInfoBlob?.slice()
                 : undefined;
@@ -550,11 +716,12 @@ export class TileSubsetLayerRenderService {
             const outbound: TileSubsetLayerRenderTask = {
                 ...pending.task,
                 subsetBlob,
+                reusePointCloudInput,
                 dataSourceInfoBlob,
                 fieldDictBlob,
                 styleSource,
                 iconCatalogEntries: needsIconCatalog
-                    ? gpuIconAtlasService.catalogEntries().map(entry => ({
+                    ? gpuIconAtlas.catalogEntries().map(entry => ({
                         uri: entry.uri,
                         atlasPage: entry.atlasPage,
                         uv: entry.uv,
@@ -584,6 +751,17 @@ export class TileSubsetLayerRenderService {
                 this.failDispatch(workerIndex, pending, error);
             }
         }
+    }
+
+    /** Wake admission on actual reclamation, without polling or retrying permanent errors. */
+    private waitForGpuRetirement(): void {
+        if (this.gpuRetirementWait || !gpuMemoryBudget.retirement) return;
+        this.gpuRetirementWait = gpuMemoryBudget.retirement;
+        void this.gpuRetirementWait.then(() => {
+            this.gpuRetirementWait = null;
+            return this.pump();
+        }).then(() => this.capacityChanged.next())
+            .catch(error => console.error("Subset render queue failed after GPU reclamation.", error));
     }
 
     /** Test whether a result still belongs to the latest visualization revision. */
@@ -686,7 +864,10 @@ export class TileSubsetLayerRenderService {
     }
 
     /** Takes one idle worker which is inside the current active prefix. */
-    private takeIdleWorker(activeLimit: number): number | undefined {
+    private takeIdleWorker(activeLimit: number, preferred?: number): number | undefined {
+        if (preferred !== undefined && this.runningTaskIdByWorker[preferred]) return undefined;
+        const preferredIndex = preferred === undefined ? -1 : this.idleWorkers.indexOf(preferred);
+        if (preferredIndex >= 0 && preferred! < activeLimit) return this.idleWorkers.splice(preferredIndex, 1)[0];
         const idleIndex = this.idleWorkers.findIndex(
             workerIndex => workerIndex < activeLimit
         );
@@ -718,6 +899,8 @@ export class TileSubsetLayerRenderService {
             this.releaseWorker(workerIndex, runningTaskId);
             return;
         }
+        this.workerHeapBytes[workerIndex] = Number(result.wasmMemoryBytes ?? 0);
+        this.workerInputKeys[workerIndex] = result.error ? undefined : pending.task.pointCloud?.cacheKey;
         const nativeMs = Number(result.timings?.totalMs ?? 0);
         const roundTripMs = pending.dispatchedAt === undefined
             ? nativeMs
@@ -734,6 +917,8 @@ export class TileSubsetLayerRenderService {
         if (result.error) {
             this.failedTaskCount += 1;
             pending.reject(new Error(result.error));
+            // Failed initialization or native allocation can leave an unusable/high-water heap.
+            this.retireWorker(workerIndex);
             this.releaseWorker(workerIndex, pending.task.taskId);
             return;
         }
@@ -757,6 +942,9 @@ export class TileSubsetLayerRenderService {
             packets: result.packets,
             bridge: result.bridge,
             vertexCount: result.vertexCount,
+            pointCloudDeliveredCount: result.pointCloudDeliveredCount,
+            pointCloudRenderedCount: result.pointCloudRenderedCount,
+            wasmMemoryBytes: result.wasmMemoryBytes,
             timings: result.timings
         };
         try {
@@ -879,13 +1067,24 @@ export class TileSubsetLayerRenderService {
         return true;
     }
 
+    /** Release admission claims on success, cancellation and every failure path. */
+    private releaseMemory(pending: PendingRender | undefined): void {
+        if (!pending) return;
+        this.workingBytes -= pending.workingBytes ?? 0;
+        pending.workingBytes = 0;
+        pending.gpuReservation?.release();
+        pending.gpuReservation = undefined;
+    }
+
     /** Release one worker only after its transferred packet is admitted or rejected. */
     private releaseWorker(workerIndex: number, taskId: string): void {
+        const pending = this.inFlight.get(taskId);
+        this.releaseMemory(pending);
         this.inFlight.delete(taskId);
         this.runningTaskIdByWorker[workerIndex] = null;
-        if (this.workers[workerIndex]) {
-            this.idleWorkers.push(workerIndex);
-        }
+        if (pending?.task.pointCloud && !this.pointCloudDemand.has(pending.task.visualizationId))
+            this.retireWorker(workerIndex);
+        else if (this.workers[workerIndex]) this.idleWorkers.push(workerIndex);
         this.pump()
             .then(() => this.capacityChanged.next())
             .catch(error => console.error("Subset render queue failed.", error));
@@ -909,6 +1108,7 @@ export class TileSubsetLayerRenderService {
             event.message || "Subset render worker failed."
         );
         if (pending) {
+            this.releaseMemory(pending);
             this.inFlight.delete(pending.task.taskId);
             this.failedTaskCount += 1;
             pending.reject(failure);
@@ -919,6 +1119,7 @@ export class TileSubsetLayerRenderService {
                 continue;
             }
             this.ready.splice(index, 1);
+            this.releaseMemory(ready.pending);
             this.inFlight.delete(ready.pending.task.taskId);
             if (ready.pending !== pending) {
                 this.failedTaskCount += 1;
@@ -959,6 +1160,7 @@ export class TileSubsetLayerRenderService {
         pending: PendingRender,
         reason: unknown
     ): void {
+        this.releaseMemory(pending);
         this.inFlight.delete(pending.task.taskId);
         this.runningTaskIdByWorker[workerIndex] = null;
         this.failedTaskCount += 1;
@@ -982,8 +1184,36 @@ export class TileSubsetLayerRenderService {
         this.capacityChanged.next();
     }
 
+    /** Termination is the only way to return a WASM high-water heap to the browser. */
+    private retireWorker(index: number): void {
+        const taskId = this.runningTaskIdByWorker[index];
+        const pending = taskId ? this.inFlight.get(taskId) : undefined;
+        if (pending) {
+            this.releaseMemory(pending);
+            this.inFlight.delete(pending.task.taskId);
+            this.staleTaskCount += 1;
+            pending.reject(new StaleSubsetRenderError());
+        }
+        for (let readyIndex = this.ready.length - 1; readyIndex >= 0; --readyIndex) {
+            if (this.ready[readyIndex].workerIndex === index) this.ready.splice(readyIndex, 1);
+        }
+        const worker = this.workers[index];
+        if (worker) {
+            worker.onmessage = null;
+            worker.onerror = null;
+            worker.terminate();
+        }
+        this.workers[index] = null;
+        this.removeIdleWorker(index);
+        this.resetWorkerState(index);
+        for (const [id, worker] of this.pointCloudWorkerByVisualization)
+            if (worker === index) this.pointCloudWorkerByVisualization.delete(id);
+    }
+
     /** Clears all state which describes the private memory of one worker. */
     private resetWorkerState(workerIndex: number): void {
+        this.workerHeapBytes[workerIndex] = 0;
+        this.workerInputKeys[workerIndex] = undefined;
         this.runningTaskIdByWorker[workerIndex] = null;
         this.catalogKeysByWorker[workerIndex] = new Set<string>();
         this.fieldDictSizesByWorker[workerIndex] = new Map<string, number>();

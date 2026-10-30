@@ -549,6 +549,16 @@ void TileSubsetLayerRenderer::setLineSimplificationTolerance(
         : 0.0;
 }
 
+void TileSubsetLayerRenderer::setPointCloudPolicy(
+    bool enabled, uint32_t maxPoints, double spacingMeters, std::string const& /*cacheKey*/)
+{
+    if (maxPoints > mapget::DefaultPointCloudMaxPoints || !std::isfinite(spacingMeters) || spacingMeters < 0.)
+        throw std::invalid_argument("Invalid point-cloud rendering policy");
+    pointCloudEnabled_ = enabled;
+    pointCloudMaxPoints_ = maxPoints;
+    pointCloudDeliveredCount_ = pointCloudRenderedCount_ = 0;
+}
+
 void TileSubsetLayerRenderer::configureGpuPacket(
     uint32_t sceneGeneration,
     uint32_t packetSequence,
@@ -758,6 +768,26 @@ void TileSubsetLayerRenderer::run()
             terminalEntryCount += channel->entryCount();
             return true;
         });
+    hasPointCloudRules_ = false;
+    std::function<size_t(FeatureStyleRule const&)> countCloudPasses = [&](auto const& rule) -> size_t {
+        if (rule.subRules().empty()) return rule.pointCloud() ? 1 : 0;
+        size_t count = 0;
+        for (auto const& child : rule.subRules()) {
+            auto const childPasses = countCloudPasses(child);
+            // First-of emits only one branch; all-of emits every matching branch.
+            if (rule.branchMode() == FeatureStyleRule::BranchMode::FirstOf)
+                count = std::max(count, childPasses);
+            else count += childPasses;
+        }
+        return count;
+    };
+    subset_->forEachChannel([&](auto const& channel) {
+        for (auto const* rule : rulesForChannel(channel->channelId())) {
+            auto const passes = countCloudPasses(*rule);
+            hasPointCloudRules_ |= passes != 0;
+        }
+        return true;
+    });
     pickRefs_.reserve(terminalEntryCount);
     pickIndices_.reserve(terminalEntryCount);
     gpuPacketBuilder_.beginContribution(
@@ -903,11 +933,26 @@ BoundEvalFun TileSubsetLayerRenderer::makeEvalFun(
                 state.lastValue = simfil::Value::undef();
                 return state.lastValue;
             }
-            auto node = state.values->at(index);
             state.lastIndex = index;
-            state.lastValue = node
-                ? simfil::Value::field(*node)
-                : simfil::Value::undef();
+            state.lastValue = simfil::Value::undef();
+            auto results = state.values->at(index);
+            if (!results || results->type() != simfil::ValueType::Array) {
+                state.renderer->recordRuntimeIssue(
+                    "projection", expression,
+                    "Projected expression results must be an array.", 0);
+            }
+            else if (results->size() > 1) {
+                state.renderer->recordRuntimeIssue(
+                    "projection", expression,
+                    "Style expression returned multiple values; expected at most one. Use an explicit reduction.", 0);
+            }
+            else if (results->size() == 1) {
+                if (auto node = results->at(0)) {
+                    // An array-valued result is still one value. Never unwrap it
+                    // again or silently choose the first of several results.
+                    state.lastValue = simfil::Value::field(*node);
+                }
+            }
             return state.lastValue;
         };
     result.reportIssueRef_ = [](
@@ -1076,6 +1121,8 @@ void TileSubsetLayerRenderer::renderFeature(
             entryOrdinal);
         ++index;
     }
+    if (hasPointCloudRules_ && selectablePick)
+        bridgePickResults_[*selectablePick].featureId = featureId->toString();
 }
 
 void TileSubsetLayerRenderer::renderFeatureRule(
@@ -1593,6 +1640,28 @@ bool TileSubsetLayerRenderer::renderGeometryCollection(
     std::optional<mapget::Point> labelPosition;
     if (!collection && !resolvedGeometries) {
         return rendered;
+    }
+    if (rule.pointCloud() && collection) {
+        auto const color = resolvedStyle ? std::optional<glm::fvec4>{resolvedStyle->color} : rule.color(evalFun);
+        if (!color) return false;
+        auto const sourceCount = mapget::PointCloudGeometrySample::count(collection, rule.geometryName());
+        mapget::PointCloudIndexSelection selection(sourceCount,
+            pointCloudEnabled_ ? pointCloudMaxPoints_ : std::numeric_limits<uint32_t>::max());
+        pointCloudDeliveredCount_ += sourceCount;
+        pointCloudRenderedCount_ += selection.size();
+        auto const zIndex = resolvedStyle ? resolvedStyle->zIndex : resolvedZIndex(rule, evalFun);
+        auto const icon = rule.hasIconUrl() ? rule.iconUrl(evalFun) : std::string{};
+        mapget::PointCloudGeometrySample::forEach(collection, selection, [&](auto const& record) {
+            auto const point = projectWgsPoint(offsetAabbOrigin(record.point, rule, offset));
+            if (!labelPosition) labelPosition = point;
+            if (rule.hasIconUrl()) appendIcon(point, icon, rule, evalFun, *color, zIndex, pick);
+            else appendPoint(point, rule, evalFun, *color, zIndex, pick);
+        }, rule.geometryName());
+        if (labelPosition && rule.hasLabel()) {
+            auto const text = rule.labelText(evalFun);
+            if (!text.empty()) appendLabel(*labelPosition, text, rule, evalFun, zIndex, pick);
+        }
+        return selection.size() != 0;
     }
     auto renderOne =
         [&](mapget::model_ptr<mapget::Geometry> const& geometry,
@@ -3846,11 +3915,17 @@ JsValue TileSubsetLayerRenderer::coordinateOriginToJs() const
     return JsValue::Float64Array(origin);
 }
 
-JsValue TileSubsetLayerRenderer::pickResultsToJs() const
+JsValue TileSubsetLayerRenderer::pickResultsToJs(bool includeReferences) const
 {
     auto results = JsValue::List();
     for (uint32_t index = 0U; index < pickRefs_.size(); ++index) {
         auto item = JsValue::Dict();
+        if (includeReferences) {
+            auto const& reference = pickRefs_[index];
+            item.set("channelOrdinal", JsValue(reference.channelOrdinal));
+            item.set("entryOrdinal", JsValue(reference.entryOrdinal));
+            item.set("endpointRole", JsValue(reference.endpointRole));
+        }
         auto const found = bridgePickResults_.find(index);
         if (found == bridgePickResults_.end()) {
             results.push(item);
@@ -3916,6 +3991,11 @@ NativeJsValue TileSubsetLayerRenderer::renderBridgeResult() const
         {"coordinateOrigin", coordinateOriginToJs()},
         {"pickResults", hasGltfBridge ? pickResultsToJs() : JsValue::List()},
     });
+    if (hasPointCloudRules_) {
+        // Identities were captured in the single entry traversal. Do not repeatedly
+        // scan entries by ordinal, or deserialize the full cloud on the main thread.
+        result.set("pointCloudPicks", pickResultsToJs(true));
+    }
     if (subset_ && subset_->glbAttachmentName())
     {
         result.set(

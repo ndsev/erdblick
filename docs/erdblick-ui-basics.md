@@ -28,6 +28,11 @@ Individual workspace surfaces can be resized without leaving the desktop
 viewport:
 
 
+<!-- mcp:
+title: "Map camera navigation and projection"
+keywords: ["navigate", "zoom", "pan", "rotate", "flat", "2D", "3D", "first person"]
+hint: "Use viewer_navigate to fit known features, native mapTileKeys or WGS84 bounds. For direct camera/projection changes discover view.camera and view.projection; camera angles are radians and destination.alt is a scale-height, not physical elevation. Use a discovered viewId and observe synchronization. Direct camera assignment is unavailable in first-person mode."
+-->
 ## Navigating the Map
 
 You can move around the map using a mix of mouse gestures, keyboard shortcuts, and on-screen controls:
@@ -78,6 +83,11 @@ does not clear caches inside a datasource or refresh other browser sessions.
 
 ![Authorized cache-reset dialog with map ownership](screenshots/26-cache-reset-authorized.png)
 
+<!-- mcp:
+title: "Map layers tile levels and grid"
+keywords: ["map", "layer", "visibility", "AUTO", "tile borders", "grid", "background"]
+hint: "Read view.layers to identify what is visible, then use singular view.layer to assign a complete {visible, level, autoLevel} value. Catalogs may include hidden layers. view.grid controls the independent NDS/XYZ tile grid; view.background selects a discovered background. Search help for \"Style options and presets\" for per-layer presentation."
+-->
 ## Maps, Layers, and Base Content
 
 Use the **Maps & Layers** panel to:
@@ -124,6 +134,11 @@ Tile overlays use these states:
 
 Click the diagnostics indicator to open its progress popover. From there you can jump into the full statistics, log, and export tools. For the detailed workflow, see the [Diagnostics and Status Guide](erdblick-diagnostics.md).
 
+<!-- mcp:
+title: "Coordinate marker"
+keywords: ["coordinates", "marker", "longitude", "latitude", "pin", "WGS84"]
+hint: "Use app.marker for the marker position and visibility. A marker does not move the camera; use viewer_navigate or view.camera when navigation is also requested."
+-->
 ## Coordinate Panel and Marker
 
 - The coordinate panel shows the current cursor position plus derived tile IDs. Click any value to copy it.
@@ -169,6 +184,11 @@ For the feature workflow, continue with the [Feature Inspection Guide](erdblick-
 
 The dedicated [Search and Jump](../../../docs/mv-search.md) guide covers targets, persistent feature-search panels, result visualization, diagnostics, and the query language.
 
+<!-- mcp:
+title: "Viewer preferences and resets"
+keywords: ["preferences", "rendering", "tile budget", "dark mode", "reset", "navigation", "inspection"]
+hint: "Discover app.preferences channels for supported rendering, navigation, inspection and hover settings. Assign complete values while preserving unrelated fields. Some UI preferences, including dark mode, have no semantic state channel; use a fresh viewer_take_snapshot and supported UI controls. Reset actions discard saved state; diagnose the specific problem before using them."
+-->
 ## Preferences and Resets
 
 Open **Edit -> Preferences** to access the main viewer preferences:
@@ -176,11 +196,14 @@ Open **Edit -> Preferences** to access the main viewer preferences:
 - **Max Tiles to Load** limits how much data the current view may page in
 - **Max Inspections** controls how many locked inspection panels can stay open
 - **Location Matches** controls how many place-name search results the palette requests and displays; the default is 10 and the supported range is 1 to 50
+- **Enable location search** under **Inspect & Search** is on by default. Turning it off cancels location-provider queries and hides location entries, including history suggestions, from the palette.
+- **Location boundaries** starts disabled until the fixed terms are accepted. Turning it off removes area highlights and makes location selection navigate to the supplied centrepoint. Enabling it again requires acceptance again. Disclaimer and attribution links sit beside both location toggles; see [Place-Name Location Search](erdblick-search.md#place-name-location-search).
 - **Show coordinates** controls whether the coordinate readout is present and, when configured by the deployment, requests acceptance of its legal terms; it does not hide the marker controls
 - **Hover Labels** controls which feature fields appear above the coordinate readout; each value can use a short display key, which defaults to the final segment of its field expression, and its joined key/value pill follows the inspection value-bubble color, outline, and striping preferences
 - **Tile pull compression** toggles compressed tile downloads
 - **WebGL antialiasing** controls multisample rendering when the browser/device supports it
 - **Semantic layer compositing** is a default-on diagnostic switch. Disabling it recreates the renderer without semantic ordering passes and hides semantic decorations, such as cinematic lane markings, and their picking. It is saved locally, not in shared URLs; other rendering effects remain enabled.
+- **Point clouds** under **Rendering** controls count-based adaptive detail and the rendering working-memory/GPU allowances. The defaults are **6144 MiB** and **3072 MiB**, shared across views. Press **Apply** to validate and apply the complete policy. These settings are saved locally and included in exported state snapshots; they are not added to shared URLs. Disabling adaptive detail requests full geometry subject to memory limits. See [NDS.Live point clouds](erdblick-stylesystem.md#ndslive-point-clouds) for sampling and memory-recovery behavior.
 - **Contact shading** uses final scene depth to darken nearby lower surfaces and can be disabled on slower GPUs
 - **LOD 3 Tile Threshold** controls the default visible-tile-count boundary between stylesheet LOD 2 and LOD 3; styles can override the full LOD ladder
 - **Dark Mode** switches between on, off, and automatic
@@ -194,14 +217,16 @@ search behavior, and rendering controls remain easy to scan:
 
 **Feature zoom clearance** controls the distance left around a feature when zooming to it.
 
-![Inspect and Search preferences](screenshots/preferences-inspection.png)
+Under **Inspect & Search**, **Drill Pick Radius** widens the pixel area used to
+find nearby pick candidates. Under **Rendering**, **Max Tiles to Load** bounds
+the workload when exploring dense maps; it does not change the per-object
+point-cloud sampling quota.
 
-**Drill pick radius** widens the pixel area used to find nearby pick candidates.
-
-![Rendering preferences](screenshots/preferences-rendering.png)
-
-**Max Tiles to Load** bounds the workload when exploring dense maps.
-
+<!-- mcp:
+title: "Hover label fields"
+keywords: ["hover", "HUD", "label", "field", "display key", "speed limit"]
+hint: "Configure app.preferences.hover using schema-grounded field expressions and optional displayKey values. This changes the hover HUD, not permanent map labels. Search help for \"Style labels\" for text drawn on map geometry."
+-->
 ### Hover Labels
 
 The **Hover Labels** tab builds the compact HUD shown while pointing at a map

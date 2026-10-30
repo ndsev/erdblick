@@ -8,6 +8,7 @@
 
 - [Erdblick User Guide](docs/erdblick-user-guide.md) – setup, UI basics, search, inspection, split view, troubleshooting, and more.
 - [Erdblick Development Guide](docs/erdblick-dev-guide.md) – architecture overview, build instructions, tile/rendering pipelines, and debugging tips.
+- [Test Layout and Commands](tests/README.md) – Angular, native and browser suites, fixtures and MapViewer integration.
 
 Those documents now host the detailed instructions that previously lived in this README. Use them as a sitemap when contributing.
 
@@ -42,14 +43,14 @@ To run them locally:
 npm install                          # install dev dependencies (incl. Playwright)
 npx playwright install --with-deps   # install Playwright browsers (once)
 pip install mapget                   # install the latest mapget package
-./ci/run-integration-with-venv-mapget.sh  # runs tests in playwright/tests using mapget serve
+./ci/run-integration-with-venv-mapget.sh  # runs tests in tests/playwright/tests using mapget serve
 ```
 
-The Playwright harness will start `mapget --config test/mapget-integration.yaml serve --allow-post-config --port 9000 --cache-type none --webapp /:static/browser` automatically; 
-ensure a `mapget` binary is available on your PATH (or set `MAPGET_BIN` to override the executable path). 
-The default integration setup uses the Python example datasource from the vendored `mapget` repo
-(`build/_deps/mapget-src/examples/python/datasource.py`) via a `DataSourceProcess` entry in
-`test/mapget-integration.yaml`. If this Python datasource cannot be started (for example, the
+The Playwright harness will start `mapget --config tests/playwright/fixtures/mapget-integration.yaml serve --allow-post-config --port 9000 --cache-type none --webapp /:static/browser` automatically;
+ensure a `mapget` binary is available on your PATH (or set `MAPGET_BIN` to override the executable path).
+The default integration setup uses `tests/playwright/fixtures/datasource.py`
+via a `DataSourceProcess` entry in
+`tests/playwright/fixtures/mapget-integration.yaml`. If this Python datasource cannot be started (for example, the
 `mapget` Python package is missing), `/sources` may be empty and datasource-dependent tests will be
 reported as skipped while generic backend and debug-tile tests still run.
 

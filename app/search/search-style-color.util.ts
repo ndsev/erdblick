@@ -1,7 +1,7 @@
 import type {
     FeatureSearchColorMode,
     FeatureSearchColorStop
-} from "../shared/feature-search-state";
+} from "./search-definition.model";
 
 export type SearchStyleColorMode = "solid" | "gradient" | "categories";
 export type SearchStyleFieldValueKind = "number" | "integer" | "string" | "boolean" | "enum" | "object" | "array" | "unknown";
