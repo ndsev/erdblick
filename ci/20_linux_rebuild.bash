@@ -46,4 +46,6 @@ if [[ -f build/CMakeCache.txt ]]; then
     fi
 fi
 emcmake cmake "${configure_args[@]}"
-cmake --build --preset "$CMAKE_PRESET" -- -j"$(nproc)"
+# Native dependencies and Angular may be built beside other MapViewer worktrees.
+# Honor an explicit budget and keep the default bounded on high-core machines.
+cmake --build --preset "$CMAKE_PRESET" --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-8}"
