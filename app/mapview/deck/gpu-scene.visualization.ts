@@ -756,7 +756,8 @@ export class GpuScene {
   private fatalPresentationFailures = 0;
   private poisoned = false;
   private destroyed = false;
-  private finishGpuRetirement: (() => void) | null = null;
+  private finishGpuRetirement: ((reusableCapacity?: boolean) => void) | null = null;
+  private retiringContributionCapacity = false;
 
   /** Own all persistent vector buffers and semantic lookup tables for one view. */
   constructor(
@@ -1163,7 +1164,7 @@ export class GpuScene {
           // slot during admission would create a tile-shaped hole in unrelated
           // Deck frames that still draw the previous buffer generation.
           this.presentationReleases.push(previous);
-          this.markGpuRetirement();
+          this.markGpuRetirement(true);
           this.changeSceneOrderReferences(previous, -1);
           this.queueContributionLookupClear(previous.contributionSlot);
         }
@@ -1266,7 +1267,7 @@ export class GpuScene {
       if (entry.active) {
         labelsChanged ||= entry.active.labels.length > 0;
         this.presentationReleases.push(entry.active);
-        this.markGpuRetirement();
+        this.markGpuRetirement(true);
         this.changeSceneOrderReferences(entry.active, -1);
         this.queueContributionLookupClear(entry.active.contributionSlot);
         entry.active = null;
@@ -1601,6 +1602,9 @@ export class GpuScene {
       return;
     }
     this.destroyed = true;
+    const finishRetirement = this.finishGpuRetirement ??
+      (this.storesByMaterial.size ? gpuMemoryBudget.beginRetirement() : null);
+    this.finishGpuRetirement = null;
     for (const store of this.storesByMaterial.values()) {
       store.destroy();
     }
@@ -1628,8 +1632,7 @@ export class GpuScene {
     this.pickOwnerSlots = new Uint32Array();
     this.pickIndicesByTileAndFeature.clear();
     this.picks.clear();
-    this.finishGpuRetirement?.();
-    this.finishGpuRetirement = null;
+    finishRetirement?.(true);
   }
 
   get revision(): number {
@@ -1688,12 +1691,16 @@ export class GpuScene {
       this._revision += 1;
       this.requestRedraw("Empty GPU stores reclaimed");
     }
-    this.finishGpuRetirement?.();
+    const finishRetirement = this.finishGpuRetirement;
     this.finishGpuRetirement = null;
+    const reusableCapacity = this.retiringContributionCapacity;
+    this.retiringContributionCapacity = false;
+    finishRetirement?.(reusableCapacity);
   }
 
   /** Publish the lifetime fence before a completed worker can wake admission. */
-  private markGpuRetirement(): void {
+  private markGpuRetirement(reusableCapacity = false): void {
+    this.retiringContributionCapacity ||= reusableCapacity;
     this.finishGpuRetirement ??= gpuMemoryBudget.beginRetirement();
   }
 

@@ -32,7 +32,9 @@ interface ProgressBar {
                     </div>
                 }
                 <div class="diagnostics-loading-bubbles">
-                    <span class="diagnostics-loading-bubble">{{ formatThroughput(bubbles.downstreamBytesPerSecond) }}</span>
+                    <span class="diagnostics-loading-bubble"
+                          pTooltip="Delivered data rate, including server processing and long-poll waits. This is not network bandwidth."
+                          tooltipPosition="top">{{ formatThroughput(bubbles.downstreamBytesPerSecond) }}</span>
                     <span class="diagnostics-loading-bubble">
                         {{ formatCompressionBubble(
                             bubbles.pullCompressionRatioPct,
@@ -41,11 +43,15 @@ interface ProgressBar {
                             bubbles.pullUncompressedBytes
                         ) }}
                     </span>
-                    <span class="diagnostics-loading-bubble">{{ formatInt(bubbles.features) }} Feats.</span>
+                    <span class="diagnostics-loading-bubble"
+                          pTooltip="Source features associated with the current presentations; not the number of visible GPU features."
+                          tooltipPosition="top">{{ formatInt(bubbles.features) }} Source feats.</span>
                     <span class="diagnostics-loading-bubble">{{ formatInt(bubbles.vertices) }} Verts.</span>
                     <span class="diagnostics-loading-bubble">{{ formatInt(bubbles.parseQueueSize) }} ParseQ</span>
                     <span class="diagnostics-loading-bubble">{{ formatInt(bubbles.renderQueueSize) }} RenderQ</span>
-                    <span class="diagnostics-loading-bubble">{{ formatFrameTimeMs(bubbles.frameTimeMs) }}</span>
+                    <span class="diagnostics-loading-bubble"
+                          pTooltip="90th percentile of recent completed-frame intervals, including on-demand redraw gaps up to two seconds. Not GPU render time or average FPS."
+                          tooltipPosition="top">{{ formatFrameTimeMs(bubbles.frameTimeMs) }}</span>
                     <span class="diagnostics-loading-bubble">{{ formatSeconds(bubbles.renderSeconds) }}</span>
                 </div>
             </div>
@@ -163,13 +169,12 @@ export class DiagnosticsProgressComponent {
         return `${safe.toFixed(1)} s`;
     }
 
-    /** Formats frame time together with its derived FPS. */
+    /** Formats the measured frame interval without presenting idle gaps as FPS. */
     formatFrameTimeMs(frameTimeMs: number): string {
         const safeMs = Math.max(0, frameTimeMs || 0);
         if (safeMs <= 0) {
             return 'Frame n/a';
         }
-        const fps = 1000 / safeMs;
-        return `${safeMs.toFixed(1)} ms (${fps.toFixed(1)} FPS)`;
+        return `Frame p90 ${safeMs.toFixed(1)} ms`;
     }
 }

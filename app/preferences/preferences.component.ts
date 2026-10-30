@@ -1,3 +1,6 @@
+import {NgModel} from "@angular/forms";
+import {ToggleSwitchChangeEvent} from "primeng/toggleswitch";
+import {LocationPolicyService} from "../geolocation/location-policy.service";
 import {
     Component,
     OnDestroy,
@@ -279,6 +282,33 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                                           [disabled]="!locationSearchResultLimitChanged"></p-button>
                             </div>
                         </div>
+                        <section data-testid="location-search-preferences">
+                            <div class="button-container" data-testid="location-search-setting">
+                                <div>
+                                    <label for="location-search-enabled">Enable location search</label>
+                                    <div class="location-preference-links">
+                                        <a href="#location-disclaimer" (click)="$event.preventDefault(); locationPolicy.showDisclaimer()">Disclaimer</a>
+                                        · <location-attribution />
+                                    </div>
+                                </div>
+                                <p-toggleswitch inputId="location-search-enabled"
+                                               [ngModel]="locationSearch.locationSearchEnabled"
+                                               (ngModelChange)="locationPolicy.setSearchEnabled($event)" />
+                            </div>
+                            <div class="button-container" data-testid="location-boundaries-setting">
+                                <div>
+                                    <label for="location-boundaries-enabled">Location boundaries</label>
+                                    <div class="location-preference-links">
+                                        <a href="#location-disclaimer" (click)="$event.preventDefault(); locationPolicy.showDisclaimer()">Disclaimer</a>
+                                        · <location-attribution />
+                                    </div>
+                                </div>
+                                <!-- Consent can reject a toggle; keep the form control at the accepted state. -->
+                                <p-toggleswitch inputId="location-boundaries-enabled" #locationBoundaryModel="ngModel"
+                                               [ngModel]="locationPolicy.boundariesAccepted"
+                                               (onChange)="onLocationBoundariesChange($event, locationBoundaryModel)" />
+                            </div>
+                        </section>
                     </p-tabpanel>
 
                     <p-tabpanel value="hover-labels">
@@ -365,6 +395,31 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                     </p-tabpanel>
 
                     <p-tabpanel value="rendering">
+                        <section data-testid="rendering-memory-preferences">
+                            <h3>Memory</h3>
+                            <div class="button-container">
+                                <label for="gpu-memory-management">Manage GPU memory</label>
+                                <p-toggleswitch inputId="gpu-memory-management"
+                                               [ngModel]="viewSettings.gpuMemoryManagementEnabledState.getValue()"
+                                               (ngModelChange)="viewSettings.gpuMemoryManagementEnabledState.next($event)" />
+                            </div>
+                            <p>Pause work that exceeds the GPU allowance and resume it when capacity is freed.
+                                Turn this off to render without an application GPU allowance.</p>
+                            <div class="slider-container">
+                                <label for="point-cloud-gpu-memory">GPU allocation allowance (MiB)</label>
+                                <input id="point-cloud-gpu-memory" type="number" pInputText
+                                       min="16" max="8192" [(ngModel)]="pointCloudPolicyDraft.gpuMemoryMiB"
+                                       [disabled]="!viewSettings.gpuMemoryManagementEnabledState.getValue()" />
+                            </div>
+                            <div class="slider-container">
+                                <label for="point-cloud-working-memory">Rendering working memory (MiB)</label>
+                                <input id="point-cloud-working-memory" type="number" pInputText
+                                       min="32" max="16384" [(ngModel)]="pointCloudPolicyDraft.workingMemoryMiB" />
+                            </div>
+                            <small>GPU allowance applies to all map geometry. Working memory applies to point clouds.
+                                Both are shared across views. Apply numeric changes below.</small>
+                        </section>
+                        <p-divider></p-divider>
                         <section data-testid="point-cloud-preferences">
                             <h3>Point clouds</h3>
                             <div class="button-container">
@@ -372,27 +427,8 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                                 <p-toggleswitch inputId="point-cloud-downsampling"
                                                [(ngModel)]="pointCloudPolicyDraft.enabled" />
                             </div>
-                            <div class="slider-container">
-                                <label for="point-cloud-detail">Point spacing (pixels)</label>
-                                <input id="point-cloud-detail" type="number" pInputText
-                                       min="0.5" max="32" step="0.5"
-                                       [(ngModel)]="pointCloudPolicyDraft.detailPixels" />
-                                <small>Lower spacing keeps more detail. Full detail still respects memory limits.</small>
-                            </div>
-                            <details>
-                                <summary>Memory limits</summary>
-                                <div class="slider-container">
-                                    <label for="point-cloud-working-memory">Rendering working memory (MiB)</label>
-                                    <input id="point-cloud-working-memory" type="number" pInputText
-                                           min="32" max="4096" [(ngModel)]="pointCloudPolicyDraft.workingMemoryMiB" />
-                                </div>
-                                <div class="slider-container">
-                                    <label for="point-cloud-gpu-memory">GPU allocation allowance (MiB)</label>
-                                    <input id="point-cloud-gpu-memory" type="number" pInputText
-                                           min="16" max="2048" [(ngModel)]="pointCloudPolicyDraft.gpuMemoryMiB" />
-                                </div>
-                                <small>Shared across map views. These settings do not change server limits.</small>
-                            </details>
+                            <p>Objects below 14 million points keep every point. Larger objects are
+                                progressively sampled to just below that count. This setting is independent of GPU memory management.</p>
                             <p-button label="Apply" data-testid="point-cloud-apply"
                                       [disabled]="!pointCloudPolicyChanged" (click)="applyPointCloudPolicy()" />
                         </section>
@@ -590,6 +626,7 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
             </div>
         </app-dialog>
     `,
+    styles: [`.location-preference-links { font-size: .85em; margin-top: .3rem; }`],
     standalone: false
 })
 /**
@@ -672,6 +709,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         public styleService: MapStyleService,
         public stateService: AppStateService,
         public coordinatesPolicy: CoordinatesPolicyService,
+        public locationPolicy: LocationPolicyService,
         private searchSchema: FeatureSearchSchemaService,
         private dialogStack: DialogStackService,
         public readonly layout: LayoutService,
@@ -818,6 +856,13 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         const saved = (localStorage.getItem(this.DARK_MODE_KEY) as 'off' | 'on' | 'auto' | null);
         this.darkModeSetting = saved ?? 'auto';
         this.applyDarkModeSetting(this.darkModeSetting);
+    }
+
+    /** Reverts the optimistic form and native checkbox values until consent is granted. */
+    onLocationBoundariesChange(event: ToggleSwitchChangeEvent, model: NgModel): void {
+        this.locationPolicy.requestBoundaries(event.checked);
+        if (event.checked) event.originalEvent.preventDefault();
+        model.reset(this.locationPolicy.boundariesAccepted);
     }
 
     /** Releases dialog-owned subscriptions and media-query listeners. */
@@ -1027,7 +1072,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     applyPointCloudPolicy(): void {
         const parsed = pointCloudPolicySchema.safeParse(this.pointCloudPolicyDraft);
         if (!parsed.success) {
-            this.messageService.showError("Point spacing must be 0.5–32 pixels, working memory 32–4096 MiB, and GPU allowance 16–2048 MiB.");
+            this.messageService.showError("Working memory must be 32–16384 MiB and GPU allowance 16–8192 MiB.");
             return;
         }
         this.mapService.setPointCloudPolicy(parsed.data);

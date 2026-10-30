@@ -67,7 +67,13 @@ The statistics dialog is the main place to inspect:
 - backend progress
 - parse and render timings
 - per-style rendering cost
-- frame-time and FPS
+- recent frame intervals
+
+The progress bubbles show delivered data rate (including backend processing and
+long-poll waits), source-feature counts, and the 90th percentile of recent
+completed-frame intervals. Frame intervals include on-demand redraw gaps up to
+two seconds; they are not GPU render time or average FPS. A low delivered data
+rate alone does not establish a network problem.
 
 Under **Load+Convert**, the **Age** row summarizes conversion-age samples for
 the currently filtered loaded tiles:
@@ -79,6 +85,8 @@ the currently filtered loaded tiles:
 The Peak, Average, and Min columns are available for every performance metric.
 
 ![Performance statistics for the Munich city scene](screenshots/performance.png)
+
+This screenshot predates the source-feature and frame-interval labels described above.
 
 Use the **layer and tile filters** to narrow the measurements to the data
 you are investigating. Values describe the current session, not a benchmark.

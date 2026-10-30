@@ -72,6 +72,6 @@ describe("SearchStyleRuleEditorComponent", () => {
         expect(rule.visualization).toEqual(["label"]);
         component.setVisualization(rule, ["point"]);
         expect(component.sizeValue(rule)).toBe(20);
-        expect(component.sizeLabel(rule)).toBe("Radius");
+        expect(component.sizeLabel(rule)).toBe("Diameter");
     });
 });

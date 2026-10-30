@@ -31,7 +31,7 @@ function createView() {
         { state: {} } as never,
         {} as never,
         {} as never,
-        {} as never, Object.assign({} as never, { viewIdAt: (index: number) => String(index), viewIds: ["0", "1"] }) as never, { state: {} } as never, {} as never as never
+        {} as never, Object.assign({} as never, { viewIdAt: (index: number) => String(index), viewIds: ["0", "1"] }) as never, { state: {} } as never, {} as never as never, {} as never
     );
     return view;
 }
@@ -50,7 +50,7 @@ function create3DView() {
         { state: {} } as never,
         {} as never,
         {} as never,
-        {} as never, Object.assign({} as never, { viewIdAt: (index: number) => String(index), viewIds: ["0", "1"] }) as never, { state: {} } as never, {} as never as never
+        {} as never, Object.assign({} as never, { viewIdAt: (index: number) => String(index), viewIds: ["0", "1"] }) as never, { state: {} } as never, {} as never as never, {} as never
     );
 }
 

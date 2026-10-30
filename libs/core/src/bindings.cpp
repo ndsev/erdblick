@@ -38,6 +38,7 @@ const char *__asan_default_options() {
 #include "visualization.h"
 #include "parser.h"
 #include "style.h"
+#include "style-authoring.h"
 #include "testdataprovider.h"
 #include "inspection.h"
 #include "geometry.h"
@@ -594,6 +595,7 @@ uint16_t tileLayerStreamProtocolMinor()
 
 EMSCRIPTEN_BINDINGS(erdblick)
 {
+    em::function("styleAuthoringSchemaJson", &styleAuthoringSchemaJson);
     // Activate this to see a lot more output from the WASM lib.
     // mapget::log().set_level(spdlog::level::debug);
 

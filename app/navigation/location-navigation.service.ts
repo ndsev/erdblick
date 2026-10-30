@@ -49,8 +49,11 @@ export class LocationNavigationService implements OnDestroy, AppActionContributo
         private readonly inspections: InspectionSelectionService,
         private readonly zone: NgZone
     ) {
-        this.boundaryFeedback = views.locationBoundaryUnavailableTopic.subscribe(() =>
-            messages.showInfo("The location boundary could not be displayed. Showing its bounding extent."));
+        this.boundaryFeedback = views.locationBoundaryUnavailableTopic.subscribe(() => {
+            if (locations.state.locationBoundariesEnabled)
+                messages.showInfo("The location boundary could not be displayed. Showing its bounding extent.");
+        });
+        this.boundaryFeedback.add(locations.state.locationPolicyChanges.subscribe(() => this.cancel()));
     }
 
     /** Releases the tab-level feedback subscription together with pending navigation. */
@@ -68,6 +71,7 @@ export class LocationNavigationService implements OnDestroy, AppActionContributo
     /** Resolves fresh selections and saved identities through exactly the same path. */
     navigate(actionId: string, payload?: unknown): void {
         this.cancel();
+        if (!this.locations.state.locationSearchEnabled) return;
         const targetView = this.viewSettings.focusedView;
         const target = this.views.captureView(targetView);
         const renderer = target ? this.views.resolveCapturedView(target) : undefined;
@@ -122,6 +126,7 @@ export class LocationNavigationService implements OnDestroy, AppActionContributo
 
     /** Publishes a location result after all asynchronous ownership checks have completed. */
     private commit(result: ResolvedLocationNavigation, targetView: number): void {
+        if (!this.locations.state.locationSearchEnabled || (result.area && !this.locations.state.locationBoundariesEnabled)) return;
         if (result.error) { this.messages.showError(result.error); return; }
         if (result.area) this.views.moveToLocationAreaTopic.next({ targetView, area: result.area });
         else if (result.point) {
@@ -308,6 +313,7 @@ export class LocationNavigationService implements OnDestroy, AppActionContributo
         query: string,
         history?: ActionCandidateHistory
     ): AppActionCandidate<{ actionId: string; payload?: unknown }>[] {
+        if (!this.locations.state.locationSearchEnabled) return [];
         const saved = normalizeLocationSearchPayload(history?.payload);
         const matches = saved ? [saved] : query.trim() === this.suggestionQuery ? this.suggestions : [];
         const candidates: AppActionCandidate<{ actionId: string; payload?: unknown }>[] = matches.map(

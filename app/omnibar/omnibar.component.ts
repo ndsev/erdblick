@@ -9,7 +9,9 @@ import {
     ViewChild
 } from "@angular/core";
 import {
-    debounce,
+    delay,
+    map,
+    of,
     debounceTime,
     distinctUntilChanged,
     Subject,
@@ -264,25 +266,27 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
         }));
 
         this.subscriptions.add(this.locationSearchQueryChanged.pipe(
-            debounce(() => timer(this.locationSearch.debounceMs)),
-            switchMap(query => this.locationSearch.search(query, this.locationSearch.state.locationSearchResultLimit))
-        ).subscribe(matches => {
-            const completedQuery = this.inputValue.trim();
-            // A cached provider can complete synchronously while Angular is
-            // checking the omnibar-menu ngFor inputs. Publish the replacement
-            // in the next task and discard it if the input has moved on.
-            setTimeout(() => {
-                if (this.destroyed ||
-                    this.inputValue.trim() !== completedQuery ||
-                    !this.shouldRequestLocationSearch(this.inputValue)) {
-                    return;
-                }
-                this.locationNavigation.updateSuggestions(completedQuery, matches);
-                this.setCurrentCandidates(this.currentCandidates());
-                this.reloadHistory();
-                this.refreshActionMenu();
-                this.changeDetectorRef.markForCheck();
-            }, 0);
+            switchMap(query => query ? timer(this.locationSearch.debounceMs).pipe(
+                switchMap(() => this.locationSearch.search(query, this.locationSearch.state.locationSearchResultLimit)),
+                delay(0),
+                map(matches => ({query, matches}))
+            ) : of({query, matches: []}))
+        ).subscribe(({query, matches}) => {
+            // Deferred cached results remain cancellable when input or availability changes.
+            if (this.destroyed || this.inputValue.trim() !== query ||
+                !this.shouldRequestLocationSearch(this.inputValue)) return;
+            this.locationNavigation.updateSuggestions(query, matches);
+            this.setCurrentCandidates(this.currentCandidates());
+            this.reloadHistory();
+            this.refreshActionMenu();
+            this.changeDetectorRef.markForCheck();
+        }));
+
+        this.subscriptions.add(this.locationSearch.state.locationSearchEnabledState.subscribe(() => {
+            this.updateLocationSearchQuery(this.inputValue);
+            this.reloadHistory();
+            this.refreshActionMenu();
+            this.changeDetectorRef.markForCheck();
         }));
 
         this.subscriptions.add(this.locationSearch.state.locationSearchResultLimitState.subscribe(() => {
@@ -708,12 +712,12 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
     private updateLocationSearchQuery(value: string): void {
         this.locationNavigation.updateSuggestions(value.trim(), []);
         this.setCurrentCandidates(this.currentCandidates());
-        if (this.shouldRequestLocationSearch(value)) this.locationSearchQueryChanged.next(value.trim());
+        this.locationSearchQueryChanged.next(this.shouldRequestLocationSearch(value) ? value.trim() : "");
     }
 
     /** Returns whether the current input is suitable for the configured place-name providers. */
     private shouldRequestLocationSearch(value: string): boolean {
-        return isSupportedLocationSearchQuery(value);
+        return this.locationSearch.state.locationSearchEnabled && isSupportedLocationSearchQuery(value);
     }
 
     /** Refreshes action menu state from the current input value. */
@@ -733,12 +737,14 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
     /** Refreshes the history suggestions shown in the action menu. */
     private refreshVisibleHistory() {
         const value = this.inputValue;
+        const availableHistory = this.history.filter(entry => this.locationSearch.state.locationSearchEnabled ||
+            !this.locationSearch.isLocationTargetId(entry.actionId));
         if (!value) {
-            this.visibleHistory = this.history;
+            this.visibleHistory = availableHistory;
             return;
         }
         this.visibleHistory = Object.values(
-            this.history.reduce((acc, obj) => {
+            availableHistory.reduce((acc, obj) => {
                 if (obj.input.includes(value)) {
                     const key = historyEntryDedupeKey(obj);
                     if (!acc[key]) {

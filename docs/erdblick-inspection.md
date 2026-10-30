@@ -240,7 +240,8 @@ Between locked panels, dock/undock support, validity-aware hovering, and SourceD
 
 ### Incoming relations
 
-Features with eligible schema declarations show an **Incoming Relations** section.
+Features with eligible schema declarations show an **Incoming Relations** section before
+**Geometry**, which remains the last section both during loading and after completion.
 Ordinary inspection appears immediately; a spinner marks only the incoming section while
 its request runs. The section shows source features and their original relations, including
 validity and SourceData links. Source rows use the source layer for hover and search actions.
@@ -252,3 +253,8 @@ no matches for those declared families. Partial results show diagnostics, and Re
 the section. Changing the selection or datasource catalog cancels stale work; finite
 provider lifetimes refresh the section. Conventional relations stay in the ordinary
 Relations section. Feature GeoJSON export continues to export the selected feature.
+
+For NDS.Live legacy RoadSurface associations, select a LaneGroup to see incoming
+`relatedLaneGroup` relations or an explicitly referenced Lane to see `relatedLane` relations.
+Selecting the RoadSurface itself shows those same stored relations in its ordinary
+Relations section. A group-only association does not apply implicitly to every member lane.

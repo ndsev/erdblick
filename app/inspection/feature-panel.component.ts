@@ -226,7 +226,11 @@ export class FeaturePanelComponent implements OnDestroy {
                 this.inspectionFeature(featureWrapper).peek((feature: Feature) => {
                     const model = feature.inspectionModel() as InspectionModelData[];
                     const incoming = this.incomingSection(featureWrapper);
-                    if (incoming) model.push(incoming);
+                    if (incoming) {
+                        // Keep Geometry last, including while incoming relations are loading.
+                        const geometryIndex = model.findIndex(section => section.geoJsonPath === "geometry");
+                        model.splice(geometryIndex < 0 ? model.length : geometryIndex, 0, incoming);
+                    }
                     selectedFeatureInspectionModels.push(model);
                 });
             } catch (error) {

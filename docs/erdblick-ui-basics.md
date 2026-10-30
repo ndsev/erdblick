@@ -196,12 +196,14 @@ Open **Edit -> Preferences** to access the main viewer preferences:
 - **Max Tiles to Load** limits how much data the current view may page in
 - **Max Inspections** controls how many locked inspection panels can stay open
 - **Location Matches** controls how many place-name search results the palette requests and displays; the default is 10 and the supported range is 1 to 50
+- **Enable location search** under **Inspect & Search** is on by default. Turning it off cancels location-provider queries and hides location entries, including history suggestions, from the palette.
+- **Location boundaries** starts disabled until the fixed terms are accepted. Turning it off removes area highlights and makes location selection navigate to the supplied centrepoint. Enabling it again requires acceptance again. Disclaimer and attribution links sit beside both location toggles; see [Place-Name Location Search](erdblick-search.md#place-name-location-search).
 - **Show coordinates** controls whether the coordinate readout is present and, when configured by the deployment, requests acceptance of its legal terms; it does not hide the marker controls
 - **Hover Labels** controls which feature fields appear above the coordinate readout; each value can use a short display key, which defaults to the final segment of its field expression, and its joined key/value pill follows the inspection value-bubble color, outline, and striping preferences
 - **Tile pull compression** toggles compressed tile downloads
 - **WebGL antialiasing** controls multisample rendering when the browser/device supports it
 - **Semantic layer compositing** is a default-on diagnostic switch. Disabling it recreates the renderer without semantic ordering passes and hides semantic decorations, such as cinematic lane markings, and their picking. It is saved locally, not in shared URLs; other rendering effects remain enabled.
-- **Point clouds** under **Rendering** controls adaptive point spacing and shared CPU/GPU allowances. Press **Apply** to validate and apply the complete policy. These settings are saved locally and included in exported state snapshots; they are not added to shared URLs. Disabling adaptive detail requests full geometry subject to memory limits. A source preview remains approximate.
+- **Point clouds** under **Rendering** controls count-based adaptive detail and the rendering working-memory/GPU allowances. The defaults are **6144 MiB** and **3072 MiB**, shared across views. Press **Apply** to validate and apply the complete policy. These settings are saved locally and included in exported state snapshots; they are not added to shared URLs. Disabling adaptive detail requests full geometry subject to memory limits. See [NDS.Live point clouds](erdblick-stylesystem.md#ndslive-point-clouds) for sampling and memory-recovery behavior.
 - **Contact shading** uses final scene depth to darken nearby lower surfaces and can be disabled on slower GPUs
 - **LOD 3 Tile Threshold** controls the default visible-tile-count boundary between stylesheet LOD 2 and LOD 3; styles can override the full LOD ladder
 - **Dark Mode** switches between on, off, and automatic
@@ -215,13 +217,10 @@ search behavior, and rendering controls remain easy to scan:
 
 **Feature zoom clearance** controls the distance left around a feature when zooming to it.
 
-![Inspect and Search preferences](screenshots/preferences-inspection.png)
-
-**Drill pick radius** widens the pixel area used to find nearby pick candidates.
-
-![Rendering preferences](screenshots/preferences-rendering.png)
-
-**Max Tiles to Load** bounds the workload when exploring dense maps.
+Under **Inspect & Search**, **Drill Pick Radius** widens the pixel area used to
+find nearby pick candidates. Under **Rendering**, **Max Tiles to Load** bounds
+the workload when exploring dense maps; it does not change the per-object
+point-cloud sampling quota.
 
 <!-- mcp:
 title: "Hover label fields"

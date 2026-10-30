@@ -1,52 +1,84 @@
+import {DEFAULT_POINT_CLOUD_POLICY} from "../point-cloud-policy.model";
+import {Subject} from "rxjs";
+
+/** A recoverable admission failure; retry when capacity or render demand changes. */
+export class GpuAllocationError extends Error {
+    /** Record the rejected allocation size for diagnostics, not as a permanent retry threshold. */
+    constructor(readonly requiredBytes: number) {
+        super("GPU allocation allowance exhausted. Some data is paused; hide data or raise the GPU allowance.");
+        this.name = "GpuAllocationError";
+    }
+}
+
 /**
  * Capacity accounting and reservation values shared by GPU scene owners.
  * The ledger models admission and retirement overlap; actual device buffers
  * are allocated and destroyed by their rendering owners.
  */
-/** Account requested GPU capacity across scenes, including replacement overlap. */
 export class GpuMemoryBudget {
+    /** Notify paused renderers after a presentation has released its buffers or reusable ranges. */
+    readonly reclaimed = new Subject<void>();
     private allocated = 0;
     private reserved = 0;
-    private external = 0;
+    private trackedTotal: {readonly count: number} | null = null;
     private active: GpuMemoryReservation | null = null;
     private retiring = 0;
     private retirementFinished: Promise<void> | null = null;
     private finishRetirement: (() => void) | null = null;
+    private reclaimedCapacityVersion = 0;
+    private enabled = true;
     /** Create an application allowance in bytes, independent of physical VRAM capacity. */
-    constructor(private limit = 256 * 1024 * 1024) {}
+    constructor(private limit = DEFAULT_POINT_CLOUD_POLICY.gpuMemoryMiB * 1024 * 1024) {}
 
     /** Lowering a limit blocks new allocation; owners reclaim their existing buffers. */
     setLimit(bytes: number): void {
         if (!Number.isSafeInteger(bytes) || bytes < 0) throw new Error("Invalid GPU memory allowance.");
         this.limit = bytes;
     }
-    /** luma's default statistics are shared; account their total once, not once per view. */
-    observeTrackedTotal(bytes: number): void {
-        if (Number.isFinite(bytes)) this.external = Math.max(0, bytes - this.allocated);
+    /** Bypass the application allowance while retaining live allocation accounting. */
+    setEnabled(enabled: boolean): void {
+        this.enabled = enabled;
+    }
+    /** Retain luma's shared live counter once, including resources owned outside primitive stores. */
+    observeTrackedTotal(counter: {readonly count: number}): void {
+        this.trackedTotal = counter;
     }
     /** Remaining capacity after live buffers, reservations and other tracked luma resources. */
-    get availableBytes(): number { return Math.max(0, this.limit - this.allocated - this.reserved - this.external); }
+    get availableBytes(): number {
+        const tracked = this.trackedTotal?.count ?? 0;
+        const external = Number.isFinite(tracked) ? Math.max(0, tracked - this.allocated) : 0;
+        return Math.max(0, (this.enabled ? this.limit : Number.MAX_SAFE_INTEGER) -
+            this.allocated - this.reserved - external);
+    }
     /** Physical primitive-buffer capacity, including retained replacement buffers. */
     get allocatedBytes(): number { return this.allocated; }
     /** Unconsumed capacity promised to running render jobs. */
     get reservedBytes(): number { return this.reserved; }
 
+    /** Capacity usable by the current upload, including its own reserved headroom. */
+    get allocationAvailableBytes(): number { return this.availableBytes + (this.active?.remaining ?? 0); }
+
     /** Pending scene reclamation, completed after Deck has rebound its models. */
     get retirement(): Promise<void> | null { return this.retirementFinished; }
 
+    /** Changes when installed ranges become reusable, even if their shared buffer stays allocated. */
+    get reclamationVersion(): number { return this.reclaimedCapacityVersion; }
+
     /** Keep admission pending until superseded presentation resources can be freed. */
-    beginRetirement(): () => void {
+    beginRetirement(): (reusableCapacity?: boolean) => void {
         if (!this.retiring++) {
             this.retirementFinished = new Promise(resolve => { this.finishRetirement = resolve; });
         }
         let finished = false;
-        return () => {
+        return (reusableCapacity = false) => {
             if (finished) return;
             finished = true;
+            if (reusableCapacity) ++this.reclaimedCapacityVersion;
             if (!--this.retiring) {
                 this.retirementFinished = null;
                 this.finishRetirement?.();
                 this.finishRetirement = null;
+                this.reclaimed.next();
             }
         };
     }
@@ -81,8 +113,8 @@ export class GpuMemoryBudget {
     }
     /** Reject invalid arithmetic or an allocation above the remaining allowance. */
     private check(bytes: number): void {
-        if (!Number.isSafeInteger(bytes) || bytes < 0 || bytes > this.availableBytes)
-            throw new Error("GPU allocation allowance exhausted. Reduce point-cloud detail or visible data.");
+        if (!Number.isSafeInteger(bytes) || bytes < 0) throw new Error("Invalid GPU allocation size.");
+        if (bytes > this.availableBytes) throw new GpuAllocationError(bytes);
     }
 }
 

@@ -11,13 +11,23 @@ import type {FeatureSearchStyleRule} from "../../../app/search/search-definition
 import {
     canonicalLayerAffinityExpression,
     canonicalSearchStyleFilename,
-    convertSearchStyleRulesToYaml,
+    convertSearchStyleRulesToYaml as exportSearchStyle,
+    featureSearchRulesToStyleRules,
     decodeCanonicalLayerAffinity,
     projectStyleSourceForSearch,
-    projectStyleSourceToQuick,
-    updateStyleSourceFromQuick,
     updateStyleSourceMetadata
 } from "../../../app/search/search-style-sheet.converter";
+
+/** Supplies the explicit unfiltered feature membership used by the codec fixtures. */
+function convertSearchStyleRulesToYaml(
+    options: Parameters<typeof exportSearchStyle>[0],
+    rules: Parameters<typeof exportSearchStyle>[1],
+    context: Parameters<typeof exportSearchStyle>[2] = {
+        concreteScope: "feature", backendQuery: "", selectedFeatureTypes: []
+    }
+) {
+    return exportSearchStyle(options, rules, context);
+}
 
 describe("search style sheet codec", () => {
     beforeAll(async () => {
@@ -84,10 +94,10 @@ describe("search style sheet codec", () => {
         }]);
         expect(parsed.rules).toHaveLength(3);
         expect(parsed.rules[0]).not.toHaveProperty("all-of");
-        expect(parsed.rules[0]).not.toHaveProperty("scope");
+        expect(parsed.rules[0].scope).toBe("feature");
         expect(parsed.rules[0].geometry).toEqual(["line"]);
         expect(parsed.rules[0]["z-index"]).toBe(Number.MAX_SAFE_INTEGER);
-        expect(parsed.rules[0].filter).toBe("showSearchStyle == true and (speed >= 80)");
+        expect(parsed.rules[0].filter).toBe("showSearchStyle == true and (any(speed >= 80))");
         expect(parsed.rules[1].filter).toBe("showSearchStyle == true");
         expect(parsed.rules[1].width).toBe(8);
         expect(parsed.rules[2]["label-background"]).toBe(true);
@@ -116,7 +126,28 @@ describe("search style sheet codec", () => {
         style.delete();
     });
 
-    it("round-trips canonical YAML through the detached search projection without filter drift", () => {
+    it.each(["feature", "attribute"] as const)("exports the live %s membership and native validity defaults", concreteScope => {
+        const context = {concreteScope, backendQuery: "speedLimitKmh == 80",
+            selectedFeatureTypes: ["Road", "Lane", "Road"]};
+        const saved = convertSearchStyleRulesToYaml(saveOptions("Scoped"), rules, context);
+        const parsed = load(saved.source) as any;
+        const live = featureSearchRulesToStyleRules(rules, context);
+        const key = concreteScope === "attribute" ? "attribute-filter" : "filter";
+        const typeField = concreteScope === "attribute" ? "$feature.typeId" : "typeId";
+        expect(parsed.rules[0].scope).toBe(concreteScope);
+        expect(parsed.rules[0][key]).toBe(`showSearchStyle == true and (${live[0][key]})`);
+        expect(parsed.rules[0][key]).toContain('any(speedLimitKmh == 80)');
+        expect(parsed.rules[0][key]).toContain(`any(${typeField} == "Road" or ${typeField} == "Lane")`);
+        expect(parsed.rules[0]).not.toHaveProperty("attribute-validity-geom");
+        if (concreteScope === "attribute") expect(parsed.rules[0]).not.toHaveProperty("filter");
+        const style = uint8ArrayToWasm(buffer => new coreLib.FeatureLayerStyle(buffer),
+            new TextEncoder().encode(saved.source));
+        try {
+            expect(style.isValid(), JSON.stringify(style.validationReport())).toBe(true);
+        } finally { style.delete(); }
+    });
+
+    it("retains captured predicates when reusing a saved style in another search", () => {
         const generated = convertSearchStyleRulesToYaml(saveOptions("Round trip"), rules);
         const projected = projectStyleSourceForSearch(generated.source, "feature");
         const regenerated = convertSearchStyleRulesToYaml(saveOptions("Round trip copy"), projected.rules);
@@ -124,83 +155,13 @@ describe("search style sheet codec", () => {
         const second = load(regenerated.source) as any;
 
         expect(projected.omissions).toEqual([]);
-        expect(second.rules).toEqual(first.rules);
+        expect(projected.rules[0].filter[0].field).toBe("any(speed >= 80)");
+        expect(second.rules[0].filter).toContain("any(any(speed >= 80))");
+        expect(second.rules.map((rule: any) => rule.color)).toEqual(first.rules.map((rule: any) => rule.color));
     });
 
-    it("keeps the generated layer-option gate stable but out of Quick and detached search rules", () => {
-        const generated = convertSearchStyleRulesToYaml(saveOptions("Gated"), rules);
-        const projection = projectStyleSourceToQuick(generated.source);
 
-        expect(projection.usesSearchStyleVisibilityOption).toBe(true);
-        expect(projection.editableRules).toHaveLength(3);
-        expect(projection.editableRules[0].rule.filter).toEqual([{
-            field: "speed >= 80",
-            op: "=",
-            value: true,
-            customExpression: true
-        }]);
-        expect(projection.editableRules[1].rule.filter).toEqual([]);
 
-        const updates = projection.editableRules.map(projected => ({
-            sourceIndex: projected.sourceIndex,
-            rule: structuredClone(projected.rule)
-        }));
-        updates[0].rule.filter[0].field = "speed >= 90";
-        const addedRule = structuredClone(projection.editableRules[1].rule);
-        const updated = updateStyleSourceFromQuick(generated.source, projection, [
-            ...updates,
-            {rule: addedRule}
-        ]);
-        const parsed = load(updated) as any;
-
-        expect(parsed.options).toEqual([{
-            label: "Show Gated",
-            id: "showSearchStyle",
-            type: "bool",
-            default: true
-        }]);
-        expect(parsed.rules[0].filter).toBe("showSearchStyle == true and (speed >= 90)");
-        expect(parsed.rules.at(-1).filter).toBe("showSearchStyle == true");
-
-        const detached = projectStyleSourceForSearch(updated, "feature");
-        expect(detached.omissions).toEqual([]);
-        expect(detached.rules[0].filter[0].field).toBe("speed >= 90");
-        expect(detached.rules.at(-1)?.filter).toEqual([]);
-    });
-
-    it("projects the all-geometry rule shape as one Quick rule independently of style options", () => {
-        const projection = projectStyleSourceToQuick(`
-name: Search Style
-category: search
-version: 2
-default: true
-rules:
-  - geometry: [point, line, polygon, mesh, aabb, gltf]
-    color: '#ea4336'
-    width: 5
-    opacity: 0.6
-layer: ^(Road)$
-`);
-
-        expect(projection.totalRuleCount).toBe(1);
-        expect(projection.editableRules).toHaveLength(1);
-        expect(projection.editableRules[0].rule.geometry).toEqual(["any"]);
-        expect(projection.usesSearchStyleVisibilityOption).toBe(false);
-    });
-
-    it("round-trips a combined non-point geometry rule as one flat style rule", () => {
-        const generated = convertSearchStyleRulesToYaml(saveOptions("Combined geometry"), [{
-            geometry: ["line", "surface"],
-            filter: [],
-            color: {mode: "solid", color: "#123456"},
-            width: 5
-        }]);
-        const parsed = load(generated.source) as any;
-        const projection = projectStyleSourceToQuick(generated.source);
-
-        expect(parsed.rules[0].geometry).toEqual(["line", "polygon", "mesh", "aabb", "gltf"]);
-        expect(projection.editableRules[0].rule.geometry).toEqual(["line", "surface"]);
-    });
 
     it("does not strip a visibility-like prefix that does not gate the complete filter", () => {
         const source = `
@@ -214,9 +175,9 @@ rules:
     filter: 'showSearchStyle == true and (kind == "a") or (kind == "b")'
     color: '#ea4336'
 `;
-        const projection = projectStyleSourceToQuick(source);
+        const projection = projectStyleSourceForSearch(source, "feature");
 
-        expect(projection.editableRules[0].rule.filter[0].field)
+        expect(projection.rules[0].filter[0].field)
             .toBe('showSearchStyle == true and (kind == "a") or (kind == "b")');
     });
 
@@ -279,13 +240,6 @@ rules:
   - geometry: [line] # retained rule comment
     color: "#ff0000"
 `;
-        const projection = projectStyleSourceToQuick(source);
-
-        expect(projection.name).toBe("Original");
-        expect(projection.layerAffinity).toEqual({
-            kind: "exact",
-            layerIds: [...exactIds].sort()
-        });
         expect(decodeCanonicalLayerAffinity(exactExpression)).toEqual([...exactIds].sort());
         expect(decodeCanonicalLayerAffinity("Road.*")).toBeUndefined();
 
@@ -298,10 +252,7 @@ rules:
         expect(parsed).not.toHaveProperty("layer");
         expect(parsed["custom-root"]).toBe("retained");
 
-        const custom = projectStyleSourceToQuick(source.replace(
-            JSON.stringify(exactExpression),
-            JSON.stringify("Road.*")));
-        expect(custom.layerAffinity).toEqual({kind: "custom", expression: "Road.*"});
+
     });
 
     it("keeps the generated visibility label synchronized with a Quick rename", () => {
@@ -320,7 +271,7 @@ rules:
             type: "bool",
             default: true
         }]);
-        expect(parsed.rules[0].filter).toBe("showSearchStyle == true and (speed >= 80)");
+        expect(parsed.rules[0].filter).toBe("showSearchStyle == true and (any(speed >= 80))");
     });
 
     it("applies only effective compatible rules and reports every omission", () => {
@@ -345,45 +296,10 @@ rules:
         expect(feature.totalRuleCount).toBe(3);
         expect(feature.omissions.map(item => item.code)).toEqual([
             "scope-incompatible",
-            "quick-read-only"
+            "unsupported-search-rule"
         ]);
     });
 
-    it("patches supported fields while preserving comments, root data, and unsupported keys", () => {
-        const source = `# retained root comment
-name: Base
-version: 2
-custom-root: retained
-rules:
-  - geometry: [line] # retained rule comment
-    color: "#ff0000"
-    width: 3
-    glow: {color: "#ffffff", radius: 2}
-  - geometry: [point]
-    first-of:
-      - color: "#00ff00"
-`;
-        const projection = projectStyleSourceToQuick(source);
-        const first = structuredClone(projection.editableRules[0].rule);
-        first.width = 9;
-        const updated = updateStyleSourceFromQuick(source, projection, [{sourceIndex: 0, rule: first}]);
-        const parsed = load(updated) as any;
-
-        expect(updated).toContain("# retained root comment");
-        expect(updated).toContain("# retained rule comment");
-        expect(parsed["custom-root"]).toBe("retained");
-        expect(parsed.rules[0].width).toBe(9);
-        expect(parsed.rules[0].glow).toEqual({color: "#ffffff", radius: 2});
-        expect(parsed.rules[1]["first-of"]).toHaveLength(1);
-        expect(projection.category).toBe("base");
-        expect(projection.readOnlyRuleIndices).toEqual([1]);
-        expect(projection.warnings.map(warning => warning.code)).toContain("unsupported-property");
-        expect(projection.warnings.every(warning => Number.isInteger(warning.sourceIndex))).toBe(true);
-        expect(projection.warnings.find(warning => warning.code === "unsupported-property")?.sourceIndex)
-            .toBe(0);
-        expect(projection.warnings.find(warning => warning.code === "branch-rule")?.sourceIndex)
-            .toBe(1);
-    });
 
     it("encodes unsafe stylesheet names only in the download filename", () => {
         expect(canonicalSearchStyleFilename("Folder/A:B * style")).toBe("Folder-A-B-style.yaml");

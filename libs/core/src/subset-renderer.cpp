@@ -550,17 +550,12 @@ void TileSubsetLayerRenderer::setLineSimplificationTolerance(
 }
 
 void TileSubsetLayerRenderer::setPointCloudPolicy(
-    bool enabled, uint32_t maxPoints, double spacingMeters, std::string const& cacheKey)
+    bool enabled, uint32_t maxPoints, double spacingMeters, std::string const& /*cacheKey*/)
 {
-    if (maxPoints > 1048576 || !std::isfinite(spacingMeters) || spacingMeters < 0.)
+    if (maxPoints > mapget::DefaultPointCloudMaxPoints || !std::isfinite(spacingMeters) || spacingMeters < 0.)
         throw std::invalid_argument("Invalid point-cloud rendering policy");
-    if (cacheKey != pointCloudCacheKey_ || maxPoints != pointCloudMaxPoints_) {
-        pointCloudSamples_.clear();
-        pointCloudCacheKey_ = cacheKey;
-    }
     pointCloudEnabled_ = enabled;
     pointCloudMaxPoints_ = maxPoints;
-    pointCloudSpacingMeters_ = spacingMeters;
     pointCloudDeliveredCount_ = pointCloudRenderedCount_ = 0;
 }
 
@@ -773,7 +768,6 @@ void TileSubsetLayerRenderer::run()
             terminalEntryCount += channel->entryCount();
             return true;
         });
-    size_t cloudPasses = 0;
     hasPointCloudRules_ = false;
     std::function<size_t(FeatureStyleRule const&)> countCloudPasses = [&](auto const& rule) -> size_t {
         if (rule.subRules().empty()) return rule.pointCloud() ? 1 : 0;
@@ -791,11 +785,9 @@ void TileSubsetLayerRenderer::run()
         for (auto const* rule : rulesForChannel(channel->channelId())) {
             auto const passes = countCloudPasses(*rule);
             hasPointCloudRules_ |= passes != 0;
-            cloudPasses += channel->entryCount() * passes;
         }
         return true;
     });
-    pointCloudObjectQuota_ = pointCloudMaxPoints_ / std::max<size_t>(1, cloudPasses);
     pickRefs_.reserve(terminalEntryCount);
     pickIndices_.reserve(terminalEntryCount);
     gpuPacketBuilder_.beginContribution(
@@ -1652,36 +1644,24 @@ bool TileSubsetLayerRenderer::renderGeometryCollection(
     if (rule.pointCloud() && collection) {
         auto const color = resolvedStyle ? std::optional<glm::fvec4>{resolvedStyle->color} : rule.color(evalFun);
         if (!color) return false;
-        auto const key = std::to_string(collection->addr().value_) + ":" + rule.geometryName().value_or("*");
-        auto found = pointCloudSamples_.find(key);
-        if (found == pointCloudSamples_.end()) {
-            found = pointCloudSamples_.emplace(key, mapget::PointCloudGeometrySample::build(
-                collection, pointCloudObjectQuota_, rule.geometryName())).first;
-        }
-        auto const& base = found->second;
-        if (!pointCloudEnabled_ && base.sourceCount > pointCloudObjectQuota_)
-            throw std::length_error("Full-detail point cloud exceeds the admitted rendering allowance");
-        auto coarse = pointCloudEnabled_ && pointCloudSpacingMeters_ > 0.
-            ? base.coarsen(pointCloudObjectQuota_, pointCloudSpacingMeters_)
-            : std::vector<mapget::PointCloudGeometrySample::Record>{};
-        auto const& points = pointCloudEnabled_ && pointCloudSpacingMeters_ > 0. ? coarse : base.records;
-        if (points.size() > pointCloudMaxPoints_ - pointCloudRenderedCount_)
-            throw std::length_error("Point-cloud rule passes exceed the admitted rendering allowance");
-        pointCloudDeliveredCount_ += base.sourceCount;
-        pointCloudRenderedCount_ += points.size();
+        auto const sourceCount = mapget::PointCloudGeometrySample::count(collection, rule.geometryName());
+        mapget::PointCloudIndexSelection selection(sourceCount,
+            pointCloudEnabled_ ? pointCloudMaxPoints_ : std::numeric_limits<uint32_t>::max());
+        pointCloudDeliveredCount_ += sourceCount;
+        pointCloudRenderedCount_ += selection.size();
         auto const zIndex = resolvedStyle ? resolvedStyle->zIndex : resolvedZIndex(rule, evalFun);
         auto const icon = rule.hasIconUrl() ? rule.iconUrl(evalFun) : std::string{};
-        for (auto const& record : points) {
+        mapget::PointCloudGeometrySample::forEach(collection, selection, [&](auto const& record) {
             auto const point = projectWgsPoint(offsetAabbOrigin(record.point, rule, offset));
             if (!labelPosition) labelPosition = point;
             if (rule.hasIconUrl()) appendIcon(point, icon, rule, evalFun, *color, zIndex, pick);
             else appendPoint(point, rule, evalFun, *color, zIndex, pick);
-        }
+        }, rule.geometryName());
         if (labelPosition && rule.hasLabel()) {
             auto const text = rule.labelText(evalFun);
             if (!text.empty()) appendLabel(*labelPosition, text, rule, evalFun, zIndex, pick);
         }
-        return !points.empty();
+        return selection.size() != 0;
     }
     auto renderOne =
         [&](mapget::model_ptr<mapget::Geometry> const& geometry,

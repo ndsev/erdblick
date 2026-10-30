@@ -1,3 +1,5 @@
+import {StyleDocumentModel} from "./style-document.model";
+import {decodeCanonicalLayerAffinity} from "../search/search-style-sheet.converter";
 import { KeyValue } from "@angular/common";
 import {
     ChangeDetectorRef,
@@ -24,14 +26,6 @@ import { MapDataService } from "../mapdata/mapdata.service";
 import { layerPresetNode, removeGroupPrefix } from "../mapdata/map-tree.controller";
 import { MapViewService, ViewRecalculationReason } from "../mapview/mapview.service";
 import {
-    FeatureSearchStyleRuleDraft,
-    SearchStyleRuleDraftCodec
-} from "../search/search-style-rule-editor.model";
-import {
-    projectStyleSourceToQuick,
-    QuickStyleProjection,
-    QuickStyleWarning,
-    updateStyleSourceFromQuick,
     updateStyleSourceMetadata
 } from "../search/search-style-sheet.converter";
 import { AppDialogComponent } from "../layout/app-dialog.component";
@@ -441,8 +435,12 @@ interface QuickPresetOption {
                                         @if (quickLayerAffinityKind === 'custom' && !quickReplacingCustomAffinity) {
                                             <div class="style-editor-custom-affinity" data-testid="style-editor-custom-affinity">
                                                 <span [pTooltip]="quickCustomLayerAffinity">
-                                                    Custom affinity — edit in Advanced or replace
+                                                    Custom affinity (regular expression)
                                                 </span>
+                                                <input aria-label="Custom layer affinity" pInputText
+                                                    [ngModel]="quickCustomLayerAffinity"
+                                                    (ngModelChange)="onQuickCustomAffinityChange($event)"
+                                                    [disabled]="quickProjectionStale">
                                                 <p-button label="Choose exact layers"
                                                           size="small"
                                                           severity="secondary"
@@ -482,20 +480,10 @@ interface QuickPresetOption {
                                         }
                                     </div>
                                 </div>
-                                <search-style-rule-editor
-                                    [drafts]="quickRuleDrafts"
-                                    (draftsChange)="onQuickRuleDraftsChange($event)"
-                                    [fieldOptions]="[]"
-                                    [completionOwnerPrefix]="'style-editor-quick'"
-                                    [completionZIndex]="31050"
-                                    [showRuleNames]="false"
-                                    [sourceRuleIndices]="quickRuleSourceIndicesByDraftId"
-                                    [readOnlyRuleIndices]="quickReadOnlyRuleIndices"
-                                    [notesBySourceIndex]="quickWarningsBySourceIndex"
-                                    [expandRulesByDefault]="true"
-                                    [expansionContext]="styleService.state.styleEditorTargetId ?? ''"
-                                    [canRefreshValueSummaries]="false">
-                                </search-style-rule-editor>
+                                <style-document-editor [source]="quickSource" [skipMetadata]="true"
+                                    (sourceChange)="commitQuickSource($event)"
+                                    (invalidChange)="quickFormInvalid = $event"/>
+
                             </div>
                         </p-tabpanel>
                     }
@@ -511,7 +499,7 @@ interface QuickPresetOption {
                         (click)="saveOrApplyEditedStyle()"
                         [label]="canSaveCurrentStyleToSource() ? 'Save to Source' : 'Apply'"
                         [icon]="canSaveCurrentStyleToSource() ? 'pi pi-save' : 'pi pi-check'"
-                        [disabled]="!!quickStyleNameIssue() || (canSaveCurrentStyleToSource() ? !currentStyleHasSourceChanges() : !sourceWasModified)"
+                        [disabled]="!!quickStyleNameIssue() || quickFormInvalid || (canSaveCurrentStyleToSource() ? !currentStyleHasSourceChanges() : !sourceWasModified)"
                         [pTooltip]="canSaveCurrentStyleToSource() ? styleSourceSaveTooltip() : ''"></p-button>
                     <p-button data-testid="style-editor-close-button" (click)="closeEditorDialog($event)"
                               [label]='sourceWasModified ? "Discard" : "Close"'
@@ -665,10 +653,8 @@ export class StyleComponent implements OnDestroy {
     private styleEditorOriginalSource: string = '';
     styleEditorTab: "quick" | "advanced" = "quick";
     styleEditorQuickAvailable = false;
-    quickRuleDrafts: FeatureSearchStyleRuleDraft[] = [];
-    quickWarnings: QuickStyleWarning[] = [];
-    quickWarningsBySourceIndex: Record<number, readonly QuickStyleWarning[]> = {};
-    quickReadOnlyRuleIndices: number[] = [];
+    quickSource = "";
+    quickFormInvalid = false;
     quickStyleName = "";
     quickLayerAffinityKind: "any" | "exact" | "custom" = "any";
     quickLayerAffinityIds: string[] = [];
@@ -677,10 +663,6 @@ export class StyleComponent implements OnDestroy {
     quickLayerOptions: Array<{ label: string; value: string }> = [];
     quickProjectionStale = false;
     quickProjectionError = "";
-    private quickProjection?: QuickStyleProjection;
-    private quickRuleSourceIndices = new Map<number, number>();
-    quickRuleSourceIndicesByDraftId: Record<number, number> = {};
-    private readonly quickRuleDraftCodec = new SearchStyleRuleDraftCodec();
     private quickProjectionRefreshTimer?: ReturnType<typeof setTimeout>;
     private updatingSourceFromQuick = false;
     stylesCollapsed: boolean = false;
@@ -1215,6 +1197,10 @@ export class StyleComponent implements OnDestroy {
 
     /** Applies editor changes locally or writes them to source when source editing is enabled. */
     saveOrApplyEditedStyle(): void {
+        if (this.quickFormInvalid) {
+            this.messageService.showError("Correct the highlighted style fields before applying changes.");
+            return;
+        }
         if (this.canSaveCurrentStyleToSource()) {
             void this.saveEditedStyleToSource();
         } else {
@@ -1281,19 +1267,14 @@ export class StyleComponent implements OnDestroy {
         this.sourceWasModified = false;
         this.styleService.state.styleEditorTargetId = null;
         this.styleEditorQuickAvailable = false;
-        this.quickProjection = undefined;
-        this.quickRuleDrafts = [];
-        this.quickWarnings = [];
-        this.quickWarningsBySourceIndex = {};
-        this.quickReadOnlyRuleIndices = [];
+        this.quickSource = "";
+        this.quickFormInvalid = false;
         this.quickStyleName = "";
         this.quickLayerAffinityKind = "any";
         this.quickLayerAffinityIds = [];
         this.quickCustomLayerAffinity = "";
         this.quickReplacingCustomAffinity = false;
         this.quickLayerOptions = [];
-        this.quickRuleSourceIndices.clear();
-        this.quickRuleSourceIndicesByDraftId = {};
         this.styleEditorSourceSubscription.unsubscribe();
         this.styleEditorSaveSubscription.unsubscribe();
         this.editorService.closeSession(this.styleEditorSessionId);
@@ -1370,32 +1351,16 @@ export class StyleComponent implements OnDestroy {
         if (!this.styleEditorQuickAvailable) {
             return;
         }
+        this.quickSource = source;
         try {
-            const projection = projectStyleSourceToQuick(source.replace(/\n+$/, ""));
-            const drafts = this.quickRuleDraftCodec.toDrafts(
-                projection.editableRules.map(projected => projected.rule));
-            this.quickRuleSourceIndices.clear();
-            drafts.forEach((draft, index) => {
-                this.quickRuleSourceIndices.set(draft.id, projection.editableRules[index].sourceIndex);
-            });
-            this.quickRuleSourceIndicesByDraftId = Object.fromEntries(this.quickRuleSourceIndices);
-            this.quickProjection = projection;
-            this.quickRuleDrafts = drafts;
-            this.quickWarnings = projection.warnings;
-            const warningsBySourceIndex: Record<number, QuickStyleWarning[]> = {};
-            for (const warning of projection.warnings) {
-                (warningsBySourceIndex[warning.sourceIndex] ??= []).push(warning);
-            }
-            this.quickWarningsBySourceIndex = warningsBySourceIndex;
-            this.quickReadOnlyRuleIndices = projection.readOnlyRuleIndices;
-            this.quickStyleName = projection.name;
-            this.quickLayerAffinityKind = projection.layerAffinity.kind;
-            this.quickLayerAffinityIds = projection.layerAffinity.kind === "exact"
-                ? [...projection.layerAffinity.layerIds]
-                : [];
-            this.quickCustomLayerAffinity = projection.layerAffinity.kind === "custom"
-                ? projection.layerAffinity.expression
-                : "";
+            const document = new StyleDocumentModel(source);
+            const layer = document.value(["layer"]);
+            const ids = typeof layer === "string" ? decodeCanonicalLayerAffinity(layer) : undefined;
+            this.quickSource = source;
+            this.quickStyleName = String(document.value(["name"]) ?? "");
+            this.quickLayerAffinityKind = layer === undefined ? "any" : ids ? "exact" : "custom";
+            this.quickLayerAffinityIds = ids ?? [];
+            this.quickCustomLayerAffinity = typeof layer === "string" && !ids ? layer : "";
             this.quickReplacingCustomAffinity = false;
             this.refreshQuickLayerOptions();
             this.quickProjectionStale = false;
@@ -1403,43 +1368,6 @@ export class StyleComponent implements OnDestroy {
         } catch (error) {
             this.quickProjectionStale = true;
             this.quickProjectionError = error instanceof Error ? error.message : String(error);
-        }
-    }
-
-    /** Patches Quick edits into the YAML AST immediately while retaining unsupported document content. */
-    protected onQuickRuleDraftsChange(drafts: FeatureSearchStyleRuleDraft[]): void {
-        const projection = this.quickProjection;
-        if (!projection || this.quickProjectionStale) {
-            return;
-        }
-        const retainedDraftIds = new Set(drafts.map(draft => draft.id));
-        const deletedPartialRules = [...this.quickRuleSourceIndices]
-            .filter(([draftId]) => !retainedDraftIds.has(draftId))
-            .map(([, sourceIndex]) => projection.editableRules.find(rule => rule.sourceIndex === sourceIndex))
-            .filter(rule => rule?.support === "partial");
-        if (deletedPartialRules.length > 0) {
-            const indices = deletedPartialRules.map(rule => (rule!.sourceIndex + 1)).join(", ");
-            if (!window.confirm(
-                `Delete YAML rule${deletedPartialRules.length === 1 ? "" : "s"} ${indices}? `
-                + "Unsupported properties on the whole rule will also be removed."
-            )) {
-                this.refreshQuickProjection(this.editorService.getSessionSource(this.styleEditorSessionId));
-                return;
-            }
-        }
-        try {
-            const semanticRules = this.quickRuleDraftCodec.fromDrafts(drafts);
-            const updates = semanticRules.map((rule, index) => ({
-                sourceIndex: this.quickRuleSourceIndices.get(drafts[index].id),
-                rule
-            }));
-            const currentSource = this.editorService.getSessionSource(this.styleEditorSessionId).replace(/\n+$/, "");
-            const updatedSource = updateStyleSourceFromQuick(currentSource, projection, updates);
-            this.commitQuickSource(updatedSource);
-        } catch (error) {
-            this.messageService.showError(
-                `Could not apply the Quick style change: ${error instanceof Error ? error.message : String(error)}`);
-            this.refreshQuickProjection(this.editorService.getSessionSource(this.styleEditorSessionId));
         }
     }
 
@@ -1490,6 +1418,12 @@ export class StyleComponent implements OnDestroy {
         });
     }
 
+    /** Edits a custom affinity without replacing it with exact layer IDs. */
+    protected onQuickCustomAffinityChange(expression: string): void {
+        const source = this.editorService.getSessionSource(this.styleEditorSessionId);
+        this.commitQuickSource(new StyleDocumentModel(source).edit({op: "set", path: ["layer"], value: expression}));
+    }
+
     /** Enters an explicit replacement state without mutating a custom regex. */
     protected beginReplacingQuickAffinity(): void {
         this.quickReplacingCustomAffinity = true;
@@ -1503,7 +1437,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Applies one metadata patch through the same guarded Advanced-source session. */
     private updateQuickMetadata(patch: Parameters<typeof updateStyleSourceMetadata>[1]): void {
-        if (!this.quickProjection || this.quickProjectionStale) {
+        if (this.quickProjectionStale) {
             return;
         }
         try {
@@ -1519,7 +1453,7 @@ export class StyleComponent implements OnDestroy {
     }
 
     /** Updates CodeMirror synchronously while suppressing its delayed projection refresh. */
-    private commitQuickSource(updatedSource: string): void {
+    protected commitQuickSource(updatedSource: string): void {
         this.updatingSourceFromQuick = true;
         try {
             this.editorService.updateSessionSource(this.styleEditorSessionId, updatedSource);

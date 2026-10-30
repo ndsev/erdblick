@@ -1,3 +1,4 @@
+import {DEFAULT_POINT_CLOUD_POLICY} from "../../../../app/mapview/point-cloud-policy.model";
 import type { Buffer, Device, Texture } from "@luma.gl/core";
 import {
     afterEach,
@@ -1419,6 +1420,40 @@ describe("GpuScene contribution lifecycle", () => {
     expect(presented.destroyed).toBe(false);
     scene.releaseRetiredPresentationResources();
     expect(presented.destroyed).toBe(true);
+  });
+
+  it("reuses retired ranges in a nonempty buffer at an unchanged full allowance", () => {
+    const {scene, device} = createScene();
+    const install = (identity: string) => {
+      const reservation = scene.prepareRender("origin", [11, 48, 0], [{
+        identity, mapTileKey: `Features:Map:Cloud:${identity}:0`, styleOrder: 0, lod: 7,
+      }]);
+      scene.applyPacket(pointPacket(reservation), reservation);
+      scene.finishRender(reservation);
+      scene.publishPresentation();
+      scene.releaseRetiredPresentationResources();
+    };
+    install("first");
+    install("second");
+    const allocated = gpuMemoryBudget.allocatedBytes;
+    const buffer = device.buffers[0];
+    const version = gpuMemoryBudget.reclamationVersion;
+    gpuMemoryBudget.setLimit(allocated);
+    try {
+      scene.removeContribution("first");
+      scene.publishPresentation();
+      scene.releaseRetiredPresentationResources();
+      expect(gpuMemoryBudget.allocatedBytes).toBe(allocated);
+      expect(gpuMemoryBudget.reclamationVersion).toBe(version + 1);
+      expect(buffer.destroyed).toBe(false);
+      install("third");
+      expect(scene.snapshot().activeContributionCount).toBe(2);
+      expect(device.buffers).toHaveLength(1);
+      expect(gpuMemoryBudget.allocatedBytes).toBe(allocated);
+    } finally {
+      scene.destroy();
+      gpuMemoryBudget.setLimit(DEFAULT_POINT_CLOUD_POLICY.gpuMemoryMiB * 1048576);
+    }
   });
 
   it("reclaims an empty material buffer after removed contributions leave the presentation", async () => {

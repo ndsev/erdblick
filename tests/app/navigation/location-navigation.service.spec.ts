@@ -1,3 +1,5 @@
+import {GeolocationState} from "../../../app/geolocation/geolocation.state";
+import {LOCATION_BOUNDARY_TERMS_REVISION} from "../../../app/geolocation/location-policy.model";
 import { testPersistence, stateOwners } from "../../support/state-owners";
 import "@angular/compiler";
 import { TestBed } from "@angular/core/testing";
@@ -27,7 +29,9 @@ const areaResult: ResolvedLocationNavigation = { area: { label: "Place", rectang
 /** Creates controlled transport and renderer lifecycles without bootstrapping the map. */
 function setup() {
     const response = new Subject<ResolvedLocationNavigation>();
-    const locations = { resolveNavigation: vi.fn<() => Observable<ResolvedLocationNavigation>>(() => response) };
+    const locationState = new GeolocationState(testPersistence());
+    locationState.locationBoundaryConsentState.next({decision: "accepted", revision: LOCATION_BOUNDARY_TERMS_REVISION});
+    const locations = { state: locationState, resolveNavigation: vi.fn<() => Observable<ResolvedLocationNavigation>>(() => response) };
     const camera = { destination: { lon: 1, lat: 2, alt: 300 }, orientation: { heading: 0, pitch: -90, roll: 0 } };
     const renderer = {
         rendererInvalidated: new Subject<void>(), getLiveCameraState: () => camera,
@@ -60,6 +64,25 @@ function setup() {
 afterEach(() => TestBed.resetTestingModule());
 
 describe("Location navigation ownership", () => {
+    it.each(["search", "boundaries"])("cancels delayed navigation when %s is disabled", preference => {
+        const h = setup();
+        h.service.navigate("area");
+        if (preference === "search") h.locations.state.locationSearchEnabledState.next(false);
+        else h.locations.state.locationBoundaryConsentState.next({decision: "disabled", revision: LOCATION_BOUNDARY_TERMS_REVISION});
+        expect(h.response.observed).toBe(false);
+        h.response.next(areaResult);
+        expect(h.area).not.toHaveBeenCalled();
+        expect(h.point).not.toHaveBeenCalled();
+    });
+
+    it("does not resolve stale location actions while search is disabled", () => {
+        const h = setup();
+        h.locations.state.locationSearchEnabledState.next(false);
+        h.service.navigate("area");
+        expect(h.locations.resolveNavigation).not.toHaveBeenCalled();
+    });
+
+
     it("commits an area once without creating a point marker", () => {
         const h = setup();
         h.service.navigate("loc:mapget-offline:wof:1");

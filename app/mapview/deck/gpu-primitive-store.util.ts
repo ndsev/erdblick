@@ -13,7 +13,7 @@ import {
 const MINIMUM_CAPACITY_RECORDS = 64;
 const INITIAL_CAPACITY_HEADROOM_FACTOR = 8;
 const MAX_INITIAL_CAPACITY_HEADROOM_BYTES = 4 * 1024 * 1024;
-export const MAX_GPU_PRIMITIVE_STORE_BYTES = 512 * 1024 * 1024;
+export const MAX_GPU_PRIMITIVE_STORE_BYTES = 1024 * 1024 * 1024;
 
 /** Diagnostic counters for one physical material buffer in a persistent GPU scene. */
 export interface GpuPrimitiveStoreSnapshot {
@@ -235,8 +235,11 @@ export class GpuPrimitiveStore {
             nextCapacity = Math.max(nextCapacity + 1, nextCapacity * 2);
         }
         nextCapacity = Math.min(nextCapacity, maximumRecords);
-        const tracked = this.device.statsManager?.getStats("GPU Time and Memory").get("GPU Memory").count;
+        const tracked = this.device.statsManager?.getStats("GPU Time and Memory").get("GPU Memory");
         if (tracked !== undefined) gpuMemoryBudget.observeTrackedTotal(tracked);
+        // Optional growth slack must not reject records that fit the remaining allowance.
+        if (nextCapacity * this.recordStride > gpuMemoryBudget.allocationAvailableBytes)
+            nextCapacity = requiredRecords;
         const releaseAllocation = gpuMemoryBudget.allocate(nextCapacity * this.recordStride);
         let next: Buffer | null = null;
         try {

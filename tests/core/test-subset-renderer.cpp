@@ -554,7 +554,7 @@ rules:
 }
 
 TEST_CASE(
-    "TileSubsetLayerRenderer samples across clusters and reuses aligned cached coarsening",
+    "TileSubsetLayerRenderer samples proportionally across clusters independently of zoom",
     "[erdblick.subset-renderer][pointcloud]")
 {
     auto strings = std::make_shared<mapget::StringPool>("PointClusterPool");
@@ -595,8 +595,7 @@ rules:
     installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
     REQUIRE(renderer.pointCloudDeliveredCount() == 5);
-    REQUIRE(renderer.pointCloudRenderedCount() <= 4);
-    REQUIRE(renderer.pointCloudRenderedCount() > 0);
+    REQUIRE(renderer.pointCloudRenderedCount() == 4);
     auto const picks = renderer.renderBridgeResult()["pointCloudPicks"];
     REQUIRE(picks.size() == 1);
     REQUIRE(picks[0]["featureId"] == "Road.1");
@@ -607,7 +606,7 @@ rules:
     renderer.setPointCloudPolicy(true, 4, 100, "points:1");
     installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
-    REQUIRE(renderer.pointCloudRenderedCount() == 1);
+    REQUIRE(renderer.pointCloudRenderedCount() == 4);
     renderer.resetForNextTile();
     renderer.setPointCloudPolicy(true, 4, 0, "points:1");
     installSubset(renderer, TileSubsetLayer(subset));
@@ -616,7 +615,21 @@ rules:
     renderer.resetForNextTile();
     renderer.setPointCloudPolicy(false, 4, 0, "points:1");
     installSubset(renderer, TileSubsetLayer(subset));
-    REQUIRE_THROWS_AS(renderer.run(), std::length_error);
+    renderer.run();
+    REQUIRE(renderer.pointCloudRenderedCount() == 5);
+    renderer.resetForNextTile();
+    renderer.setPointCloudPolicy(true, mapget::DefaultPointCloudMaxPoints, 100, "points:1");
+    installSubset(renderer, TileSubsetLayer(subset));
+    renderer.run();
+    REQUIRE(renderer.pointCloudRenderedCount() == 5);
+    channel->newFeatureEntry(
+        subset->newFeatureId("Road", {{"roadId", int64_t{2}}}), collection, {});
+    renderer.resetForNextTile();
+    renderer.setPointCloudPolicy(true, 4, 0, "points:2");
+    installSubset(renderer, TileSubsetLayer(subset));
+    renderer.run();
+    REQUIRE(renderer.pointCloudDeliveredCount() == 10);
+    REQUIRE(renderer.pointCloudRenderedCount() == 8);
     REQUIRE(first->numPoints() == 3);
     REQUIRE(second->numPoints() == 2);
 }

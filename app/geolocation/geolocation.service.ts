@@ -1,3 +1,5 @@
+import {filter, takeUntil} from "rxjs";
+import {WOF_LOCATION_ATTRIBUTION} from "./location-policy.model";
 import { HttpClient, HttpHeaders, HttpParams } from "@angular/common/http";
 import { Injectable } from "@angular/core";
 import {
@@ -303,7 +305,7 @@ export class GeolocationService {
     /** Requests location matches from every enabled configured provider. */
     search(query: string, limit: number): Observable<LocationSearchMatch[]> {
         const trimmedQuery = query.trim();
-        if (!isSupportedLocationSearchQuery(trimmedQuery) || trimmedQuery.length < this.minCharacters) {
+        if (!this.state.locationSearchEnabled || !isSupportedLocationSearchQuery(trimmedQuery) || trimmedQuery.length < this.minCharacters) {
             return of([]);
         }
 
@@ -314,7 +316,8 @@ export class GeolocationService {
         }
 
         return forkJoin(providers.map(provider => this.searchProvider(provider, trimmedQuery, cappedLimit))).pipe(
-            map(results => results.flat().sort(compareLocationMatches).slice(0, cappedLimit))
+            map(results => results.flat().sort(compareLocationMatches).slice(0, cappedLimit)),
+            takeUntil(this.state.locationSearchEnabledState.pipe(filter(enabled => !enabled)))
         );
     }
 
@@ -327,13 +330,13 @@ export class GeolocationService {
             color: "green",
             name: match.name,
             label: this.labelForMatch(match),
-            enabled: true,
+            enabled: this.state.locationSearchEnabled,
             payload: match,
             jump: (_value: string, payload: unknown) => {
                 const selected = normalizeLocationSearchPayload(payload ?? match);
                 return selected?.lonLat ? [selected.lonLat[1], selected.lonLat[0], 0] : undefined;
             },
-            validate: () => true
+            validate: () => this.state.locationSearchEnabled
         };
     }
 
@@ -349,8 +352,13 @@ export class GeolocationService {
 
     /** Resolves selected WOF identities lazily; history retains only lightweight metadata. */
     resolveNavigation(actionId: string, payload?: unknown): Observable<ResolvedLocationNavigation> {
+        if (!this.state.locationSearchEnabled) return of({error: "Location search is disabled."});
         const saved = normalizeLocationSearchPayload(payload);
         const match = saved && this.targetId(saved) === actionId ? saved : undefined;
+        if (!this.state.locationBoundariesEnabled) {
+            return of(match?.lonLat ? {point: match.lonLat, label: match.name}
+                : {error: "This location has no usable centrepoint. Search for the place again."});
+        }
         const prefix = `${LOCATION_SEARCH_TARGET_PREFIX}${MAPGET_LOCATION_PROVIDER_ID}:`;
         const id = actionId.startsWith(prefix) ? actionId.slice(prefix.length) : undefined;
         if (!id || !/^wof:[1-9]\d*$/.test(id)) {
@@ -385,7 +393,9 @@ export class GeolocationService {
                     !polygons && (raw.geometry !== undefined || raw.geometryAvailable === true)
                         ? "The location boundary could not be displayed." : undefined);
             }),
-            catchError(() => of(this.navigationFromMatch(match, undefined, "The location boundary could not be loaded.")))
+            catchError(() => of(this.navigationFromMatch(match, undefined, "The location boundary could not be loaded."))),
+            takeUntil(this.state.locationSearchEnabledState.pipe(filter(enabled => !enabled))),
+            takeUntil(this.state.locationBoundaryConsentState.pipe(filter(() => !this.state.locationBoundariesEnabled)))
         );
     }
 
@@ -552,7 +562,8 @@ export class GeolocationService {
                 ? `population ${Math.trunc(match.population)}`
                 : ""
         ].filter(Boolean);
-        const credit = match.attribution;
+        const credit = match.attribution ?? (match.providerId === MAPGET_LOCATION_PROVIDER_ID && match.id.startsWith("wof:")
+            ? WOF_LOCATION_ATTRIBUTION : undefined);
         if (credit) details.push(credit.name);
         return details.map(detail => escapeHtml(String(detail))).join(" | ")
             + (credit?.url ? ` | <a href="${escapeHtml(credit.url)}" target="_blank" rel="noopener noreferrer">Source</a>` : "")

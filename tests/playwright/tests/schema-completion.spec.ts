@@ -1,3 +1,4 @@
+import {waitForAppReady} from "../utils/ui-helpers";
 import {expect, test} from '../fixtures/test';
 import type {ErdblickCore_} from '../../../app/integrations/wasm.adapter';
 
@@ -5,6 +6,7 @@ test.use({stateSnapshot: null});
 
 test('WASM completes feature and attribute domains without materialized sample features', async ({page}) => {
     await page.goto('/?v2=1&n=1&m=1&f=0&lon=10&lat=40&alt=1000&h=0&p=-1&r=0&px=0&py=0&pz=0&m2d=0&bg=~10&l=');
+    await waitForAppReady(page);
     await expect.poll(() => page.evaluate(() => !!window.ebDebug)).toBe(true);
     const results = await page.evaluate(() => {
         const core: ErdblickCore_ = window.ebDebug!.coreLib();

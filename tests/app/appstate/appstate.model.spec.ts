@@ -385,6 +385,8 @@ describe('StyleState', () => {
         expect(styles.coerceOptionValue('42', 'number')).toBe(42);
         expect(styles.coerceOptionValue(undefined, 'string')).toBe('');
         expect(styles.coerceOptionValue('abc', 'string')).toBe('abc');
+        expect(styles.coerceOptionValue('red', 'Color')).toBe('red');
+        expect(styles.coerceOptionValue('#abcdef', 'color')).toBe('#abcdef');
     });
 
     it('styleOptionKey composes the compound key correctly', () => {

@@ -1,3 +1,4 @@
+import {waitForAppReady} from "../utils/ui-helpers";
 import type { Page } from '@playwright/test';
 import { bearer, proxyBrowserAuthority } from '../utils/mcp-auth';
 import { expect, test } from '../fixtures/test';
@@ -18,6 +19,7 @@ test.afterEach(async () => {
 async function openAuthenticatedViewer(page: Page, subject: string, baseURL: string) {
     closeProxies.push(await proxyBrowserAuthority(page, subject, baseURL));
     await page.goto('/?v2=1&n=1&vid=left&m=1&f=0&lon=10&lat=40&alt=1000&h=0&p=-1&r=0&px=0&py=0&pz=0&m2d=0&bg=~10&l=');
+    await waitForAppReady(page);
     await page.getByTestId('viewer-action-status').click();
     await expect(page.getByTestId('viewer-action-details')).toContainText('MCP controls ready');
     await page.getByLabel('Tab label', { exact: true }).fill(subject);

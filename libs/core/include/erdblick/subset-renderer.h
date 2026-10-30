@@ -576,11 +576,7 @@ private:
     double lineSimplificationToleranceMeters_ = 0.0;
     bool pointCloudEnabled_ = true;
     bool hasPointCloudRules_ = false;
-    uint32_t pointCloudMaxPoints_ = 262144;
-    size_t pointCloudObjectQuota_ = 0;
-    double pointCloudSpacingMeters_ = 0;
-    std::string pointCloudCacheKey_;
-    std::unordered_map<std::string, mapget::PointCloudGeometrySample> pointCloudSamples_;
+    uint32_t pointCloudMaxPoints_ = mapget::DefaultPointCloudMaxPoints;
     uint64_t pointCloudDeliveredCount_ = 0;
     uint64_t pointCloudRenderedCount_ = 0;
     bool hasRun_ = false;

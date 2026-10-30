@@ -1570,28 +1570,6 @@ TEST_CASE("TileLayerParser exposes subset identity and lifetime", "[erdblick.par
     REQUIRE(metadata.layer.error.empty());
 }
 
-TEST_CASE("Point-cloud hard limits do not schedule repeated browser conversions", "[erdblick.parser][pointcloud]")
-{
-    TileLayerParser parser;
-    auto source = TestDataProvider(parser).getTestLayer(42., 11., 13);
-    source->setError("Point-cloud allocation unavailable");
-    source->setTtl(std::chrono::milliseconds(1000));
-    for (auto const* classification : {"resource-limit", "resource-busy"}) {
-        source->setInfo("PointCloud/Error", classification);
-        mapget::TileSubsetLayer subset(source->tileId(), source->stringPoolId(),
-            source->mapId(), source->layerInfo(), source->strings(), "cloud", 1);
-        subset.adoptSourceInfo(*source);
-        subset.setError(source->error());
-        std::ostringstream stream;
-        REQUIRE(subset.write(stream));
-        auto metadata = parser.readTileSubsetLayerMetadata(SharedUint8Array(stream.str()));
-        REQUIRE_FALSE(metadata.layer.error.empty());
-        if (std::string_view(classification) == "resource-limit")
-            REQUIRE(std::isnan(metadata.layer.ttlMs));
-        else REQUIRE(metadata.layer.ttlMs == 1000.);
-    }
-}
-
 TEST_CASE("Feature search auto-scope accepts one attribute across different attribute layers", "[erdblick.search]")
 {
     auto datasource = nlohmann::json{
@@ -2088,28 +2066,22 @@ rules:
 
 TEST_CASE("Bundled styles pass native style validation", "[erdblick.style]")
 {
-    // CMake supplies the source-tree fixture location independently of this file's layout.
-    auto const stylesDirectory = std::filesystem::path(ERDBLICK_TEST_STYLES_DIRECTORY);
-    REQUIRE(
-        std::filesystem::is_directory(
-            stylesDirectory));
-
-    size_t checked = 0;
-    for (auto const& entry :
-         std::filesystem::directory_iterator(
-             stylesDirectory))
+    // CMake supplies the fixture location independently of the test file's depth.
+    auto const configDirectory = std::filesystem::path(ERDBLICK_TEST_STYLES_DIRECTORY).parent_path();
+    // Validate the configured bundle, not unrelated ignored local style files.
+    std::ifstream configInput(configDirectory / "config.json");
+    REQUIRE(configInput.good());
+    auto const config = nlohmann::json::parse(configInput);
+    auto const& styles = config.at("styles");
+    REQUIRE_FALSE(styles.empty());
+    for (auto const& entry : styles)
     {
-        if (!entry.is_regular_file() ||
-            entry.path().extension() != ".yaml")
-        {
-            continue;
-        }
-        ++checked;
+        auto const path = configDirectory / "styles" / entry.at("url").get<std::string>();
         DYNAMIC_SECTION(
-            entry.path().filename().string())
+            path.filename().string())
         {
             std::ifstream input(
-                entry.path(),
+                path,
                 std::ios::binary);
             REQUIRE(input.good());
             std::string source{
@@ -2118,11 +2090,13 @@ TEST_CASE("Bundled styles pass native style validation", "[erdblick.style]")
                 std::istreambuf_iterator<char>()};
             auto style = FeatureLayerStyle(
                 SharedUint8Array(source));
-            INFO(nlohmann::json(style.validationReport()).dump(2));
+            auto const report = nlohmann::json(style.validationReport());
+            INFO(report.dump(2));
             REQUIRE(style.isValid());
+            REQUIRE(report.at("valid") == true);
+            REQUIRE(report.at("skippedRuleCount") == 0);
         }
     }
-    REQUIRE(checked > 0);
 }
 
 TEST_CASE("FeatureStyleRuleOffsetIncrementParsing", "[erdblick.style]")

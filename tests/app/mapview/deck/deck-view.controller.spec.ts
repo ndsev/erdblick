@@ -19,12 +19,26 @@ interface LocationHighlightHarness {
 }
 
 describe("DeckMapView", () => {
+    it("rejects area highlights after boundary consent has been withdrawn", () => {
+        const upsert = vi.fn(), remove = vi.fn(), offTick = vi.fn();
+        const tick = () => {};
+        const view: LocationHighlightHarness = Object.assign(Object.create(DeckMapView.prototype), {
+            locationState: {locationBoundariesEnabled: false}, layerRegistry: {upsert, remove},
+            offTick, locationAreaHighlightTick: tick
+        });
+        view.startLocationAreaHighlight({label: "Place", rectangle: {west: 10, south: 47, east: 14, north: 49}});
+        expect(upsert).not.toHaveBeenCalled();
+        expect(offTick).toHaveBeenCalledWith(tick);
+        expect(remove).toHaveBeenCalledWith("builtin/location-area");
+    });
+
     it("fades a stable polygon array and releases the callback and layer on expiry/replacement", () => {
         let layer: LocationAreaLayer | undefined;
         const onTick = vi.fn(), offTick = vi.fn(), remove = vi.fn();
         const view: LocationHighlightHarness = Object.assign(Object.create(DeckMapView.prototype), {
             layerRegistry: {upsert: (_key: string, next: LocationAreaLayer) => {layer = next;}, remove},
-            onTick, offTick, requestRender: vi.fn(), locationAreaHighlightTick: null
+            onTick, offTick, requestRender: vi.fn(), locationAreaHighlightTick: null,
+            locationState: {locationBoundariesEnabled: true}
         });
         const now = vi.spyOn(performance, "now").mockReturnValue(1000);
         try {
@@ -65,6 +79,7 @@ describe("DeckMapView", () => {
         const unavailable = vi.fn();
         const view: LocationHighlightHarness = Object.assign(Object.create(DeckMapView.prototype), {
             layerRegistry: {upsert: (_key: string, next: LocationAreaLayer) => {layer = next;}, remove: vi.fn()},
+            locationState: {locationBoundariesEnabled: true},
             mapViewState: {locationBoundaryUnavailableTopic: {next: unavailable}},
             onTick: vi.fn(), offTick: vi.fn(), requestRender: vi.fn(), locationAreaHighlightTick: null
         });

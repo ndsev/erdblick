@@ -840,6 +840,10 @@ export class MapViewState {
         fromStorage: (value) => clampTileSubsetRenderWorkerCount(value)
     });
 
+    readonly gpuMemoryManagementEnabledState = this.persistence.registerState<boolean>({
+        name: "gpuMemoryManagementEnabled", defaultValue: true, schema: Boolish
+    });
+
     readonly pointCloudDownsamplingEnabledState = this.persistence.registerState<boolean>({
         name: "pointCloudDownsamplingEnabled",
         defaultValue: DEFAULT_POINT_CLOUD_POLICY.enabled,
@@ -882,6 +886,14 @@ export class MapViewState {
             left.detailPixels === right.detailPixels &&
             left.workingMemoryMiB === right.workingMemoryMiB &&
             left.gpuMemoryMiB === right.gpuMemoryMiB
+    );
+
+    /** Render admission observes the allowance and its enable switch atomically. */
+    readonly renderingMemoryPolicyChanges = this.persistence.observe(
+        () => ({...this.pointCloudPolicy, managed: this.gpuMemoryManagementEnabledState.value}),
+        (left, right) => left.enabled === right.enabled && left.detailPixels === right.detailPixels &&
+            left.workingMemoryMiB === right.workingMemoryMiB && left.gpuMemoryMiB === right.gpuMemoryMiB &&
+            left.managed === right.managed
     );
 
     readonly tilesLoadLimitState = this.persistence.registerState<number>({

@@ -45,6 +45,26 @@ If the UI feels sluggish or frame rates drop when you move the camera, a few sim
 - Use Chromium-based browsers for the best WebGL throughput. Firefox/Safari generally render fewer tiles per frame.
 - Open **Tools -> Performance Statistics** and capture the relevant diagnostics before changing the scene further.
 
+### GPU allocation allowance exhausted
+
+This warning means some rendering work is paused because it cannot fit the
+application's GPU allowance. Hide unused layers/styles or restrict a style's
+filter to reduce demand. Eligible work resumes automatically as buffers or
+reusable ranges are released; a page reload is unnecessary. You can also raise
+**GPU allocation allowance (MiB)** under **Edit → Preferences → Rendering →
+Memory**, then press **Apply**. The allowance is shared
+across views and also applies to ordinary primitive buffers.
+
+Turning off **Manage GPU memory** in the same section resumes paused work without
+enforcing the application GPU allowance. Normal resource disposal continues;
+point-cloud sampling and its separate working-memory allowance still apply.
+
+Point clouds keep their configured point-count quota under memory pressure.
+Work that still cannot fit remains paused with a deduplicated warning. The
+allowance is not a measurement or guarantee of physical GPU memory. See
+[point-cloud rendering and memory behavior](erdblick-stylesystem.md#ndslive-point-clouds)
+for browser working-memory limits and point-count sampling.
+
 <!-- mcp:
 title: "Styles look wrong"
 keywords: ["wrong color", "missing label", "style reset", "overlay", "per view"]

@@ -1,3 +1,5 @@
+import {DEFAULT_POINT_CLOUD_POLICY} from "../../../../app/mapview/point-cloud-policy.model";
+import {GpuAllocationError, gpuMemoryBudget} from "../../../../app/mapview/deck/gpu-memory-budget.model";
 import "@angular/compiler";
 import {
     describe,
@@ -16,6 +18,79 @@ import {TileSubsetLayerVisualization} from
     "../../../../app/mapview/deck/tile-subset-layer.visualization";
 
 describe("TileSubsetLayerVisualization", () => {
+    it.each(["physical", "reusable"])("retries after %s capacity returns without retaining an unreachable byte threshold", async (capacity) => {
+        const finishRender = vi.fn();
+        const scene = {prepareRender: vi.fn(() => ({
+            origin: {slot: 0, key: 0n}, contributions: [{key: 0n}],
+        })), snapshot: () => ({stores: []}), finishRender, removeContributions: vi.fn()};
+        const sceneHandle = {scene: {gpuScene: scene}};
+        const renderService = {
+            pointCloudPolicy: {...DEFAULT_POINT_CLOUD_POLICY},
+            render: vi.fn(async () => {
+                // Returning this job's own temporary allocation must not wake it again.
+                const releaseStaging = gpuMemoryBudget.allocate(128);
+                releaseStaging();
+                gpuMemoryBudget.beginRetirement()();
+                throw new GpuAllocationError(5000);
+            }),
+            reportAllocationFailure: vi.fn()
+        };
+        const visualization = Object.assign(Object.create(TileSubsetLayerVisualization.prototype), {
+            visualizationId: "cloud", disposed: false, sceneRevision: 0, sceneHandle,
+            renderedSignature: "", requestedSignature: "", failedSignature: "",
+            failedGpuCapacity: null, contributionIdentities: new Set(["cloud"]), renderService,
+            state: {status: "ready", subsetBlob: new Uint8Array(1), valueVersion: 1,
+                mapTileKey: "cloud", partition: {kind: "object"}},
+            owner: {mapInfo: {getRenderDataSourceInfoBlob: () => new Uint8Array(1),
+                getFieldDictBlob: () => new Uint8Array(1)},
+                style: {id: "cloud"}, highlightMode: {value: 0}},
+            setPointCloudScale: vi.fn(), contributionIdentity: () => "cloud"
+        });
+        gpuMemoryBudget.setLimit(1024);
+        const releaseOtherOwner = gpuMemoryBudget.allocate(256);
+        try {
+            expect(await visualization.render(sceneHandle)).toBe(false);
+            for (let i = 0; i < 10; ++i) expect(await visualization.render(sceneHandle)).toBe(false);
+            expect(renderService.render).toHaveBeenCalledOnce();
+            expect(visualization.waitingForGpuMemory).toBe(true);
+            expect(visualization.canRetryGpuAllocation()).toBe(false);
+            expect(finishRender).toHaveBeenCalledOnce();
+            if (capacity === "physical") releaseOtherOwner();
+            else gpuMemoryBudget.beginRetirement()(true);
+            expect(visualization.canRetryGpuAllocation()).toBe(true);
+            expect(await visualization.render(sceneHandle)).toBe(false);
+            expect(renderService.render).toHaveBeenCalledTimes(2);
+            for (let i = 0; i < 10; ++i) await visualization.render(sceneHandle);
+            expect(renderService.render).toHaveBeenCalledTimes(2);
+            renderService.pointCloudPolicy.gpuMemoryMiB += 1;
+            expect(await visualization.render(sceneHandle)).toBe(false);
+            expect(renderService.render).toHaveBeenCalledTimes(3);
+            visualization.disposed = true;
+            expect(visualization.waitingForGpuMemory).toBe(false);
+            expect(visualization.canRetryGpuAllocation()).toBe(false);
+        } finally {
+            releaseOtherOwner();
+            gpuMemoryBudget.setLimit(DEFAULT_POINT_CLOUD_POLICY.gpuMemoryMiB * 1048576);
+        }
+    });
+
+    it("retires ordinary geometry too when the shared allowance is reduced", () => {
+        const scene = {removeContributions: vi.fn()};
+        const cancel = vi.fn();
+        const visualization = Object.assign(Object.create(TileSubsetLayerVisualization.prototype), {
+            visualizationId: "roads", renderedSignature: "installed", requestedSignature: "running",
+            sceneRevision: 0, contributionIdentities: new Set(["roads"]),
+            sceneHandle: {scene: {gpuScene: scene}}, renderService: {cancel},
+            owner: {filterPlan: {channels: [{}]}},
+            state: {status: "ready", renderedValueVersion: 1, valueVersion: 1}
+        });
+        visualization.setPointCloudScale(null, true);
+        expect(cancel).toHaveBeenCalledExactlyOnceWith("roads");
+        expect(scene.removeContributions).toHaveBeenCalledExactlyOnceWith(["roads"]);
+        expect(visualization.isCurrentPresentationInstalled()).toBe(false);
+        expect(visualization.requestedSignature).toBe("");
+    });
+
     it("resolves cloud picks from entry identities without parsing another subset", () => {
         const reference = {channelOrdinal: 2, entryOrdinal: 3, endpointRole: 0};
         const firstPicks = [{...reference, featureId: "PointCloudObject.1"}];

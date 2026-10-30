@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/test';
+import { installStyleSupportFixture } from '../fixtures/style-support';
 import { requireMapSource } from '../utils/backend-helpers';
 import { TEST_LAYER_NAMES, TEST_MAP_NAMES } from '../utils/test-params';
 import {
@@ -10,12 +11,13 @@ import {
 
 const MAP_INDEX = 0;
 const LAYER_INDEX = 0;
-const CONFIGURED_STYLE_TEST_ID = 'default-style';
+const CONFIGURED_STYLE_TEST_ID = 'style-support';
 test.use({ stateSnapshot: 'style_editor_state' });
 
 test.describe('Snapshot – style component', () => {
     test('style dialog and editor', async ({ page, request }) => {
         await requireMapSource(request, TEST_MAP_NAMES[MAP_INDEX], TEST_LAYER_NAMES[LAYER_INDEX]);
+        await installStyleSupportFixture(page);
         await navigateToStateSnapshotRoot(page);
         await enableMapLayer(page, TEST_MAP_NAMES[MAP_INDEX], TEST_LAYER_NAMES[LAYER_INDEX]);
 
@@ -27,11 +29,6 @@ test.describe('Snapshot – style component', () => {
             `style-edit-button-${CONFIGURED_STYLE_TEST_ID}`
         );
         await expect(editButton).toBeVisible();
-        const editButtonTestId = await editButton.getAttribute('data-testid');
-        if (!editButtonTestId?.startsWith('style-edit-button-')) {
-            throw new Error(`Expected a style edit button data-testid, got ${editButtonTestId}`);
-        }
-        const styleTestIdSuffix = editButtonTestId.slice('style-edit-button-'.length);
 
         await page.mouse.move(0, 0);
         await expect(page).toHaveScreenshot('style-component-dialog.png', {
@@ -46,6 +43,7 @@ test.describe('Snapshot – style component', () => {
         await expect(editorDialog.getByTestId('style-editor-enabled')).toBeVisible();
         await expect(editorDialog.getByTestId('style-editor-quick-name')).toBeVisible();
         await expect(editorDialog.getByTestId('style-editor-quick-layers')).toBeVisible();
+        await expect(editorDialog.locator('.style-form-error')).toHaveCount(0);
 
         await page.mouse.move(0, 0);
         await expect(page).toHaveScreenshot('style-component-editor.png', {
@@ -54,26 +52,6 @@ test.describe('Snapshot – style component', () => {
 
         await page.mouse.move(0, 0);
         await captureDocsScreenshotWithLabels(page, 'docs/screenshots/style-component-editor-controls.png', [
-            {
-                locator: stylesDialog.getByTestId(`style-visibility-${styleTestIdSuffix}`),
-                label: 'Toggle style visibility'
-            },
-            {
-                locator: stylesDialog.getByTestId(`style-reset-button-${styleTestIdSuffix}`),
-                label: 'Reset style'
-            },
-            {
-                locator: editButton,
-                label: 'Open style editor'
-            },
-            {
-                locator: stylesDialog.getByTestId('style-import-button'),
-                label: 'Import style'
-            },
-            {
-                locator: stylesDialog.getByTestId('styles-close-button'),
-                label: 'Close dialog'
-            },
             {
                 locator: editorDialog.getByTestId('style-editor-enabled'),
                 label: 'Enable or disable style'
@@ -85,6 +63,14 @@ test.describe('Snapshot – style component', () => {
             {
                 locator: editorDialog.getByTestId('style-editor-quick-layers'),
                 label: 'Set layer affinity'
+            },
+            {
+                locator: editorDialog.locator('[data-style-path="rules.0.geometry"]'),
+                label: 'Choose geometry'
+            },
+            {
+                locator: editorDialog.locator('[data-style-path="rules.0.attribute-filter"]'),
+                label: 'Edit attribute predicate'
             },
             {
                 locator: editorDialog.getByTestId('style-editor-apply-button'),

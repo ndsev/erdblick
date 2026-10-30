@@ -116,7 +116,7 @@ function setup() {
     const viewDiagnostics = { cameraInteracting$: new BehaviorSubject(false), snapshot: vi.fn() };
     const styleReports = { reports$: new BehaviorSubject<import('../../../app/mapstyle/style-validation.model').StyleValidationIssue[]>([]) };
     Object.assign(diagnostics, { mapService: stream, renderService: render, maps, searches, styleValidationReportService: styleReports });
-    const navigation = new LocationNavigationService({} as never, views, state, viewDiagnostics as never, {} as never,
+    const navigation = new LocationNavigationService(owners.locationSearch, views, state, viewDiagnostics as never, {} as never,
         {} as never, owners.viewSettings, stream as never, inspections, zone as never);
     const ui = new UiAutomationService(views, owners.viewSettings);
     const jumps = new JumpTargetService(maps, inspections, {} as never, {} as never, config,

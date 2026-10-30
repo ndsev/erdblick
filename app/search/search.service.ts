@@ -1,3 +1,4 @@
+import type {FeatureSearchStyleRule} from "./search-definition.model";
 import { FeatureSearchResultEntry } from "./search.model";
 import { Injectable } from "@angular/core";
 import {
@@ -567,6 +568,20 @@ export class SearchService implements AppActionContributor {
     /** Returns one live session by runtime id. */
     getSession(id: string): FeatureSearchSession | undefined {
         return this.getInternalSession(id);
+    }
+
+    /** Captures current resolved membership and editor rules together for a save dialog. */
+    getStyleExportSnapshot(id: string, rules: readonly FeatureSearchStyleRule[]): FeatureSearchResolvedDefinition {
+        const session = this.getInternalSession(id);
+        if (!session) {
+            throw new Error("The search is no longer available.");
+        }
+        const resolved = this.resolvedDefinitionForSession(session);
+        if (!resolved) {
+            throw new Error(session.schemaAnalysis.error
+                || "Search scope is still being resolved. Please save again when the search is ready.");
+        }
+        return structuredClone({...resolved, searchStyleRules: [...rules]});
     }
 
     /** Starts lazy native aggregation of withFields and trace values for the Diagnostics tab. */

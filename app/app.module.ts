@@ -1,3 +1,7 @@
+import {LocationPolicyService} from "./geolocation/location-policy.service";
+import {LocationTermsDialogComponent} from "./geolocation/location-terms-dialog.component";
+import {LocationAttributionComponent} from "./geolocation/location-attribution.component";
+import {StyleDocumentEditorComponent} from "./mapstyle/style-document-editor.component";
 import { provideHttpClient, withFetch } from "@angular/common/http";
 import {
     inject,
@@ -187,6 +191,7 @@ export const initializeServices = () => {
     const inspectionSelection = inject(InspectionSelectionService);
     const coordService = inject(CoordinatesService);
     const coordinatesPolicy = inject(CoordinatesPolicyService);
+    const locationPolicy = inject(LocationPolicyService);
     const subsetRenderService = inject(TileSubsetLayerRenderService);
     const presentationBridge = inject(PresentationStateBridgeService);
     const viewerActions = inject(McpActionService);
@@ -210,6 +215,7 @@ export const initializeServices = () => {
         await subsetRenderService.preloadWorkerSource();
         stateService.initializePersistence();
         coordinatesPolicy.initialize();
+        locationPolicy.initialize();
         updateGlobalSpinner('Initializing coordinates');
         coordService.initialize();
         updateGlobalSpinner('Loading styles');
@@ -238,6 +244,8 @@ export const initializeServices = () => {
         PreferencesComponent,
         EditorComponent,
         CoordinatesPanelComponent,
+        LocationTermsDialogComponent,
+        LocationAttributionComponent,
         SearchComponent,
         SearchStyleColorComponent,
         SearchStyleRuleEditorComponent,
@@ -277,6 +285,7 @@ export const initializeServices = () => {
         AppComponent
     ],
     imports: [
+        StyleDocumentEditorComponent,
         BrowserModule,
         BrowserAnimationsModule,
         AnimateOnScroll,

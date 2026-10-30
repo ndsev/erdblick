@@ -28,6 +28,7 @@ target_link_libraries(test.erdblick
 catch_discover_tests(test.erdblick)
 
 add_executable(test.erdblick-style-plan
+  test-style-authoring.cpp
   test-style-filter-plan.cpp)
 
 target_link_libraries(test.erdblick-style-plan
