@@ -40,9 +40,11 @@ describe("TileSubsetLayerVisualization", () => {
             renderedSignature: "", requestedSignature: "", failedSignature: "",
             failedGpuCapacity: null, contributionIdentities: new Set(["cloud"]), renderService,
             state: {status: "ready", subsetBlob: new Uint8Array(1), valueVersion: 1,
-                mapTileKey: "cloud", partition: {kind: "object"}},
+                mapId: "Map", mapTileKey: "cloud", partition: {kind: "object"}},
             owner: {mapInfo: {getRenderDataSourceInfoBlob: () => new Uint8Array(1),
-                getFieldDictBlob: () => new Uint8Array(1)},
+                getFieldDictBlob: () => new Uint8Array(1),
+                // The mocked renderer rejects allocation before consuming any schema bytes.
+                mapMetadataGeneration: () => 1, getSchemaArtifacts: () => []},
                 style: {id: "cloud"}, highlightMode: {value: 0}},
             setPointCloudScale: vi.fn(), contributionIdentity: () => "cloud"
         });
