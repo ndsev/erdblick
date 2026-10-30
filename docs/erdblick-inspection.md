@@ -240,15 +240,31 @@ Between locked panels, dock/undock support, validity-aware hovering, and SourceD
 
 ### Incoming relations
 
-Features with eligible schema declarations show an **Incoming Relations** section.
+Features with a possible incoming family show an **Incoming Relations** section.
+The service derives this possibility from readable providers' outgoing relation
+schemas. Missing discovery hints mean unknown coverage, not proof of absence.
 Ordinary inspection appears immediately; a spinner marks only the incoming section while
 its request runs. The section shows source features and their original relations, including
 validity and SourceData links. Source rows use the source layer for hover and search actions.
 Use **Inspect source relation** to open a relation owned by a feature outside the current panel.
 Hidden provider layers can contribute relations without becoming visible in the map.
 
-The lookup covers eligible relations in the same map and partition. An empty result means
-no matches for those declared families. Partial results show diagnostics, and Retry reloads
-the section. Changing the selection or datasource catalog cancels stale work; finite
+The response lists the exact provider partitions admitted to the lookup, including
+providers that found no matches. **Complete** means complete within that reported
+scope, never a map-wide absence claim. **No possible family** means discovery found
+no eligible family; **partial** and **unsupported scope** remain distinct outcomes
+with diagnostics. Retry reloads the section. Changing the selection or replacing
+its datasource cancels stale work; finite
 provider lifetimes refresh the section. Conventional relations stay in the ordinary
 Relations section. Feature GeoJSON export continues to export the selected feature.
+
+### Numeric meanings and flags
+
+Feature and SourceData rows show native domain meanings beside their raw values.
+Named numeric exceptions, such as unknown or unlimited, are identified before unit
+conversion. Ordinary measurements may show their scaled unit value while copying
+or querying still uses the original encoding. Integers outside JavaScript's exact
+range remain decimal text; bitmasks remain exact hexadecimal text with named flags
+and any unknown bits visible. Composite flags require all their bits, aliases can
+share a value, and a named zero mask matches only zero. Structured flag objects and
+arrays retain their original structure.

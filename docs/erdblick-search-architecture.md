@@ -226,24 +226,34 @@ Search result subsets never hydrate or share a complete source tile.
 
 ## Completion and schema analysis
 
-Style-field discovery must follow compiled schema aliases when reading JSON
-metadata. In particular, mapget's feature-root `attributes` alias points to
+Style-field discovery traverses the installed native schema domains, including
+compiled aliases. In particular, mapget's feature-root `attributes` alias points to
 `properties`; both paths must expose identical numeric bounds and enum symbols.
 This is a schema-identity check, not a global spelling substitution: nested
 source fields literally named `attributes` retain their own metadata.
 
-The completion worker uses datasource `featureModelSchema` plus parser-owned
-string/schema state. It provides:
+The completion worker installs binary `MapSchema` artifacts and their source
+metadata into parser-owned state. Installation must succeed before a query runs;
+failure is explicit rather than an empty completion result. Requests are serialized
+within a worker lane and checked against their selected maps' model generations
+before installation and after completion. It provides:
 
 - syntax diagnostics;
 - direct/nested field completion;
-- enum values and numeric ranges;
+- enum values, ordinary numeric ranges, named numeric specials and flag domains;
 - feature/attribute ownership analysis;
 - candidate label/category/gradient fields.
 
 This worker is advisory. Backend compilation remains authoritative.
 `rewrite: false` still schema-compiles for correctness and speed; it merely
 skips search-query normalization.
+
+Result and trace summaries retain separate groups for each exact graph/domain
+pair, plus a separate unqualified group. Identical expression text does not imply
+identical units or exceptional values. Named sentinels remain in raw histograms
+but do not contribute to ordinary numeric ranges or averages. Trace call counts
+and timings describe the whole trace and are repeated on its domain cards; do not
+sum those cards to obtain a total trace duration.
 
 ## Diagnostics
 

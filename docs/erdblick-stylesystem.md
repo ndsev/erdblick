@@ -481,6 +481,38 @@ Linear keys must be finite, numeric, and strictly increasing. Colors are
 interpolated between adjacent stops. `fallback` handles null, unsupported
 types, and values which cannot be mapped.
 
+Schema-generated numeric scales may additionally bind to an exact value domain
+and give named exceptional values their own colors:
+
+```yaml
+color-scale:
+  mode: linear
+  expression: "properties.speed"
+  domain: {schemaId: "<exact schema token>", domainId: 42}
+  stops:
+    - [1, blue]
+    - [253, red]
+  specials:
+    - [0, gray]
+    - [254, purple]
+    - [255, cyan]
+  fallback: white
+```
+
+This example illustrates a domain whose ordinary range is 1–253; discover the
+actual token, domain ID, field path and meanings from the selected source. Special
+colors are checked before gradient interpolation or categorical lookup. Removing
+a special override routes that value to the fallback. Values outside the
+domain's ordinary ranges also use the fallback. A different graph/domain or an
+unqualified computed number cannot reuse a bound scale. Existing manual scales
+without `domain` retain their unrestricted behavior. `specials` requires a domain
+and finite numeric keys; saved YAML preserves both the guard and edited colors.
+
+Stops use raw source numbers. The search editor can label scaled units and choose
+round steps in those units without changing the stored encoding. For flags, prefer
+a boolean categorical scale over a named `hasFlag(...)` expression or explicit
+rule priority; enumerating all mask combinations loses useful meaning.
+
 Use one scale instead of a palette-only `first-of` chain. Structural
 `first-of`/`all-of` trees remain appropriate for geometry, dash composition,
 or other compound presentation changes.

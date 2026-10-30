@@ -156,6 +156,25 @@ connection remain live. Catalog status/progress changes are not model changes.
 Replacing or removing installed metadata still uses `setDataSourceInfo` and resets
 the stream dictionaries; the additive API rejects already registered map IDs.
 
+Canonical catalog entries carry a small `mapFormat` and an exact `schemaId`.
+`MapDataService` fetches the binary artifact from `/schema` using both `sourceId`
+and `schemaId`, coalesces equal artifacts and limits concurrent downloads to two.
+`TileLayerParser.installMapSchema` validates the artifact before that source can
+become locally ready. Backend readiness and browser schema readiness are separate:
+one failed or slow download leaves other ready maps usable, and incomplete catalogs
+must not prune saved layer, style or inspection selections. Produced feature types
+and reference-only targets come from the installed native graph, not duplicate
+catalog arrays. Legacy inline metadata remains an import format.
+
+Each worker has its own WASM heap. Completion installs only the selected scope;
+render workers install only the map required by a task. Both acknowledge successful
+native installation before accepting dependent work. Render parsers use a bounded
+LRU cache; acknowledgements report retained catalogs so a later reinstallation
+also resends an evicted parser's dictionary. Source model generations invalidate
+work only for affected maps. Progress updates and unrelated additions do not retire
+valid searches or rendered scenes. Replaced graphs remain alive while decoded
+values own them; stale bytes cannot silently bind to a replacement graph.
+
 Search completion selects native feature or attribute-query schema IDs from
 mapget's `LayerSchema` and calls simfil's schema-domain completion directly.
 The parser caches one environment/private string namespace per registry, cleared
@@ -163,6 +182,14 @@ when datasource metadata changes. It builds no sample `ModelPool` or frontend
 schema graph. Mapget owns attribute overlay roots such as `$feature` and validity
 metadata; simfil owns array, union and recursive-domain traversal. Candidate
 merging/type hints remain in erdblick, under one timeout across selected roots.
+
+Scalar domain projections preserve the exact graph/domain identity together with
+native numeric ranges, units, named special values and flag definitions. They are
+small presentation records, not a TypeScript schema implementation. Values selected
+from a source retain their domain; computed plain values do not acquire a unit from
+their expression text. Native subset copying preserves these bindings for both
+projected values and traces. Search summaries group actual values by domain; there
+is no inferred output schema or per-result metadata side table.
 
 Subset projected values have two distinct array levels: the outer array aligns
 with the channel's expressions, and each slot contains that expression's ordered
@@ -968,6 +995,11 @@ See [Style System](erdblick-stylesystem.md).
 
 ## Protocol migration
 
+Protocol 6.0.0 requires the exact installed MapSchema for model decoding and
+preserves scalar domains through native subset copying. Fetch schema artifacts
+before decoding dependent tiles; older binary frames are incompatible. This does
+not rename persisted AppState, configuration or URL keys.
+
 Protocol 4 and stylesheet schema 2 are clean breaks. Protocol 4 removes subset
 delivery epochs in favor of complete pending snapshots; no epoch-bearing
 compatibility parser exists. Old staged cache blobs, stage-suffixed keys, LOD
@@ -977,7 +1009,7 @@ suffix solely to restore older links.
 
 ## Tile warnings and transient datasource recovery
 
-Protocol 5.4 metadata exposes warnings, errors and ordinary timestamp/TTL pairs for every tile type. Warned subset values remain ready and render normally. Warnings are retained with the current value and emitted once per value into diagnostics logs at warning severity, including map/layer/partition context. Replacing or disposing a value replaces or clears its diagnostics. Feature and source-data inspection also surface warnings without discarding content.
+Tile metadata exposes warnings, errors and ordinary timestamp/TTL pairs for every tile type. Warned subset values remain ready and render normally. Warnings are retained with the current value and emitted once per value into diagnostics logs at warning severity, including map/layer/partition context. Replacing or disposing a value replaces or clears its diagnostics. Feature and source-data inspection also surface warnings without discarding content.
 
 Failed tile values expire through the same `TileExpiryScheduler` as successful finite-lifetime values. Mapget caps error tiles with `mapget.serve.error-tile-ttl` (default five seconds). Mapget also caps successful empty source layers with `mapget.serve.empty-tile-ttl` (default five seconds), including missing LiveSource tiles/objects. Empty search/inspection matches inherit their source lifetime; they do not receive a separate empty-result cap. Filter errors retain their per-output diagnostics and earliest dependency expiry; unrelated new coverage is sent immediately. There is no subscription-level suppression, retry deadline map, or tile-specific backoff. Release and coverage pruning cancel expiry ownership. Retained inspection renewals preserve older content on error and schedule the returned value's absolute expiry. Initial inspection failures are surfaced immediately, not hidden in a transport retry loop.
 
