@@ -1,3 +1,7 @@
+import {POINT_CLOUD_MAX_POINTS} from "../../../../app/mapview/point-cloud-policy.model";
+import {MapViewState} from "../../../../app/mapview/mapview.state";
+import {testPersistence} from "../../../support/state-owners";
+import {DEFAULT_POINT_CLOUD_POLICY} from "../../../../app/mapview/point-cloud-policy.model";
 import {
     describe,
     expect,
@@ -109,6 +113,65 @@ function completedTile(
 }
 
 describe("TileSubsetLayerRenderService GPU admission", () => {
+    it("resumes queued work when management is disabled and reclaims on re-enabling", async () => {
+        const persistence = testPersistence();
+        const state = new MapViewState(persistence);
+        const management = state.gpuMemoryManagementEnabledState;
+        const gpuMiB = state.pointCloudGpuMemoryMiBState;
+        gpuMiB.next(16);
+        const service = new TileSubsetLayerRenderService(state);
+        const internal = service as any;
+        const pump = vi.spyOn(internal, "pump").mockResolvedValue(undefined);
+        const changed = vi.fn();
+        const subscription = service.pointCloudPolicyChanged.subscribe(changed);
+        let release: (() => void) | undefined;
+        try {
+            await vi.waitFor(() => expect(changed).toHaveBeenCalledOnce());
+            expect(pump).not.toHaveBeenCalled(); // Preferences alone must not start the worker pool.
+            internal.queue = [{}];
+            management.next(false);
+            await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(2));
+            expect(changed).toHaveBeenLastCalledWith(false);
+            expect(pump).toHaveBeenCalledOnce();
+            release = gpuMemoryBudget.allocate(32 * 1048576);
+            gpuMiB.next(8);
+            await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(3));
+            expect(changed).toHaveBeenLastCalledWith(false);
+            management.next(true);
+            await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(4));
+            expect(changed).toHaveBeenLastCalledWith(true);
+            expect(() => gpuMemoryBudget.allocate(1)).toThrow("GPU allocation allowance exhausted");
+        } finally {
+            subscription.unsubscribe();
+            persistence.ngOnDestroy();
+            release?.();
+            gpuMemoryBudget.setEnabled(true);
+            gpuMemoryBudget.setLimit(DEFAULT_POINT_CLOUD_POLICY.gpuMemoryMiB * 1048576);
+        }
+    });
+
+    it("reclaims worker heaps and outstanding claims when retiring running work", () => {
+        const service = new TileSubsetLayerRenderService();
+        const internal = service as any;
+        const {reject} = completedTile(service);
+        const terminate = vi.fn();
+        internal.workers[0].terminate = terminate;
+        internal.workerHeapBytes[0] = 1000;
+        const pending = internal.inFlight.get("tile-task");
+        pending.workingBytes = 123;
+        internal.workingBytes = 123;
+        const before = gpuMemoryBudget.reservedBytes;
+        pending.gpuReservation = gpuMemoryBudget.reserve(100);
+        internal.retireWorker(0);
+        expect(terminate).toHaveBeenCalledOnce();
+        expect(reject).toHaveBeenCalledOnce();
+        expect(internal.inFlight.size).toBe(0);
+        expect(internal.ready).toHaveLength(0);
+        expect(internal.workerHeapBytes[0]).toBe(0);
+        expect(internal.workingBytes).toBe(0);
+        expect(gpuMemoryBudget.reservedBytes).toBe(before);
+    });
+
     it("wakes outer tile scheduling even when retirement cannot admit queued work", async () => {
         const service = new TileSubsetLayerRenderService();
         const internal = service as any;
@@ -124,19 +187,19 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
         subscription.unsubscribe();
     });
 
-    it.each([false, true])("admits adaptive work after accounting for GPU retirement (%s)", async (retiring) => {
+    it.each([false, true])("waits for retirement and permits existing-buffer reuse without changing point counts (%s)", async (retiring) => {
         const service = new TileSubsetLayerRenderService();
         const internal = service as any;
         const postMessage = vi.fn();
         const mib = 1048576;
         gpuMemoryBudget.setLimit(10 * mib);
-        const releaseExisting = gpuMemoryBudget.allocate((retiring ? 10 : 8) * mib);
+        const releaseExisting = gpuMemoryBudget.allocate(10 * mib);
         const finishRetirement = retiring ? gpuMemoryBudget.beginRetirement() : null;
         const task = {
             taskId: "cloud", visualizationId: "cloud", renderSignature: "cloud",
             subsetBlob: new Uint8Array(4), inputGeometryVertexCount: 10000,
             mapId: "Map", catalogRevision: 1, stringPoolId: "pool", styleKey: "style",
-            iconCatalogVersion: 0, gpuExistingBytes: mib / 2,
+            iconCatalogVersion: 0,
             pointCloud: {enabled: true, maxPoints: 10000, spacingMeters: 1, cacheKey: "cloud"}
         };
         const pending = {task, admit: vi.fn(), prepare: vi.fn(), resolve: vi.fn(), reject: vi.fn(), queuedAt: 0};
@@ -154,7 +217,6 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
         internal.activeWorkerCount = vi.fn().mockReturnValue(1);
         try {
             await internal.pump();
-            expect(pending.reject).not.toHaveBeenCalled();
             if (retiring) {
                 expect(postMessage).not.toHaveBeenCalled();
                 expect(internal.queue).toHaveLength(1);
@@ -162,14 +224,54 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
                 finishRetirement!();
                 await vi.waitFor(() => expect(postMessage).toHaveBeenCalledOnce());
             }
+            expect(pending.reject).not.toHaveBeenCalled();
             expect(postMessage).toHaveBeenCalledOnce();
-            expect(postMessage.mock.calls[0][0].pointCloud.maxPoints).toBe(retiring ? 10000 : Math.floor(mib / 640));
+            expect(postMessage.mock.calls[0][0].pointCloud.maxPoints).toBe(10000);
             expect(gpuMemoryBudget.allocatedBytes + gpuMemoryBudget.reservedBytes).toBeLessThanOrEqual(10 * mib);
         } finally {
             (pending as any).gpuReservation?.release();
             releaseExisting();
             finishRetirement?.();
-            gpuMemoryBudget.setLimit(256 * mib);
+            gpuMemoryBudget.setLimit(DEFAULT_POINT_CLOUD_POLICY.gpuMemoryMiB * mib);
+        }
+    });
+
+    it("dispatches a smaller queued job while a larger job waits for running work", async () => {
+        const service = new TileSubsetLayerRenderService();
+        const internal = service as any;
+        const postMessage = vi.fn();
+        const mib = 1048576;
+        gpuMemoryBudget.setLimit(10 * mib);
+        const releaseExisting = gpuMemoryBudget.allocate(8 * mib);
+        const jobs = [30000, 1000].map((points, index) => ({
+            task: {taskId: String(index), visualizationId: String(index), renderSignature: "same",
+                subsetBlob: new Uint8Array(4), inputGeometryVertexCount: points,
+                mapId: "Map", catalogRevision: 1, stringPoolId: "pool", styleKey: "style", iconCatalogVersion: 0,
+                pointCloud: {enabled: true, maxPoints: points, spacingMeters: 0, cacheKey: String(index)}},
+            admit: vi.fn(), prepare: vi.fn(), resolve: vi.fn(), reject: vi.fn(), queuedAt: 0
+        }));
+        internal.workers = [{postMessage}, {postMessage}];
+        internal.runningTaskIdByWorker = ["running", null];
+        internal.inFlight.set("running", {});
+        internal.workerHeapBytes = [0, 0];
+        internal.catalogKeysByWorker = [new Set(), new Set()];
+        internal.fieldDictSizesByWorker = [new Map(), new Map()];
+        internal.styleKeysByWorker = [new Set(), new Set()];
+        internal.iconCatalogVersionByWorker = [-1, -1];
+        internal.idleWorkers = [1];
+        internal.queue = [...jobs];
+        jobs.forEach(job => internal.latestSignatureByVisualization.set(job.task.visualizationId, "same"));
+        internal.ensureWorkers = vi.fn().mockResolvedValue(undefined);
+        internal.activeWorkerCount = () => 2;
+        try {
+            await internal.pump();
+            expect(postMessage).toHaveBeenCalledOnce();
+            expect(postMessage.mock.calls[0][0].taskId).toBe("1");
+            expect(internal.queue).toEqual([jobs[0]]);
+        } finally {
+            jobs.forEach(job => (job as any).gpuReservation?.release());
+            releaseExisting();
+            gpuMemoryBudget.setLimit(DEFAULT_POINT_CLOUD_POLICY.gpuMemoryMiB * mib);
         }
     });
 
@@ -796,7 +898,7 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
 
 
 describe("point-cloud view allocation", () => {
-    it("shares one quota between views and then their visible contributions", () => {
+    it("keeps per-object fidelity independent of other views and visible contributions", () => {
         const service = new TileSubsetLayerRenderService();
         service.registerPointCloud("a", 0, 100);
         const whole = service.pointCloudPolicyFor("a", 1).maxPoints;
@@ -805,14 +907,15 @@ describe("point-cloud view allocation", () => {
         const first = service.pointCloudPolicyFor("a", 1);
         const second = service.pointCloudPolicyFor("b", 1);
         const third = service.pointCloudPolicyFor("c", 1);
-        expect(first.maxPoints + second.maxPoints + third.maxPoints).toBeLessThanOrEqual(whole);
+        expect(whole).toBe(POINT_CLOUD_MAX_POINTS);
+        expect(first.maxPoints).toBe(whole);
         expect(second.maxPoints).toBe(third.maxPoints);
-        expect(first.maxPoints).toBeGreaterThan(second.maxPoints);
+        expect(first.maxPoints).toBe(second.maxPoints);
         service.unregisterPointCloud("c");
         expect(service.pointCloudPolicyFor("b", 1).maxPoints).toBe(first.maxPoints);
     });
 
-    it("coalesces changed demand and keeps density stable across small scale changes", async () => {
+    it("keeps count-based demand independent without broadcasting policy changes", async () => {
         const service = new TileSubsetLayerRenderService();
         const changed = vi.fn();
         const subscription = service.pointCloudPolicyChanged.subscribe(changed);
@@ -820,7 +923,8 @@ describe("point-cloud view allocation", () => {
         service.registerPointCloud("b", 0, 200);
         service.registerPointCloud("a", 0, 100);
         await Promise.resolve();
-        expect(changed).toHaveBeenCalledTimes(1);
+        service.unregisterPointCloud("b");
+        expect(changed).not.toHaveBeenCalled();
         const policy = service.pointCloudPolicyFor("a", 1);
         expect(service.pointCloudPolicyFor("a", 1.1, policy.spacingMeters).spacingMeters).toBe(policy.spacingMeters);
         subscription.unsubscribe();

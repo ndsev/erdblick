@@ -1,3 +1,5 @@
+import {Subject} from "rxjs";
+import {LOCATION_BOUNDARY_TERMS_REVISION} from "../../../app/geolocation/location-policy.model";
 import { GeolocationState } from "../../../app/geolocation/geolocation.state";
 import {testPersistence, stateOwners} from '../../support/state-owners';
 import "@angular/compiler";
@@ -35,6 +37,9 @@ const createService = (providers: LocationSearchProviderConfig[] = [
     }
 ]) => {
     const httpClient = new HttpClientStub();
+    const persistence = testPersistence();
+    const state = new GeolocationState(persistence);
+    state.locationBoundaryConsentState.next({decision: "accepted", revision: LOCATION_BOUNDARY_TERMS_REVISION});
     const configService = {
         snapshot: {
             locationSearch: {
@@ -45,8 +50,8 @@ const createService = (providers: LocationSearchProviderConfig[] = [
         }
     };
     return {
-        service: new GeolocationService(httpClient as any, configService as any, testPersistence(), new GeolocationState(testPersistence())),
-        httpClient
+        service: new GeolocationService(httpClient as any, configService as any, persistence, state),
+        httpClient, state
     };
 };
 
@@ -59,6 +64,55 @@ function savedArea(overrides: Record<string, unknown> = {}) {
 }
 
 describe("GeolocationService", () => {
+    it("does not query providers when location search is disabled", async () => {
+        const {service, httpClient, state} = createService();
+        state.locationSearchEnabledState.next(false);
+        expect(await firstValueFrom(service.search("Place", 10))).toEqual([]);
+        expect(httpClient.get).not.toHaveBeenCalled();
+    });
+
+    it("cancels an outstanding provider search when disabled", () => {
+        const {service, httpClient, state} = createService();
+        const response = new Subject<unknown>();
+        const next = vi.fn();
+        httpClient.get.mockReturnValue(response);
+        service.search("Place", 10).subscribe(next);
+        expect(response.observed).toBe(true);
+        state.locationSearchEnabledState.next(false);
+        expect(response.observed).toBe(false);
+        response.next([areaMatch]);
+        expect(next).not.toHaveBeenCalled();
+    });
+
+    it("uses the supplied centrepoint without geometry requests when boundaries are disabled", async () => {
+        const {service, httpClient, state} = createService();
+        state.locationBoundaryConsentState.next({decision: "disabled", revision: LOCATION_BOUNDARY_TERMS_REVISION});
+        expect(await firstValueFrom(service.resolveNavigation("loc:mapget-offline:wof:1", savedArea())))
+            .toEqual({point: [11.5, 48], label: "Place"});
+        expect(httpClient.get).not.toHaveBeenCalled();
+    });
+
+    it("does not substitute a bounding box for a missing centrepoint while boundaries are disabled", async () => {
+        const {service, httpClient, state} = createService();
+        state.locationBoundaryConsentState.next({decision: "disabled", revision: LOCATION_BOUNDARY_TERMS_REVISION});
+        const result = await firstValueFrom(service.resolveNavigation("loc:mapget-offline:wof:1", savedArea({lonLat: undefined})));
+        expect(result.error).toContain("centrepoint");
+        expect(result.area).toBeUndefined();
+        expect(httpClient.get).not.toHaveBeenCalled();
+    });
+
+    it("cancels a boundary lookup when consent is withdrawn", () => {
+        const {service, httpClient, state} = createService();
+        const response = new Subject<unknown>();
+        const next = vi.fn();
+        httpClient.get.mockReturnValue(response);
+        service.resolveNavigation("loc:mapget-offline:wof:1", savedArea()).subscribe(next);
+        state.locationBoundaryConsentState.next({decision: "disabled", revision: LOCATION_BOUNDARY_TERMS_REVISION});
+        expect(response.observed).toBe(false);
+        response.next([{...areaMatch, geometry: polygon}]);
+        expect(next).not.toHaveBeenCalled();
+    });
+
     it("normalizes provider responses and creates executable targets", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockReturnValue(of([

@@ -26,7 +26,7 @@ search owners.
 | `app/omnibar/` | Command palette, history compatibility codecs and `OmnibarState` |
 | `app/navigation/` | Coordinate/feature jumps, location navigation and external viewers |
 | `app/search/` | Feature-search definitions, execution, completion, result presentation and `SearchState` |
-| `app/geolocation/` | Place providers, location geometry and `GeolocationState` |
+| `app/geolocation/` | Place providers, location geometry, consent UI and `GeolocationState` |
 | `app/mapview/`, `app/mapdata/`, `app/inspection/`, `app/coordinates/`, `app/mapstyle/`, `app/diagnostics/` | The corresponding domain's state, controllers and presentation |
 | `app/alert/`, `app/editor/`, `app/clipboard/`, `app/keyboard/` | Reusable UI capabilities, each with its own components/services |
 | `app/survey/` | Configured announcement banner, its value contracts and HTML validation |
@@ -62,7 +62,7 @@ The main service boundaries are:
 
 | Owner | Responsibility |
 | --- | --- |
-| `MapViewState` | Durable identities, committed cameras, projection/sync values, rendering budgets, positional codecs and coherent membership edits |
+| `MapViewState` | Durable identities, committed cameras, projection/sync values, rendering budgets and GPU-management switch, positional codecs and coherent membership edits |
 | `MapViewService` | Renderer lifetimes, live camera previews, navigation, view teardown and view/render-preference actions and controls |
 | `MapDataState` | Layer values, style-option associations, preset selections, compression and retry preferences |
 | `MapDataService` | Loaded catalog/tree, preset application, complete-catalog cleanup and transport-preference controls |
@@ -71,6 +71,8 @@ The main service boundaries are:
 | `InspectionSelectionService` | Asynchronous feature loading, selection projection and navigation |
 | `SearchState` | Saved definitions, grouping and logical view associations |
 | `SearchService` | Live sessions, completion, worker/transport coordination and search actions |
+| `GeolocationState` | Location-search availability, result limits and local-only, revisioned boundary consent |
+| `LocationPolicyService` | Explicit consent, refusal and read-only access to the bundled disclaimer |
 | `AppActionRegistry` | Shared registration, schema validation and dispatch for omnibar and MCP |
 | `DiagnosticsState` | Saved diagnostics preferences and read-only runtime version snapshots, kept outside persistence |
 | `AppConfigService` | Configuration loading, precedence and publication, using pure domain schemas and normalizers |

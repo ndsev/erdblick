@@ -1,3 +1,5 @@
+import {SearchService} from "../../../app/search/search.service";
+import {createFeatureSearchStateEntry} from "../../../app/search/search-definition.model";
 import "@angular/compiler";
 import {load} from "js-yaml";
 import {
@@ -25,7 +27,10 @@ function fixture(importedStyleId: string | undefined = "Folder/Saved") {
     const component = Object.create(SearchComponent.prototype) as any;
     component.searchStyleSavePending = false;
     component.searchStyleSaveVisible = true;
-    component.pendingSearchStyleRules = structuredClone(RULES);
+    component.pendingSearchStyle = {
+        ...createFeatureSearchStateEntry({query: "true", searchStyleRules: structuredClone(RULES)}),
+        concreteScope: "feature", backendQuery: "", resultFields: []
+    };
     component.styleService = {
         styleIdentityConflict: vi.fn(() => undefined),
         importStyleYamlSource: vi.fn(() => importedStyleId)
@@ -46,6 +51,25 @@ function request(action: SearchStyleSaveRequest["action"], enabled: boolean): Se
 }
 
 describe("Feature Search style save lifecycle", () => {
+    it("freezes resolved query, scope, selected types and visual rules for the dialog", () => {
+        const service: SearchService = Object.create(SearchService.prototype);
+        const definition = {
+            ...createFeatureSearchStateEntry({query: "**.speedLimitKmh", selectedFeatureTypes: ["Road"]}),
+            concreteScope: "attribute" as const, backendQuery: "speedLimitKmh", resultFields: ["$name"]
+        };
+        Reflect.set(service, "getInternalSession", () => ({id: definition.id}));
+        Reflect.set(service, "resolvedDefinitionForSession", () => definition);
+        const drafts = structuredClone(RULES);
+        const snapshot = service.getStyleExportSnapshot(definition.id, drafts);
+        definition.backendQuery = "otherField";
+        definition.selectedFeatureTypes.push("Lane");
+        drafts[0].width = 19;
+        expect(snapshot.backendQuery).toBe("speedLimitKmh");
+        expect(snapshot.concreteScope).toBe("attribute");
+        expect(snapshot.selectedFeatureTypes).toEqual(["Road"]);
+        expect(snapshot.searchStyleRules[0].width).toBe(4);
+    });
+
     it("initializes layer affinity from the search's selected layers", () => {
         const component = fixture();
         component.searchStyleSaveVisible = false;
@@ -57,11 +81,13 @@ describe("Feature Search style save lifecycle", () => {
                 {id: "RoadSurface"}
             ])
         }};
-        component.selectedSearchMapLayers = vi.fn(() => [
+        component.session = {id: "search-1"};
+        component.pendingSearchStyle.selectedMapLayers = [
             {mapId: "Map A", layerId: "Road"},
             {mapId: "Map B", layerId: "Road"},
             {mapId: "Map B", layerId: "Lane"}
-        ]);
+        ];
+        component.searchService = {getStyleExportSnapshot: vi.fn(() => component.pendingSearchStyle)};
 
         component.saveSearchStyle();
 
@@ -113,7 +139,21 @@ describe("Feature Search style save lifecycle", () => {
         await Promise.resolve();
 
         expect(component.searchStyleSaveVisible).toBe(true);
-        expect(component.pendingSearchStyleRules).toEqual(RULES);
+        expect(component.pendingSearchStyle.searchStyleRules).toEqual(RULES);
         expect(component.styleEditorRequestService.open).not.toHaveBeenCalled();
+    });
+
+    it("refuses an unresolved scope before opening the save dialog", () => {
+        const component = fixture();
+        component.searchStyleSaveVisible = false;
+        component.session = {id: "search-1"};
+        component.serializeStyleRuleDrafts = vi.fn(() => RULES);
+        component.searchService = {getStyleExportSnapshot: vi.fn(() => {
+            throw new Error("Search scope is still being resolved.");
+        })};
+        component.saveSearchStyle();
+        expect(component.searchStyleSaveVisible).toBe(false);
+        expect(component.infoMessageService.showError).toHaveBeenCalledWith("Search scope is still being resolved.");
+        expect(component.styleService.importStyleYamlSource).not.toHaveBeenCalled();
     });
 });

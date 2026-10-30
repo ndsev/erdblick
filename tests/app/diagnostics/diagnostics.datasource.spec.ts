@@ -7,6 +7,25 @@ import {buildAggregatedPerfStats} from "../../../app/diagnostics/diagnostics-per
 import {DiagnosticsDatasource} from "../../../app/diagnostics/diagnostics.datasource";
 import type {LogEntry} from "../../../app/diagnostics/diagnostics.model";
 
+describe("console error diagnostics", () => {
+    it.each([
+        ["Firefox", "pump@http://localhost/main.js:10:20"],
+        ["Chromium", "Error: No GPU allowance remains.\n    at pump (http://localhost/main.js:10:20)"],
+        ["missing stack", undefined],
+        ["empty stack", ""]
+    ])("retains the error message with a %s stack", (_browser, stack) => {
+        const error = new Error("No GPU allowance remains.");
+        error.stack = stack;
+        const message = DiagnosticsDatasource.prototype["stringifyLogPart"](error);
+
+        expect(message.split("Error: No GPU allowance remains.")).toHaveLength(2);
+        expect(message.startsWith("Error: No GPU allowance remains.")).toBe(true);
+        if (stack) {
+            expect(message).toContain(stack);
+        }
+    });
+});
+
 describe("backend connectivity diagnostics", () => {
     it("does not turn an intentional socket reset into a backend error", () => {
         let connected = true;

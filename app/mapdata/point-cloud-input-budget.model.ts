@@ -1,3 +1,5 @@
+import {DEFAULT_POINT_CLOUD_POLICY} from "../mapview/point-cloud-policy.model";
+
 /**
  * Admission model for immutable point-cloud inputs retained by FilterTileState.
  *
@@ -8,7 +10,7 @@
 export class PointCloudInputBudget {
     private readonly entries = new Map<object, {bytes: number; evict: () => void}>();
     private retained = 0;
-    private limit = (512 - 16) * 1048576 / 4;
+    private limit = (DEFAULT_POINT_CLOUD_POLICY.workingMemoryMiB - 16) * 1048576 / 4;
 
     /** Leave space for worker copies/model storage and at least one worker's fixed overhead. */
     setWorkingLimit(bytes: number): void {

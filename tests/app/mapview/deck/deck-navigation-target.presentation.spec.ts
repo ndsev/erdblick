@@ -83,7 +83,7 @@ function createView(): DeckMapView3D {
         {} as never,
         {} as never,
         {} as never,
-        {} as never, Object.assign({} as never, { viewIdAt: (index: number) => String(index), viewIds: ["0", "1"] }) as never, {} as never as never, {} as never as never
+        {} as never, Object.assign({} as never, { viewIdAt: (index: number) => String(index), viewIds: ["0", "1"] }) as never, {} as never as never, {} as never as never, {} as never
     );
 }
 

@@ -1114,7 +1114,7 @@ export class StyleState extends AppState<Map<string, Record<string, StyleOptionV
             const n = Number(value);
             return Number.isNaN(n) ? 0 : n;
         }
-        if (t === 'string') {
+        if (t === 'string' || t === 'color') {
             if (value === null || value === undefined) return '';
             return String(value);
         }

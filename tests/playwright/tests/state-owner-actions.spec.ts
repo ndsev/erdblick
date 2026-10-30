@@ -1,7 +1,7 @@
 import type {Page} from '@playwright/test';
 import {expect, test} from '../fixtures/test';
 import {mcpClient} from '../utils/mcp-client';
-import {enableMapLayer} from '../utils/ui-helpers';
+import {enableMapLayer, waitForAppReady} from '../utils/ui-helpers';
 import {TEST_LAYER_NAMES, TEST_MAP_NAMES} from '../utils/test-params';
 
 /**
@@ -52,6 +52,7 @@ interface Camera {
 /** Label through the visible UI, proving that session updates reach native discovery. */
 async function openViewer(page: Page, label: string, origin?: string): Promise<void> {
     await page.goto(origin ? new URL(legacyTwoViews, origin).href : legacyTwoViews);
+    await waitForAppReady(page);
     await page.getByTestId('viewer-action-status').click();
     await expect(page.getByTestId('viewer-action-details')).toContainText('MCP controls ready');
     await page.getByLabel('Tab label', {exact: true}).fill(label);

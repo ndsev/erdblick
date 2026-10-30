@@ -1,3 +1,4 @@
+import {LOCATION_BOUNDARY_TERMS_REVISION} from "../../../app/geolocation/location-policy.model";
 import "@angular/compiler";
 import { stateOwners } from '../../support/state-owners';
 import {
@@ -2513,6 +2514,22 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
+    it('persists GPU memory management separately from downsampling and URL state', () => {
+        const routerStub = createRouterStub();
+        const service = new AppStateService(routerStub as unknown as Router, messageServiceStub());
+        stateOwners(service);
+        expect(stateOwners(service).viewSettings.gpuMemoryManagementEnabledState.getValue()).toBe(true);
+        expect(stateOwners(service).viewSettings.gpuMemoryManagementEnabledState.isUrlState()).toBe(false);
+        expect(service.seedConfigDefaultState({gpuMemoryManagementEnabled: false}, 'memory-config')).toEqual([]);
+        expect(stateOwners(service).viewSettings.gpuMemoryManagementEnabledState.getValue()).toBe(false);
+        expect(stateOwners(service).viewSettings.pointCloudPolicy.enabled).toBe(true);
+        expect(service.exportSnapshot()).toMatchObject({gpuMemoryManagementEnabled: 0});
+        expect(service.importSnapshot({gpuMemoryManagementEnabled: 1})).toEqual([]);
+        expect(stateOwners(service).viewSettings.gpuMemoryManagementEnabledState.getValue()).toBe(true);
+        service.ngOnDestroy();
+        routerStub.events.complete();
+    });
+
     it('exports app state entries with compact style option storage keys', () => {
         const routerStub = createRouterStub();
         const messageServiceStub = { add: vi.fn(), showSuccess: vi.fn(), registerDefaultContainer: vi.fn(), showAlertDialogDefault: vi.fn() } as any;
@@ -2546,6 +2563,32 @@ describe('AppStateService', () => {
 
         service.ngOnDestroy();
         routerStub.events.complete();
+    });
+
+    it('keeps location preferences local and rejects consent from config, URL and snapshots', () => {
+        const consent = {decision: "accepted", revision: LOCATION_BOUNDARY_TERMS_REVISION} as const;
+        const router = createRouterStub({locationBoundaryConsent: JSON.stringify(consent), locationSearchEnabled: "false"});
+        const service = new AppStateService(router as unknown as Router, messageServiceStub());
+        stateOwners(service);
+        service.seedConfigDefaultState({locationBoundaryConsent: consent, locationSearchEnabled: false}, "location-test");
+        service.initializePersistence();
+        expect(stateOwners(service).locationSearch.state.locationBoundariesEnabled).toBe(false);
+        expect(stateOwners(service).locationSearch.state.locationSearchEnabled).toBe(true);
+        service.importSnapshot({locationBoundaryConsent: consent});
+        expect(stateOwners(service).locationSearch.state.locationBoundariesEnabled).toBe(false);
+        service.replaceSnapshotState({locationBoundaryConsent: consent});
+        expect(stateOwners(service).locationSearch.state.locationBoundariesEnabled).toBe(false);
+        stateOwners(service).locationSearch.state.locationBoundaryConsentState.next(consent);
+        expect(stateOwners(service).locationSearch.state.locationBoundariesEnabled).toBe(true);
+        stateOwners(service).locationSearch.state.locationSearchEnabledState.next(false);
+        expect(stateOwners(service).locationSearch.state.locationBoundariesEnabled).toBe(false);
+        service.replaceSnapshotState({locationSearchEnabled: true});
+        expect(stateOwners(service).locationSearch.state.locationSearchEnabled).toBe(false);
+        expect(stateOwners(service).locationSearch.state.locationBoundaryConsentState.getValue()).toEqual(consent);
+        expect(service.exportSnapshot()).not.toHaveProperty("locationBoundaryConsent");
+        expect(service.exportSnapshot()).not.toHaveProperty("locationSearchEnabled");
+        service.ngOnDestroy();
+        router.events.complete();
     });
 
     it('keeps coordinate preference and legal acceptance out of URLs and snapshots', () => {

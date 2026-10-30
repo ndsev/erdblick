@@ -118,12 +118,30 @@ Enable **Point clouds**, then choose a layer preset:
 
 **Colour by object** and **Subtle overlay** can also be combined in the
 layer's style options. All presets retain depth occlusion and object picking.
-Overlay changes point appearance. The style opts into spatial downsampling for
-both `PointCloudObject` and `PointCloudPreview`; picking still identifies the
-containing object. Preferences → Rendering → Point clouds controls adaptive
-spacing (default 2 CSS pixels), browser working memory (512 MiB), and the shared
-GPU allocation allowance (256 MiB). A smaller spacing requests more detail;
-available memory and the backend's delivered sample limit the result.
+Overlay changes point appearance. The style opts into count-based downsampling
+for `PointCloudObject`; picking still identifies the
+containing object. By default, objects with fewer than 14,000,000 points retain
+every point. Objects with at least 14,000,000 points retain 13,999,999 original
+points, spaced evenly through the object's point sequence, including both
+endpoints. This is deterministic selection by source index; spatial coverage
+depends on source ordering. For example, a 16-million-point object
+retains approximately 87.5% of its points. Zooming out or opening another view
+does not reduce this per-object count. LiveSource converts the complete source
+objects; sampling applies only to visualization.
+
+Preferences → Rendering → Point clouds controls adaptive detail. Disabling it
+requests exact backend geometry and renders all delivered points, subject to
+available memory.
+
+The separate **Memory** section controls browser working memory for point clouds
+(default **6144 MiB**) and the shared GPU allocation allowance for all map geometry
+(default **3072 MiB**). **Manage GPU memory** is enabled by default. Turning it off
+immediately bypasses GPU allowance checks and resumes work paused by that allowance;
+it keeps normal rendering and resource disposal, point-count sampling, and the
+point-cloud working-memory allowance. Turning it back on releases existing
+presentations and rebuilds them within the saved GPU allowance. These settings
+persist in this browser. The allowances are not preallocated memory or measurements
+of available VRAM. Saved user values take precedence over defaults.
 
 Custom styles opt in on a top-level, feature-scope, point-only rule:
 
@@ -131,32 +149,41 @@ Custom styles opt in on a top-level, feature-scope, point-only rule:
 rules:
   - geometry: point
     point-cloud: true
-    point-cloud-max-points: 262144
+    point-cloud-max-points: 13999999
     color: "#70D6C7"
     width: 2
 ```
 
-`point-cloud-max-points` is a backend visualization quota per channel/source
-partition, shared across features. Set it to zero for exact backend delivery
-with frontend sampling. Allowed values are 0–1048576. Subrules inherit the
-policy and must not override it. Ordinary point/POI rules remain unchanged.
-Sampling preserves original representatives and stable order within each
-encoding, including duplicates when the input fits its quota. Draco can use a
-different decoded order from native arrays.
+`point-cloud-max-points` is a backend visualization quota for each object,
+combining its matching point geometries. Its default is 13999999; custom styles
+may explicitly request a smaller sample. Set it to zero for exact backend
+delivery with frontend sampling. Allowed values are 0–13999999. Subrules inherit
+the policy and must not override it. Ordinary point/POI rules remain unchanged.
+Selection preserves original coordinates, source order and duplicates; Draco
+can use a different decoded order from native arrays. The canonical model,
+inspection and export remain exact.
 
-The frontend selects before projection and packet generation. It shares
-quotas across visible views/contributions and reuses bounded representatives
-for aligned coarse redraws. Grid spacing changes with hysteresis. Empty cells,
-diagonal thin structures and outliers can yield fewer representatives than the
-quota. Statistics expose delivered/rendered instance counts. The GPU allowance
-accounts requested primitive-buffer capacity, retained old/new buffers and
-observed luma resources; it is not a measurement of available VRAM.
+The frontend selects before projection and packet generation. Statistics expose
+delivered/rendered instance counts. The GPU allowance accounts for requested
+primitive-buffer capacity, replacement overlap and observed luma resources.
+Memory admission pauses work that cannot fit; it does not silently lower the
+point count.
 
-Reducing memory allowances evicts retained cloud input and retires cloud GPU
-contributions before replacement. Workers are recycled when their retained
-WASM heaps cannot fit further work. Pending work waits for the old GPU buffers
-to be safely freed after Deck rebinds its models. Insufficient memory produces an explicit
-error instead of silently treating reduced data as full detail.
+Reducing working memory, or reducing the GPU allowance while GPU management is
+enabled, terminates render workers to release their WASM heaps and retires GPU
+contributions from all layers. Lowering working memory may
+additionally evict retained cloud input.
+Replacement work waits for safe retirement after Deck rebinds its models. It can
+reuse released ranges inside buffers that remain allocated. Under allocation
+pressure, superseded fallback visuals retire before their replacements are ready;
+this may leave a temporary gap while the replacement renders.
+GPU allocation exhaustion produces one warning per memory or point-cloud preference change.
+Affected work retries automatically when usable capacity is released or its
+allowance/input changes. Smaller jobs can proceed while larger jobs wait. Hide
+data or restrict a style's filter to reduce demand without raising the allowance
+or reloading the viewer. An object that still cannot fit remains paused. If browser working-memory
+admission rejects input or rendering, raise that allowance, or hide other clouds
+and refresh the affected layer.
 
 <!-- mcp:
 keywords: [style, YAML, search visualization]
@@ -170,19 +197,27 @@ YAML. A root `category` may be `base` or `search`; omission means `base`.
 Category is metadata independent of whether a style is built in, additional,
 modified, imported, or visible.
 
-Feature Search saves reusable search-result rules as ordinary imported YAML
-with `category: search`, a checked-by-default **Enable this style upon save** choice, and optional exact
-layer-ID affinity. Empty affinity applies to any layer. The source is added directly to
-the Styles tree, marked with a **Search** tag, persisted through the normal
-imported-style mechanism, and exported through the normal style action. Its
-canonical source contains flat rules, plus one `showSearchStyle` Boolean option
-that defaults on and gates every generated rule. This produces a real per-layer
-**Show &lt;stylesheet name&gt;** control in Maps & Layers. The option gate is plumbing: it
-is kept out of Quick rule controls and removed when a saved style is copied
-back into detached Feature Search rules. The source contains no query, search
-scope, map ID, or separate JSON-library identity. Its optional `layer` metadata
-affects ordinary rendering but is not copied into a detached Feature Search
-rule template.
+Feature Search saves its matching entities and visual rules as ordinary imported YAML
+with `category: search`, a checked-by-default **Enable this style upon save** choice,
+and optional exact layer-ID affinity. The save dialog captures the resolved feature
+or attribute scope, normalized query, selected feature types, and current visual rules.
+Each generated rule includes that membership predicate. Attribute rules use
+`attribute-filter`, so native rendering uses each matched validity's geometry;
+attributes without a validity use their feature geometry. No geometry clipping is
+reimplemented in the browser.
+
+The source is added to the Styles tree with a **Search** tag, persisted through the
+normal imported-style mechanism, and exported through the normal style action. A
+`showSearchStyle` Boolean option defaults on and gates every rule, producing a
+per-layer **Show &lt;stylesheet name&gt;** control in Maps & Layers. The generated gate
+is removed when copying compatible rules back into a detached Feature Search;
+captured predicates remain and intersect with the new search. Explicitly different
+scopes are incompatible. Older generic templates still work without reconstructing
+missing scope or query information.
+
+Empty affinity applies to any layer; exact IDs apply across maps. Layer affinity
+controls ordinary rendering and is not copied into a detached search. The stylesheet
+does not capture map IDs, tiles, result views, or density settings.
 
 The root `default` and the generated Boolean option are deliberately distinct.
 Root `default` determines whether the whole stylesheet is enabled when first
@@ -190,15 +225,35 @@ saved or loaded; `options[].default` seeds the per-layer control once that
 stylesheet is active.
 
 The Style Editor has **Quick** and **Advanced** tabs for every loaded base or
-search style. Its header switch controls the loaded style's current visible
-state directly and intentionally does not rewrite the YAML `default`. Quick
-opens all rules initially and exposes the root name, exact layer-affinity IDs, and the rule properties
-supported by the current controls, updating the authoritative Advanced YAML on
-every change. No selected affinity means Any. A noncanonical regular expression
-is presented as Custom and is preserved until the user explicitly replaces it
-with exact IDs or clears it. Unsupported properties and rules remain in the
-YAML; rule-local help icons explain what Quick preserves or leaves Advanced-only.
-Applying either view updates the same stylesheet source.
+search style. Its header switch controls current visibility without changing YAML
+`default`. Both tabs edit the same source; Apply updates the stylesheet.
+
+Quick exposes the name and exact layer affinity at the top. No selected layer means
+Any, and a custom regular expression can be edited directly or replaced with exact
+IDs. Common controls include exact native geometry choices, feature and attribute
+filters, literal/expression/scaled colors, width or point diameter, opacity, and
+label text. Expand the named groups for matching, LOD, attributes, offsets, lines,
+points, surfaces, drawing order, labels, relations, and branch trees. Rule lists can
+be added to, duplicated, reordered, and removed. Switching `first-of`/`all-of`
+retains the child rules. Relation endpoints use the same nested rule controls.
+
+Document groups expose options of all three native types (Boolean, color, string),
+local presets, LOD thresholds, and hover/selection effects. Maps & Layers also provides
+runtime controls for all non-internal option types. Color text accepts native named
+colors and RGB hex forms; the picker is a convenience. Scale rows retain numeric,
+string, and Boolean category keys and optional fallbacks. Numeric entry uses native
+validation rather than search-editor slider limits.
+
+**Unset** removes a field, retaining inheritance or native defaults; opening the
+form does not materialize defaults. Inherited scales/expressions retain their native
+precedence over child literals. Compatibility fields are explicitly labeled when
+they have no rendering effect. Edits patch individual YAML nodes, preserving
+unrelated content and comments. Editing an alias makes a local copy without changing
+other uses. Unknown fields remain preserved. Native validation messages identify
+invalid fields in the form; invalid YAML syntax temporarily disables form editing
+until corrected in Advanced.
+
+![Quick Style Editor with attribute scope and matching controls](screenshots/style-component-editor-controls.png)
 
 <!-- mcp:
 title: "Style document shape"
@@ -281,11 +336,12 @@ map, with at least one matching component required. If a present layer lacks
 the referenced preset, that composition cannot be applied to the map.
 Selecting a map preset leaves unrelated layers and options alone.
 
-## One top-level rule, one channel
+## Rule channels
 
-Each applicable top-level rule becomes exactly one ordered `/filter` channel.
-Channels are not combined for compression. The channel transports only the
-geometry and projected scalar expressions needed to evaluate that rule tree.
+The planner emits ordered `/filter` channels for applicable top-level rules.
+Compatible rules can share a channel, whose `style-rules` indices retain their
+independent presentation behavior. Channels carry the geometry and projected scalar
+expressions needed to evaluate their rule trees.
 
 The planner separates:
 
@@ -1020,11 +1076,11 @@ hint: "Discover real stored relation names and endpoint types through mapget sch
   relation-source-style:
     geometry: line
     opacity: 0
-    label-text-expression: "$source.laneGroupId"
+    label-text-expression: "laneGroupId"
   relation-target-style:
     geometry: line
     opacity: 0
-    label-text-expression: "$target.laneGroupId"
+    label-text-expression: "laneGroupId"
 ```
 
 Relation fields:
@@ -1174,5 +1230,3 @@ accepts metadata prefixes up to 256 KiB. Increasing the working-memory setting
 retries clouds whose input was rejected; after hiding other clouds, refresh the
 affected layer to retry it. Complete delivered sources within their point quota
 keep all records, including duplicates.
-Hard backend point-cloud resource-limit errors do not trigger automatic tile
-expiry retries. Temporary resource-busy errors keep their retry delay.

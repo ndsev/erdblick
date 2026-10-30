@@ -51,6 +51,12 @@ incremental rebuild script. It rebuilds the bindings and both frontend variants:
 ./ci/20_linux_rebuild.bash
 ```
 
+WASM exception catching is enabled only for the parser, style validation/loading,
+and packet-error reporting sources listed in `libs/core/CMakeLists.txt`. Keep it
+off globally: Emscripten's emulated catching inserts JavaScript invoke wrappers
+into hot model access. Existing validation errors still need their local catches;
+the WASM style-validation tests check recovery after malformed input.
+
 With matching WASM artifacts already present, frontend-only validation uses:
 
 ```bash
@@ -266,6 +272,19 @@ Each logical map view owns one controller. It reconciles:
 A Deck/device recreation replaces only the scene handle. Logical styled
 layers, filter refs, subsets, and visualizations survive until the logical
 view/controller disposes them.
+
+Worker completion only advances the pending render queue; it does not reconcile
+the full view or rebuild style plans. The controller retains a separate set of
+allocation-paused visualizations. Capacity notifications retry only eligible
+members of that set, after available bytes or reusable installed ranges increase.
+Cleanup of a failed attempt alone does not restart it. Point-cloud demand and
+camera scale do not change the count-based sampling policy.
+
+`gpuMemoryManagementEnabled` is persisted AppState (default `true`, absent from
+URLs). Disabling it bypasses the shared GPU allowance and cloud GPU reservations,
+while preserving allocation accounting and normal resource disposal. Re-enabling
+it reclaims existing presentations before rendering within the saved allowance.
+Point-cloud working-memory admission remains independent.
 
 ### Transport refs
 
@@ -814,13 +833,21 @@ Search is an ordinary styled presentation:
 There is no search-specific tile model or renderer. See
 [Search Architecture](erdblick-search-architecture.md).
 
-Place-name navigation is separate from feature-search styling. `LocationNavigationService`
-resolves a Plazs boundary, extent or representative point and owns cancellation of pending
-navigation. `deck-location-area-navigation.ts` clips the complete boundary to Mercator,
+Place-name navigation is separate from feature-search styling. `GeolocationState`
+owns the local, versioned acceptance state; `LocationPolicyService` handles the
+acceptance dialog and preference changes. Neither
+deployment defaults nor imported snapshots can grant consent. Disabling location
+search cancels provider requests and hides location actions/history suggestions.
+`LocationNavigationService` cancels pending navigation on preference changes;
+with boundaries disabled it uses only the supplied centrepoint, without requesting
+geometry or fitting an extent. With consent it resolves a Plazs boundary, extent
+or representative point. Navigation and Deck's final highlight path check the
+policy again so delayed results cannot restore a disabled area highlight.
+`deck-location-area-navigation.util.ts` clips the complete boundary to Mercator,
 splits dateline crossings and fits the active pane. Coordinates remain transient.
 
 `LocationAreaLayer` combines Deck's indexed polygon fill with `LocationOutlineLayer`,
-a WebGL luma model for the 3px aqua ground outline. `location-outline-buffer.ts`
+a WebGL luma model for the 3px aqua ground outline. `location-outline-buffer.util.ts`
 preprojects every ring vertex and prepares camera-independent miter joins once.
 Each 40-byte record stores high/low Mercator coordinates and join information;
 adjacent segment instances share records, and a disabled closing record separates
@@ -974,6 +1001,18 @@ See [Style System](erdblick-stylesystem.md).
 
 ## Failure and cancellation rules
 
+- GPU allowance failures are recoverable presentation failures. Physical buffer
+  allocations check `GpuMemoryBudget`; scheduling estimates must not charge
+  existing scene buffers again or reject reuse of their free ranges. Paused
+  visualizations become eligible after additional free bytes, safe retirement of
+  installed ranges, or changed input/allowances. A failed job's own temporary
+  cleanup does not make it eligible again. Capacity notifications reconsider
+  paused visualizations as well as queued work; smaller jobs can bypass waiting
+  larger jobs. Under pressure, superseded regular-layer fallback owners retire
+  before their replacements are ready. Deck's presentation/rebind boundary
+  controls safe buffer retirement. Point counts are not reduced to satisfy
+  admission. This path is distinct from renderer invalidation after unsafe
+  publication or WebGL context loss.
 - A new filter generation makes older subset/status/render completions stale.
 - Filter status frames use `filterId` and `generation`, independent of viewport
   request IDs. Route them before request-status filtering; the subscription

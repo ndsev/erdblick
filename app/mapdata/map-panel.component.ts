@@ -1,3 +1,4 @@
+import {stylePickerColor} from "../mapstyle/style-color.util";
 import { Component, ViewChild } from "@angular/core";
 import { MenuItem, TreeNode } from "primeng/api";
 import { Menu } from "primeng/menu";
@@ -549,8 +550,11 @@ const MAP_FILTER_DELAY_MS = 300;
                                             }
                                         </div>
                                     </ng-template>
-                                    <!-- Template for boolean style option nodes -->
-                                    <ng-template let-node pTemplate="Bool">
+                                    <!-- All native option kinds share the same persisted update path and editor action. -->
+                                    <ng-template let-node pTemplate="Bool"><ng-container *ngTemplateOutlet="styleOption; context: {$implicit: node}"/></ng-template>
+                                    <ng-template let-node pTemplate="String"><ng-container *ngTemplateOutlet="styleOption; context: {$implicit: node}"/></ng-template>
+                                    <ng-template let-node pTemplate="Color"><ng-container *ngTemplateOutlet="styleOption; context: {$implicit: node}"/></ng-template>
+                                    <ng-template #styleOption let-node>
                                         <div class="map-option-row"
                                              [class.style-option-group-highlight]="isStyleOptionGroupActive(node, index)"
                                              [attr.data-style-option-group]="styleOptionGroupKey(node, index)"
@@ -560,6 +564,7 @@ const MAP_FILTER_DELAY_MS = 300;
                                              (focusout)="deactivateStyleOptionGroup($event, node, index)">
                                         <span class="checkbox-entry oblique"
                                               [ngClass]="{'disabled': !mapService.maps.getMapLayerVisibility(index, node.mapId, node.layerId)}">
+                                            @if (node.type === 'Bool') {
                                             <p-checkbox
                                                     [attr.data-testid]="styleOptionCheckboxTestId(node, index)"
                                                     [(ngModel)]="node.value[index]"
@@ -567,6 +572,18 @@ const MAP_FILTER_DELAY_MS = 300;
                                                     [binary]="true"
                                                     [inputId]="index + '_' + node.key"
                                                     [name]="index + '_' + node.key"/>
+                                            } @else {
+                                                @if (node.type === 'Color') {
+                                                    <input type="color" aria-label="Option color picker"
+                                                        [value]="optionPickerColor(node.value[index])"
+                                                        (input)="setStyleColorOption(node, index, $event)">
+                                                }
+                                                <input pInputText [attr.data-testid]="styleOptionCheckboxTestId(node, index)"
+                                                    [id]="index + '_' + node.key" [attr.aria-label]="node.info.label"
+                                                    [(ngModel)]="node.value[index]"
+                                                    (change)="updateStyleOption(node, index)"
+                                                    [placeholder]="node.type === 'Color' ? 'Named color or RGB hex' : ''">
+                                            }
                                             <label [for]="index + '_' + node.key">{{ node.info.label }}</label>
                                         </span>
                                         @if (node.firstInStyleGroup) {
@@ -581,7 +598,6 @@ const MAP_FILTER_DELAY_MS = 300;
                                         }
                                         </div>
                                     </ng-template>
-                                    <!-- TODO: Add Templates for String/Color Options, and ignore internal ones. -->
                                 </p-tree>
                             </div>
                             }
@@ -1321,6 +1337,14 @@ export class MapPanelComponent {
     dataSourceProgressIndicator(mapInfo: MapInfoItem): string {
         const progress = this.mapService.dataSourceProgressPercent(mapInfo);
         return progress === null ? "0%" : `${progress}%`;
+    }
+
+    protected readonly optionPickerColor = stylePickerColor;
+
+    /** Routes picker edits through the same option state owner as text and Boolean controls. */
+    setStyleColorOption(node: StyleOptionNode, viewIndex: number, event: Event): void {
+        node.value[viewIndex] = (event.target as HTMLInputElement).value;
+        this.updateStyleOption(node, viewIndex);
     }
 
     /** Persists a style option change and triggers visualization refresh for the affected view. */

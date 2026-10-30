@@ -1,3 +1,4 @@
+import type {FeatureSearchResolvedDefinition} from "./feature-search-runtime-state.model";
 import {
     AfterViewInit,
     ChangeDetectorRef,
@@ -326,6 +327,7 @@ interface FeatureSearchResultTreeItem {
                 </p-iftalabel>
                 <p-iftalabel class="feature-search-scope-select">
                     <p-select inputId="feature-search-scope"
+                              data-testid="feature-search-scope"
                               [options]="featureSearchScopeOptions"
                               [(ngModel)]="featureSearchScope"
                               optionLabel="label"
@@ -492,6 +494,7 @@ interface FeatureSearchResultTreeItem {
                                     <div class="feature-search-style-control-header feature-search-highfi-header">
                                         <p-toggleswitch [ngModel]="searchRenderStrategy().showHighFiGeometry"
                                                         inputId="feature-search-show-highfi-geometry"
+                                                        data-testid="feature-search-show-highfi-geometry"
                                                         ariaLabel="Toggle styled result geometry"
                                                         (ngModelChange)="patchRenderStrategy('showHighFiGeometry', $event)">
                                         </p-toggleswitch>
@@ -831,7 +834,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
     protected searchStyleSavePending = false;
     protected searchStyleSaveLayerIds: string[] = [];
     protected searchStyleSaveInitialLayerIds: string[] = [];
-    private pendingSearchStyleRules: FeatureSearchStyleRule[] = [];
+    private pendingSearchStyle?: FeatureSearchResolvedDefinition;
     protected readonly featureSearchColorPickerOverlayOptions: OverlayOptions = {
         styleClass: "feature-search-colorpicker-overlay"
     };
@@ -1654,27 +1657,35 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
             : `Applied all ${projection.rules.length} rules from “${style.id}” as a detached copy.`;
     }
 
-    /** Opens the AppDialog with an immutable snapshot of the current high-fidelity rules. */
+    /** Captures resolved membership and visual rules before opening the save dialog. */
     protected saveSearchStyle(): void {
         const rules = this.serializeStyleRuleDrafts();
         if (!rules.length) {
             this.infoMessageService.showError("Add at least one high-fidelity rule before saving a search stylesheet.");
             return;
         }
-        this.pendingSearchStyleRules = structuredClone(rules);
+        if (!this.session) {
+            return;
+        }
+        try {
+            this.pendingSearchStyle = this.searchService.getStyleExportSnapshot(this.session.id, rules);
+        } catch (error) {
+            this.infoMessageService.showError(error instanceof Error ? error.message : String(error));
+            return;
+        }
         this.searchStyleSaveLayerIds = Array.from(new Set(
             Array.from(this.mapService.maps.allFeatureLayers(), layer => layer.id)
                 .filter(layerId => layerId.length > 0)
         )).sort();
         this.searchStyleSaveInitialLayerIds = Array.from(new Set(
-            this.selectedSearchMapLayers().map(layer => layer.layerId)
+            this.pendingSearchStyle.selectedMapLayers.map(layer => layer.layerId)
         )).sort();
         this.searchStyleSaveVisible = true;
     }
 
     /** Persists one dialog payload through the ordinary transactional style import path. */
     protected confirmSearchStyleSave(request: Readonly<SearchStyleSaveRequest>): void {
-        if (this.searchStyleSavePending || !this.searchStyleSaveVisible) {
+        if (this.searchStyleSavePending || !this.searchStyleSaveVisible || !this.pendingSearchStyle) {
             return;
         }
         const { options, action } = request;
@@ -1686,7 +1697,8 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         }
         this.searchStyleSavePending = true;
         try {
-            const generated = convertSearchStyleRulesToYaml(options, this.pendingSearchStyleRules);
+            const generated = convertSearchStyleRulesToYaml(
+                options, this.pendingSearchStyle.searchStyleRules, this.pendingSearchStyle);
             const importedStyleId = this.styleService.importStyleYamlSource(
                 generated.source,
                 options.defaultEnabled);
@@ -1698,7 +1710,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
             this.searchStyleApplicationMessage = `Saved “${importedStyleId}” as an imported search stylesheet. This search remains a detached copy.`;
             this.infoMessageService.showSuccess(`Saved search stylesheet “${importedStyleId}”.`);
             this.searchStyleSaveVisible = false;
-            this.pendingSearchStyleRules = [];
+            this.pendingSearchStyle = undefined;
             if (action === "save-and-open") {
                 queueMicrotask(() => this.styleEditorRequestService.open(importedStyleId));
             }
@@ -1712,7 +1724,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
     protected onSearchStyleSaveVisibleChange(visible: boolean): void {
         this.searchStyleSaveVisible = visible;
         if (!visible && !this.searchStyleSavePending) {
-            this.pendingSearchStyleRules = [];
+            this.pendingSearchStyle = undefined;
         }
     }
 

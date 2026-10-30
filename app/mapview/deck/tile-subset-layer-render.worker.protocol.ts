@@ -74,7 +74,6 @@ export interface TileSubsetLayerRenderTask {
     /** World-space RDP tolerance selected from the current view's pixel scale. */
     lineSimplificationToleranceMeters: number;
     pointCloud?: PointCloudRenderPolicy;
-    gpuExistingBytes?: number;
     /** Reuse the worker's single immutable point-cloud input, verified by cacheKey. */
     reusePointCloudInput?: boolean;
 }

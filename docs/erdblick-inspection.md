@@ -240,7 +240,8 @@ Between locked panels, dock/undock support, validity-aware hovering, and SourceD
 
 ### Incoming relations
 
-Features with a possible incoming family show an **Incoming Relations** section.
+Features with a possible incoming family show an **Incoming Relations** section before
+**Geometry**, which remains the last section both during loading and after completion.
 The service derives this possibility from readable providers' outgoing relation
 schemas. Missing discovery hints mean unknown coverage, not proof of absence.
 Ordinary inspection appears immediately; a spinner marks only the incoming section while
@@ -257,6 +258,11 @@ with diagnostics. Retry reloads the section. Changing the selection or replacing
 its datasource cancels stale work; finite
 provider lifetimes refresh the section. Conventional relations stay in the ordinary
 Relations section. Feature GeoJSON export continues to export the selected feature.
+
+For NDS.Live legacy RoadSurface associations, select a LaneGroup to see incoming
+`relatedLaneGroup` relations or an explicitly referenced Lane to see `relatedLane` relations.
+Selecting the RoadSurface itself shows those same stored relations in its ordinary
+Relations section. A group-only association does not apply implicitly to every member lane.
 
 ### Numeric meanings and flags
 

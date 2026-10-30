@@ -497,7 +497,12 @@ export class DiagnosticsDatasource implements OnDestroy {
     /** Serialize arbitrary console arguments without letting cycles break diagnostics. */
     private stringifyLogPart(value: unknown): string {
         if (value instanceof Error) {
-            return value.stack ?? value.message;
+            const description = value.toString();
+            // Firefox stacks contain frames only; Chromium includes the error
+            // name and message. Keep the cause visible in either format.
+            return value.stack?.startsWith(description)
+                ? value.stack
+                : [description, value.stack].filter(Boolean).join("\n");
         }
         if (typeof value === "string") {
             return value;

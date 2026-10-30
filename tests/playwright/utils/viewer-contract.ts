@@ -6,7 +6,7 @@
  */
 import Ajv, { type SchemaObject } from "ajv";
 import { readFileSync } from "node:fs";
-import type { ViewerContract } from "../../app/actions/generated/viewer-contract";
+import type { ViewerContract } from "../../../app/action/generated/viewer-contract";
 
 type Actions = ViewerContract["actions"];
 type Controls = ViewerContract["controls"];

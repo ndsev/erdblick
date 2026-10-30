@@ -1,6 +1,7 @@
 #pragma once
 
 #include "mapget/model/geometry.h"
+#include "mapget/model/pointcloud-sampler.h"
 #include "simfil/model/nodes.h"
 #include "simfil/overlay.h"
 #include "yaml-cpp/yaml.h"
@@ -465,7 +466,7 @@ private:
     ZIndexRole zIndexRole_ = ZIndexRole::None;
     std::optional<bool> billboard_;
     bool pointCloud_ = false;
-    uint32_t pointCloudMaxPoints_ = 262144;
+    uint32_t pointCloudMaxPoints_ = mapget::DefaultPointCloudMaxPoints;
     bool flat_ = false;
     bool dashed_ = false;
     float dashLength_ = 16.0F;

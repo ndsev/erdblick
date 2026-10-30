@@ -1,3 +1,4 @@
+import {waitForAppReady} from "../utils/ui-helpers";
 import { expect, test } from '../fixtures/test';
 import type { Page } from '@playwright/test';
 import { viewerActions } from "../utils/viewer-contract";
@@ -26,6 +27,7 @@ async function call(page: Page, name: string, input: Record<string, unknown> = {
 
 test('native WebMCP discovers all tools, controls only this document and calls real mapget', async ({ page, context }) => {
     await page.goto('/?v2=1&n=1&vid=left&lon=11&lat=48&alt=500&m2d=0&l=');
+    await waitForAppReady(page);
     await page.getByTestId('viewer-action-status').click();
     await expect(page.getByTestId('viewer-action-details')).toContainText('WebMCP ready for this tab and mapget');
     const names = await page.evaluate(async () =>
@@ -45,6 +47,7 @@ test('native WebMCP discovers all tools, controls only this document and calls r
     const second = await context.newPage();
     try {
         await second.goto('/?v2=1&n=1&vid=left&lon=20&lat=50&alt=1000&m2d=0&l=');
+    await waitForAppReady(second);
         await expect.poll(() => second.evaluate(async () =>
             (await (document as Document & { modelContext: ModelContext }).modelContext.getTools()).map(tool => tool.name)))
             .toContain('viewer_get_controls');

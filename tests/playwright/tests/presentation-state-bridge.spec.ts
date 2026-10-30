@@ -1,3 +1,4 @@
+import {waitForAppReady} from "../utils/ui-helpers";
 import { expect, test } from "../fixtures/test";
 import { requireMapSource } from "../utils/backend-helpers";
 import { TEST_LAYER_NAMES, TEST_MAP_NAMES, TEST_VIEW_POSITIONS } from "../utils/test-params";
@@ -20,7 +21,7 @@ async function presentationMessages(page: import("@playwright/test").Page): Prom
 test("presentation scenes apply state and authored searches without reloading the framed application", async ({ page, request }) => {
     await requireMapSource(request, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0]);
     await page.goto("/");
-    await page.waitForSelector("#global-spinner-container", { state: "hidden" });
+    await waitForAppReady(page);
     const origin = new URL(page.url()).origin;
     let childDocumentRequests = 0;
     page.on("request", request => {

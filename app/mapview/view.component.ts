@@ -1,3 +1,4 @@
+import {GeolocationState} from "../geolocation/geolocation.state";
 import {
     AfterViewInit,
     ChangeDetectorRef,
@@ -254,7 +255,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         private cdr: ChangeDetectorRef,
         private ngZone: NgZone,
         public readonly viewSettings: MapViewState,
-        public readonly inspectionState: InspectionPanelService
+        public readonly inspectionState: InspectionPanelService,
+        public readonly locationState: GeolocationState
     ) {
         this.subscriptions.push(
             this.viewSettings.focusedViewChanges.subscribe(focusedViewIndex => {
@@ -474,14 +476,14 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.inspectionSelection, this.featureSearchService,
                 this.menuService, this.coordinatesService, this.stateService, this.configService,
                 this.layerController!, this.viewSettings, this.inspectionState,
-                this.mapService.state
+                this.mapService.state, this.locationState
             )
             : new DeckMapView3D(
                 this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
                 this.inspectionSelection, this.featureSearchService,
                 this.menuService, this.coordinatesService, this.stateService, this.configService,
                 this.layerController!, this.viewSettings, this.inspectionState,
-                this.mapService.state
+                this.mapService.state, this.locationState
             );
         mapView.setDesktopDrillPickingEnabled(!this.isNarrow);
         this.initializingMapView = mapView;

@@ -1,3 +1,4 @@
+import {GeolocationState} from "../../geolocation/geolocation.state";
 /**
  * The current Deck implementation behind one map view component.
  * ViewComponent supplies this controller and switches its 2D/3D variant. The
@@ -532,7 +533,8 @@ export abstract class DeckMapView implements IRenderView {
         protected layerController: ViewLayerController,
         public readonly viewSettings: MapViewState,
         public readonly inspectionState: InspectionPanelService,
-        public readonly layerState: MapDataState) {
+        public readonly layerState: MapDataState,
+        public readonly locationState: GeolocationState) {
         this.viewId = viewSettings.viewIdAt(id);
         this.canvasId = canvasId;
         this.targetNavigationAdapter = new ErdblickTargetNavigationAdapter({
@@ -1898,6 +1900,10 @@ export abstract class DeckMapView implements IRenderView {
         }));
         this.subscriptions.push(this.mapViewState.moveToLocationAreaTopic.subscribe(({ targetView, area }) => {
             if (targetView === this._viewIndex) this.moveToLocationArea(area);
+        }));
+        this.subscriptions.push(this.locationState.locationPolicyChanges.subscribe(() => {
+            if (!this.locationState.locationBoundariesEnabled) this.stopLocationAreaHighlight();
+            if (!this.locationState.locationSearchEnabled) this.stopLocationLabel();
         }));
         this.subscriptions.push(
             this.viewSettings.cameraViewDataState
@@ -3907,6 +3913,7 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Fits a selected place independently of tile navigation, then publishes the settled camera. */
     private moveToLocationArea(area: LocationArea): void {
+        if (!this.locationState.locationBoundariesEnabled) return;
         this.stopLocationAreaHighlight();
         this.stopLocationLabel();
         this.prepareForNavigation();
@@ -3931,6 +3938,7 @@ export abstract class DeckMapView implements IRenderView {
     /** Keeps polygon data/accessors stable during fading so Deck only updates opacity. */
     private startLocationAreaHighlight(area: LocationArea): void {
         this.stopLocationAreaHighlight();
+        if (!this.locationState.locationBoundariesEnabled) return;
         let data: LocationPolygon[];
         try {
             data = locationOverlayPolygons(area);

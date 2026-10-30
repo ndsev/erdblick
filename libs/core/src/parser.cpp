@@ -1228,13 +1228,7 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
     for (auto const& warning : tileLayer.warnings()) warnings.push(JsValue(warning));
     const auto conversionTimestampMs = std::chrono::duration<double, std::milli>(
         tileLayer.timestamp().time_since_epoch()).count();
-    // A source-declared hard resource rejection cannot recover on expiration.
-    // Keep it visible until explicit refresh/source reconfiguration; transient
-    // resource-busy values retain the producer's short retry lifetime.
-    const bool permanentPointCloudLimit = tileLayer.error() &&
-        layerInfo.is_object() && layerInfo.contains("PointCloud/Error") &&
-        layerInfo["PointCloud/Error"] == "resource-limit";
-    const auto ttlMs = tileLayer.ttl() && !permanentPointCloudLimit
+    const auto ttlMs = tileLayer.ttl()
         ? static_cast<double>(tileLayer.ttl()->count())
         : std::numeric_limits<double>::quiet_NaN();
     return {

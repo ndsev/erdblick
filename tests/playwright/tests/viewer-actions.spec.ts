@@ -1,3 +1,4 @@
+import {waitForAppReady} from "../utils/ui-helpers";
 import type { Page, WebSocketRoute } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -54,6 +55,7 @@ async function browserActions(page: Page, mismatch = false) {
         });
     });
     await page.goto('/?v2=1&n=2&vid=left,right&m=1&f=0&sync=&lon=10,20&lat=40,50&alt=500,1000&h=0,0&p=-1,-1&r=0,0&px=0,0&py=0,0&pz=0,0&m2d=0,0&bg=~10,~10&l=');
+    await waitForAppReady(page);
     await expect.poll(() => page.evaluate(() => !!window.ebDebug)).toBe(true);
     protocol = await page.evaluate(() => {
         const core = window.ebDebug!.coreLib();

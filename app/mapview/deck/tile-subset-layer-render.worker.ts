@@ -1,3 +1,4 @@
+import {POINT_CLOUD_MAX_POINTS} from "../point-cloud-policy.model";
 import {
     coreLib,
     initializeLibrary,
@@ -228,7 +229,7 @@ function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
         renderer.setLineSimplificationTolerance(
             task.lineSimplificationToleranceMeters
         );
-        renderer.setPointCloudPolicy(task.pointCloud?.enabled ?? true, task.pointCloud?.maxPoints ?? 262144,
+        renderer.setPointCloudPolicy(task.pointCloud?.enabled ?? true, task.pointCloud?.maxPoints ?? POINT_CLOUD_MAX_POINTS,
             task.pointCloud?.spacingMeters ?? 0, task.pointCloud?.cacheKey ?? task.taskId);
         renderer.configureGpuPacket(
             task.sceneGeneration,

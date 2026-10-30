@@ -40,7 +40,7 @@ hint: "For a place name, use mapget_lookup_place to obtain candidate WGS84 coord
 | Action | Input syntax | Result |
 | --- | --- | --- |
 | **Search Loaded Features** | Any valid Simfil expression | Opens a feature-search panel for the query. The panel streams result layers from the backend, keeps its own result tree, and can be docked, undocked, paused, refreshed, styled, bookmarked, or closed independently. |
-| **Place / Location Matches** | Place-name text such as `Munich` | Shows matching locations from the configured location providers. Selecting a match jumps the active view to that place, drops the location marker, and briefly labels the chosen result on the map. |
+| **Place / Location Matches** | Place-name text such as `Munich` | Available while location search is enabled. Point navigation uses a supplied centrepoint and updates the marker; with boundaries disabled, results without a usable centrepoint cannot navigate. With accepted boundaries enabled, an area result fits and briefly highlights its boundary or extent while preserving the existing marker. |
 | **Mapget Tile ID** | `<tileId>` (integer without spaces) | Navigates to the requested tile by computing its bounding box. Useful for links copied from logs or SourceData tools. |
 | **WGS84 Lon-Lat Coordinates** | `lon, lat` or `lon lat [level]` (decimal) / `12°34'56"W 48°01'30"N [level]` (DMS) | Positions the active view on the provided longitude/latitude pair. An optional zoom `level` snaps to the matching tile. |
 | **WGS84 Lat-Lon Coordinates** | `lat, lon` or `lat lon [level]` (decimal/DMS) | Same as above but with the order reversed for users accustomed to `lat,lon` input. |
@@ -63,7 +63,19 @@ Location search is part of the same palette as coordinate jumps and feature sear
 
 Erdblick only sends name-like queries to location providers. Numeric IDs, coordinates, and mixed strings such as postal-code searches stay with the normal jump and feature-search targets. The default minimum query length is two characters.
 
-Location results are sorted by population when the provider supplies it, then by name, provider, and stable result id. Selecting a built-in Plazs result uses its available boundary, then its bounding extent, then its representative coordinate:
+Location results are sorted by population when the provider supplies it, then by name, provider, and stable result id. On first startup, erdblick asks whether to enable location boundaries after showing a fixed disclaimer and Who's On First attribution. Choose **Accept and enable** for area navigation, or **Keep disabled** to navigate to each result's supplied centrepoint. Closing the dialog also keeps boundaries disabled.
+
+Manage these choices in **Edit -> Preferences -> Inspect & Search**:
+
+- **Enable location search** controls location-provider queries and location entries in the palette, including history suggestions. Switching it off cancels pending queries and hides these entries; other search actions remain available. Switching it back on restores location search using the saved boundary preference.
+- **Location boundaries** controls area navigation and temporary polygon or extent highlights across all map views. Switching it off immediately removes existing area highlights and cancels pending area navigation. Every later attempt to enable it requires acceptance again.
+- **Disclaimer**, **Who's On First**, and **License** links beside both toggles remain accessible while disabled. Reading the disclaimer does not change either preference or record acceptance.
+
+With boundaries disabled, selecting or replaying a location jumps to its supplied centrepoint and can show the normal point marker and place label. It neither requests boundary geometry nor fits an extent. A result without a usable centrepoint reports that it cannot be navigated to; it does not enable boundaries as a fallback.
+
+These preferences and the accepted disclaimer revision are stored locally for this browser and application origin. Shared URLs, snapshots and deployment defaults cannot enable boundaries or import acceptance. An unchanged accepted decision survives reload; updated terms require fresh acceptance if boundaries were enabled. Clearing browser storage starts the initial prompt again.
+
+With boundaries enabled, selecting a built-in Plazs result uses its available boundary, then its bounding extent, then its representative coordinate:
 
 - A polygon fits the active map to the complete area, including islands and holes, and briefly highlights its actual shape in aqua before fading.
 - An extent without a usable polygon fits and highlights a rectangle. If a requested boundary cannot be loaded, a short notice explains the fallback.
@@ -71,9 +83,9 @@ Location results are sorted by population when the provider supplies it, then by
 
 Area navigation shows a temporary place label and preserves any existing marker. It uses the visible map pane and retains the camera orientation when a complete fit is possible. Very broad extents can zoom out beyond one world; polar areas are limited to the portion Web Mercator can display. A later selection or camera interaction cancels a pending lookup.
 
-Boundaries are loaded only after selection. Search history stores lightweight place metadata and resolves the same stable ID when replayed; it does not store polygon coordinates. Provider credits and source/license links appear with the location result. An extent-only record is interpreted as an area even when its original source geometry type is unavailable.
+Boundaries are loaded only after selection with acceptance in effect. Search history stores lightweight place metadata and follows the current preferences when replayed; it does not store polygon coordinates. Provider credits and source/license links appear with the location result. When boundaries are enabled, an extent-only record is interpreted as an area even when its original source geometry type is unavailable.
 
-Use **Edit -> Settings -> Location Matches** to control how many location matches the palette asks providers to return. The default is 10; the supported range is 1 to 50.
+Use **Location Matches** in the same preferences tab to control how many location matches the palette asks providers to return. The default is 10; the supported range is 1 to 50.
 <!-- --8<-- [end:location-search] -->
 
 ![Offline Munich place-name matches above the city map](screenshots/search-location.png)
@@ -193,7 +205,7 @@ High-fi visualization draws styled result geometry when the visible tile count i
 - Toggle styled result geometry on or off.
 - Enable per-feature result pins when high-fi geometry is active.
 - The default high-fidelity cutoff is 512 visible tiles. Above that limit, density markers remain the practical overview.
-- Geometry for attribute-scope results uses computed validity geometry when available and falls back to feature display geometry otherwise.
+- Attribute-scope results use computed validity geometry where available; attributes without validities use feature display geometry. A failed validity computation can produce empty geometry rather than a whole-feature fallback.
 
 <!-- mcp:
 keywords: [search styling, visualization, rules]
@@ -206,7 +218,7 @@ Search style rules are evaluated only for the result layer of the current search
 - **Add Rule** creates another rule. Reset restores a rule to its generated defaults; delete removes it. Rule names are only local labels for keeping several result styles readable.
 - Rule headers show compact summaries for geometry, filters, color mode, and preview colors.
 - **Filter** conditions can use schema-backed field pickers, comparison operators, numeric inputs, enum value pickers, text values, or custom Simfil expressions. Multiple conditions inside one rule are combined for that rule.
-- **Geom** chooses one or more rendered geometry groups. **Any geometry** and **Label** are exclusive modes; line, surface, polygon, mesh, and point groups can be combined. Geometry rules expose the relevant width, radius, size, and opacity controls for the selection.
+- **Geom** chooses one or more rendered geometry groups. **Any geometry** and **Label** are exclusive modes; line, surface, polygon, mesh, and point groups can be combined. Geometry rules expose the relevant width, point diameter, label size, and opacity controls for the selection.
 - Automatic styles use a 20 px point rule and a 5 px combined line/surface rule so both geometry families remain legible without duplicating every concrete surface type.
 - **Labels** can use a selected field or a custom label expression. Common labels are speed-limit values, feature types, validation rule IDs, and issue IDs.
 - **Color** supports solid colors, numeric gradients, and categories for numeric, boolean, or string values. Schema enums can initialize categories immediately; other fields use **Update from data** or manually entered values. In category and gradient modes, **Fallback color** controls how missing or unmatched values are drawn. Uncheck it to omit those values from rendering; the setting survives saving and reopening the stylesheet. Incomplete scales still use a temporary solid colour until valid stops are supplied. **Update from data** uses the Diagnostics/Values summaries from the current result set, collected from the result-only channel independently of rendering rules, including when a category scale has no stops yet.
@@ -233,13 +245,13 @@ they do not generate a category for every observed combination of bits.
 <!-- mcp:
 title: "Save and reuse search styles"
 keywords: ["save style", "reuse", "search category", "detached", "export"]
-hint: "The Save/Saved styles controls are normal UI actions; no semantic save-search-style command is exposed. viewer_edit_style can create browser-local YAML directly when its semantics are known. A saved stylesheet does not retain the query or search scope."
+hint: "The Save/Saved styles controls are normal UI actions; no semantic save-search-style command is exposed. viewer_edit_style can create browser-local YAML directly when its semantics are known. A saved stylesheet captures resolved scope, normalized query, and selected feature types in ordinary rule predicates."
 -->
 ### Re-using Search Styles
 
 Use **Save** beside the high-fidelity controls to create a canonical stylesheet. The small save dialog accepts the exact stylesheet name, optional layer affinity, and a checked-by-default **Enable this style upon save** checkbox. Slashes in the name create the same groups used by the normal Styles tree. Empty affinity means any feature layer; selected layer IDs are stored as an escaped exact-match `layer` expression and apply to every map that uses that ID. **Save** creates the style and closes the dialog; **Save and Open** creates it and then opens the ordinary Style Editor. **Cancel** creates nothing. Saving is create-only: an empty rule list or a name/URL collision is rejected without overwriting anything. The generated source has `category: search`, `version: 2`, a root `default` matching the checkbox, one per-layer **Show &lt;stylesheet name&gt;** Boolean option that defaults on, and one flat top-level YAML rule per GUI rule. Every generated rule is gated by that option. The imported style's initial global visible state matches the save checkbox; once active, its per-layer option is available in Maps & Layers.
 
-Only high-fidelity style semantics are saved. The query, search scope, selected maps/layers, feature types, result views, density controls, and source-specific rule applicability remain outside the stylesheet. The saved YAML is registered immediately as a normal browser-imported style and appears under **Edit -> Styles Configurator -> Styles** with a **Search** tag.
+The dialog captures the resolved feature/attribute scope, normalized query, selected feature types, and visual rules when opened. Saving before scope resolution completes reports a message instead of guessing feature scope. Generated rules retain the query and feature-type restrictions, so the imported style independently matches the search. Attribute styles render matched validity geometry where available; attributes without validities use their feature geometry. Selected layer IDs initialize the affinity picker. Map IDs, result views, tiles, and density controls remain outside the stylesheet. The saved YAML is registered immediately as a normal browser-imported style and appears under **Edit -> Styles Configurator -> Styles** with a **Search** tag.
 
 ![Save Search Style dialog][10-save-search-style]
 
@@ -247,11 +259,11 @@ The saved sheet also provides a per-layer visibility option in **Maps & Layers**
 
 ![Saved search stylesheet and its Maps & Layers option][11a-saved-search-style-editor]
 
-The adjacent **Saved styles** menu lists loaded stylesheets whose category is `search`. Selecting one projects every compatible rule into the current GUI as a detached copy. Root `default`, `layer`, and the generated per-layer visibility option govern ordinary stylesheet rendering; they do not alter the active search scope when rules are copied here. The converter removes its generated option gate from the detached rule copy. Editing that copy does not change the stylesheet, and later stylesheet edits do not change the search. A partially compatible stylesheet remains selectable and reports every rule omitted from the copy. A stylesheet with no compatible rules is shown in red and disabled.
+The adjacent **Saved styles** menu lists loaded stylesheets whose category is `search`. Selecting one projects every compatible rule into the current GUI as a detached copy. Root `default`, `layer`, and the generated per-layer visibility option govern ordinary stylesheet rendering; they do not alter the active search scope when rules are copied here. The converter removes its generated option gate from the detached rule copy, retaining captured predicates so they intersect with the new search. Rules with an explicit incompatible scope are omitted; older generic templates remain supported. Editing that copy does not change the stylesheet, and later stylesheet edits do not change the search. A partially compatible stylesheet remains selectable and reports every rule omitted from the copy. A stylesheet with no compatible rules is shown in red and disabled.
 
 ![Saved Lane Speed Search sheet applied as a detached visualization rule][11b-saved-search-style-reuse]
 
-Edit a saved stylesheet from the ordinary Styles tree. The Style Editor opens on **Quick**, which reuses the rule controls, expands every rule initially, and also provides **Advanced** for authoritative YAML editing. Quick exposes the stylesheet name and exact layer-affinity IDs at the top; no selected layer means Any. An arbitrary existing affinity regex is shown as Custom and remains untouched until you explicitly replace or clear it. Quick changes update Advanced immediately. Rules or properties outside the current controls are preserved; a help icon beside the affected rule explains preserved or Advanced-only content. The switch in the dialog header enables or disables the currently loaded stylesheet immediately without changing its YAML `default`. Apply the editor changes to update the imported stylesheet, or use the ordinary **Export** action to download it.
+Edit a saved stylesheet from the ordinary Styles tree. The Style Editor opens on **Quick**, with common native controls visible and advanced fields in expandable groups. It supports nested rules, exact geometry types, expression colors, color/width scales, options, presets, labels, relations, and interaction effects. Name and exact/custom layer affinity remain editable at the top. Unset fields retain native defaults or inheritance. Quick patches the same YAML shown in **Advanced**, preserving unrelated fields and comments; native validation reports invalid combinations. The header switch changes current visibility without changing YAML `default`. Apply edits to update the stylesheet, or use **Export** to download it. See [the style editor guide](erdblick-stylesystem.md) for the full model.
 
 Use density markers for broad searches or early exploration. Switch to high-fi geometry and labels when the visible tile count is small enough that individual result geometry is more useful than aggregate buckets.
 <!-- --8<-- [end:visualization] -->

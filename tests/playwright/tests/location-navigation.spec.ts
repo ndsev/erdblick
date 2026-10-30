@@ -1,7 +1,17 @@
+import {LOCATION_BOUNDARY_TERMS_REVISION} from "../../../app/geolocation/location-policy.model";
 import { WebMercatorViewport } from '@deck.gl/core';
 import type { Page } from '@playwright/test';
 import { expect, test } from '../fixtures/test';
-import { navigateToStateSnapshotRoot, openOmnibar } from '../utils/ui-helpers';
+import { acceptLocationBoundaries, disableUiAnimations, navigateToStateSnapshotRoot, openLocationPreferences, openOmnibar, waitForAppReady } from '../utils/ui-helpers';
+
+/** Read local persistence after UI actions; consent never comes from a snapshot. */
+async function locationPreferences(page: Page) {
+    return page.evaluate(revision => {
+        const consent = JSON.parse(localStorage.getItem("locationBoundaryConsent") ?? "{}");
+        const searchEnabled = localStorage.getItem("locationSearchEnabled") !== "0";
+        return {searchEnabled, boundariesEnabled: searchEnabled && consent.decision === "accepted" && consent.revision === revision};
+    }, LOCATION_BOUNDARY_TERMS_REVISION);
+}
 
 const metadata = { id: 'wof:1', name: 'Area Place', lonLat: [160, 70], aabb: [[0, 0], [22, 10]], geometryAvailable: true };
 const geometry = {
@@ -65,7 +75,157 @@ async function sampleMap(page: Page, points: number[][]): Promise<number[][]> {
 
 test.use({ stateSnapshot: 'location_navigation' });
 
-test('fits all polygon components, renders holes, fades, and replays metadata-only history', async ({ page }) => {
+test('requires local consent and keeps preference links available while disabled', async ({page}) => {
+    await page.goto('/');
+    await waitForAppReady(page, {keepLocationTerms: true});
+    await disableUiAnimations(page);
+    await expect(page.getByTestId('location-boundary-terms')).toBeVisible();
+    expect((await locationPreferences(page)).boundariesEnabled).toBe(false);
+    await page.getByTestId('location-boundaries-refuse').click();
+    await page.reload();
+    await waitForAppReady(page, {keepLocationTerms: true});
+    await disableUiAnimations(page);
+    await expect(page.getByTestId('location-boundary-terms')).not.toBeVisible();
+
+    const preferences = await openLocationPreferences(page);
+    await preferences.getByLabel('Enable location search', {exact: true}).uncheck();
+    for (const setting of ['location-search-setting', 'location-boundaries-setting']) {
+        const row = preferences.getByTestId(setting);
+        await expect(row.getByRole('link', {name: "Who's On First"})).toHaveAttribute('href', 'https://whosonfirst.org/');
+        await expect(row.getByRole('link', {name: 'License', exact: true})).toHaveAttribute('href', 'https://whosonfirst.org/docs/licenses/');
+        await row.getByRole('link', {name: 'Disclaimer'}).click();
+        await expect(page.getByTestId('location-boundary-terms')).toBeVisible();
+        await expect(page.getByTestId('location-boundaries-accept')).toHaveCount(0);
+        await page.getByTestId('location-terms-close').click();
+    }
+    expect((await locationPreferences(page)).searchEnabled).toBe(false);
+    await preferences.getByLabel('Enable location search', {exact: true}).check();
+    const boundaryToggle = preferences.getByLabel('Location boundaries', {exact: true});
+    await boundaryToggle.click();
+    expect((await locationPreferences(page)).boundariesEnabled).toBe(false);
+    await page.getByTestId('location-boundaries-refuse').click();
+    await expect(boundaryToggle).not.toBeChecked({timeout: 5000});
+    await boundaryToggle.click();
+    await page.getByTestId('location-boundaries-accept').click();
+    await expect(boundaryToggle).toBeChecked();
+    await boundaryToggle.uncheck();
+    await boundaryToggle.click();
+    await expect(page.getByTestId('location-boundaries-accept')).toBeVisible();
+    await page.getByTestId('location-boundaries-accept').click();
+    await page.reload();
+    await waitForAppReady(page, {keepLocationTerms: true});
+    await expect(page.getByTestId('location-boundary-terms')).not.toBeVisible();
+    expect((await locationPreferences(page)).boundariesEnabled).toBe(true);
+});
+
+test('uses centrepoints without boundaries and removes location results and history when search is disabled', async ({page}) => {
+    let details = 0;
+    await page.route('**/location?**', async route => {
+        if (new URL(route.request().url()).searchParams.has('id')) details++;
+        await route.fulfill({json: [metadata]});
+    });
+    await navigateToStateSnapshotRoot(page);
+    await selectPlace(page);
+    await expect.poll(async () => (await camera(page)).destination.lon).toBeCloseTo(160, 5);
+    await expect.poll(async () => (await camera(page)).destination.lat).toBeCloseTo(70, 5);
+    expect(details).toBe(0);
+    await openOmnibar(page, '');
+    await expect(page.getByTestId('omnibar-history-action').filter({has: page.getByText('Area', {exact: true})})).toBeVisible();
+    const preferences = await openLocationPreferences(page);
+    await preferences.getByLabel('Enable location search', {exact: true}).uncheck();
+    await preferences.getByRole('button', {name: /Close$/}).last().click();
+    await openOmnibar(page, '');
+    await expect(page.getByTestId('omnibar-history-action').filter({has: page.getByText('Area', {exact: true})})).toHaveCount(0);
+    await openOmnibar(page, 'Area');
+    await expect(page.locator('[data-testid="omnibar-action"][data-action-id^="loc:"]')).toHaveCount(0);
+    // Other actions remain usable, and removing their history must preserve hidden locations.
+    await openOmnibar(page, '20 10');
+    await page.getByTestId('omnibar-action').filter({has: page.getByText('WGS84 Lon-Lat Coordinates', {exact: true})}).click();
+    await expect.poll(async () => (await camera(page)).destination.lon).toBeCloseTo(20, 5);
+    await openOmnibar(page, '');
+    await page.getByTestId('omnibar-history-action').filter({has: page.getByText('20 10', {exact: true})})
+        .getByRole('button').click();
+    const reopened = await openLocationPreferences(page);
+    await reopened.getByLabel('Enable location search', {exact: true}).check();
+    await reopened.getByRole('button', {name: /Close$/}).last().click();
+    await openOmnibar(page, '');
+    await expect(page.getByTestId('omnibar-history-action').filter({has: page.getByText('Area', {exact: true})})).toBeVisible();
+    await selectPlace(page);
+    expect(details).toBe(0);
+});
+
+test('does not publish a delayed provider response after location search is disabled', async ({page}) => {
+    let release!: () => void;
+    const delayed = new Promise<void>(resolve => { release = resolve; });
+    let requested = false;
+    await page.route('**/location?**', async route => {
+        requested = true;
+        await delayed;
+        await route.fulfill({json: [metadata]}).catch(() => {});
+    });
+    await navigateToStateSnapshotRoot(page);
+    await openOmnibar(page, 'Area');
+    await expect.poll(() => requested).toBe(true);
+    const preferences = await openLocationPreferences(page);
+    await preferences.getByLabel('Enable location search', {exact: true}).uncheck();
+    release();
+    await preferences.getByRole('button', {name: /Close$/}).last().click();
+    await openOmnibar(page, 'Area');
+    await expect(page.getByText('Area Place', {exact: true})).toHaveCount(0);
+});
+
+test('disabling boundaries cancels a delayed area fit', async ({page}) => {
+    let release!: () => void;
+    const delayed = new Promise<void>(resolve => { release = resolve; });
+    let requested = false;
+    await page.route('**/location?**', async route => {
+        const id = new URL(route.request().url()).searchParams.get('id');
+        if (id) { requested = true; await delayed; }
+        await route.fulfill({json: [{...metadata, ...(id ? {geometry} : {})}]}).catch(() => {});
+    });
+    await navigateToStateSnapshotRoot(page);
+    await acceptLocationBoundaries(page);
+    const before = await camera(page);
+    await selectPlace(page);
+    await expect.poll(() => requested).toBe(true);
+    const preferences = await openLocationPreferences(page);
+    await preferences.getByLabel('Location boundaries', {exact: true}).uncheck();
+    release();
+    await preferences.getByRole('button', {name: /Close$/}).last().click();
+    expect((await camera(page)).destination).toEqual(before.destination);
+    await selectPlace(page);
+    await expect.poll(async () => (await camera(page)).destination.lon).toBeCloseTo(160, 5);
+});
+
+test('disabling boundaries removes a visible highlight without waiting for its fade', async ({page}) => {
+    await page.route('**/location?**', route => route.fulfill({json: [{...metadata, geometry}]}));
+    await page.clock.install();
+    await navigateToStateSnapshotRoot(page);
+    await acceptLocationBoundaries(page);
+    await selectPlace(page, 'Area', 'wof:1', true);
+    await expect.poll(async () => (await camera(page)).destination.lon).toBeCloseTo(11, 5);
+    await page.clock.runFor(250);
+    const visible = (await sampleMap(page, [[8, 8]]))[0];
+    expect(Math.min(visible[1], visible[2]) - visible[0]).toBeGreaterThan(10);
+
+    // Advance menu activation while keeping the three-second fade frozen afterward.
+    const editMenu = page.locator('.main-bar').getByRole('menuitem', {name: /Edit$/});
+    await editMenu.hover();
+    await editMenu.click();
+    await page.clock.runFor(500);
+    await page.locator('.p-menubar-submenu:visible').last().getByRole('menuitem', {name: /Preferences$/}).click();
+    await page.clock.runFor(200);
+    const preferences = page.getByRole('dialog', {name: 'Preferences', exact: true});
+    await preferences.getByRole('tab', {name: 'Inspect & Search', exact: true}).click();
+    await page.clock.runFor(100);
+    await preferences.getByLabel('Location boundaries', {exact: true}).uncheck();
+    await preferences.getByRole('button', {name: /Close$/}).last().click();
+    await page.clock.runFor(100);
+    const removed = (await sampleMap(page, [[8, 8]]))[0];
+    expect(Math.min(removed[1], removed[2]) - removed[0]).toBeLessThan(5);
+});
+
+test('fits all polygon components, renders holes, fades, and replays metadata-only history', async ({page}) => {
     let details = 0;
     await page.route('**/location?**', async route => {
         const id = new URL(route.request().url()).searchParams.get('id');
@@ -74,8 +234,9 @@ test('fits all polygon components, renders holes, fades, and replays metadata-on
     });
     await page.clock.install();
     await navigateToStateSnapshotRoot(page);
+    await acceptLocationBoundaries(page);
     await openOmnibar(page, 'Area');
-    await expect(page.getByText('Area Place', { exact: true })).toBeVisible();
+    await expect(page.getByText('Area Place', {exact: true})).toBeVisible();
     expect(details).toBe(0);
     await selectPlace(page, 'Area', 'wof:1', true);
     await expect.poll(async () => (await camera(page)).destination.lon).toBeCloseTo(11, 5);
@@ -114,6 +275,7 @@ test('falls back from failed geometry to extent, then preserves point marker nav
     });
     await page.clock.install();
     await navigateToStateSnapshotRoot(page);
+    await acceptLocationBoundaries(page);
     await selectPlace(page, 'Area', 'wof:1', true);
     await expect.poll(async () => (await camera(page)).destination.lon).toBeCloseTo(11, 5);
     await page.clock.runFor(250);
@@ -144,6 +306,7 @@ test('a late polygon response cannot override a newer point selection', async ({
         } else await route.fulfill({ json: [query.get('name') === 'Point' ? point : metadata] });
     });
     await navigateToStateSnapshotRoot(page);
+    await acceptLocationBoundaries(page);
     await selectPlace(page);
     await expect.poll(() => requested).toBe(true);
     await selectPlace(page, 'Point', 'wof:2');
@@ -171,6 +334,7 @@ test('keeps a dateline-crossing boundary and its hole in the fitted world copy',
     }));
     await page.clock.install();
     await navigateToStateSnapshotRoot(page);
+    await acceptLocationBoundaries(page);
     await selectPlace(page, 'Area', 'wof:1', true);
     await expect.poll(async () => (await camera(page)).destination.lon).toBeCloseTo(177.5, 5);
     await page.clock.runFor(250);

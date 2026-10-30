@@ -60,7 +60,7 @@ describe("feature search flat style channels", () => {
             rewrite: false,
             featureTypes: ["Road"],
             featureFilter: "styleFeature",
-            entryFilter: "(styleEntry) and (searchQuery)"
+            entryFilter: "styleEntry"
         });
         expect(planned.channels[2]).toMatchObject({
             scope: "feature",
@@ -134,7 +134,7 @@ describe("feature search native style compilation", () => {
                 new TextEncoder().encode(JSON.stringify(metadata)));
             const definition = {
                 ...createFeatureSearchStateEntry({
-                    query: "laneId in [76,99]",
+                    query: "laneId == 76 or laneId == 99",
                     searchStyleRules: [
                         {geometry: ["line"], filter: [{field: "laneId", op: "=", value: 76}],
                             color: {mode: "solid", color: "#0088ff"}},
@@ -143,7 +143,7 @@ describe("feature search native style compilation", () => {
                     ]
                 }),
                 concreteScope: "feature" as const,
-                backendQuery: "laneId in [76,99]",
+                backendQuery: "laneId == 76 or laneId == 99",
                 resultFields: ["laneId"]
             };
             const compiled = compileFeatureSearchStyle(definition,

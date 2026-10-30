@@ -9,6 +9,16 @@ import {coreLib, initializeLibrary, uint8ArrayToWasmOrThrow} from "../../../app/
 describe("native WASM style validation recovery", () => {
     beforeAll(async () => { await initializeLibrary(); });
 
+    it("reports malformed YAML and can validate a subsequent valid style in the same module", () => {
+        const validate = (source: string) => uint8ArrayToWasmOrThrow(buffer => {
+            const style = new coreLib.FeatureLayerStyle(buffer);
+            try { return style.validationReport(); }
+            finally { style.delete(); }
+        }, new TextEncoder().encode(source));
+        expect(validate("rules: [unterminated").valid).toBe(false);
+        expect(validate("name: Repaired\nversion: 2\nrules:\n  - geometry: line\n").valid).toBe(true);
+    });
+
     it("retains the property and rule for an invalid attribute regex and accepts its repair", () => {
         const source = (pattern: string) => `name: RegexRecovery
 version: 2

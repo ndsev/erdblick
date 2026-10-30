@@ -1,3 +1,4 @@
+import {waitForAppReady} from "../utils/ui-helpers";
 import type { Page } from '@playwright/test';
 import { expect, test } from '../fixtures/test';
 import { mcpClient } from '../utils/mcp-client';
@@ -19,6 +20,7 @@ const twoViews = '/?v2=1&n=2&vid=left,right&m=1&f=0&sync=&lon=10,20&lat=40,50&al
 async function openViewer(page: Page, label: string, sync = false, origin?: string) {
     const path = sync ? twoViews.replace('sync=&', 'sync=pos&') : twoViews;
     await page.goto(origin ? new URL(path, origin).href : path);
+    await waitForAppReady(page);
     await page.getByTestId('viewer-action-status').click();
     await expect(page.getByTestId('viewer-action-details')).toContainText('MCP controls ready');
     await page.getByLabel('Tab label', { exact: true }).fill(label);

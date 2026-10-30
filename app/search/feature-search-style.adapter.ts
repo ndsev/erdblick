@@ -11,7 +11,7 @@ import type {FeatureSearchResolvedDefinition} from "./feature-search-runtime-sta
 import type {MapgetLayer} from "../mapdata/mapget-layer.model";
 import type {FilterChannelDefinition} from "../mapdata/filter-subscription.model";
 import type { StyleFilterPlan } from "../mapdata/styled-mapget-layer.model";
-import {featureSearchRuleToStyleRule} from "./search-style-sheet.converter";
+import {featureSearchRulesToStyleRules} from "./search-style-sheet.converter";
 import { MAX_STYLE_LOD } from "../mapstyle/style-lod.model";
 
 const ALL_GEOMETRY_TYPES = 0xffffffff;
@@ -49,10 +49,10 @@ export function compileFeatureSearchStyle(
     featureTypes: readonly string[]
 ): CompiledFeatureSearchStyle {
     const hasRenderRules = definition.searchStyleRules.length > 0;
-    const runtimeRules = hasRenderRules
-        ? definition.searchStyleRules.map(rule =>
-            featureSearchRuleToStyleRule(rule, definition.concreteScope))
-        : [featureSearchRuleToStyleRule(invisiblePlaceholderRule(), definition.concreteScope)];
+    const runtimeRules = featureSearchRulesToStyleRules(
+        hasRenderRules ? definition.searchStyleRules : [invisiblePlaceholderRule()],
+        definition
+    );
     const sourceObject = {
         name: `Search/${definition.id}/${mapgetLayer.mapId}/${mapgetLayer.layerId}`,
         category: "search",
@@ -141,7 +141,7 @@ export function buildFeatureSearchFilterChannels(
     presentationKey: string
 ): FeatureSearchFilterChannels {
     const renderChannels = nativeRenderChannels.map(channel =>
-        prepareRenderChannel(channel, backendQuery, featureTypes));
+        prepareRenderChannel(channel, featureTypes));
     const resultChannel = createResultChannel(
         scope,
         backendQuery,
@@ -158,7 +158,6 @@ export function buildFeatureSearchFilterChannels(
 
 function prepareRenderChannel(
     source: FilterChannelDefinition,
-    backendQuery: string,
     selectedFeatureTypes: readonly string[]
 ): FilterChannelDefinition {
     const channel = structuredClone(source);
@@ -172,7 +171,6 @@ function prepareRenderChannel(
         && channel.featureTypes.length === 0) {
         channel.featureFilter = conjunction(channel.featureFilter, "false");
     }
-    channel.entryFilter = conjunction(channel.entryFilter, backendQuery);
     return channel;
 }
 
