@@ -117,7 +117,13 @@ nlohmann::ordered_json const& styleAuthoringSchema()
           "mode": {"kind":"enum","values":["linear","categorical"]},
           "expression": {"kind":"expression"},
           "stops": {"kind":"stops","valueKind":"color"},
+          "domain": {"kind":"record","record":"scalar-domain","help":"Generated scales apply only to this exact source domain. Keep this guard when editing special colors."},
+          "specials": {"kind":"stops","valueKind":"color","help":"Named numeric exceptions use these raw values before ordinary stops. Requires a domain guard; omitted exceptions use fallback."},
           "fallback": {"kind":"color"}
+        },
+        "scalar-domain": {
+          "schemaId": {"kind":"string","help":"Exact source schema identity captured when the scale was generated."},
+          "domainId": {"kind":"number","help":"Positive scalar domain ID within that schema."}
         },
         "width-scale": {
           "mode": {"kind":"enum","values":["linear","categorical"]},

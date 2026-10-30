@@ -254,7 +254,8 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
         internal.runningTaskIdByWorker = ["running", null];
         internal.inFlight.set("running", {});
         internal.workerHeapBytes = [0, 0];
-        internal.catalogKeysByWorker = [new Set(), new Set()];
+        // This fixture isolates memory admission after both workers have acknowledged the schema.
+        internal.catalogKeysByWorker = [new Set(["1:Map"]), new Set(["1:Map"])];
         internal.fieldDictSizesByWorker = [new Map(), new Map()];
         internal.styleKeysByWorker = [new Set(), new Set()];
         internal.iconCatalogVersionByWorker = [-1, -1];

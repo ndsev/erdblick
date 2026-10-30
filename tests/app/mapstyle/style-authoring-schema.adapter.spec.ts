@@ -1,10 +1,11 @@
 import "@angular/compiler";
 import {beforeAll, describe, expect, it} from "vitest";
-import {initializeLibrary} from "../../../app/integrations/wasm.adapter";
+import {coreLib, initializeLibrary, uint8ArrayToWasm} from "../../../app/integrations/wasm.adapter";
 import {styleAuthoringCompletions, styleAuthoringSchema} from "../../../app/mapstyle/style-authoring-schema.adapter";
 import {StyleFieldInputComponent} from "../../../app/mapstyle/style-field-input.component";
 import {StyleRecordEditorComponent} from "../../../app/mapstyle/style-record-editor.component";
 import {StyleDocumentModel} from "../../../app/mapstyle/style-document.model";
+import {convertSearchStyleRulesToYaml, projectStyleSourceForSearch} from "../../../app/search/search-style-sheet.converter";
 
 describe("native style authoring contract", () => {
     beforeAll(async () => { await initializeLibrary(); });
@@ -28,6 +29,53 @@ describe("native style authoring contract", () => {
         expect(fields).toContain("scope");
         expect(fields).not.toContain("lod-range");
         expect(fields).not.toContain("fidelity");
+    });
+
+    it("edits saved search special colors without losing the source domain or ordinary stops", () => {
+        const saved = convertSearchStyleRulesToYaml(
+            {name: "Domain colors", defaultEnabled: true, layerIds: ["Road"]},
+            [{geometry: ["line"], filter: [], color: {
+                mode: "gradient", field: "speed",
+                stops: [{value: 1, color: "#111111"}, {value: 253, color: "#222222"}],
+                domain: {schemaId: "source-graph", domainId: 7},
+                specials: [{value: 0, color: "#123456"}, {value: 255, color: "#654321"}],
+                fallbackColor: "#ffffff"
+            }}],
+            {concreteScope: "feature", backendQuery: "speed > 0", selectedFeatureTypes: ["Road"]}
+        );
+        const form = new StyleRecordEditorComponent();
+        form.catalog = styleAuthoringSchema();
+        form.record = "color-scale";
+        form.path = ["rules", 0, "color-scale"];
+        form.model = new StyleDocumentModel(saved.source);
+        form.ngOnChanges();
+        expect(form.unknownKeys).toEqual([]);
+
+        // Exercise the same stop-cell edit as the shared Quick editor after Save and Open.
+        const control = new StyleFieldInputComponent();
+        control.model = form.model;
+        control.field = form.catalog.records["color-scale"]["specials"];
+        control.path = [...form.path, "specials"];
+        control.edit.subscribe(edit => {
+            control.model = new StyleDocumentModel(control.model.edit(edit));
+            control.ngOnChanges();
+        });
+        control.stopValue(0, {target: {value: "#abcdef"}} as unknown as Event);
+        const result = projectStyleSourceForSearch(control.model.source, "feature");
+        expect(result.omissions).toEqual([]);
+        expect(result.rules[0].color).toMatchObject({
+            domain: {schemaId: "source-graph", domainId: 7},
+            stops: [{value: 1, color: "#111111"}, {value: 253, color: "#222222"}],
+            specials: [{value: 0, color: "#abcdef"}, {value: 255, color: "#654321"}],
+            fallbackColor: "#ffffff"
+        });
+        const style = uint8ArrayToWasm(
+            data => new coreLib.FeatureLayerStyle(data), new TextEncoder().encode(control.model.source));
+        try {
+            expect(style.isValid(), JSON.stringify(style.validationReport())).toBe(true);
+        } finally {
+            style.delete();
+        }
     });
 
     it("uses Boolean option defaults when the native type is omitted", () => {
