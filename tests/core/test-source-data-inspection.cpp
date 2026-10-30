@@ -93,29 +93,40 @@ TEST_CASE("Incoming inspection preserves the source owner and relation ordinal",
     auto info = LayerInfo::fromJson(nlohmann::json::parse(R"({"layerId":"Surface","type":"Features",
         "featureTypes":[{"name":"Surface","uniqueIdCompositions":[[{"partId":"id","datatype":"U64"}]]},
                         {"name":"Lane","uniqueIdCompositions":[[{"partId":"id","datatype":"U64"}]]}]})"));
-    auto sourceInfo = std::make_shared<LayerInfo>(*info);
-    sourceInfo->layerId_ = "Lane";
+    auto sourceInfo =
+        LayerInfo::fromJson(nlohmann::json::parse(R"({"layerId":"Lane","type":"Features",
+        "featureTypes":[{"name":"Surface","uniqueIdCompositions":[[{"partId":"id","datatype":"U64"}]]},
+                        {"name":"Lane","uniqueIdCompositions":[[{"partId":"id","datatype":"U64"}]]}]})"));
     auto strings = std::make_shared<StringPool>("IncomingInspection");
     auto target = std::make_shared<mapget::TileFeatureLayer>(TileId::fromTileXY(1,1,2),
         "IncomingInspection", "Map", info, strings);
     auto source = std::make_shared<mapget::TileFeatureLayer>(target->partitionId(),
         "IncomingInspection", "Map", sourceInfo, strings);
     target->newFeature("Surface", {{"id", int64_t{1}}});
-    auto providerJson = sourceInfo->toJson();
-    providerJson["incomingRelationTargetTypes"] = {"Surface"};
     erdblick::TileLayerParser parser;
-    auto catalog = nlohmann::json::array({{{"mapId", "Map"}, {"stringPoolId", "IncomingInspection"},
-        {"layers", {{"Surface", info->toJson()}, {"Lane", providerJson}}}}});
-    parser.setDataSourceInfo(erdblick::SharedUint8Array(catalog.dump()));
+    auto catalog = nlohmann::json::array(
+        {{{"mapId", "Map"},
+          {"stringPoolId", "IncomingInspection"},
+          {"layers",
+           {{"Surface",
+             {{"incomingRelationTargetTypes", {"Surface"}},
+              {"incomingRelationCoverageUnknown", false}}}}}}});
+    parser.setIncomingRelationHints(erdblick::SharedUint8Array(catalog.dump()));
     CHECK(parser.hasIncomingRelations(erdblick::TileFeatureLayer(target), "Surface.1"));
-    parser.setDataSourceInfo(erdblick::SharedUint8Array("[]"));
+    catalog[0]["layers"]["Surface"]["incomingRelationTargetTypes"] = nlohmann::json::array();
+    parser.setIncomingRelationHints(erdblick::SharedUint8Array(catalog.dump()));
     CHECK_FALSE(parser.hasIncomingRelations(erdblick::TileFeatureLayer(target), "Surface.1"));
+    parser.setDataSourceInfo(erdblick::SharedUint8Array("[]"));
+    CHECK(parser.hasIncomingRelations(
+        erdblick::TileFeatureLayer(target),
+        "Surface.1"));  // Missing means unknown.
     auto lane = source->newFeature("Lane", {{"id", int64_t{7}}});
     lane->addRelation("ordinary", "Surface", {{"id", int64_t{1}}});
     lane->addRelation("visible", "Surface", {{"id", int64_t{1}}});
     IncomingRelationCollection collection;
     collection.target_ = target->id(); collection.featureId_ = "Surface.1";
     collection.snapshots_ = {target->id(), source->id()};
+    collection.scope_ = {source->id()};
     collection.relations_ = {{source->id(), "Lane.7", 1, "visible", "Surface.1"}};
     erdblick::IncomingInspection inspection(collection.toJson().dump(), target->id().toString(), "Surface.1");
     inspection.addSnapshot(erdblick::TileFeatureLayer(target));

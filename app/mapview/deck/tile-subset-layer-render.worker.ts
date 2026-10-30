@@ -11,6 +11,8 @@ import type {
 } from "../../../build/libs/core/erdblick-core";
 import type {
     TileSubsetLayerRenderResult,
+    TileSubsetLayerRenderCatalogInstall,
+    TileSubsetLayerRenderCatalogInstalled,
     TileSubsetLayerRenderTask,
     TileSubsetLayerRenderWorkerInbound,
     TileSubsetLayerRenderWorkerReady
@@ -18,13 +20,17 @@ import type {
 import type {TileSubsetGpuIconCatalogEntry} from
     "./tile-subset-layer-render.worker.protocol";
 
+declare const self: DedicatedWorkerGlobalScope;
+
 const textEncoder = new TextEncoder();
 interface ParserCacheEntry {
+    mapId: string;
     parser: TileLayerParser;
     fieldDictSizes: Map<string, number>;
 }
 
 const parserCache = new Map<string, ParserCacheEntry>();
+const maxParserCacheEntries = 8;
 const styleCache = new Map<string, FeatureLayerStyle>();
 const rendererCache = new Map<string, TileSubsetLayerRenderer>();
 const maxRendererCacheEntries = 4;
@@ -49,39 +55,52 @@ function installIconCatalog(task: TileSubsetLayerRenderTask): void {
     }
 }
 
-/** Reuse one parser per map/catalog revision and retire superseded catalogs. */
-function parserFor(task: TileSubsetLayerRenderTask): ParserCacheEntry {
-    const key = `${task.catalogRevision}:${task.mapId}`;
-    const cached = parserCache.get(key);
-    if (cached) {
-        return cached;
+/** Validate a complete map/schema snapshot before acknowledging task admission. */
+function installCatalog(message: TileSubsetLayerRenderCatalogInstall): void {
+    const key = `${message.catalogRevision}:${message.mapId}`;
+    const existing = parserCache.get(key);
+    if (existing) {
+        for (const artifact of message.schemas) {
+            uint8ArrayToWasmOrThrow(bytes => existing.parser.installMapSchema(bytes, artifact.schemaId), artifact.bytes);
+        }
+        return;
     }
-    if (!task.dataSourceInfoBlob) {
-        throw new Error(
-            `Subset render worker has no catalog '${key}'.`
-        );
-    }
-    const parser = new coreLib.TileLayerParser() as TileLayerParser;
-    const configured = uint8ArrayToWasmOrThrow(
-        data => parser.setDataSourceInfo(data),
-        task.dataSourceInfoBlob
-    );
-    if (configured === null) {
+    const parser: TileLayerParser = new coreLib.TileLayerParser();
+    try {
+        for (const artifact of message.schemas) {
+            uint8ArrayToWasmOrThrow(
+                bytes => parser.installMapSchema(bytes, artifact.schemaId), artifact.bytes
+            );
+        }
+        uint8ArrayToWasmOrThrow(bytes => parser.setDataSourceInfo(bytes), message.dataSourceInfoBlob);
+    } catch (error) {
         parser.delete();
-        throw new Error("Failed to configure the subset render worker parser.");
+        throw error;
     }
+    // Keep the previous graph alive until the replacement is completely bound.
+    // MapSchema's native cache shares owners when several maps use one artifact.
     for (const [existingKey, existing] of parserCache) {
-        if (existingKey.endsWith(`:${task.mapId}`)) {
+        if (existing.mapId === message.mapId) {
             existing.parser.delete();
             parserCache.delete(existingKey);
         }
     }
-    const entry = {
-        parser,
-        fieldDictSizes: new Map<string, number>()
-    };
-    parserCache.set(key, entry);
-    return entry;
+    while (parserCache.size >= maxParserCacheEntries) {
+        const [oldestKey, oldest] = parserCache.entries().next().value!;
+        oldest.parser.delete();
+        parserCache.delete(oldestKey);
+    }
+    parserCache.set(key, {mapId: message.mapId, parser, fieldDictSizes: new Map<string, number>()});
+}
+
+/** Rendering only consumes catalogs whose installation has been acknowledged. */
+function parserFor(task: TileSubsetLayerRenderTask): ParserCacheEntry {
+    const key = `${task.catalogRevision}:${task.mapId}`;
+    const cached = parserCache.get(key);
+    if (!cached) throw new Error(`Subset render worker has no installed catalog '${key}'.`);
+    parserCache.delete(key);
+    parserCache.set(key, cached);
+    return cached;
 }
 
 /**
@@ -302,6 +321,20 @@ self.onmessage = async (event: MessageEvent<TileSubsetLayerRenderWorkerInbound>)
             scriptUrl: self.location.href
         };
         self.postMessage(ready);
+        return;
+    }
+    if (event.data.type === "TileSubsetLayerRenderCatalogInstall") {
+        const installed: TileSubsetLayerRenderCatalogInstalled = {
+            type: "TileSubsetLayerRenderCatalogInstalled", requestId: event.data.requestId, catalogKeys: []
+        };
+        try {
+            await initializeLibrary();
+            installCatalog(event.data);
+        } catch (error) {
+            installed.error = error instanceof Error ? error.message : String(error);
+        }
+        installed.catalogKeys = [...parserCache.keys()];
+        self.postMessage(installed);
         return;
     }
     let result: TileSubsetLayerRenderResult;

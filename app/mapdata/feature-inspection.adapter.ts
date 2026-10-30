@@ -29,6 +29,9 @@ export interface IncomingInspectionResult {
     /** Canonical target snapshot validated in the same bundle as the source relations. */
     target?: InspectionFeatureTile;
     complete: boolean;
+    /** Completeness applies only to the exact provider partitions reported in scope. */
+    status: "no-possible-family" | "complete" | "partial" | "unsupported-scope";
+    scope: string[];
     issues: string[];
     expiresAtMs?: number;
 }
@@ -173,6 +176,7 @@ export class InspectionFeatureTile {
                 for (const snapshot of snapshots) snapshot.peek(layer => view.addSnapshot(layer));
                 return {
                     model: view.inspectionModel(), target: snapshots.find(tile => tile.mapTileKey === this.mapTileKey), complete: manifest.complete,
+                    status: manifest.status, scope: manifest.scope,
                     issues: manifest.issues, expiresAtMs: manifest.expiresAtMs
                 };
             } finally {

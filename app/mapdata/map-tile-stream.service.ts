@@ -1763,7 +1763,9 @@ export class MapTileStreamService implements OnDestroy {
                 const matches = await this.locateFeature(feature.mapId, featureId, feature.layerId, signal);
                 signal?.throwIfAborted();
                 if (matches.length !== 1) rejectAction(matches.length ? "Feature identity is ambiguous; supply its partition" :
-                    "Feature was not found. For a relation target, discover its owning layer using mapget_list_sources/schemaFeatureTypes; featureTypes may be reference-only. Do not bypass this failure by copying the source feature's mapTileKey into a new inspection.");
+                    "Feature was not found. For a relation target, use viewer_list_layers to find a layer whose " +
+                    "featureTypes includes the target type; referenceTypes does not establish ownership. " +
+                    "Do not bypass this failure by copying the source feature's mapTileKey into a new inspection.");
                 const target = parseFeatureInspectionTarget(featureId);
                 result.push({ ...matches[0], featureId: formatFeatureInspectionTarget({ ...target, baseFeatureId: matches[0].featureId }) });
             }

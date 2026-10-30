@@ -886,6 +886,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// TileLayerParser
     em::class_<TileLayerParser>("TileLayerParser")
         .constructor<>()
+        .function("installMapSchema", &TileLayerParser::installMapSchema)
+        .function("featureTypes", &TileLayerParser::featureTypes)
+        .function("setIncomingRelationHints", &TileLayerParser::setIncomingRelationHints)
         .function("setDataSourceInfo", &TileLayerParser::setDataSourceInfo)
         .function("addDataSourceInfo", &TileLayerParser::addDataSourceInfo)
         .function("getDataSourceInfo", &TileLayerParser::getDataSourceInfo)
@@ -908,8 +911,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("planStyleFilter", &TileLayerParser::planStyleFilter)
         .function(
             "filterFeatureJumpTargets",
-            std::function<
-                NativeJsValue(TileLayerParser const&, std::string)>(
+            std::function<NativeJsValue(TileLayerParser const&, std::string)>(
                 [](TileLayerParser const& self, std::string input)
                 {
                     auto result = self.filterFeatureJumpTargets(input);

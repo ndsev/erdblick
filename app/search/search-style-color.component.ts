@@ -29,7 +29,8 @@ import {
     SearchStyleFieldOption,
     SearchStyleFieldValueKind,
     SearchStyleGradientStopDraft,
-    sortedGradientStopDrafts
+    sortedGradientStopDrafts,
+    specialStopsForDomain
 } from "./search-style-color.util";
 
 @Component({
@@ -115,6 +116,27 @@ import {
 
             @if (colorWarning) {
                 <div class="search-style-color-warning">{{ colorWarning }}</div>
+            }
+            @if (schemaHasChanged) {
+                <p-button label="Use current schema" severity="secondary" [outlined]="true"
+                          (click)="setField(viewDraft.field)"></p-button>
+            }
+            @if (viewDraft.mode !== 'solid' && viewDraft.specialStops?.length) {
+                <div class="search-style-color-stop-list">
+                    <span>Special values</span>
+                    @for (stop of viewDraft.specialStops; track stop.id) {
+                        <div class="search-style-color-stop-row">
+                            <p-colorpicker [ngModel]="stop.color" appendTo="body"
+                                           [overlayOptions]="colorPickerOverlayOptions"
+                                           [attr.aria-label]="specialColorLabel(stop)"
+                                           (ngModelChange)="setSpecialStopColor(stop, $event)"></p-colorpicker>
+                            <span>{{ specialColorLabel(stop) }}</span>
+                            <p-button icon="pi pi-times" severity="danger" [outlined]="true"
+                                      pTooltip="Use fallback for this special value"
+                                      (click)="deleteSpecialStop(stop)"></p-button>
+                        </div>
+                    }
+                </div>
             }
 
             @if (viewDraft.mode === 'gradient') {
@@ -322,7 +344,40 @@ export class SearchStyleColorComponent implements OnChanges {
     }
 
     protected get gradientTags() {
-        return gradientValueTags(this.viewDraft);
+        const numeric = this.selectedFieldOption()?.domain?.numeric;
+        return gradientValueTags(this.viewDraft).map(tag => ({...tag,
+            label: numeric?.unit && !this.schemaHasChanged
+                ? `${Number((Number(tag.label) * numeric.scale + numeric.offset).toPrecision(8))} ${numeric.unit}`
+                : tag.label
+        }));
+    }
+
+    /** A saved generated scale must be explicitly replanned after a source changes meaning. */
+    protected get schemaHasChanged(): boolean {
+        const expected = this.viewDraft.domain;
+        const option = this.selectedFieldOption();
+        return !!expected && !!option && (option.incompatibleDomains === true ||
+            expected.schemaId !== option.domain?.schemaId || expected.domainId !== option.domain?.domainId);
+    }
+
+    /** Names explain raw codes only when the currently loaded domain still matches the saved one. */
+    protected specialColorLabel(stop: SearchStyleGradientStopDraft): string {
+        const names = this.schemaHasChanged ? [] : this.selectedFieldOption()?.domain?.namedValues
+            .filter(named => named.role === "special" && named.value === stop.value).map(named => named.name) ?? [];
+        return `${stop.value}${names.length ? ` (${names.join(", ")})` : ""}`;
+    }
+
+    /** Editing a special color preserves the raw code, exact domain guard and ordinary stops. */
+    protected setSpecialStopColor(stop: SearchStyleGradientStopDraft, color: string): void {
+        this.viewDraft = {...this.viewDraft, specialStops: this.viewDraft.specialStops?.map(candidate =>
+            candidate.id === stop.id ? {...candidate, color: normalizeHexColor(color)} : candidate)};
+        this.emitChange();
+    }
+
+    /** Removing an override deliberately exposes the scale's fallback for that code. */
+    protected deleteSpecialStop(stop: SearchStyleGradientStopDraft): void {
+        this.viewDraft = {...this.viewDraft, specialStops: this.viewDraft.specialStops?.filter(candidate => candidate.id !== stop.id)};
+        this.emitChange();
     }
 
     protected get canSortGradientStops(): boolean {
@@ -405,6 +460,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.clearDataWarning();
         this.viewDraft = {
             ...this.viewDraft,
+            ...(field !== this.viewDraft.field ? {domain: undefined, specialStops: undefined} : {}),
             field: field ?? "",
             customField: this.viewDraft.customField || this.fieldOptions.length > 0,
             categoryValueKind: this.fieldOptions.length > 0
@@ -576,7 +632,8 @@ export class SearchStyleColorComponent implements OnChanges {
         return Math.max(
             0,
             ...draft.gradientStops.map(stop => stop.id),
-            ...draft.categoryStops.map(stop => stop.id)
+            ...draft.categoryStops.map(stop => stop.id),
+            ...(draft.specialStops ?? []).map(stop => stop.id)
         );
     }
 
@@ -658,17 +715,22 @@ export class SearchStyleColorComponent implements OnChanges {
         const gradientStops = gradientStopsForObservedNumericRange({
             min: summary.numeric.min,
             max: summary.numeric.max
-        }, () => this.nextStopId++);
+        }, () => this.nextStopId++, summary.domain?.numeric);
         if (gradientStops.length === 0) {
             this.dataColorWarning = "Observed numeric values do not provide a usable range.";
             this.updateColorWarning();
             return;
         }
 
+        const sameDomain = this.viewDraft.domain?.schemaId === summary.domain?.schemaId &&
+            this.viewDraft.domain?.domainId === summary.domain?.domainId;
         this.viewDraft = {
             ...this.viewDraft,
             gradientStops,
-            categoryStops: []
+            categoryStops: [],
+            domain: summary.domain ? {schemaId: summary.domain.schemaId, domainId: summary.domain.domainId} : undefined,
+            specialStops: !summary.domain ? undefined : sameDomain && this.viewDraft.specialStops !== undefined
+                ? this.viewDraft.specialStops : specialStopsForDomain(summary.domain, () => this.nextStopId++)
         };
         this.dataColorWarning = "";
         this.emitChange();
@@ -677,9 +739,16 @@ export class SearchStyleColorComponent implements OnChanges {
 
     /** Rebuilds category stops from observed numeric, boolean, or string values. */
     private updateCategoryStopsFromData(summary: SearchValueSummary): void {
+        if (summary.kinds.bitmask > 0) {
+            this.dataColorWarning = "Choose a named flag from the field picker to color its presence. Raw mask combinations are not categories.";
+            this.updateColorWarning();
+            return;
+        }
+        const specialValues = new Set(summary.domain?.namedValues
+            .filter(named => named.role === "special").map(named => String(named.value)) ?? []);
         const values = summary.histogram
             .map(bucket => bucket.value)
-            .filter(value => value.trim().length > 0);
+            .filter(value => value.trim().length > 0 && !specialValues.has(value));
         if (values.length === 0) {
             this.dataColorWarning = "Observed data for this expression has no category histogram.";
             this.updateColorWarning();
@@ -688,9 +757,22 @@ export class SearchStyleColorComponent implements OnChanges {
 
         const valueKind = this.observedCategoryValueKind(summary)
             ?? this.selectedFieldOption()?.valueKind;
+        if (summary.kinds.integer > 0 && values.some(value =>
+            /^-?\d+$/.test(value) && !Number.isSafeInteger(Number(value)))) {
+            this.dataColorWarning = "Some observed integers exceed the editor's exact numeric range. Their raw values remain available in Diagnostics.";
+            this.updateColorWarning();
+            return;
+        }
+        // Refreshing observed categories changes ordinary stops only. Preserve
+        // edited or deleted special colors while their exact meaning matches.
+        const sameDomain = this.viewDraft.domain?.schemaId === summary.domain?.schemaId &&
+            this.viewDraft.domain?.domainId === summary.domain?.domainId;
         this.viewDraft = {
             ...this.viewDraft,
             categoryValueKind: valueKind,
+            domain: summary.domain ? {schemaId: summary.domain.schemaId, domainId: summary.domain.domainId} : undefined,
+            specialStops: !summary.domain ? undefined : sameDomain && this.viewDraft.specialStops !== undefined
+                ? this.viewDraft.specialStops : specialStopsForDomain(summary.domain, () => this.nextStopId++),
             gradientStops: [],
             categoryStops: categoryStopsForObservedValues(
                 values,
@@ -733,13 +815,20 @@ export class SearchStyleColorComponent implements OnChanges {
         if (this.dataSummaryStatus === "error") {
             return "Observed value summary failed. See Diagnostics.";
         }
-        if (this.dataSummaryStatus === "empty" || this.dataSummaryStatus === "ready") {
+        if (this.dataSummaryStatus === "ready") {
+            return "No single observed value domain is available. Check Diagnostics for missing values or mixed domains.";
+        }
+        if (this.dataSummaryStatus === "empty") {
             return "No observed values are available for this expression.";
         }
         return "Summarizing observed values; click again when ready.";
     }
 
     private updateColorWarning(): void {
+        if (this.schemaHasChanged) {
+            this.colorWarning = "This saved scale belongs to an older or different value domain. Its fallback remains active until you choose Use current schema.";
+            return;
+        }
         if (this.dataColorWarning) {
             this.colorWarning = this.dataColorWarning;
             return;

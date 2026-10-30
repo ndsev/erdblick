@@ -1,10 +1,11 @@
+import type {SchemaDomainIdentity, SchemaScalarDomain} from "../mapdata/schema-domain.model";
 import type {
     FeatureSearchColorMode,
     FeatureSearchColorStop
 } from "./search-definition.model";
 
 export type SearchStyleColorMode = "solid" | "gradient" | "categories";
-export type SearchStyleFieldValueKind = "number" | "integer" | "string" | "boolean" | "enum" | "object" | "array" | "unknown";
+export type SearchStyleFieldValueKind = "number" | "integer" | "string" | "boolean" | "enum" | "bitmask" | "object" | "array" | "unknown";
 
 export interface SearchStyleNumericRange {
     min: number;
@@ -17,6 +18,9 @@ export interface SearchStyleFieldOption {
     valueKind?: SearchStyleFieldValueKind;
     enumValues?: string[];
     numericRange?: SearchStyleNumericRange;
+    domain?: SchemaScalarDomain;
+    /** One expression spans different meanings; auto-coloring requires a narrower source scope. */
+    incompatibleDomains?: boolean;
 }
 
 export interface SearchStyleGradientStopDraft {
@@ -41,6 +45,9 @@ export interface SearchStyleColorDraft {
     solidColor: string;
     gradientStops: SearchStyleGradientStopDraft[];
     categoryStops: SearchStyleCategoryStopDraft[];
+    /** These are explicit saved rules; loading new metadata must not regenerate them. */
+    domain?: SchemaDomainIdentity;
+    specialStops?: SearchStyleGradientStopDraft[];
     fallbackColor: string;
     /** False omits the scale fallback: unmatched values are not rendered. */
     fallbackEnabled?: boolean;
@@ -94,6 +101,8 @@ export function searchStyleColorProperties(
             mode: color.mode === "gradient" ? "linear" : "categorical",
             expression,
             stops,
+            ...(color.domain ? {domain: color.domain} : {}),
+            ...(color.specials?.length ? {specials: normalizedCategoricalStyleStops(color.specials, fallback)} : {}),
             ...(color.fallbackColor === undefined ? {} : {fallback})
         }
     };
@@ -182,6 +191,8 @@ export function cloneSearchStyleColorDraft(draft: SearchStyleColorDraft): Search
         field: draft.field,
         customField: !!draft.customField,
         categoryValueKind: draft.categoryValueKind,
+        ...(draft.domain ? {domain: {...draft.domain}} : {}),
+        ...(draft.specialStops ? {specialStops: draft.specialStops.map(stop => ({...stop}))} : {}),
         fallbackEnabled: draft.fallbackEnabled !== false,
         solidColor: normalizeHexColor(draft.solidColor),
         gradientStops: draft.gradientStops.map(stop => ({
@@ -400,73 +411,66 @@ export function categoryStopsForObservedValues(
     }));
 }
 
-/** Creates at most eight numeric gradient stops with denser coverage in the lower half of the range. */
+/**
+ * Choose round steps in presentation units, then store the corresponding raw
+ * thresholds. Endpoints remain exact and the source values are never converted.
+ * For example, a 0.1 m encoding gets round metre labels with raw integer stops.
+ */
 export function gradientStopsForNumericRange(
     range: SearchStyleNumericRange | undefined,
-    nextId: () => number
+    nextId: () => number,
+    numeric?: SchemaScalarDomain["numeric"]
 ): SearchStyleGradientStopDraft[] {
-    if (!range || !Number.isFinite(range.min) || !Number.isFinite(range.max) || range.min > range.max) {
-        return [];
+    if (!range || !Number.isFinite(range.min) || !Number.isFinite(range.max) || range.min > range.max) return [];
+    if (range.min === range.max) return [{id: nextId(), value: range.min, color: gradientColorAt(0.5)}];
+    const scale = numeric?.scale ?? 1;
+    const offset = numeric?.offset ?? 0;
+    if (!Number.isFinite(scale) || scale <= 0 || !Number.isFinite(offset)) return [];
+    const minimum = range.min * scale + offset;
+    const maximum = range.max * scale + offset;
+    const span = maximum - minimum;
+    if (!Number.isFinite(span) || span <= 0) return [];
+    const magnitude = 10 ** Math.floor(Math.log10(span / 6));
+    const step = [1, 2, 5, 10].find(factor => factor * magnitude >= span / 6)! * magnitude;
+    if (!Number.isFinite(step) || step <= 0) return [];
+    const values = [range.min];
+    const first = Math.floor(minimum / step) + 1;
+    // A fixed upper bound also protects this loop from floating-point steps
+    // that stop advancing at extreme magnitudes.
+    for (let index = 0; index < 8; ++index) {
+        const measured = (first + index) * step;
+        if (measured >= maximum) break;
+        const raw = Number(((measured - offset) / scale).toPrecision(14));
+        if (raw > values[values.length - 1] && raw < range.max) values.push(raw);
     }
-    if (range.min === range.max) {
-        return [{id: nextId(), value: range.min, color: gradientColorAt(0.5)}];
-    }
-
-    const span = range.max - range.min;
-    const roundingStep = span / 10;
-    const offsets = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.75, 1];
-    const values = offsets.reduce<number[]>((result, offset, index) => {
-        const exactValue = index === offsets.length - 1
-            ? range.max
-            : range.min + span * offset;
-        const value = index === 0 || index === offsets.length - 1
-            ? exactValue
-            : roundGradientValue(exactValue, roundingStep);
-        if (result.length === 0 || result[result.length - 1] !== value) {
-            result.push(value);
-        }
-        return result;
-    }, []);
-
-    return values.map((value, index) => ({
-        id: nextId(),
-        value,
-        color: gradientColorAt(index / Math.max(values.length - 1, 1))
+    values.push(range.max);
+    return values.map(value => ({
+        id: nextId(), value,
+        color: gradientColorAt((value - range.min) / (range.max - range.min))
     }));
 }
 
-/** Creates observed-data gradients with linear value spacing across the measured domain. */
+/** Observed ordinary bounds use the same round, unit-aware steps as schema defaults. */
 export function gradientStopsForObservedNumericRange(
     range: SearchStyleNumericRange | undefined,
+    nextId: () => number,
+    numeric?: SchemaScalarDomain["numeric"]
+): SearchStyleGradientStopDraft[] {
+    return gradientStopsForNumericRange(range, nextId, numeric);
+}
+
+/** Named sentinel defaults are editable presentation choices, separate from ordinary stops. */
+export function specialStopsForDomain(
+    domain: SchemaScalarDomain | undefined,
     nextId: () => number
 ): SearchStyleGradientStopDraft[] {
-    if (!range || !Number.isFinite(range.min) || !Number.isFinite(range.max) || range.min > range.max) {
-        return [];
-    }
-    if (range.min === range.max) {
-        return [{id: nextId(), value: range.min, color: gradientColorAt(0.5)}];
-    }
-
-    const stopCount = 8;
-    const span = range.max - range.min;
-    const roundingStep = span / (stopCount - 1);
-    const values = Array.from({length: stopCount}, (_, index) => {
-        if (index === 0) {
-            return range.min;
-        }
-        if (index === stopCount - 1) {
-            return range.max;
-        }
-        return roundGradientValue(range.min + span * (index / (stopCount - 1)), roundingStep);
-    }).filter((value, index, array) => index === 0 || value !== array[index - 1]);
-
-    return values.map((value, index) => {
-        const offset = index / Math.max(values.length - 1, 1);
-        return {
-            id: nextId(),
-            value,
-            color: gradientColorAt(offset)
-        };
+    const colors = {unknown: "#71717a", variable: "#a855f7", unbounded: "#06b6d4", saturated: "#f59e0b", ordinary: "#64748b"};
+    const seen = new Set<number>();
+    return (domain?.namedValues ?? []).flatMap(named => {
+        if (named.role !== "special" || named.removed || typeof named.value !== "number" ||
+            !Number.isFinite(named.value) || (Number.isInteger(named.value) && !Number.isSafeInteger(named.value)) || seen.has(named.value)) return [];
+        seen.add(named.value);
+        return [{id: nextId(), value: named.value, color: colors[named.meaning]}];
     });
 }
 
@@ -480,6 +484,10 @@ export function autoInitializeSearchStyleColorDraft(
         return {draft: cloneSearchStyleColorDraft(draft), message: "", success: true};
     }
 
+    if (fieldOption?.incompatibleDomains) {
+        return {draft: cloneSearchStyleColorDraft(draft), success: false,
+            message: "This field has different schema meanings across the selected sources. Narrow the source selection before generating colors."};
+    }
     if (!fieldOption || draft.customField) {
         return {
             draft: cloneSearchStyleColorDraft({
@@ -493,14 +501,16 @@ export function autoInitializeSearchStyleColorDraft(
     }
 
     if (draft.mode === "categories") {
-        const enumValues = fieldOption.enumValues ?? [];
-        if (fieldOption.valueKind === "enum" && enumValues.length > 0) {
+        const enumValues = fieldOption.valueKind === "boolean" ? ["false", "true"] : fieldOption.enumValues ?? [];
+        if ((fieldOption.valueKind === "enum" || fieldOption.valueKind === "boolean") && enumValues.length > 0) {
             return {
                 draft: cloneSearchStyleColorDraft({
                     ...draft,
                     categoryValueKind: fieldOption.valueKind,
                     categoryStops: categoryStopsForEnumValues(enumValues, nextId),
-                    gradientStops: []
+                    gradientStops: [],
+                    domain: undefined,
+                    specialStops: undefined
                 }),
                 message: "",
                 success: true
@@ -528,7 +538,7 @@ export function autoInitializeSearchStyleColorDraft(
         };
     }
 
-    const gradientStops = gradientStopsForNumericRange(fieldOption.numericRange, nextId);
+    const gradientStops = gradientStopsForNumericRange(fieldOption.numericRange, nextId, fieldOption.domain?.numeric);
     if (gradientStops.length === 0) {
         return {
             draft: cloneSearchStyleColorDraft({...draft, gradientStops: []}),
@@ -537,7 +547,11 @@ export function autoInitializeSearchStyleColorDraft(
         };
     }
     return {
-        draft: cloneSearchStyleColorDraft({...draft, gradientStops, categoryStops: []}),
+        draft: cloneSearchStyleColorDraft({
+            ...draft, gradientStops, categoryStops: [],
+            domain: fieldOption.domain ? {schemaId: fieldOption.domain.schemaId, domainId: fieldOption.domain.domainId} : undefined,
+            specialStops: fieldOption.domain ? specialStopsForDomain(fieldOption.domain, nextId) : undefined
+        }),
         message: "",
         success: true
     };
@@ -598,11 +612,6 @@ function hexToRgb(color: string): [number, number, number] {
         Number.parseInt(normalized.slice(3, 5), 16),
         Number.parseInt(normalized.slice(5, 7), 16)
     ];
-}
-
-function roundGradientValue(value: number, step: number): number {
-    const decimals = step >= 1 ? 0 : Math.ceil(Math.abs(Math.log10(step))) + 2;
-    return Number(value.toFixed(Math.min(12, decimals)));
 }
 
 function serializableValue(valueText: string, valueKind: SearchStyleFieldValueKind | undefined): unknown {

@@ -56,7 +56,7 @@ import {
     removeGroupPrefix,
     StyleOptionNode
 } from "./map-tree.controller";
-import { CoverageRectItem, dataSourceCatalogStatus, MapInfoItem } from "./source-catalog.model";
+import { CoverageRectItem, dataSourceReadinessStatus, MapInfoItem } from "./source-catalog.model";
 
 /** One rendered select option in the per-view background-layer dropdown. */
 interface BackgroundLayerOption {
@@ -1304,12 +1304,12 @@ export class MapPanelComponent {
 
     /** Returns the catalog startup status for a map tree entry. */
     dataSourceStatus(mapInfo: MapInfoItem) {
-        return dataSourceCatalogStatus(mapInfo);
+        return dataSourceReadinessStatus(mapInfo);
     }
 
     /** Maps datasource startup status to the small connectivity indicator class. */
     dataSourceStatusClass(mapInfo: MapInfoItem): string {
-        return dataSourceCatalogStatus(mapInfo);
+        return dataSourceReadinessStatus(mapInfo);
     }
 
     /** Returns a concise datasource status tooltip for ready, initializing, and failed entries. */

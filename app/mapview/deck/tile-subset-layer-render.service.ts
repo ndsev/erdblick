@@ -1,3 +1,4 @@
+import type {MapSchemaArtifact} from "../../mapdata/source-catalog.model";
 import { Injectable, Optional } from "@angular/core";
 import { skip, Subject } from "rxjs";
 import { pointCloudInputBudget } from "../../mapdata/point-cloud-input-budget.model";
@@ -15,6 +16,8 @@ import type { GpuSceneSnapshot } from "./gpu-scene.visualization";
 import type {
     TileSubsetGpuContribution,
     TileSubsetLayerRenderBuffers,
+    TileSubsetLayerRenderCatalogInstall,
+    TileSubsetLayerRenderCatalogInstalled,
     TileSubsetLayerRenderResult,
     TileSubsetLayerRenderTask,
     TileSubsetLayerRenderWorkerOutbound
@@ -68,6 +71,7 @@ export interface TileSubsetLayerRenderRequest {
     mapId: string;
     catalogRevision: number;
     dataSourceInfoBlob: Uint8Array;
+    schemas?: MapSchemaArtifact[];
     stringPoolId: string;
     fieldDictBlob: Uint8Array;
     subsetBlob: Uint8Array;
@@ -83,6 +87,9 @@ export interface TileSubsetLayerRenderRequest {
 
 interface PendingRender {
     task: TileSubsetLayerRenderTask;
+    schemas: MapSchemaArtifact[];
+    /** Deferred until the worker acknowledges native catalog/schema installation. */
+    dispatch?: () => void;
     admit: (packet: Uint8Array) => void;
     prepare: (buffers: TileSubsetLayerRenderBuffers) => void;
     resolve: (value: TileSubsetLayerRenderBuffers) => void;
@@ -540,14 +547,16 @@ export class TileSubsetLayerRenderService {
             request.renderSignature
         );
         this.dropReplacedQueuedJobs(request.visualizationId);
+        const { schemas = [], ...renderRequest } = request;
         const task: TileSubsetLayerRenderTask = {
             type: "TileSubsetLayerRenderTask",
             taskId: `subset-render-${++this.nextTaskId}`,
-            ...request
+            ...renderRequest
         };
         return new Promise<TileSubsetLayerRenderBuffers>((resolve, reject) => {
             this.queue.push({
                 task,
+                schemas,
                 admit,
                 prepare,
                 resolve,
@@ -713,7 +722,7 @@ export class TileSubsetLayerRenderService {
                 ...pending.task,
                 subsetBlob,
                 reusePointCloudInput,
-                dataSourceInfoBlob,
+                dataSourceInfoBlob: undefined,
                 fieldDictBlob,
                 styleSource,
                 iconCatalogEntries: needsIconCatalog
@@ -726,9 +735,6 @@ export class TileSubsetLayerRenderService {
                     : undefined
             };
             const transferables: ArrayBuffer[] = [];
-            if (dataSourceInfoBlob) {
-                transferables.push(dataSourceInfoBlob.buffer);
-            }
             if (fieldDictBlob) {
                 transferables.push(fieldDictBlob.buffer);
             }
@@ -741,8 +747,31 @@ export class TileSubsetLayerRenderService {
                 );
                 continue;
             }
+            pending.dispatch = () => {
+                if (this.runningTaskIdByWorker[workerIndex] !== pending.task.taskId) return;
+                try {
+                    if (!this.isCurrent(pending.task)) throw new StaleSubsetRenderError();
+                    worker.postMessage(outbound, transferables);
+                    pending.dispatch = undefined;
+                } catch (error) {
+                    this.failDispatch(workerIndex, pending, error);
+                    void this.pump();
+                }
+            };
+            if (!needsCatalog) {
+                pending.dispatch();
+                continue;
+            }
             try {
-                worker.postMessage(outbound, transferables);
+                if (!dataSourceInfoBlob) throw new Error("Render task has no source metadata for schema installation.");
+                worker.postMessage({
+                    type: "TileSubsetLayerRenderCatalogInstall",
+                    requestId: pending.task.taskId,
+                    mapId: pending.task.mapId,
+                    catalogRevision: pending.task.catalogRevision,
+                    dataSourceInfoBlob,
+                    schemas: pending.schemas
+                } satisfies TileSubsetLayerRenderCatalogInstall, [dataSourceInfoBlob.buffer]);
             } catch (error) {
                 this.failDispatch(workerIndex, pending, error);
             }
@@ -848,10 +877,13 @@ export class TileSubsetLayerRenderService {
             worker.terminate();
             throw error;
         }
-        worker.onmessage = event => this.handleResult(
-            index,
-            event.data as TileSubsetLayerRenderResult
-        );
+        worker.onmessage = (event: MessageEvent<TileSubsetLayerRenderWorkerOutbound>) => {
+            if (event.data.type === "TileSubsetLayerRenderCatalogInstalled") {
+                this.handleCatalogInstalled(index, event.data);
+            } else if (event.data.type === "TileSubsetLayerRenderResult") {
+                this.handleResult(index, event.data);
+            }
+        };
         worker.onerror = event => this.handleWorkerError(index, event);
         this.workers[index] = worker;
         this.resetWorkerState(index);
@@ -871,6 +903,30 @@ export class TileSubsetLayerRenderService {
             return undefined;
         }
         return this.idleWorkers.splice(idleIndex, 1)[0];
+    }
+
+    /** Admit the waiting task only after its exact source and schema exist in this heap. */
+    private handleCatalogInstalled(workerIndex: number, message: TileSubsetLayerRenderCatalogInstalled): void {
+        if (this.runningTaskIdByWorker[workerIndex] !== message.requestId) return;
+        const pending = this.inFlight.get(message.requestId);
+        if (!pending?.dispatch) return;
+        const previous = this.catalogKeysByWorker[workerIndex];
+        const retained = new Set(message.catalogKeys);
+        this.catalogKeysByWorker[workerIndex] = retained;
+        // Parser eviction also drops its dictionary. Forget that knowledge on
+        // the sender so a later reinstall cannot omit a required snapshot.
+        for (const key of previous) {
+            if (retained.has(key)) continue;
+            for (const dictionary of this.fieldDictSizesByWorker[workerIndex].keys()) {
+                if (dictionary.startsWith(`${key}:`)) this.fieldDictSizesByWorker[workerIndex].delete(dictionary);
+            }
+        }
+        if (message.error) {
+            this.failDispatch(workerIndex, pending, new Error(message.error));
+            void this.pump();
+            return;
+        }
+        pending.dispatch();
     }
 
     /** Validate a worker response and queue its fragments for scene admission. */
@@ -1150,7 +1206,7 @@ export class TileSubsetLayerRenderService {
         this.iconCatalogVersionByWorker[workerIndex] = task.iconCatalogVersion;
     }
 
-    /** Rejects a synchronous dispatch failure and immediately returns its credit. */
+    /** Rejects a failed or superseded dispatch and immediately returns its credit. */
     private failDispatch(
         workerIndex: number,
         pending: PendingRender,
@@ -1159,7 +1215,11 @@ export class TileSubsetLayerRenderService {
         this.releaseMemory(pending);
         this.inFlight.delete(pending.task.taskId);
         this.runningTaskIdByWorker[workerIndex] = null;
-        this.failedTaskCount += 1;
+        if (reason instanceof StaleSubsetRenderError) {
+            this.staleTaskCount += 1;
+        } else {
+            this.failedTaskCount += 1;
+        }
         pending.reject(reason instanceof Error ? reason : new Error(String(reason)));
         if (this.workers[workerIndex]) {
             this.idleWorkers.push(workerIndex);

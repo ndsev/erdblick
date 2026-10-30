@@ -34,6 +34,8 @@ interface SchemaWorkerState {
     worker: Worker | null;
     failed: boolean;
     dataSourceInfoJson: string | null | undefined;
+    /** Serializes installation plus its dependent query, keeping their source scope coherent. */
+    queue: Promise<void>;
 }
 
 /**
@@ -52,20 +54,32 @@ export class FeatureSearchSchemaService {
     }>();
     private readonly pendingStyleFields = new Map<number, {
         resolve: (value: FeatureSearchStyleFieldCandidate[]) => void;
-        cacheKey: string;
+        reject: (error: Error) => void;
     }>();
     private scopeAnalysisByQueryCache = new Map<string, Promise<FeatureSearchScopeAnalysis>>();
     private readonly workerStates: Record<SchemaWorkerKind, SchemaWorkerState> = {
-        completion: {worker: null, failed: false, dataSourceInfoJson: undefined},
-        analysis: {worker: null, failed: false, dataSourceInfoJson: undefined}
+        completion: {worker: null, failed: false, dataSourceInfoJson: undefined, queue: Promise.resolve()},
+        analysis: {worker: null, failed: false, dataSourceInfoJson: undefined, queue: Promise.resolve()}
     };
     private workerRequestSerial = 0;
+    private readonly schemaInstallations = new Map<number, {
+        kind: SchemaWorkerKind;
+        resolve: () => void;
+        reject: (error: Error) => void;
+    }>();
+    private readonly latestCompletionSerialByOwner = new Map<string, number>();
 
     constructor(private readonly mapInfo: MapDataService) {
+        let catalogSignature = this.mapInfo.schemaScopeSignature();
         this.mapInfo.layerStateChanged.subscribe(reason => {
             if (reason === "datasources") {
+                const nextSignature = this.mapInfo.schemaScopeSignature();
+                if (nextSignature === catalogSignature) return;
+                catalogSignature = nextSignature;
                 this.clearCaches();
-                this.syncAllWorkerDataSourceInfo();
+                // Each lane installs only the maps requested by its next query.
+                // Existing requests use their own scope identity, so changes to
+                // another map do not discard their work or restart a search.
             }
         });
     }
@@ -76,10 +90,11 @@ export class FeatureSearchSchemaService {
         scope: FeatureSearchScope,
         selectedMapLayers?: FeatureSearchMapLayerRef[]
     ): string {
-        return `${scope}\n${this.selectedMapLayerSignature(selectedMapLayers)}\n${query.trim()}`;
+        const mapIds = selectedMapLayers?.map(layer => layer.mapId);
+        return `${this.mapInfo.schemaScopeSignature(mapIds)}\n${scope}\n${this.selectedMapLayerSignature(selectedMapLayers)}\n${query.trim()}`;
     }
 
-    /** Requests concrete scope analysis without blocking the UI thread. */
+    /** Requests scope analysis only after its selected sources are installed in this worker. */
     requestSearchScopeAnalysis(
         query: string,
         scope: FeatureSearchScope,
@@ -87,80 +102,116 @@ export class FeatureSearchSchemaService {
     ): Promise<FeatureSearchScopeAnalysis> {
         const signature = this.searchScopeAnalysisSignature(query, scope, selectedMapLayers);
         const cached = this.scopeAnalysisByQueryCache.get(signature);
-        if (cached) {
-            return cached;
-        }
-
-        const worker = this.schemaWorker("analysis");
-        if (!worker) {
-            const result = Promise.resolve(this.workerUnavailableScopeAnalysis(
-                signature,
-                scope,
-                "Schema worker is unavailable; search schema analysis is disabled."
-            ));
-            this.scopeAnalysisByQueryCache.set(signature, result);
+        if (cached) return cached;
+        const promise: Promise<FeatureSearchScopeAnalysis> = this.enqueueSchemaRequest("analysis", selectedMapLayers, worker =>
+            new Promise<FeatureSearchScopeAnalysis>(resolve => {
+                const requestId = ++this.workerRequestSerial;
+                this.pendingScopeAnalysis.set(requestId, {resolve, signature});
+                worker.postMessage({
+                    type: "SearchScopeAnalysisRequest", requestId, query, scope,
+                    ...(selectedMapLayers !== undefined ? {selectedMapLayers} : {})
+                } satisfies SearchScopeAnalysisRequestMessage);
+            })
+        ).catch(error => this.workerUnavailableScopeAnalysis(signature, scope, String(error))).then(result => {
+            // A temporarily unavailable source can recover without changing its
+            // model generation; failed analysis is never a reusable answer.
+            if (result.error && this.scopeAnalysisByQueryCache.get(signature) === promise) {
+                this.scopeAnalysisByQueryCache.delete(signature);
+            }
             return result;
-        }
-
-        this.syncWorkerDataSourceInfo("analysis");
-        const requestId = ++this.workerRequestSerial;
-        const promise = new Promise<FeatureSearchScopeAnalysis>(resolve => {
-            this.pendingScopeAnalysis.set(requestId, {resolve, signature});
-            worker.postMessage({
-                type: "SearchScopeAnalysisRequest",
-                requestId,
-                query,
-                scope,
-                ...(selectedMapLayers !== undefined ? {selectedMapLayers} : {})
-            } satisfies SearchScopeAnalysisRequestMessage);
         });
         this.scopeAnalysisByQueryCache.set(signature, promise);
         return promise;
     }
 
-    /** Requests schema-backed field expressions for visualization controls off the UI thread. */
+    /** Failed or pending schema installation rejects, rather than claiming there are no fields. */
     requestSearchStyleFields(
         query: string,
         scope: FeatureSearchScope,
         selectedMapLayers?: FeatureSearchMapLayerRef[]
     ): Promise<FeatureSearchStyleFieldCandidate[]> {
-        const cacheKey = `${scope}\n${this.selectedMapLayerSignature(selectedMapLayers)}\n${query.trim()}`;
+        const cacheKey = this.searchScopeAnalysisSignature(query, scope, selectedMapLayers);
         const cached = this.searchStyleFieldsByQueryCache.get(cacheKey);
-        if (cached) {
-            return Promise.resolve(cached);
-        }
-        const worker = this.schemaWorker("analysis");
-        if (!worker) {
-            return Promise.resolve([]);
-        }
-
-        this.syncWorkerDataSourceInfo("analysis");
-        const requestId = ++this.workerRequestSerial;
-        return new Promise(resolve => {
-            this.pendingStyleFields.set(requestId, {resolve, cacheKey});
-            worker.postMessage({
-                type: "SearchStyleFieldsRequest",
-                requestId,
-                query,
-                scope,
-                ...(selectedMapLayers !== undefined ? {selectedMapLayers} : {})
-            } satisfies SearchStyleFieldsRequestMessage);
+        if (cached) return Promise.resolve(cached);
+        return this.enqueueSchemaRequest("analysis", selectedMapLayers, worker =>
+            new Promise<FeatureSearchStyleFieldCandidate[]>((resolve, reject) => {
+                const requestId = ++this.workerRequestSerial;
+                this.pendingStyleFields.set(requestId, {resolve, reject});
+                worker.postMessage({
+                    type: "SearchStyleFieldsRequest", requestId, query, scope,
+                    ...(selectedMapLayers !== undefined ? {selectedMapLayers} : {})
+                } satisfies SearchStyleFieldsRequestMessage);
+            })
+        ).then(fields => {
+            this.searchStyleFieldsByQueryCache.set(cacheKey, fields);
+            return fields;
         });
     }
 
-    /** Sends one completion request through the dedicated completion worker. */
+    /** Queues completion behind native installation, superseding older queued input from the same owner. */
     requestCompletion(
         message: SearchCompletionRequestMessage,
         handler: (message: SearchCompletionResultMessage) => void
     ): boolean {
-        const worker = this.schemaWorker("completion");
-        if (!worker) {
-            return false;
-        }
-        this.syncWorkerDataSourceInfo("completion");
-        this.pendingCompletionHandlers.set(this.completionHandlerKey(message.ownerId, message.requestSerial), handler);
-        worker.postMessage(message);
+        if (!this.schemaWorker("completion")) return false;
+        this.latestCompletionSerialByOwner.set(message.ownerId, message.requestSerial);
+        void this.enqueueSchemaRequest("completion", message.options.selectedMapLayers, (worker, isCurrent) =>
+            new Promise<void>(resolve => {
+                if (this.latestCompletionSerialByOwner.get(message.ownerId) !== message.requestSerial) {
+                    handler({ type: "SearchCompletionResult", ownerId: message.ownerId,
+                        requestSerial: message.requestSerial, candidates: [], done: true });
+                    resolve();
+                    return;
+                }
+                this.pendingCompletionHandlers.set(
+                    this.completionHandlerKey(message.ownerId, message.requestSerial), result => {
+                        if (isCurrent() && this.latestCompletionSerialByOwner.get(message.ownerId) === message.requestSerial) {
+                            handler(result);
+                        }
+                        if (result.done) resolve();
+                    }
+                );
+                worker.postMessage(message);
+            })
+        ).catch(error => handler({
+            type: "SearchCompletionResult", ownerId: message.ownerId,
+            requestSerial: message.requestSerial, candidates: [], done: true, error: String(error)
+        }));
         return true;
+    }
+
+    /**
+     * Keeps configuration and execution adjacent in one worker lane. Otherwise
+     * concurrent requests for two source scopes could replace each other's parser
+     * between the installation acknowledgement and the actual native query.
+     */
+    private enqueueSchemaRequest<T>(
+        kind: SchemaWorkerKind,
+        selectedMapLayers: FeatureSearchMapLayerRef[] | undefined,
+        execute: (worker: Worker, isCurrent: () => boolean) => Promise<T>
+    ): Promise<T> {
+        const state = this.workerStates[kind];
+        const mapIds = selectedMapLayers === undefined
+            ? undefined : [...new Set(selectedMapLayers.map(layer => layer.mapId))];
+        const signature = this.mapInfo.schemaScopeSignature(mapIds);
+        const isCurrent = () => signature === this.mapInfo.schemaScopeSignature(mapIds);
+        const assertCurrent = () => {
+            if (!isCurrent()) throw new Error("Datasource schema changed while this request was pending. Please retry.");
+        };
+        const request = state.queue.then(async () => {
+            assertCurrent();
+            const worker = this.schemaWorker(kind);
+            if (!worker) throw new Error(`Schema ${kind} worker is unavailable.`);
+            const unavailable = this.mapInfo.schemaReadinessError(mapIds);
+            if (unavailable) throw new Error(unavailable);
+            await this.syncWorkerDataSourceInfo(kind, mapIds);
+            assertCurrent();
+            const result = await execute(worker, isCurrent);
+            assertCurrent();
+            return result;
+        });
+        state.queue = request.then(() => undefined, () => undefined);
+        return request;
     }
 
     /** Builds a non-blocking failure result when schema workers are unavailable. */
@@ -234,32 +285,38 @@ export class FeatureSearchSchemaService {
         }
     }
 
-    /** Mirrors current datasource metadata into the worker-local parser. */
-    private syncWorkerDataSourceInfo(kind: SchemaWorkerKind): void {
+    /** Installs only this query's source scope and awaits actual native validation. */
+    private async syncWorkerDataSourceInfo(kind: SchemaWorkerKind, mapIds?: string[]): Promise<void> {
         const state = this.workerStates[kind];
         const worker = state.worker;
-        if (!worker) {
-            return;
-        }
-        const dataSourceInfoJson = this.mapInfo.getDataSourceInfoJson();
-        if (dataSourceInfoJson === state.dataSourceInfoJson) {
-            return;
-        }
+        if (!worker) throw new Error("Schema worker is unavailable.");
+        const dataSourceInfoJson = this.mapInfo.getDataSourceInfoJson(mapIds);
+        if (dataSourceInfoJson === state.dataSourceInfoJson) return;
+        const requestId = ++this.workerRequestSerial;
+        await new Promise<void>((resolve, reject) => {
+            this.schemaInstallations.set(requestId, {kind, resolve, reject});
+            try {
+                worker.postMessage({
+                    type: "SearchCompletionDataSourceInfo", requestId, dataSourceInfoJson,
+                    schemas: this.mapInfo.getSchemaArtifacts(mapIds)
+                } satisfies SearchCompletionDataSourceInfoMessage);
+            } catch (error) {
+                this.schemaInstallations.delete(requestId);
+                reject(error);
+            }
+        });
         state.dataSourceInfoJson = dataSourceInfoJson;
-        worker.postMessage({
-            type: "SearchCompletionDataSourceInfo",
-            dataSourceInfoJson
-        } satisfies SearchCompletionDataSourceInfoMessage);
-    }
-
-    /** Refreshes metadata in every worker that has already been created. */
-    private syncAllWorkerDataSourceInfo(): void {
-        this.syncWorkerDataSourceInfo("completion");
-        this.syncWorkerDataSourceInfo("analysis");
     }
 
     /** Routes worker messages to the pending request that owns them. */
     private handleWorkerMessage(message: SearchCompletionWorkerOutboundMessage): void {
+        if (message.type === "SearchCompletionDataSourceInfoReady") {
+            const pending = this.schemaInstallations.get(message.requestId);
+            this.schemaInstallations.delete(message.requestId);
+            if (message.error) pending?.reject(new Error(message.error));
+            else pending?.resolve();
+            return;
+        }
         if (message.type === "SearchCompletionResult") {
             const key = this.completionHandlerKey(message.ownerId, message.requestSerial);
             const handler = this.pendingCompletionHandlers.get(key);
@@ -321,11 +378,10 @@ export class FeatureSearchSchemaService {
         }
         this.pendingStyleFields.delete(message.requestId);
         if (!message.error) {
-            this.searchStyleFieldsByQueryCache.set(pending.cacheKey, message.fields);
+            pending.resolve(message.fields);
         } else {
-            console.warn("Failed to enumerate feature-search style fields from schema worker.", message.error);
+            pending.reject(new Error(message.error));
         }
-        pending.resolve(message.fields);
     }
 
     /** Returns the unique key for one completion owner/serial pair. */
@@ -344,6 +400,11 @@ export class FeatureSearchSchemaService {
         state.worker?.terminate();
         state.worker = null;
         state.dataSourceInfoJson = undefined;
+        for (const [id, pending] of this.schemaInstallations) {
+            if (pending.kind !== kind) continue;
+            this.schemaInstallations.delete(id);
+            pending.reject(new Error(message));
+        }
         this.resolvePendingWorkerRequestsAfterFailure(kind, message);
     }
 
@@ -384,7 +445,7 @@ export class FeatureSearchSchemaService {
         }
         for (const [requestId, pending] of this.pendingStyleFields) {
             this.pendingStyleFields.delete(requestId);
-            pending.resolve([]);
+            pending.reject(new Error(message));
         }
     }
 }

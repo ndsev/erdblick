@@ -265,6 +265,8 @@ export class FeatureFilterOptions {
                                            [style.text-overflow]="filterFields.indexOf(col.key) !== -1 ? 'ellipsis' : null"
                                            [innerHTML]="filterFields.indexOf(col.key) !== -1 ? (col.transform(col.key, rowData) | highlight: filterString) : col.transform(col.key, rowData)">
                                         </a>
+                                    } @else if (col.key === "value" && rowData["displayValue"]) {
+                                        <span class="inspection-cell-primary-value">{{ rowData["displayValue"] }}</span>
                                     } @else {
                                         <span class="inspection-cell-primary-value"
                                               (click)="onNodeClick($event, rowData, col.key)"

@@ -44,6 +44,8 @@ interface InspectionModelData {
     key: string;
     type: number;
     value: any;
+    displayValue?: string;
+    domain?: unknown;
     info?: string;
     hoverId?: string;
     geoJsonPath?: string;
@@ -281,10 +283,14 @@ export class FeaturePanelComponent implements OnDestroy {
         };
         return {
             ...section, nodeId: "incoming-relations", incomingLoading: state.loading,
-            value: state.loading ? "Loading…" : state.error ?? (result?.complete
-                ? (section.children?.length ? "" : "No matching relations in this partition")
-                : "Partial result"),
-            info: state.error ?? result?.issues.join("\n") ?? section.info,
+            value: state.loading ? "Loading…" : state.error ?? (
+                result?.status === "no-possible-family" ? "No possible incoming family in the available sources"
+                    : result?.status === "unsupported-scope" ? "Incoming search is unsupported for this scope"
+                    : result?.complete ? (section.children?.length ? "" : "No matching relations in the searched scope")
+                    : "Partial result in the searched scope"),
+            info: state.error ?? (result
+                ? [`Searched scope: ${result.scope.join(", ") || "no provider partitions"}`, ...result.issues].join("\n")
+                : section.info),
             retryIncoming: !state.loading ? () => this.retryIncoming(feature) : undefined
         };
     }
@@ -573,6 +579,8 @@ export class FeaturePanelComponent implements OnDestroy {
                 node.data = {
                     key: data?.key ?? "",
                     value: value ?? "",
+                    displayValue: data?.displayValue,
+                    domain: data?.domain,
                     type: valueType,
                     mapTileKey: data?.mapTileKey ?? context.mapTileKey,
                     incomingLoading: data?.incomingLoading,

@@ -1,4 +1,5 @@
 #include "interop/js-object.h"
+#include <stdexcept>
 #include "fmt/core.h"
 
 #if !defined(EMSCRIPTEN)
@@ -9,6 +10,126 @@
 
 namespace erdblick
 {
+
+JsValue JsValue::fromBitmask(simfil::Bitmask const& mask)
+{
+    if (!mask.domain || !mask.domain.definition())
+        throw std::invalid_argument("Cannot expose a bitmask without its exact domain");
+    return Dict(
+        {{"_bitmask", JsValue(true)},
+         {"bits", JsValue(fmt::format("0x{:016x}", mask.bits))},
+         {"schema", JsValue(std::string(mask.domain.binding->identity()))},
+         {"domain", JsValue(mask.domain.id)}});
+}
+
+JsValue JsValue::fromSchema(simfil::SchemaReference const& reference)
+{
+    auto const* domain = reference.definition();
+    if (!domain)
+        return Undefined();
+    auto result = Dict(
+        {{"schemaId", JsValue(std::string(reference.binding->identity()))},
+         {"domainId", JsValue(reference.id)},
+         {"typeName", JsValue(std::string(domain->typeName()))}});
+    // Numeric bounds and named literals may exceed JS's exact integer range.
+    // Their type remains explicit; decimal strings preserve those raw encodings.
+    auto scalar = [](auto const& value)
+    {
+        return std::visit(
+            [](auto const& raw) -> JsValue
+            {
+                using T = std::decay_t<decltype(raw)>;
+                if constexpr (std::is_same_v<T, std::string_view>)
+                    return JsValue(std::string(raw));
+                else if constexpr (std::is_same_v<T, uint64_t>) {
+                    return raw > 9007199254740991ULL ?
+                        JsValue(std::to_string(raw)) :
+                        JsValue(double(raw));
+                }
+                else if constexpr (std::is_same_v<T, int64_t>) {
+                    return raw < -9007199254740991LL || raw > 9007199254740991LL ?
+                        JsValue(std::to_string(raw)) :
+                        JsValue(double(raw));
+                }
+                else
+                    return JsValue(raw);
+            },
+            value);
+    };
+    if (auto numeric = domain->numericDomain()) {
+        auto ranges = List();
+        for (auto const& range : numeric->ordinaryRanges)
+            ranges.push(Dict({{"min", scalar(range.min)}, {"max", scalar(range.max)}}));
+        auto metadata = Dict(
+            {{"encoding", JsValue(std::string(numeric->encoding))},
+             {"unit", JsValue(std::string(numeric->unit))},
+             {"ordinaryRanges", ranges},
+             {"scale", JsValue(numeric->scale)},
+             {"offset", JsValue(numeric->offset)},
+             {"complete", JsValue(numeric->complete)}});
+        if (numeric->minimum)
+            metadata.set("minimum", scalar(*numeric->minimum));
+        if (numeric->maximum)
+            metadata.set("maximum", scalar(*numeric->maximum));
+        result.set("numeric", metadata);
+    }
+    auto names = List();
+    domain->forEachNamedValue(
+        [&](simfil::Schema::NamedValue const& named)
+        {
+            using Named = simfil::Schema::NamedValue;
+            auto valueType = std::visit(
+                [](auto const& value) -> std::string
+                {
+                    using T = std::decay_t<decltype(value)>;
+                    if constexpr (std::is_same_v<T, bool>)
+                        return "boolean";
+                    if constexpr (std::is_same_v<T, std::string_view>)
+                        return "string";
+                    if constexpr (std::is_same_v<T, double>)
+                        return "number";
+                    return "integer";
+                },
+                named.value);
+            auto raw = scalar(named.value);
+            if (named.role == Named::Role::Flag) {
+                raw = std::visit(
+                    [](auto const& value) -> JsValue
+                    {
+                        using T = std::decay_t<decltype(value)>;
+                        if constexpr (std::is_same_v<T, uint64_t> || std::is_same_v<T, int64_t>)
+                            return JsValue(fmt::format("0x{:016x}", uint64_t(value)));
+                        throw std::invalid_argument("A named flag must have an exact integer mask");
+                    },
+                    named.value);
+            }
+            std::string role = named.role == Named::Role::Flag ?
+                "flag" :
+                named.role == Named::Role::Special ?
+                "special" :
+                "constant";
+            std::string meaning;
+            switch (named.meaning) {
+            case Named::Meaning::Ordinary: meaning = "ordinary"; break;
+            case Named::Meaning::Unknown: meaning = "unknown"; break;
+            case Named::Meaning::Variable: meaning = "variable"; break;
+            case Named::Meaning::Unbounded: meaning = "unbounded"; break;
+            case Named::Meaning::Saturated: meaning = "saturated"; break;
+            }
+            names.push(Dict(
+                {{"name", JsValue(std::string(named.name))},
+                 {"value", raw},
+                 {"valueType", JsValue(valueType)},
+                 {"role", JsValue(role)},
+                 {"meaning", JsValue(meaning)},
+                 {"deprecated", JsValue(named.deprecated)},
+                 {"removed", JsValue(named.removed)}}));
+        });
+    result.set("namedValues", names);
+    if (domain->hasAffinity(simfil::ValueType::Bitmask))
+        result.set("bitWidth", JsValue(domain->bitWidth()));
+    return result;
+}
 
 namespace {
 

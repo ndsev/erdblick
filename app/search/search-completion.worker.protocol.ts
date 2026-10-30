@@ -1,6 +1,7 @@
 import type { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldCandidate } from "./search.model";
 import type {FeatureSearchMapLayerRef, FeatureSearchScope} from "./search-definition.model";
 import type {CompletionCandidate} from "./search.model";
+import type {MapSchemaArtifact} from "../mapdata/source-catalog.model";
 
 /** Parser options needed by the schema-completion worker. */
 export interface SearchCompletionWorkerOptions {
@@ -13,7 +14,16 @@ export interface SearchCompletionWorkerOptions {
 /** Refreshes the worker-local parser with the current `/sources` metadata. */
 export interface SearchCompletionDataSourceInfoMessage {
     type: "SearchCompletionDataSourceInfo";
+    requestId: number;
     dataSourceInfoJson: string | null;
+    schemas: MapSchemaArtifact[];
+}
+
+/** Native installation acknowledgement; dependent queries remain queued until this arrives. */
+export interface SearchCompletionDataSourceInfoReady {
+    type: "SearchCompletionDataSourceInfoReady";
+    requestId: number;
+    error?: string;
 }
 
 /** Requests one schema-backed completion pass off the UI thread. */
@@ -86,6 +96,7 @@ export type SearchCompletionWorkerInboundMessage =
     SearchStyleFieldsRequestMessage;
 
 export type SearchCompletionWorkerOutboundMessage =
+    SearchCompletionDataSourceInfoReady |
     SearchCompletionResultMessage |
     SearchScopeAnalysisResultMessage |
     SearchStyleFieldsResultMessage;

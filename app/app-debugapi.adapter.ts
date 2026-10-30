@@ -113,46 +113,52 @@ export class ErdblickDebugApi {
         ) as string;
     }
 
-    /** Loads one exact feature through the inspection-only restricted `/tiles` path. */
-    async featureInspectionHoverSummary(
+    /** Reads the same detached native tree as the panel, including raw values and their domains. */
+    async featureInspectionModel(
         mapTileKey: string,
-        featureId: string,
-        keyFilter = ""
-    ): Promise<Record<string, unknown>> {
+        featureId: string
+    ): Promise<unknown[] | {error: string}> {
         const [wrapper] = await this.tileStream.loadFeatures([
             { mapTileKey, featureId }
         ]);
         if (!wrapper) {
             return { error: `Feature ${featureId} was not found in ${mapTileKey}.` };
         }
-        return wrapper.peek(feature => {
-            const root = feature.inspectionModel();
-            const hits: Record<string, unknown>[] = [];
-            const walk = (node: any, path: string[]): void => {
-                if (!node || typeof node !== "object") {
-                    return;
-                }
-                const nodeKey = String(node.key ?? "");
-                const nextPath = [...path, nodeKey];
-                if (typeof node.hoverId === "string" &&
-                    (!keyFilter || nodeKey.includes(keyFilter))) {
-                    hits.push({
-                        key: node.key,
-                        value: node.value,
-                        hoverId: node.hoverId,
-                        path: nextPath.join(" > ")
-                    });
-                }
-                if (Array.isArray(node.children)) {
-                    node.children.forEach((child: unknown) =>
-                        walk(child, nextPath)
-                    );
-                }
-            };
-            if (Array.isArray(root)) {
-                root.forEach((node: unknown) => walk(node, []));
+        const root = wrapper.peek(feature => feature.inspectionModel());
+        return Array.isArray(root) ? root : {
+            error: `Feature ${featureId} could not be parsed.`
+        };
+    }
+
+    /** Summarizes hover targets without exposing the owning tile or parser lifetime. */
+    async featureInspectionHoverSummary(
+        mapTileKey: string,
+        featureId: string,
+        keyFilter = ""
+    ): Promise<Record<string, unknown>> {
+        const root = await this.featureInspectionModel(mapTileKey, featureId);
+        if (!Array.isArray(root)) return root;
+        const hits: Record<string, unknown>[] = [];
+        const walk = (node: any, path: string[]): void => {
+            if (!node || typeof node !== "object") {
+                return;
             }
-            return { mapTileKey, featureId, hitCount: hits.length, hits };
-        }) ?? { error: `Feature ${featureId} could not be parsed.` };
+            const nodeKey = String(node.key ?? "");
+            const nextPath = [...path, nodeKey];
+            if (typeof node.hoverId === "string" &&
+                (!keyFilter || nodeKey.includes(keyFilter))) {
+                hits.push({
+                    key: node.key,
+                    value: node.value,
+                    hoverId: node.hoverId,
+                    path: nextPath.join(" > ")
+                });
+            }
+            if (Array.isArray(node.children)) {
+                node.children.forEach((child: unknown) => walk(child, nextPath));
+            }
+        };
+        root.forEach((node: unknown) => walk(node, []));
+        return { mapTileKey, featureId, hitCount: hits.length, hits };
     }
 }

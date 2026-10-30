@@ -57,6 +57,23 @@ describe("search style sheet codec", () => {
         layerIds: readonly string[] = []
     ) => ({name, defaultEnabled, layerIds});
 
+    it("round-trips domain-bound special overrides through saved YAML and native validation", () => {
+        const rule: FeatureSearchStyleRule = {geometry: ["line"], filter: [], color: {
+            mode: "gradient", field: "speed", stops: [{value: 1, color: "#111111"}, {value: 253, color: "#222222"}],
+            domain: {schemaId: "saved-graph", domainId: 7},
+            specials: [{value: 0, color: "#123456"}, {value: 255, color: "#abcdef"}], fallbackColor: "#ffffff"
+        }};
+        const saved = convertSearchStyleRulesToYaml(saveOptions("Semantic colors"), [rule]);
+        const loaded = projectStyleSourceForSearch(saved.source, "feature");
+        expect(loaded.rules[0].color).toMatchObject(rule.color);
+        const style = uint8ArrayToWasm(data => new coreLib.FeatureLayerStyle(data), new TextEncoder().encode(saved.source))!;
+        try {
+            expect(style.isValid(), JSON.stringify(style.validationReport())).toBe(true);
+        } finally {
+            style.delete();
+        }
+    });
+
     it.each(["gradient", "categories"] as const)("preserves an omitted %s fallback through YAML", mode => {
         const rule: FeatureSearchStyleRule = {geometry: ["line"], filter: [], width: 2,
             color: {mode, field: "speed", stops: [{value: 10, color: "#123456"}]}};

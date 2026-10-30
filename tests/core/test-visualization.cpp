@@ -1460,10 +1460,18 @@ TEST_CASE("TileLayerParser clears string-pool offsets when datasource info is re
 TEST_CASE("TileLayerParser appends ready maps without invalidating live dictionaries or metadata", "[erdblick.parser]")
 {
     TileLayerParser parser;
+    auto layerInfo = lineTestLayerInfo();
+    auto schema = layerInfo->schemaOwner();
+    std::ostringstream artifact;
+    REQUIRE(schema->write(artifact));
+    parser.installMapSchema(SharedUint8Array(artifact.str()), std::string(schema->schemaId()));
+    // Canonical metadata contains only a graph reference. Feature identities
+    // are supplied by the separately installed artifact, including on append.
     auto first = nlohmann::json{
-        {"mapId", "First"}, {"stringPoolId", "FirstPool"},
-        {"layers", {{"LineLayer", lineTestLayerInfo()->toJson()}}}
-    };
+        {"mapId", "First"},
+        {"stringPoolId", "FirstPool"},
+        {"schemaId", schema->schemaId()},
+        {"layers", {{"LineLayer", layerInfo->toJson()}}}};
     auto second = first;
     second["mapId"] = "Second";
     second["stringPoolId"] = "SecondPool";

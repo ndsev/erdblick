@@ -637,7 +637,11 @@ std::optional<ValueBubble> scalarBubbleForNode(InspectionNode const& node)
         return std::nullopt;
     case InspectionConverter::ValueType::Number:
     case InspectionConverter::ValueType::String:
-        return makeValueBubble(node.value_.toString(), node.nodeId_, "scalar", inspectionKeyString(node));
+        return makeValueBubble(
+            node.displayValue_.empty() ? node.value_.toString() : node.displayValue_,
+            node.nodeId_,
+            "scalar",
+            inspectionKeyString(node));
     case InspectionConverter::ValueType::FeatureId:
         return makeValueBubble(node.value_.toString(), node.nodeId_, "feature-id", inspectionKeyString(node));
     case InspectionConverter::ValueType::Null:
@@ -666,7 +670,11 @@ std::optional<ValueBubble> leafDisplayBubbleForNode(InspectionNode const& node, 
     case InspectionConverter::ValueType::Boolean:
     case InspectionConverter::ValueType::Number:
     case InspectionConverter::ValueType::String:
-        return makeValueBubble(node.value_.toString(), node.nodeId_, "scalar", key);
+        return makeValueBubble(
+            node.displayValue_.empty() ? node.value_.toString() : node.displayValue_,
+            node.nodeId_,
+            "scalar",
+            key);
     case InspectionConverter::ValueType::FeatureId:
         return makeValueBubble(node.value_.toString(), node.nodeId_, "feature-id", key);
     case InspectionConverter::ValueType::Null:
@@ -1185,9 +1193,14 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     if (auto mergedBasicAttrs = featurePtr->mergedAttributesOrNull()) {
         auto scope = push(convertString("Basic Attributes"), RawPath{"attributes"}, ValueType::Section);
         for (auto i = 0U; i < mergedBasicAttrs->size(); ++i) {
+            auto key = mergedBasicAttrs->keyAt(static_cast<int64_t>(i));
+            auto child = mergedBasicAttrs->at(static_cast<int64_t>(i));
+            auto name = convertString(key).toString();
             convertField(
-                mergedBasicAttrs->keyAt(static_cast<int64_t>(i)),
-                mergedBasicAttrs->at(static_cast<int64_t>(i)));
+                convertString(key),
+                std::string_view(name),
+                child,
+                simfil::Value::field(*mergedBasicAttrs, *child, key).schemaReference());
         }
     }
 
@@ -1376,11 +1389,18 @@ void InspectionConverter::convertAttributeLayer(
         convertSourceDataReferences(attr->sourceDataReferences(), *attrScope);
 
         auto hasFields = false;
-        attr->forEachField([this, &hasFields](auto const& fieldName, auto const& val) {
-            hasFields = true;
-            convertField(fieldName, val);
-            return true;
-        });
+        attr->forEachField(
+            [this, &hasFields, &attr](auto const& fieldName, auto const& val)
+            {
+                hasFields = true;
+                convertField(
+                    convertString(fieldName),
+                    std::string_view(fieldName),
+                    val,
+                    simfil::Value::field(*attr, *val, stringPool_->get(fieldName))
+                        .schemaReference());
+                return true;
+            });
 
         if (!hasFields) {
             current_->value_ = JsValue(true);
@@ -1803,7 +1823,8 @@ void InspectionConverter::convertField(const JsValue& fieldName, const simfil::M
 void InspectionConverter::convertField(
     const JsValue& fieldName,
     FieldOrIndex const& path,
-    const simfil::ModelNode::Ptr& value)
+    const simfil::ModelNode::Ptr& value,
+    simfil::SchemaReference domain)
 {
     if (value->addr().column() == TileFeatureLayer::ColumnId::RelationReferences) {
         auto relationRef = tile_->resolve<RelationReference>(*value);
@@ -1829,45 +1850,11 @@ void InspectionConverter::convertField(
         assignFeatureReference(*fieldScope, featureId);
         return;
     }
-    else {
-        switch (value->type()) {
-        case simfil::ValueType::Undef:
-            return;
-        case simfil::ValueType::TransientObject: break;
-        case simfil::ValueType::Null:
-            return;
-        case simfil::ValueType::Bool:
-            fieldScope->value_ = JsValue(std::get<bool>(value->value()));
-            fieldScope->type_ = ValueType::Boolean;
-            return;
-        case simfil::ValueType::Int:
-            fieldScope->value_ = JsValue(std::get<int64_t>(value->value()));
-            fieldScope->type_ = ValueType::Number;
-            return;
-        case simfil::ValueType::Float:
-            fieldScope->value_ = JsValue(std::get<double>(value->value()));
-            fieldScope->type_ = ValueType::Number;
-            return;
-        case simfil::ValueType::String: {
-            auto vv = value->value();
-            if (std::holds_alternative<std::string_view>(vv))
-                fieldScope->value_ = convertString(std::get<std::string_view>(vv));
-            else
-                fieldScope->value_ = JsValue(std::get<std::string>(vv));
-            fieldScope->type_ = ValueType::String;
-            return;
-        }
-        case simfil::ValueType::Bytes:
-            fieldScope->value_ = JsValue(byteArrayToDisplayString(std::get<simfil::ByteArray>(value->value())));
-            fieldScope->type_ = ValueType::String;
-            return;
-        case simfil::ValueType::Object: break;
-        case simfil::ValueType::Array:
-            isArray = true;
-            fieldScope->type_ = ValueType::ArrayBit;
-            break;
-        case simfil::ValueType::LAST_: break;
-        }
+    if (fieldScope->setScalarValue(simfil::Value::field(*value).withSchema(std::move(domain))))
+        return;
+    if (value->type() == simfil::ValueType::Array) {
+        isArray = true;
+        fieldScope->type_ = ValueType::ArrayBit;
     }
 
     auto const containerPath = fieldScope->geoJsonPath_;
@@ -1876,10 +1863,18 @@ void InspectionConverter::convertField(
         auto kk = isArray ? JsValue(index) : convertString(k);
         auto keyPath = kk.toString();
         if (isArray) {
-            convertField(kk, static_cast<uint32_t>(index), v);
+            convertField(
+                kk,
+                static_cast<uint32_t>(index),
+                v,
+                simfil::Value::at(*value, *v, index).schemaReference());
         }
         else {
-            convertField(kk, std::string_view(keyPath), v);
+            convertField(
+                kk,
+                std::string_view(keyPath),
+                v,
+                simfil::Value::field(*value, *v, k).schemaReference());
         }
         ++index;
     }
@@ -1931,6 +1926,137 @@ JsValue InspectionConverter::convertString(const char* s)
     return convertString(std::string_view(s));
 }
 
+bool InspectionConverter::InspectionNode::setScalarValue(simfil::Value const& value)
+{
+    using NativeType = simfil::ValueType;
+    switch (value.type) {
+    case NativeType::Undef:
+    case NativeType::Null: return true;
+    case NativeType::Bool:
+        value_ = JsValue(value.as<NativeType::Bool>());
+        type_ = ValueType::Boolean;
+        break;
+    case NativeType::Int: {
+        auto raw = value.as<NativeType::Int>();
+        value_ = raw < -9007199254740991LL || raw > 9007199254740991LL ?
+            JsValue(std::to_string(raw)) :
+            JsValue(double(raw));
+        type_ = ValueType::Number;
+        break;
+    }
+    case NativeType::Float:
+        value_ = JsValue(value.as<NativeType::Float>());
+        type_ = ValueType::Number;
+        break;
+    case NativeType::String:
+        value_ = JsValue(std::string(value.as<NativeType::String>()));
+        type_ = ValueType::String;
+        break;
+    case NativeType::Bytes:
+        value_ = JsValue(byteArrayToDisplayString(value.as<NativeType::Bytes>()));
+        type_ = ValueType::String;
+        break;
+    case NativeType::Bitmask:
+        value_ = JsValue(fmt::format("0x{:016x}", value.as<NativeType::Bitmask>().bits));
+        type_ = ValueType::String;
+        break;
+    default: return false;
+    }
+    auto reference = value.schemaReference();
+    auto const* domain = reference.definition();
+    if (!domain)
+        return true;
+    scalarDomain_ = JsValue::fromSchema(reference);
+    std::vector<std::string> names;
+    uint64_t knownBits = 0;
+    bool special = false;
+    domain->forEachNamedValue(
+        [&](simfil::Schema::NamedValue const& named)
+        {
+            if (named.removed)
+                return;
+            auto matches = std::visit(
+                [&](auto const& raw)
+                {
+                    using T = std::decay_t<decltype(raw)>;
+                    if (value.type == NativeType::Bitmask) {
+                        if constexpr (std::is_same_v<T, uint64_t> || std::is_same_v<T, int64_t>) {
+                            if (named.role != simfil::Schema::NamedValue::Role::Flag)
+                                return false;
+                            auto bits = uint64_t(raw);
+                            knownBits |= bits;
+                            auto actual = value.as<NativeType::Bitmask>().bits;
+                            return bits ? (actual & bits) == bits : actual == 0;
+                        }
+                        return false;
+                    }
+                    if constexpr (std::is_same_v<T, int64_t>)
+                        return value.type == NativeType::Int && value.as<NativeType::Int>() == raw;
+                    if constexpr (std::is_same_v<T, uint64_t>)
+                        return value.type == NativeType::Int && value.as<NativeType::Int>() >= 0 &&
+                            uint64_t(value.as<NativeType::Int>()) == raw;
+                    if constexpr (std::is_same_v<T, double>)
+                        return value.type == NativeType::Float &&
+                            value.as<NativeType::Float>() == raw;
+                    if constexpr (std::is_same_v<T, bool>)
+                        return value.type == NativeType::Bool &&
+                            value.as<NativeType::Bool>() == raw;
+                    if constexpr (std::is_same_v<T, std::string_view>)
+                        return value.type == NativeType::String &&
+                            value.as<NativeType::String>() == raw;
+                    return false;
+                },
+                named.value);
+            if (matches) {
+                names.emplace_back(named.name);
+                special |= named.role == simfil::Schema::NamedValue::Role::Special;
+            }
+        });
+    if (value.type == NativeType::Bitmask) {
+        if (auto unknown = value.as<NativeType::Bitmask>().bits & ~knownBits)
+            names.push_back(fmt::format("unknown bits 0x{:016x}", unknown));
+    }
+    if (auto numeric = domain->numericDomain(); numeric && !numeric->unit.empty() && !special &&
+        (value.type == NativeType::Int || value.type == NativeType::Float))
+    {
+        auto raw = value.type == NativeType::Int ?
+            double(value.as<NativeType::Int>()) :
+            value.as<NativeType::Float>();
+        bool ordinary =
+            numeric->ordinaryRanges.empty() ||
+            std::ranges::any_of(
+                numeric->ordinaryRanges,
+                [&](auto const& range)
+                {
+                    auto low = std::visit(
+                        [](auto bound) { return static_cast<long double>(bound); },
+                        range.min);
+                    auto high = std::visit(
+                        [](auto bound) { return static_cast<long double>(bound); },
+                        range.max);
+                    return raw >= low && raw <= high;
+                });
+        if (ordinary && std::isfinite(raw) && std::abs(raw) <= 9007199254740991.0) {
+            displayValue_ =
+                fmt::format("{:.12g} {}", raw * numeric->scale + numeric->offset, numeric->unit);
+            if (numeric->scale != 1 || numeric->offset != 0)
+                displayValue_ += " (raw " + value_.toString() + ")";
+        }
+    }
+    if (!names.empty()) {
+        if (displayValue_.empty())
+            displayValue_ = value_.toString();
+        displayValue_ += " (";
+        for (size_t index = 0; index < names.size(); ++index) {
+            if (index)
+                displayValue_ += ", ";
+            displayValue_ += names[index];
+        }
+        displayValue_ += ")";
+    }
+    return true;
+}
+
 JsValue InspectionConverter::InspectionNode::toJsValue(std::string_view const& mapId) const
 {
     auto newDict = JsValue::Dict({
@@ -1938,6 +2064,10 @@ JsValue InspectionConverter::InspectionNode::toJsValue(std::string_view const& m
         {"value", value_},
         {"type", JsValue((uint32_t)type_)},
     });
+    if (!displayValue_.empty())
+        newDict.set("displayValue", JsValue(displayValue_));
+    if (scalarDomain_)
+        newDict.set("domain", *scalarDomain_);
     if (!hoverId_.empty())
         newDict.set("hoverId", JsValue(hoverId_));
     if (!info_.empty())

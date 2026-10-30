@@ -9,6 +9,7 @@ import {
     FeatureSearchStyleRule
 } from "./search-definition.model";
 import {searchStyleColorProperties} from "./search-style-color.util";
+import {schemaDomainIdentitySchema} from "../mapdata/schema-domain.model";
 
 const SUPPORTED_SEARCH_STYLE_OPERATORS = new Set(["=", "==", "!=", "<", "<=", ">", ">=", "contains"]);
 const ALL_GEOMETRY_TYPES = ["point", "line", "polygon", "mesh", "aabb", "gltf"];
@@ -786,11 +787,24 @@ function colorFromStyle(raw: Record<string, unknown>): FeatureSearchColorMode | 
         if (fallback !== undefined && (typeof fallback !== "string" || !normalizeHexLiteral(fallback))) {
             return undefined;
         }
+        const domain = schemaDomainIdentitySchema.safeParse(scale["domain"]);
+        if (scale["domain"] !== undefined && !domain.success) return undefined;
+        const specials: Array<{value: unknown; color: string}> = [];
+        if (scale["specials"] !== undefined) {
+            if (!domain.success || !Array.isArray(scale["specials"])) return undefined;
+            for (const stop of scale["specials"]) {
+                if (!Array.isArray(stop) || stop.length !== 2 || !isFiniteNumber(stop[0]) ||
+                    typeof stop[1] !== "string" || !normalizeHexLiteral(stop[1])) return undefined;
+                specials.push({value: stop[0], color: normalizeHexLiteral(stop[1])!});
+            }
+        }
         return {
             mode: mode === "linear" ? "gradient" : "categories",
             field: expression,
             customField: true,
             stops: parsedStops,
+            ...(domain.success ? {domain: domain.data} : {}),
+            ...(scale["specials"] !== undefined ? {specials} : {}),
             ...(typeof fallback === "string" ? {fallbackColor: normalizeHexLiteral(fallback)!} : {})
         };
     }

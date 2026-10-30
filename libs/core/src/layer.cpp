@@ -1,11 +1,5 @@
 #include "layer.h"
 
-#include "geo/point-conversion.h"
-#include "geometry.h"
-#include "inspection.h"
-#include "mapget/log.h"
-#include "mapget/model/feature.h"
-#include "mapget/model/point.h"
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -14,8 +8,15 @@
 #include <sstream>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
+#include "geo/point-conversion.h"
+#include "geometry.h"
+#include "inspection.h"
+#include "mapget/log.h"
+#include "mapget/model/feature.h"
+#include "mapget/model/point.h"
 
 namespace
 {
@@ -51,14 +52,6 @@ std::optional<uint32_t> relationIndexForSource(
     return ordinal;
 }
 
-/** Render binary source-data blobs as readable integers when possible, hex otherwise. */
-auto byteArrayToDisplayString(const simfil::ByteArray& value) -> std::string
-{
-    if (auto decoded = value.decodeBigEndianI64())
-        return std::to_string(*decoded);
-    return "0x" + value.toHex(false);
-}
-
 /** Convert nlohmann JSON into the small JS value helper used by embind-facing APIs. */
 auto jsonToJsValue(nlohmann::json const& json) -> erdblick::JsValue
 {
@@ -69,11 +62,17 @@ auto jsonToJsValue(nlohmann::json const& json) -> erdblick::JsValue
     if (json.is_boolean()) {
         return JsValue(json.get<bool>());
     }
-    if (json.is_number_integer()) {
-        return JsValue(static_cast<double>(json.get<int64_t>()));
-    }
     if (json.is_number_unsigned()) {
-        return JsValue(static_cast<double>(json.get<uint64_t>()));
+        auto raw = json.get<uint64_t>();
+        return raw > 9007199254740991ULL ?
+            JsValue(std::to_string(raw)) :
+            JsValue(static_cast<double>(raw));
+    }
+    if (json.is_number_integer()) {
+        auto raw = json.get<int64_t>();
+        return raw < -9007199254740991LL || raw > 9007199254740991LL ?
+            JsValue(std::to_string(raw)) :
+            JsValue(static_cast<double>(raw));
     }
     if (json.is_number_float()) {
         return JsValue(json.get<double>());
@@ -174,6 +173,9 @@ auto projectedValue(simfil::ModelNode const& node, simfil::StringPool const& str
 /** Accumulate compact diagnostics for one projected value stream. */
 struct ValueSummary
 {
+    // This is derived aggregate metadata. Individual values retain provenance
+    // in the native model pool; there is no parallel per-result schema table.
+    simfil::SchemaReference domain;
     uint64_t count = 0;
     uint64_t missing = 0;
     uint64_t nulls = 0;
@@ -184,7 +186,9 @@ struct ValueSummary
     uint64_t objects = 0;
     uint64_t lists = 0;
     uint64_t blobs = 0;
+    uint64_t bitmasks = 0;
     uint64_t unknown = 0;
+    uint64_t specials = 0;
     uint64_t numericCount = 0;
     uint64_t histogramDropped = 0;
     bool distinctLimitReached = false;
@@ -241,16 +245,79 @@ std::string numericHistogramValue(double value)
     return stream.str();
 }
 
+/** Group by the value's actual domain before aggregating its raw representation. */
 void summarizeNode(
-    ValueSummary& summary,
+    std::vector<ValueSummary>& groups,
     simfil::ModelNode::Ptr const& node,
     uint32_t distinctLimit)
 {
+    auto value = node ? simfil::Value::field(*node) : simfil::Value::undef();
+    auto domain = value.schemaReference();
+    auto group = std::ranges::find_if(
+        groups,
+        [&](auto const& candidate) { return candidate.domain == domain; });
+    if (group == groups.end()) {
+        groups.emplace_back();
+        group = std::prev(groups.end());
+        group->domain = domain;
+    }
+    auto& summary = *group;
     ++summary.count;
     if (!node) {
         ++summary.missing;
         return;
     }
+    bool special = false;
+    if (auto const* definition = domain.definition()) {
+        definition->forEachNamedValue(
+            [&](simfil::Schema::NamedValue const& named)
+            {
+                if (named.role != simfil::Schema::NamedValue::Role::Special || named.removed)
+                    return;
+                special |= std::visit(
+                    [&](auto const& raw)
+                    {
+                        using T = std::decay_t<decltype(raw)>;
+                        if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, uint64_t>) {
+                            return value.type == simfil::ValueType::Int &&
+                                std::cmp_equal(value.as<simfil::ValueType::Int>(), raw);
+                        }
+                        else if constexpr (std::is_same_v<T, double>) {
+                            return value.type == simfil::ValueType::Float &&
+                                value.as<simfil::ValueType::Float>() == raw;
+                        }
+                        return false;
+                    },
+                    named.value);
+            });
+    }
+    if (special)
+        ++summary.specials;
+    auto addOrdinaryNumeric = [&](double raw)
+    {
+        if (special)
+            return;
+        if (auto const* definition = domain.definition()) {
+            if (auto numeric = definition->numericDomain();
+                numeric && !numeric->ordinaryRanges.empty()) {
+                bool ordinary = std::ranges::any_of(
+                    numeric->ordinaryRanges,
+                    [&](auto const& range)
+                    {
+                        auto low = std::visit(
+                            [](auto bound) { return static_cast<long double>(bound); },
+                            range.min);
+                        auto high = std::visit(
+                            [](auto bound) { return static_cast<long double>(bound); },
+                            range.max);
+                        return raw >= low && raw <= high;
+                    });
+                if (!ordinary)
+                    return;
+            }
+        }
+        addNumeric(summary, raw);
+    };
     switch (node->type()) {
     case simfil::ValueType::Undef:
         ++summary.missing;
@@ -264,14 +331,17 @@ void summarizeNode(
     case simfil::ValueType::Int: {
         ++summary.integers;
         auto const value = std::get<int64_t>(node->value());
-        addNumeric(summary, static_cast<double>(value));
+        // Raw histograms remain exact for large integers. JS numeric summaries
+        // are limited to values representable without integer precision loss.
+        if (value >= -9007199254740991LL && value <= 9007199254740991LL)
+            addOrdinaryNumeric(static_cast<double>(value));
         addHistogram(summary, std::to_string(value), distinctLimit);
         break;
     }
     case simfil::ValueType::Float: {
         ++summary.numbers;
         auto const value = std::get<double>(node->value());
-        addNumeric(summary, value);
+        addOrdinaryNumeric(value);
         addHistogram(
             summary,
             numericHistogramValue(value),
@@ -296,6 +366,13 @@ void summarizeNode(
     case simfil::ValueType::Bytes:
         ++summary.blobs;
         break;
+    case simfil::ValueType::Bitmask:
+        ++summary.bitmasks;
+        addHistogram(
+            summary,
+            fmt::format("0x{:016x}", value.as<simfil::ValueType::Bitmask>().bits),
+            distinctLimit);
+        break;
     case simfil::ValueType::TransientObject:
     case simfil::ValueType::Object:
         ++summary.objects;
@@ -318,21 +395,24 @@ auto summaryToJsValue(
         {"count", JsValue(static_cast<double>(summary.count))},
         {"missing", JsValue(static_cast<double>(summary.missing))},
         {"nulls", JsValue(static_cast<double>(summary.nulls))},
-        {"kinds", JsValue::Dict({
-            {"integer", JsValue(static_cast<double>(summary.integers))},
-            {"number", JsValue(static_cast<double>(summary.numbers))},
-            {"boolean", JsValue(static_cast<double>(summary.booleans))},
-            {"string", JsValue(static_cast<double>(summary.strings))},
-            {"object", JsValue(static_cast<double>(summary.objects))},
-            {"list", JsValue(static_cast<double>(summary.lists))},
-            {"blob", JsValue(static_cast<double>(summary.blobs))},
-            {"unknown", JsValue(static_cast<double>(summary.unknown))},
-        })},
-        {"otherCount",
-         JsValue(static_cast<double>(summary.histogramDropped))},
-        {"distinctLimitReached",
-         JsValue(summary.distinctLimitReached)},
+        {"specials", JsValue(static_cast<double>(summary.specials))},
+        {"kinds",
+         JsValue::Dict({
+             {"integer", JsValue(static_cast<double>(summary.integers))},
+             {"number", JsValue(static_cast<double>(summary.numbers))},
+             {"boolean", JsValue(static_cast<double>(summary.booleans))},
+             {"string", JsValue(static_cast<double>(summary.strings))},
+             {"object", JsValue(static_cast<double>(summary.objects))},
+             {"list", JsValue(static_cast<double>(summary.lists))},
+             {"blob", JsValue(static_cast<double>(summary.blobs))},
+             {"bitmask", JsValue(static_cast<double>(summary.bitmasks))},
+             {"unknown", JsValue(static_cast<double>(summary.unknown))},
+         })},
+        {"otherCount", JsValue(static_cast<double>(summary.histogramDropped))},
+        {"distinctLimitReached", JsValue(summary.distinctLimitReached)},
     });
+    if (summary.domain)
+        result.set("domain", JsValue::fromSchema(summary.domain));
     if (summary.numericCount > 0) {
         result.set("numeric", JsValue::Dict({
             {"count",
@@ -576,7 +656,7 @@ NativeJsValue TileSourceDataLayer::toObject() const
     const auto& strings = *model_->strings();
     using InspectionNode = InspectionConverter::InspectionNode;
     using InspectionValueType = InspectionConverter::ValueType;
-    std::function<InspectionNode(JsValue, simfil::ModelNode const&)> visit;
+    std::function<InspectionNode(JsValue, simfil::ModelNode const&, simfil::SchemaReference)> visit;
 
     auto visitAddress = [&](SourceDataAddress const& addr) {
         if (model_->sourceDataAddressFormat() == mapget::TileSourceDataLayer::SourceDataAddressFormat::BitRange) {
@@ -600,15 +680,21 @@ NativeJsValue TileSourceDataLayer::toObject() const
         }
         for (const auto& [field, v] : node.fields()) {
             if (auto k = strings.resolve(field); k && v) {
-                result.children_.push_back(visit(JsValue(k->data()), *v));
+                result.children_.push_back(visit(
+                    JsValue(std::string(*k)),
+                    *v,
+                    simfil::Value::field(node, *v, field).schemaReference()));
             }
         }
         return result;
     };
 
-    visit = [&](JsValue key, simfil::ModelNode const& node) {
+    visit = [&](JsValue key, simfil::ModelNode const& node, simfil::SchemaReference domain)
+    {
         InspectionNode result;
         result.key_ = std::move(key);
+        if (result.setScalarValue(simfil::Value::field(node).withSchema(std::move(domain))))
+            return result;
         switch (node.type()) {
         case simfil::ValueType::Object:
             return visitObject(std::move(result.key_), node);
@@ -616,46 +702,15 @@ NativeJsValue TileSourceDataLayer::toObject() const
             result.type_ = InspectionValueType::ArrayBit;
             uint32_t index = 0;
             for (auto const& item : node) {
-                result.children_.push_back(visit(JsValue(index++), *item));
+                result.children_.push_back(visit(
+                    JsValue(index),
+                    *item,
+                    simfil::Value::at(node, *item, index).schemaReference()));
+                ++index;
             }
             break;
         }
-        case simfil::ValueType::Bool:
-            result.value_ = JsValue(std::get<bool>(node.value()));
-            result.type_ = InspectionValueType::Boolean;
-            break;
-        case simfil::ValueType::Int:
-            result.value_ = JsValue(std::get<int64_t>(node.value()));
-            result.type_ = InspectionValueType::Number;
-            break;
-        case simfil::ValueType::Float:
-            result.value_ = JsValue(std::get<double>(node.value()));
-            result.type_ = InspectionValueType::Number;
-            break;
-        case simfil::ValueType::String: {
-            auto value = node.value();
-            if (auto string = std::get_if<std::string>(&value)) {
-                result.value_ = JsValue(*string);
-            }
-            else if (auto view = std::get_if<std::string_view>(&value)) {
-                result.value_ = JsValue(std::string(*view));
-            }
-            result.type_ = InspectionValueType::String;
-            break;
-        }
-        case simfil::ValueType::Bytes: {
-            auto value = node.value();
-            if (auto bytes = std::get_if<simfil::ByteArray>(&value)) {
-                result.value_ = JsValue(byteArrayToDisplayString(*bytes));
-            }
-            result.type_ = InspectionValueType::String;
-            break;
-        }
-        case simfil::ValueType::Undef:
-        case simfil::ValueType::TransientObject:
-        case simfil::ValueType::Null:
-        case simfil::ValueType::LAST_:
-            break;
+        default: break;
         }
         return result;
     };
@@ -667,7 +722,7 @@ NativeJsValue TileSourceDataLayer::toObject() const
     if (!root)
         raise(root.error().message);
 
-    auto inspectionRoot = visit(JsValue("root"), **root);
+    auto inspectionRoot = visit(JsValue("root"), **root, {});
     InspectionConverter::finalizeTree(inspectionRoot);
     return *inspectionRoot.toJsValue(std::string_view{});
 }
@@ -952,7 +1007,7 @@ NativeJsValue TileSubsetLayer::valueSummaries(
         channel->scope() == mapget::Scope::Feature
             ? channel->featureFields()
             : channel->entryFields();
-    auto summaries = std::vector<ValueSummary>(fields.size());
+    auto summaries = std::vector<std::vector<ValueSummary>>(fields.size());
     auto summarize = [&](mapget::model_ptr<mapget::Array> const& values) {
         for (size_t field = 0; field < fields.size(); ++field) {
             auto results = values && field < values->size()
@@ -998,13 +1053,14 @@ NativeJsValue TileSubsetLayer::valueSummaries(
 
     auto resultFields = JsValue::List();
     for (size_t index = 0; index < fields.size(); ++index) {
-        resultFields.push(JsValue::Dict({
-            {"source", JsValue("resultField")},
-            {"index", JsValue(static_cast<double>(index))},
-            {"expression", JsValue(fields[index])},
-            {"summary",
-             summaryToJsValue(summaries[index], histogramLimit)},
-        }));
+        for (auto const& summary : summaries[index]) {
+            resultFields.push(JsValue::Dict({
+                {"source", JsValue("resultField")},
+                {"index", JsValue(static_cast<double>(index))},
+                {"expression", JsValue(fields[index])},
+                {"summary", summaryToJsValue(summary, histogramLimit)},
+            }));
+        }
     }
     auto traces = JsValue::List();
     for (size_t traceIndex = 0;
@@ -1015,26 +1071,21 @@ NativeJsValue TileSubsetLayer::valueSummaries(
         if (!trace) {
             continue;
         }
-        auto summary = ValueSummary{};
+        auto summaries = std::vector<ValueSummary>{};
         if (auto values = trace->values()) {
             for (uint32_t index = 0; index < values->size(); ++index) {
-                summarizeNode(
-                    summary,
-                    values->at(index),
-                    distinctLimit);
+                summarizeNode(summaries, values->at(index), distinctLimit);
             }
         }
-        traces.push(JsValue::Dict({
-            {"source", JsValue("trace")},
-            {"name", JsValue(trace->name())},
-            {"calls", JsValue(static_cast<double>(trace->calls()))},
-            {"totalus",
-             JsValue(
-                 static_cast<double>(
-                     trace->totalUs().count()))},
-            {"summary",
-             summaryToJsValue(summary, histogramLimit)},
-        }));
+        for (auto const& summary : summaries) {
+            traces.push(JsValue::Dict({
+                {"source", JsValue("trace")},
+                {"name", JsValue(trace->name())},
+                {"calls", JsValue(static_cast<double>(trace->calls()))},
+                {"totalus", JsValue(static_cast<double>(trace->totalUs().count()))},
+                {"summary", summaryToJsValue(summary, histogramLimit)},
+            }));
+        }
     }
     return *JsValue::Dict({
         {"resultFields", resultFields},

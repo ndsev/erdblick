@@ -564,6 +564,11 @@ interface FeatureSearchResultTreeItem {
                                     {{ searchStyleApplicationMessage }}
                                 </div>
                             }
+                            @if (styleAttributeOptionsError) {
+                                <div class="feature-search-style-application-message warning" role="status">
+                                    {{ styleAttributeOptionsError }}
+                                </div>
+                            }
                             <search-style-rule-editor
                                 [drafts]="styleRuleDrafts"
                                 (draftsChange)="onSharedStyleRuleDraftsChange($event)"
@@ -656,7 +661,7 @@ interface FeatureSearchResultTreeItem {
                                         <div class="feature-search-values-empty">No user-visible style or trace values available.</div>
                                     } @else {
                                         <div class="feature-search-value-card-grid">
-                                            @for (field of diagnosticsVisibleResultFields(); track field.index + ':' + field.expression) {
+                                            @for (field of diagnosticsVisibleResultFields(); track $index) {
                                                 <article class="feature-search-value-card">
                                                     <header>
                                                         <span>Field</span>
@@ -665,7 +670,7 @@ interface FeatureSearchResultTreeItem {
                                                     <ng-container *ngTemplateOutlet="valueSummaryTemplate; context: {$implicit: field.summary}"/>
                                                 </article>
                                             }
-                                            @for (trace of valueSummaries.traces; track trace.name) {
+                                            @for (trace of valueSummaries.traces; track $index) {
                                                 <article class="feature-search-value-card">
                                                     <header>
                                                         <span>Trace</span>
@@ -686,13 +691,19 @@ interface FeatureSearchResultTreeItem {
 
                         <ng-template #valueSummaryTemplate let-summary>
                             <div class="feature-search-value-summary">
+                                @if (summary.domain) {
+                                    <div class="feature-search-value-summary-row" [title]="summary.domain.schemaId + ':' + summary.domain.domainId">
+                                        <span>Value domain</span>
+                                        <strong>{{ summary.domain.typeName || 'Qualified value' }}</strong>
+                                    </div>
+                                }
                                 <div class="feature-search-value-summary-row">
                                     <span>Samples</span>
                                     <strong>{{ summary.count }}</strong>
                                 </div>
                                 @if (summary.numeric) {
                                     <div class="feature-search-value-summary-row">
-                                        <span>Numeric</span>
+                                        <span>Ordinary numeric values</span>
                                         <strong>{{ numericSummaryLabel(summary) }}</strong>
                                     </div>
                                 }
@@ -789,6 +800,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
     styleAttributeOptions: FeatureSearchStyleOption[] = [];
     styleScalarAttributeOptions: FeatureSearchStyleOption[] = [];
     styleAttributeOptionsLoading = false;
+    styleAttributeOptionsError = "";
     mapLayerTreeOptions: TreeNode<FeatureSearchLayerTreeNodeData>[] = [];
     selectedMapLayerTreeNodes: TreeNode<FeatureSearchLayerTreeNodeData>[] = [];
     featureSearchFeatureTypeOptions: FeatureSearchFeatureTypeOption[] = [];
@@ -1030,9 +1042,12 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         if (!trimmedExpression || this.valueSummaries.status !== "ready") {
             return undefined;
         }
-        return this.valueSummaries.resultFields.find(field =>
+        const matches = this.valueSummaries.resultFields.filter(field =>
             field.expression.trim() === trimmedExpression
-        )?.summary;
+        );
+        // Choosing the first group would silently pick one unit or format.
+        // Auto-coloring requires one unambiguous observed value domain.
+        return matches.length === 1 ? matches[0].summary : undefined;
     }
 
     /** Lets style controls lazily trigger the same value aggregation used by Diagnostics/Values. */
@@ -1059,9 +1074,11 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         if (!summary.numeric) {
             return "";
         }
-        return `min ${this.formatSummaryNumber(summary.numeric.min)}, `
-            + `max ${this.formatSummaryNumber(summary.numeric.max)}, `
-            + `avg ${this.formatSummaryNumber(summary.numeric.average)}`;
+        const domain = summary.domain?.numeric;
+        const display = (raw: number) => this.formatSummaryNumber(raw * (domain?.scale ?? 1) + (domain?.offset ?? 0));
+        return `min ${display(summary.numeric.min)}, `
+            + `max ${display(summary.numeric.max)}, `
+            + `avg ${display(summary.numeric.average)}${domain?.unit ? ` ${domain.unit}` : ""}`;
     }
 
     /** Returns non-zero kind counters in display order. */
@@ -1074,6 +1091,8 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
             { label: "object", count: summary.kinds.object },
             { label: "list", count: summary.kinds.list },
             { label: "blob", count: summary.kinds.blob },
+            { label: "bitmask", count: summary.kinds.bitmask },
+            { label: "special", count: summary.specials },
             { label: "null", count: summary.nulls },
             { label: "missing", count: summary.missing },
             { label: "unknown", count: summary.kinds.unknown }
@@ -1268,7 +1287,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
 
     /** Chooses the initial color mode from schema metadata. */
     private defaultColorModeForField(fieldOption: FeatureSearchStyleOption | null | undefined): "solid" | "gradient" | "categories" {
-        if (fieldOption?.valueKind === "enum") {
+        if (fieldOption?.valueKind === "enum" || fieldOption?.valueKind === "boolean") {
             return "categories";
         }
         if (isNumericStyleValueKind(fieldOption?.valueKind)) {
@@ -1796,7 +1815,13 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
                 this.styleAttributeOptionsLoading = false;
                 return;
             }
+            this.styleAttributeOptionsError = "";
             this.applyStyleAttributeOptions(currentSession, rawOptions, patchMissingFields);
+        }).catch(error => {
+            if (signature !== this.styleAttributeOptionsSessionSignature) return;
+            this.styleAttributeOptionsLoading = false;
+            this.styleAttributeOptionsError = `Schema fields are unavailable. ${String(error)}`;
+            // Retain manual rules and the last choices; failure is not an empty schema.
         });
     }
 
@@ -1825,6 +1850,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
                         valueKind: option.valueKind,
                         enumValues: option.enumValues,
                         numericRange: option.numericRange,
+                        domain: option.domain,
                         mapLayers: [{
                             mapId: option.mapId,
                             layerId: option.layerId
@@ -1841,10 +1867,24 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
             }
         }
         const nextOptions = Array.from(byValue.values())
-            .map(entry => ({
-                ...entry.option,
-                label: this.searchStyleFieldOptionLabel(entry.option.value, entry.contexts)
-            }))
+            .flatMap(entry => {
+                const option: FeatureSearchStyleOption = {...entry.option,
+                    label: this.searchStyleFieldOptionLabel(entry.option.value, entry.contexts)};
+                // A flag is a boolean question answered by native domain-aware
+                // hasFlag, including zero/composite masks. Never enumerate all
+                // combinations or use a raw numeric mask as an enum category.
+                if (option.valueKind !== "bitmask" || option.incompatibleDomains) return [option];
+                return [option, ...(option.domain?.namedValues ?? [])
+                    .filter(flag => flag.role === "flag" && !flag.removed && !flag.deprecated)
+                    .map(flag => ({...option,
+                        label: `${option.label} · ${flag.name}`,
+                        value: `hasFlag(${option.value}, ${JSON.stringify(flag.name)})`,
+                        valueKind: "boolean" as const,
+                        domain: undefined,
+                        numericRange: undefined,
+                        enumValues: ["false", "true"]
+                    }))];
+            })
             .sort((lhs, rhs) =>
                 this.searchStyleFieldSortRank(lhs) - this.searchStyleFieldSortRank(rhs)
                 || lhs.label.localeCompare(rhs.label));
@@ -1876,6 +1916,9 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         target: FeatureSearchStyleOption,
         source: FeatureSearchStyleFieldCandidate
     ): void {
+        const sameDomain = target.domain?.schemaId === source.domain?.schemaId &&
+            target.domain?.domainId === source.domain?.domainId;
+        target.incompatibleDomains ||= !sameDomain;
         target.valueKind = this.mergedStyleFieldValueKind(target.valueKind, source.valueKind);
         const enumValues = new Set([...(target.enumValues ?? []), ...(source.enumValues ?? [])]);
         target.enumValues = Array.from(enumValues).sort();
@@ -1886,6 +1929,12 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
                     max: Math.max(target.numericRange.max, source.numericRange.max)
                 }
                 : { ...source.numericRange };
+        }
+        if (target.incompatibleDomains) {
+            target.domain = undefined;
+            target.numericRange = undefined;
+            target.enumValues = [];
+            target.valueKind = "unknown";
         }
         if (target.featureType !== source.featureType) {
             // A shared path across feature types cannot use one portable type
@@ -2304,8 +2353,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         const layerKeys: string[] = [];
         for (const [mapId, mapInfo] of this.mapService.maps.maps) {
             for (const layer of mapInfo.allFeatureLayers()) {
-                const featureTypeSignature = (layer.info.featureTypes ?? [])
-                    .map(featureType => featureType.name)
+                const featureTypeSignature = this.mapService.featureTypesForLayer(mapId, layer.id)
                     .sort()
                     .join(",");
                 layerKeys.push(`${mapId}:${layer.id}:${featureTypeSignature}`);
@@ -2715,10 +2763,8 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
             })
             : Array.from(this.mapService.maps.allFeatureLayers());
         for (const layer of layers) {
-            for (const featureType of layer.info.featureTypes ?? []) {
-                if (featureType.name) {
-                    featureTypes.add(featureType.name);
-                }
+            for (const type of this.mapService.featureTypesForLayer(layer.mapId, layer.id)) {
+                featureTypes.add(type);
             }
         }
         return Array.from(featureTypes).sort((lhs, rhs) => lhs.localeCompare(rhs));
@@ -2739,8 +2785,9 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         const availableTypes = new Set(this.featureSearchFeatureTypeOptions.map(option => option.value));
         const persistedTypes = normalizeFeatureSearchFeatureTypes(session.definition.selectedFeatureTypes);
         const persistedSignature = JSON.stringify(persistedTypes);
-        const nextTypes = persistedTypes
-            .filter(type => availableTypes.has(type));
+        const nextTypes = this.mapService.canPruneStateForCurrentCatalog()
+            ? persistedTypes.filter(type => availableTypes.has(type))
+            : persistedTypes;
         const signature = JSON.stringify(nextTypes);
         if (signature === this.selectedFeatureTypesSignature) {
             if (persistedSignature !== signature) {

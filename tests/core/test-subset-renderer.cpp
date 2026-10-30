@@ -1,6 +1,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
+#include "../support/scalar-schema.h"
 #include "erdblick/gpu-render-packet.h"
 #include "erdblick/gpu-render-records.h"
 #include "erdblick/subset-renderer.h"
@@ -765,7 +767,12 @@ TEST_CASE(
     double expectedZ = 13;
     std::string issueProperty;
     SECTION("zero results use the literal fallback") {}
-    SECTION("one null uses the literal fallback") { results->append(subset->materializeValue(simfil::Value::null())); }
+    SECTION("one null uses the literal fallback")
+    {
+        auto copied = subset->copySequence(std::vector{simfil::Value::null()});
+        REQUIRE(copied);
+        results = *copied;
+    }
     SECTION("one undefined uses the literal fallback") { results->append(subset->newUndefined()); }
     SECTION("one number is the exact style value") {
         results->append(subset->newValue(int64_t{17}));
@@ -826,8 +833,9 @@ TEST_CASE(
         mapget::TileId::fromWgs84(11.0, 48.0, 13), "ProjectionValues",
         "TestMap", rendererLayerInfo(), strings, "roads", 1);
     auto empty = subset->newArray();
-    auto null = subset->newArray();
-    null->append(subset->materializeValue(simfil::Value::null()));
+    auto copiedNull = subset->copySequence(std::vector{simfil::Value::null()});
+    REQUIRE(copiedNull);
+    auto null = *copiedNull;
     auto multiple = subset->newArray();
     multiple->append(subset->newValue(int64_t{1}));
     multiple->append(subset->newValue(int64_t{2}));
@@ -862,6 +870,109 @@ TEST_CASE(
     CHECK(fields[3]["summary"]["kinds"]["list"] == 1);
     CHECK(fields[4]["summary"]["missing"] == 1);
     CHECK(fields[5]["summary"]["kinds"]["object"] == 1);
+}
+
+TEST_CASE(
+    "Rendered domain-bound colors classify sentinels before ordinary stops",
+    "[erdblick.schema][erdblick.subset-renderer]")
+{
+    auto categorical = GENERATE(false, true);
+    erdblick::test::ScalarSchema fixture;
+    auto selected = fixture.number(255, fixture.speed);
+    std::array<uint8_t, 3> expected{0, 255, 255};
+    bool removeOverride = false;
+    SECTION("unlimited has its explicit color") {}
+    SECTION("undefined is neutral")
+    {
+        selected = fixture.number(0, fixture.speed);
+        expected = {128, 128, 128};
+    }
+    SECTION("ordinary minimum remains blue")
+    {
+        selected = fixture.number(1, fixture.speed);
+        expected = {0, 0, 255};
+    }
+    SECTION("ordinary maximum remains red")
+    {
+        selected = fixture.number(253, fixture.speed);
+        expected = {255, 0, 0};
+    }
+    SECTION("variable has its explicit color")
+    {
+        selected = fixture.number(254, fixture.speed);
+        expected = {255, 0, 255};
+    }
+    SECTION("same raw code from another domain uses fallback")
+    {
+        selected = fixture.number(255, fixture.classicSpeed);
+        expected = {255, 255, 255};
+    }
+    SECTION("computed plain numbers acquire no sentinel semantics")
+    {
+        selected = simfil::Value(int64_t{255});
+        expected = {255, 255, 255};
+    }
+    SECTION("deleted special override uses fallback instead of clamping")
+    {
+        removeOverride = true;
+        expected = {255, 255, 255};
+    }
+    auto strings = std::make_shared<mapget::StringPool>(fixture.source.stringPoolId_);
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        mapget::TileId::fromWgs84(11, 48, 13),
+        fixture.source.stringPoolId_,
+        fixture.source.mapId_,
+        fixture.source.getLayer("Road"),
+        strings,
+        "style",
+        1);
+    auto values = subset->copySequence(std::vector<simfil::Value>{selected});
+    REQUIRE(values);
+    auto channel = subset->newChannel(
+        "style-rule:0",
+        mapget::Scope::Feature,
+        1U << static_cast<uint8_t>(mapget::GeomType::Line),
+        "centerline",
+        std::vector<std::string>{"speed"});
+    channel->newFeatureEntry(
+        subset->newFeatureId("Road", {{"id", int64_t{1}}}),
+        lineGeometry(*subset, "centerline"),
+        std::vector<simfil::ModelNode::Ptr>{*values});
+    auto yaml = YAML::Load(R"yaml(
+name: Semantic colors
+version: 2
+rules:
+  - type: Road
+    geometry: line
+    width: 2
+    color-scale:
+      mode: linear
+      expression: speed
+      stops: [[1, "#0000ff"], [253, "#ff0000"]]
+      specials: [[0, "#808080"], [254, "#ff00ff"], [255, "#00ffff"]]
+      fallback: "#ffffff"
+)yaml");
+    auto scale = yaml["rules"][0]["color-scale"];
+    if (categorical) {
+        scale["mode"] = "categorical";
+        // Even an explicit ordinary stop cannot reclassify a named sentinel
+        // when its separate override is deleted from a domain-bound scale.
+        scale["stops"].push_back(YAML::Load("[255, '#ff0000']"));
+    }
+    scale["domain"]["schemaId"] = std::string(fixture.owner->schemaId());
+    scale["domain"]["domainId"] = fixture.speed;
+    if (removeOverride)
+        scale.remove("specials");
+    auto style = rendererStyle(YAML::Dump(yaml));
+    REQUIRE(style.isValid());
+    TileSubsetLayerRenderer renderer(0, "Features:ScalarSchema:Road:0", style, 0, 7);
+    installSubset(renderer, TileSubsetLayer(subset));
+    renderer.run();
+    RendererPacketView packet(renderer);
+    auto streams = packet.streams(GpuPrimitiveKind::PathSegment);
+    REQUIRE(streams.size() == 1);
+    for (size_t index = 0; index < expected.size(); ++index)
+        CHECK(packet.read<uint8_t>(streams[0].dataOffset + 32 + index) == expected[index]);
 }
 
 TEST_CASE(

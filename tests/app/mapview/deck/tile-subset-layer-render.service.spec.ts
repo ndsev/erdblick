@@ -143,7 +143,7 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
         internal.workers = [{postMessage}];
         internal.runningTaskIdByWorker = [null];
         internal.workerHeapBytes = [0];
-        internal.catalogKeysByWorker = [new Set()];
+        internal.catalogKeysByWorker = [new Set(["1:Map"])];
         internal.fieldDictSizesByWorker = [new Map()];
         internal.styleKeysByWorker = [new Set()];
         internal.iconCatalogVersionByWorker = [-1];
@@ -255,7 +255,8 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
         }
     });
 
-    it("retains subset bytes and leaves their worker clone to structured clone", async () => {
+    it.each(["installed", "failed", "cancelled", "evicted"] as const)(
+        "gates rendering on catalog installation and retains subset bytes (%s)", async outcome => {
         const service = new TileSubsetLayerRenderService();
         const internal = service as any;
         const postMessage = vi.fn();
@@ -280,13 +281,14 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
         };
         internal.workers.push({postMessage});
         internal.runningTaskIdByWorker.push(null);
-        internal.catalogKeysByWorker.push(new Set());
-        internal.fieldDictSizesByWorker.push(new Map());
+        internal.catalogKeysByWorker.push(new Set(outcome === "evicted" ? ["0:Map"] : []));
+        internal.fieldDictSizesByWorker.push(new Map(outcome === "evicted" ? [["0:Map:pool", 1]] : []));
         internal.styleKeysByWorker.push(new Set());
         internal.iconCatalogVersionByWorker.push(-1);
         internal.idleWorkers.push(0);
         internal.queue.push({
             task,
+            schemas: [],
             admit: vi.fn(),
             prepare: vi.fn(),
             resolve,
@@ -302,11 +304,37 @@ describe("TileSubsetLayerRenderService GPU admission", () => {
 
         await internal.pump();
 
-        const [outbound, transferables] = postMessage.mock.calls[0];
+        expect(postMessage).toHaveBeenCalledOnce();
+        expect(postMessage.mock.calls[0][0].type).toBe("TileSubsetLayerRenderCatalogInstall");
+        expect(postMessage.mock.calls[0][0].subsetBlob).toBeUndefined();
+        expect(internal.catalogKeysByWorker[0]).not.toContain("1:Map");
+        if (outcome === "cancelled") {
+            internal.latestSignatureByVisualization.set(task.visualizationId, "replacement-signature");
+        }
+        internal.handleCatalogInstalled(0, {
+            type: "TileSubsetLayerRenderCatalogInstalled", requestId: task.taskId,
+            catalogKeys: outcome === "failed" ? [] : ["1:Map"],
+            error: outcome === "failed" ? "Schema checksum mismatch" : undefined
+        });
+        if (outcome === "failed" || outcome === "cancelled") {
+            expect(postMessage).toHaveBeenCalledOnce();
+            expect(reject).toHaveBeenCalledOnce();
+            expect(resolve).not.toHaveBeenCalled();
+            expect(internal.inFlight.size).toBe(0);
+            expect(internal.idleWorkers).toEqual([0]);
+            expect(internal.styleKeysByWorker[0]).toEqual(new Set());
+            expect(service.debugSnapshot().failed).toBe(outcome === "failed" ? 1 : 0);
+            expect(service.debugSnapshot().stale).toBe(outcome === "cancelled" ? 1 : 0);
+            return;
+        }
+        // An evicted parser no longer owns its field dictionary. Remembering
+        // the old byte count would incorrectly suppress its next resend.
+        expect(internal.fieldDictSizesByWorker[0].has("0:Map:pool")).toBe(false);
+        const [outbound, transferables] = postMessage.mock.calls[1];
         expect(outbound.subsetBlob).toBe(subsetBlob);
         expect(transferables).not.toContain(subsetBlob.buffer);
         expect([...subsetBlob]).toEqual([1, 2, 3, 4]);
-        expect(internal.catalogKeysByWorker[0]).toEqual(new Set());
+        expect(internal.catalogKeysByWorker[0]).toEqual(new Set(["1:Map"]));
         expect(internal.styleKeysByWorker[0]).toEqual(new Set());
 
         internal.handleResult(0, {

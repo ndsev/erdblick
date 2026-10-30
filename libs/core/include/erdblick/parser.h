@@ -1,13 +1,13 @@
 #pragma once
 
-#include "mapget/model/stream.h"
-#include "mapget/model/featurelayer.h"
-#include "mapget/model/subsetlayer.h"
 #include "buffer.h"
 #include "interop/js-object.h"
-#include "mapget/model/featurelayer.h"
-#include "mapget/model/sourcedatalayer.h"
 #include "layer.h"
+#include "mapget/model/featurelayer.h"
+#include "mapget/model/mapschema.h"
+#include "mapget/model/sourcedatalayer.h"
+#include "mapget/model/stream.h"
+#include "mapget/model/subsetlayer.h"
 
 namespace erdblick
 {
@@ -28,6 +28,21 @@ class TileLayerParser
 public:
     /** Create a parser with empty stream state and metadata caches. */
     explicit TileLayerParser();
+
+    /**
+     * Validate and retain an exact binary schema before publishing its sources.
+     * MapSchema's process-local cache shares immutable owners across parsers;
+     * a separate WASM worker must install its own heap-local owner first.
+     */
+    void installMapSchema(SharedUint8Array const& bytes, std::string const& expectedId);
+
+    /** Enumerate produced types, optionally including reference-only ID definitions. */
+    NativeJsValue
+    featureTypes(std::string const& mapId, std::string const& layerId, bool includeReferenceTypes)
+        const;
+
+    /** Refresh service-derived incoming eligibility without replacing schema/model metadata. */
+    void setIncomingRelationHints(SharedUint8Array const& catalogJson);
 
     /**
      * Update the data source info metadata which the parser uses
@@ -51,7 +66,8 @@ public:
      */
     TileFeatureLayer readTileFeatureLayer(SharedUint8Array const& buffer);
 
-    /** Query explicit deferred relation declarations for a selected feature in the current catalog. */
+    /** Request discovery for a matching family or unknown coverage; only known absence suppresses
+     * it. */
     bool hasIncomingRelations(TileFeatureLayer const& layer, std::string const& featureId) const;
 
     /**
@@ -123,7 +139,7 @@ public:
     void addFieldDict(SharedUint8Array const& buffer);
 
     /**
-     * Complete a SIMFIL search query using only LayerInfo.featureModelSchema metadata.
+     * Complete a SIMFIL search query using the installed immutable MapSchema.
      *
      * Returns an empty list when no schema metadata is available. This deliberately
      * does not fall back to loaded tile blobs.
@@ -220,14 +236,21 @@ public:
     std::vector<FilteredFeatureJumpTarget> filterFeatureJumpTargets(std::string const& queryString) const;
 
     std::map<std::string, mapget::DataSourceInfo> info_;
+    /** Exact owners retained for metadata and already captured inspection/subset snapshots. */
+    std::map<std::string, std::shared_ptr<mapget::MapSchema const>, std::less<>> schemas_;
     /** Backend-derived capability hints retained when the shared parser omits full schemas. */
     std::map<std::pair<std::string, std::string>, std::set<std::string>> incomingRelationTargets_;
+    std::set<std::pair<std::string, std::string>> incomingRelationCoverageUnknown_;
     std::unique_ptr<mapget::TileLayerStream::Reader> reader_;
     std::shared_ptr<mapget::TileLayerStream::StringPoolCache> cachedStrings_;
     std::function<void(mapget::TileFeatureLayer::Ptr)> tileParsedFun_;
     std::shared_ptr<mapget::LayerInfo> fallbackLayerInfo_;
     struct SchemaCompletionBinding;
-    std::map<mapget::LayerSchema const*, std::shared_ptr<SchemaCompletionBinding>> schemaCompletionBindings_;
+    std::map<std::pair<std::string, std::string>, std::shared_ptr<SchemaCompletionBinding>>
+        schemaCompletionBindings_;
+
+    /** Resolve an already installed graph; model decoding never performs network IO. */
+    std::shared_ptr<mapget::MapSchema const> resolveMapSchema(std::string_view schemaId) const;
 
     /**
      * Resolve layer metadata for a `(mapId, layerId)` pair using loaded datasource info

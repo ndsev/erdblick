@@ -2,10 +2,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./out-tsc/worker",
-    // "lib": [
-    //   "ES2023",
-    //   "webworker"  // Ensuring web worker specific globals are included
-    // ],
+    "lib": ["ESNext", "webworker"],
     "types": [],
     "sourceMap": true,  // Enable source maps for easier debugging
     "esModuleInterop": true,

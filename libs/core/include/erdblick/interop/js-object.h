@@ -3,6 +3,7 @@
 #include <type_traits>
 #include <variant>
 #include "mapget/model/info.h"
+#include "simfil/model/schema.h"
 
 #ifdef EMSCRIPTEN
 #include <emscripten/bind.h>
@@ -53,6 +54,12 @@ struct JsValue
 
     /** Convert a tagged native partition without narrowing an object ID. */
     static JsValue fromPartition(mapget::PartitionId const& partition);
+
+    /** Project one exact domain for inspection/style UI without exporting its schema graph. */
+    static JsValue fromSchema(simfil::SchemaReference const& reference);
+
+    /** Preserve a mask's raw uint64 bits and exact graph/domain identity at the JS boundary. */
+    static JsValue fromBitmask(simfil::Bitmask const& mask);
 
     /**
      * Construct an Object as a new JS or JSON dictionary with provided initializers.

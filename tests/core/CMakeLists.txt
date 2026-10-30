@@ -14,6 +14,7 @@ include(CTest)
 
 add_executable(test.erdblick
   test-visualization.cpp
+  test-map-schema.cpp
   test-source-data-inspection.cpp)
 
 # Resolve bundled styles from the source tree, not from the test file's depth.

@@ -371,8 +371,10 @@ std::vector<std::string> concreteFeatureTypes(
     mapget::LayerInfo const& layerInfo)
 {
     std::vector<std::string> result;
-    for (auto const& featureType : layerInfo.featureTypes_) {
-        if (rule.maybeMatchesType(featureType.name_)) {
+    for (auto const& featureType : layerInfo.featureTypes()) {
+        if (layerInfo.layerSchema()->producesFeatureType(featureType.name_) &&
+            rule.maybeMatchesType(featureType.name_))
+        {
             result.push_back(featureType.name_);
         }
     }

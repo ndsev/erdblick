@@ -6,6 +6,29 @@
 
 export type DataSourceCatalogStatus = "initializing" | "ready" | "failed";
 
+/**
+ * Browser-local schema installation, independent of the server's startup status.
+ * A server-ready source remains visible while loading, but cannot yet supply
+ * tiles, completion or feature-type choices. A failure must not prune saved state.
+ */
+export type MapSchemaStatus = "loading" | "ready" | "failed";
+
+/** Descriptive format metadata; only schemaId identifies an exact domain graph. */
+export interface MapFormat {
+    name: string;
+    version: string;
+    subsystems?: Record<string, string>;
+}
+
+/**
+ * Exact validated schema bytes retained for isolated WASM workers.
+ * Each heap installs its own copy; parsers within a heap share the native owner.
+ */
+export interface MapSchemaArtifact {
+    schemaId: string;
+    bytes: Uint8Array;
+}
+
 /** Expected structure of a LayerInfoItem's coverage entry. */
 export interface CoverageRectItem extends Record<string, any> {
     min: number,
@@ -18,9 +41,8 @@ export interface LayerInfoItem extends Record<string, any> {
     canWrite: boolean;
     defaultVisible?: boolean;
     coverage: Array<number | CoverageRectItem>;
-    featureTypes: Array<{ name: string, uniqueIdCompositions: Array<any> }>;
-    /** Schema roots published by mapget; identifier types may also contain cross-layer references. */
-    schemaFeatureTypes?: string[];
+    /** Legacy input only. Native metadata import moves these definitions into MapSchema. */
+    featureTypes?: Array<{ name: string, uniqueIdCompositions: Array<any> }>;
     layerId: string;
     type: string;
     version: { major: number, minor: number, patch: number };
@@ -37,6 +59,11 @@ export interface MapInfoItem extends Record<string, any> {
     maxParallelJobs: number;
     sourceId: string;
     stringPoolId: string;
+    mapFormat?: MapFormat;
+    schemaId?: string;
+    /** Local decoration, never sent back to mapget or included in metadata identity. */
+    schemaStatus?: MapSchemaStatus;
+    schemaMessage?: string;
     protocolVersion?: { major: number, minor: number, patch: number };
     addOn: boolean;
     status?: DataSourceCatalogStatus | string;
@@ -55,8 +82,22 @@ export function dataSourceCatalogStatus(item: Pick<MapInfoItem, "status">): Data
 }
 
 /** Returns true when a `/sources` catalog entry can be used for tile and search requests. */
-export function isDataSourceCatalogEntryReady(item: Pick<MapInfoItem, "status">): boolean {
-    return dataSourceCatalogStatus(item) === "ready";
+export function isDataSourceCatalogEntryReady(item: Pick<MapInfoItem, "status" | "schemaStatus">): boolean {
+    return dataSourceReadinessStatus(item) === "ready";
+}
+
+/** Maps independent server and browser states to the map tree's availability indicator. */
+export function dataSourceReadinessStatus(
+    item: Pick<MapInfoItem, "status" | "schemaStatus">
+): DataSourceCatalogStatus {
+    const serverStatus = dataSourceCatalogStatus(item);
+    if (serverStatus !== "ready") {
+        return serverStatus;
+    }
+    if (item.schemaStatus === "loading") {
+        return "initializing";
+    }
+    return item.schemaStatus === "failed" ? "failed" : "ready";
 }
 
 /** Normalizes optional datasource startup progress to a display percentage. */

@@ -714,6 +714,43 @@ bool validateColorScale(
             }
         }
     }
+    if (auto domain = scale["domain"]; domain.IsDefined()) {
+        if (!domain.IsMap() || !domain["schemaId"].IsScalar() ||
+            domain["schemaId"].Scalar().empty() || !domain["domainId"].IsScalar())
+            return fail(
+                "color-scale.domain requires an exact schemaId and a positive domainId.",
+                domain);
+        try {
+            auto id = domain["domainId"].as<uint64_t>();
+            if (id == 0 || id > simfil::MaxSchemaId)
+                return fail("color-scale.domain.domainId is out of range.", domain);
+        }
+        catch (YAML::Exception const&) {
+            return fail("color-scale.domain.domainId must be a positive integer.", domain);
+        }
+    }
+    if (auto specials = scale["specials"]; specials.IsDefined()) {
+        if (!specials.IsSequence() || !scale["domain"].IsDefined())
+            return fail(
+                "color-scale.specials requires a list and an exact domain guard.",
+                specials);
+        std::set<double> values;
+        for (auto const& stop : specials) {
+            if (!stop.IsSequence() || stop.size() != 2 || !stop[0].IsScalar() ||
+                !stop[1].IsScalar() || !Color(stop[1].Scalar()).isValid())
+                return fail(
+                    "Every special color must be a [numeric raw value, literal color] pair.",
+                    stop);
+            try {
+                auto raw = stop[0].as<double>();
+                if (!std::isfinite(raw) || !values.insert(raw).second)
+                    return fail("Special colors require unique finite raw values.", stop);
+            }
+            catch (YAML::Exception const&) {
+                return fail("Special color keys must be numeric raw values.", stop);
+            }
+        }
+    }
     if (scale["fallback"].IsDefined() &&
         (!scale["fallback"].IsScalar() ||
          !Color(scale["fallback"].Scalar()).isValid()))

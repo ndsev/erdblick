@@ -3,6 +3,7 @@
  * These contracts describe delivered data without constructing SearchService,
  * opening a filter subscription or retaining rendered result presentations.
  */
+import type {SchemaScalarDomain} from "../mapdata/schema-domain.model";
 import type {FeatureSearchMapLayerRef} from "./search-definition.model";
 
 /** Counts of scalar and placeholder value kinds observed in a search value stream. */
@@ -14,6 +15,7 @@ export interface SearchValueKindCounts {
     object: number;
     list: number;
     blob: number;
+    bitmask: number;
     unknown: number;
 }
 
@@ -34,9 +36,13 @@ export interface SearchValueHistogramBucket {
 
 /** Aggregated value summary for one withFields expression or one trace expression. */
 export interface SearchValueSummary {
+    /** Exact source meaning; unqualified calculations remain a separate group. */
+    domain?: SchemaScalarDomain;
     count: number;
     missing: number;
     nulls: number;
+    /** Named sentinels remain in raw histograms but are excluded from numeric aggregates. */
+    specials: number;
     kinds: SearchValueKindCounts;
     numeric?: SearchValueNumericSummary;
     histogram: SearchValueHistogramBucket[];
@@ -179,6 +185,7 @@ export type FeatureSearchStyleValueKind =
     | "string"
     | "boolean"
     | "enum"
+    | "bitmask"
     | "object"
     | "array"
     | "unknown";
@@ -194,4 +201,5 @@ export interface FeatureSearchStyleFieldCandidate {
     valueKind: FeatureSearchStyleValueKind;
     enumValues: string[];
     numericRange?: {min: number; max: number};
+    domain?: SchemaScalarDomain;
 }

@@ -189,6 +189,24 @@ std::optional<double> numericColorScaleKey(
     return std::nullopt;
 }
 
+/** Compare typed scale literals without rounding a large integer through a double. */
+bool colorScaleKeysEqual(
+    FeatureStyleRule::ColorScaleStop::Key const& left,
+    FeatureStyleRule::ColorScaleStop::Key const& right)
+{
+    if (left.index() == right.index())
+        return left == right;
+    auto integer = std::get_if<int64_t>(&left);
+    auto number = std::get_if<double>(&right);
+    if (!integer || !number) {
+        integer = std::get_if<int64_t>(&right);
+        number = std::get_if<double>(&left);
+    }
+    return integer && number && *number >= -9223372036854775808.0 &&
+        *number < 9223372036854775808.0 && std::trunc(*number) == *number &&
+        *integer == static_cast<int64_t>(*number);
+}
+
 /** Convert a SIMFIL integer or float into a finite double. */
 std::optional<double> finiteNumber(simfil::Value const& value)
 {
@@ -430,6 +448,19 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             ? ColorScale::Mode::Categorical
             : ColorScale::Mode::Linear;
         scale.expression = scaleYaml["expression"].as<std::string>();
+        if (auto domain = scaleYaml["domain"]; domain.IsDefined()) {
+            scale.schemaId = domain["schemaId"].as<std::string>();
+            scale.domainId = domain["domainId"].as<simfil::SchemaId>();
+        }
+        if (auto specials = scaleYaml["specials"]; specials.IsDefined()) {
+            for (auto const& stopYaml : specials) {
+                auto key = parseColorScaleKey(stopYaml[0]);
+                scale.specials.push_back(
+                    {key,
+                     Color(stopYaml[1].as<std::string>()).toFVec4(),
+                     numericColorScaleKey(key)});
+            }
+        }
         for (auto const& stopYaml : scaleYaml["stops"]) {
             auto key = parseColorScaleKey(stopYaml[0]);
             scale.stops.push_back(ColorScaleStop{
@@ -1129,7 +1160,8 @@ FeatureStyleRule::expressionUses() const
 std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) const
 {
     if (colorScale_) {
-        auto fallback = [&]() -> std::optional<glm::fvec4> {
+        auto fallback = [&]() -> std::optional<glm::fvec4>
+        {
             if (!colorScale_->fallback) {
                 return std::nullopt;
             }
@@ -1138,38 +1170,92 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
             return color;
         };
         auto const evaluated = evalFun.evaluate(colorScale_->expression);
-        if (colorScale_->mode == ColorScale::Mode::Categorical &&
-            colorScale_->denseIntegerStops)
-        {
+        if (!colorScale_->schemaId.empty()) {
+            auto const domain = evaluated.schemaReference();
+            if (!domain || domain.id != colorScale_->domainId ||
+                domain.binding->identity() != colorScale_->schemaId)
+                return fallback();
+        }
+        // Special overrides precede clamping/interpolation. A computed plain
+        // number has no domain and cannot acquire a sentinel meaning here.
+        auto const value = colorScaleKey(evaluated);
+        if (!value)
+            return fallback();
+        for (auto const& stop : colorScale_->specials) {
+            if (colorScaleKeysEqual(*value, stop.key)) {
+                auto color = stop.color;
+                color.a *= color_.a;
+                return color;
+            }
+        }
+        auto input = numericColorScaleKey(*value);
+        if (input && !colorScale_->schemaId.empty()) {
+            // Generated domain-bound scales cover ordinary measurements only.
+            // Deleting a special override exposes fallback, never a high-end
+            // gradient or ordinary category color for an exceptional code.
+            auto const* definition = evaluated.schemaReference().definition();
+            if (!definition)
+                return fallback();
+            bool special = false;
+            definition->forEachNamedValue(
+                [&](simfil::Schema::NamedValue const& named)
+                {
+                    if (named.role != simfil::Schema::NamedValue::Role::Special)
+                        return;
+                    std::visit(
+                        [&](auto raw)
+                        {
+                            using T = decltype(raw);
+                            if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, double>)
+                                special |= colorScaleKeysEqual(*value, ColorScaleStop::Key{raw});
+                            else if constexpr (std::is_same_v<T, uint64_t>) {
+                                if (raw <= uint64_t(std::numeric_limits<int64_t>::max()))
+                                    special |= colorScaleKeysEqual(
+                                        *value,
+                                        ColorScaleStop::Key{int64_t(raw)});
+                            }
+                        },
+                        named.value);
+                });
+            if (special)
+                return fallback();
+            if (auto numeric = definition->numericDomain();
+                numeric && !numeric->ordinaryRanges.empty()) {
+                auto ordinary = std::ranges::any_of(
+                    numeric->ordinaryRanges,
+                    [&](auto const& range)
+                    {
+                        auto low = std::visit(
+                            [](auto bound) { return static_cast<long double>(bound); },
+                            range.min);
+                        auto high = std::visit(
+                            [](auto bound) { return static_cast<long double>(bound); },
+                            range.max);
+                        return *input >= low && *input <= high;
+                    });
+                if (!ordinary)
+                    return fallback();
+            }
+        }
+        if (colorScale_->mode == ColorScale::Mode::Categorical && colorScale_->denseIntegerStops) {
             auto const key = integerScaleKey(evaluated);
             if (!key || *key < colorScale_->denseIntegerStops->minimum) {
                 return fallback();
             }
             auto const index = static_cast<uint64_t>(*key) -
-                static_cast<uint64_t>(
-                    colorScale_->denseIntegerStops->minimum);
+                static_cast<uint64_t>(colorScale_->denseIntegerStops->minimum);
             if (index >= colorScale_->denseIntegerStops->values.size() ||
-                !colorScale_->denseIntegerStops->values[
-                    static_cast<size_t>(index)])
+                !colorScale_->denseIntegerStops->values[static_cast<size_t>(index)])
             {
                 return fallback();
             }
-            auto color = *colorScale_->denseIntegerStops->values[
-                static_cast<size_t>(index)];
+            auto color = *colorScale_->denseIntegerStops->values[static_cast<size_t>(index)];
             color.a *= color_.a;
             return color;
         }
-        auto const value = colorScaleKey(evaluated);
-        if (!value) {
-            return fallback();
-        }
         if (colorScale_->mode == ColorScale::Mode::Categorical) {
-            auto const valueNumber = numericColorScaleKey(*value);
             for (auto const& stop : colorScale_->stops) {
-                auto const equal = valueNumber
-                    ? stop.numericKey && *valueNumber == *stop.numericKey
-                    : !stop.numericKey && *value == stop.key;
-                if (equal) {
+                if (colorScaleKeysEqual(*value, stop.key)) {
                     auto color = stop.color;
                     color.a *= color_.a;
                     return color;
@@ -1178,7 +1264,6 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
             return fallback();
         }
 
-        auto input = numericColorScaleKey(*value);
         if (!input || colorScale_->stops.empty()) {
             return fallback();
         }
@@ -1204,10 +1289,8 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
                 continue;
             }
             auto const t = static_cast<float>((*input - *lower) / (*upper - *lower));
-            auto color = glm::mix(
-                colorScale_->stops[index - 1].color,
-                colorScale_->stops[index].color,
-                t);
+            auto color =
+                glm::mix(colorScale_->stops[index - 1].color, colorScale_->stops[index].color, t);
             color.a *= color_.a;
             return color;
         }

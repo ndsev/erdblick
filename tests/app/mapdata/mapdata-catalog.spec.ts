@@ -46,7 +46,7 @@ function fixture() {
     service.dataSourceInfoChanged.subscribe(resets);
     let revision = 0;
     return {
-        service, resets, state, owners,
+        service, resets, state, owners, get,
         async reload(entries: MapInfoItem[]) {
             get.mockReturnValueOnce(of(new HttpResponse({
                 body: JSON.parse(JSON.stringify(entries)),
@@ -62,6 +62,90 @@ function fixture() {
 }
 
 describe("MapDataService incremental catalog startup", () => {
+    it("publishes independent schema readiness and keeps a failed source from pruning saved state", async () => {
+        const {service, get, reload, dispose} = fixture();
+        const slow = new Subject<ArrayBuffer>();
+        const fast = new Subject<ArrayBuffer>();
+        get.mockImplementation((_url, options) => options.params.sourceId === "Slow" ? slow : fast);
+        vi.spyOn(service.tileLayerParser, "installMapSchema").mockImplementation(() => {});
+        vi.spyOn(service.tileLayerParser, "addDataSourceInfo").mockImplementation(() => {});
+        try {
+            await reload([{...source("Slow", 0), schemaId: "slow"}, {...source("Fast", 1), schemaId: "fast"}]);
+            expect(service.isMapReady("Fast")).toBe(false);
+            expect(service.canPruneStateForCurrentCatalog()).toBe(false);
+            fast.next(new Uint8Array([1]).buffer);
+            await vi.waitFor(() => expect(service.isMapReady("Fast")).toBe(true));
+            const signature = service.schemaScopeSignature(["Fast"]);
+            slow.error(new Error("Schema download failed"));
+            await vi.waitFor(() => expect(service.isMapFailed("Slow")).toBe(true));
+            expect(service.schemaScopeSignature(["Fast"])).toBe(signature);
+            expect(service.canPruneStateForCurrentCatalog()).toBe(false);
+            expect(service.maps.maps.get("Slow")?.info.status).toBe("ready");
+            expect(service.maps.maps.get("Slow")?.info.schemaStatus).toBe("failed");
+        } finally {vi.restoreAllMocks(); dispose();}
+    });
+
+    it("retries a coalesced artifact through another source after the first provider fails", async () => {
+        const {service, get, reload, dispose} = fixture();
+        const first = new Subject<ArrayBuffer>();
+        const second = new Subject<ArrayBuffer>();
+        const requested: string[] = [];
+        get.mockImplementation((_url, options) => {
+            requested.push(options.params.sourceId);
+            return options.params.sourceId === "First" ? first : second;
+        });
+        vi.spyOn(service.tileLayerParser, "installMapSchema").mockImplementation(() => {});
+        vi.spyOn(service.tileLayerParser, "addDataSourceInfo").mockImplementation(() => {});
+        try {
+            await reload([{...source("First", 0), schemaId: "shared"}, {...source("Second", 1), schemaId: "shared"}]);
+            expect(requested).toEqual(["First"]);
+            first.error(new Error("Provider unavailable"));
+            await vi.waitFor(() => expect(requested).toEqual(["First", "Second"]));
+            second.next(new Uint8Array([1]).buffer);
+            await vi.waitFor(() => expect(service.isMapReady("Second")).toBe(true));
+            expect(service.isMapReady("First")).toBe(true);
+            expect(service.getSchemaArtifacts()).toHaveLength(1);
+        } finally {vi.restoreAllMocks(); dispose();}
+    });
+
+    it("discards a retired download instead of installing it into the replacement catalog", async () => {
+        const {service, get, reload, dispose} = fixture();
+        const old = new Subject<ArrayBuffer>();
+        const replacement = new Subject<ArrayBuffer>();
+        get.mockImplementation((_url, options) => options.params.schemaId === "old" ? old : replacement);
+        const install = vi.spyOn(service.tileLayerParser, "installMapSchema").mockImplementation(() => {});
+        vi.spyOn(service.tileLayerParser, "addDataSourceInfo").mockImplementation(() => {});
+        try {
+            await reload([{...source("Map", 0), schemaId: "old"}]);
+            await reload([{...source("Map", 0), schemaId: "new"}]);
+            old.next(new Uint8Array([1]).buffer);
+            replacement.next(new Uint8Array([2]).buffer);
+            await vi.waitFor(() => expect(service.isMapReady("Map")).toBe(true));
+            expect(install.mock.calls.every(call => call[1] === "new")).toBe(true);
+            expect(service.getSchemaArtifacts().map(artifact => artifact.schemaId)).toEqual(["new"]);
+        } finally {vi.restoreAllMocks(); dispose();}
+    });
+
+    it("does not let an older HTTP response overwrite a newer stream update", async () => {
+        const {service, get, reload, dispose} = fixture();
+        const delayed = new Subject<HttpResponse<MapInfoItem[]>>();
+        try {
+            await reload([source("First", 0), source("Second", 1, "initializing")]);
+            get.mockReturnValueOnce(delayed);
+            const refresh = service.reloadDataSources();
+            service.applySourceCatalogChange({configIndex: 1, status: "initializing", progress: 0.9}, 3);
+            get.mockReturnValueOnce(of(new HttpResponse({body: [source("First", 0), source("Second", 1)],
+                headers: new HttpHeaders({"X-Mapget-Sources-Revision": "3"})})));
+            const states: unknown[] = [];
+            const subscription = service.maps$.subscribe(tree => states.push(tree.maps.get("Second")?.info.status));
+            delayed.next(new HttpResponse({body: [source("First", 0), source("Second", 1, "failed")],
+                headers: new HttpHeaders({"X-Mapget-Sources-Revision": "2"})}));
+            await refresh;
+            await vi.waitFor(() => expect(service.isMapReady("Second")).toBe(true));
+            expect(states).not.toContain("failed");
+            subscription.unsubscribe();
+        } finally {dispose();}
+    });
     it('prunes layers, style visibility and inspection together only after a complete catalog', async () => {
         const { service, state, owners, reload, dispose } = fixture();
         try {

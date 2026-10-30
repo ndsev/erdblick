@@ -171,7 +171,7 @@ export class TileSubsetLayerVisualization {
         this.renderService.registerPointCloud(this.visualizationId, this.viewIndex, this.state.subsetBlob?.byteLength ?? 0);
         const next = this.renderService.pointCloudPolicyFor(this.visualizationId, metersPerPixel,
             this.pointCloud?.spacingMeters);
-        next.cacheKey = JSON.stringify([this.owner.mapInfo.sourceCatalogRevision, this.owner.ownerId,
+        next.cacheKey = JSON.stringify([this.owner.mapInfo.mapMetadataGeneration(this.state.mapId), this.owner.ownerId,
         this.state.mapTileKey, this.state.valueVersion]);
         if (JSON.stringify(next) === JSON.stringify(this.pointCloud) && !reclaim) return;
         this.pointCloud = next;
@@ -321,8 +321,9 @@ export class TileSubsetLayerVisualization {
                     activationToken: contribution.activationToken
                 },
                 mapId: this.state.mapId,
-                catalogRevision: this.owner.mapInfo.sourceCatalogRevision ?? 0,
+                catalogRevision: this.owner.mapInfo.mapMetadataGeneration(this.state.mapId),
                 dataSourceInfoBlob,
+                schemas: this.owner.mapInfo.getSchemaArtifacts([this.state.mapId]),
                 stringPoolId,
                 fieldDictBlob,
                 subsetBlob: this.state.subsetBlob!,

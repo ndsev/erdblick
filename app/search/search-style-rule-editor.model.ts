@@ -13,6 +13,7 @@ import {
 } from "./search-definition.model";
 import {
     defaultSearchStyleColorDraft,
+    cloneSearchStyleColorDraft,
     DEFAULT_SEARCH_STYLE_SOLID_COLOR,
     gradientStopsToDraft,
     isNumericStyleValueKind,
@@ -112,7 +113,8 @@ export class SearchStyleRuleDraftCodec {
             this.nextColorStopId,
             ...drafts.flatMap(rule => [
                 ...rule.color.gradientStops.map(stop => stop.id + 1),
-                ...rule.color.categoryStops.map(stop => stop.id + 1)
+                ...rule.color.categoryStops.map(stop => stop.id + 1),
+                ...(rule.color.specialStops ?? []).map(stop => stop.id + 1)
             ]),
             1
         );
@@ -134,7 +136,7 @@ export class SearchStyleRuleDraftCodec {
         const fieldOption = this.defaultFieldOption();
         const field = fieldOption?.value ?? "";
         const color = defaultSearchStyleColorDraft(field);
-        if (fieldOption?.valueKind === "enum") {
+        if (fieldOption?.valueKind === "enum" || fieldOption?.valueKind === "boolean") {
             color.mode = "categories";
         } else if (!isNumericStyleValueKind(fieldOption?.valueKind)) {
             color.mode = "solid";
@@ -175,11 +177,7 @@ export class SearchStyleRuleDraftCodec {
             ...rule,
             visualization: [...rule.visualization],
             filters: rule.filters.map(filter => ({...filter})),
-            color: {
-                ...rule.color,
-                gradientStops: rule.color.gradientStops.map(stop => ({...stop})),
-                categoryStops: rule.color.categoryStops.map(stop => ({...stop}))
-            }
+            color: cloneSearchStyleColorDraft(rule.color)
         }));
     }
 
@@ -290,6 +288,9 @@ export class SearchStyleRuleDraftCodec {
                 stops: serializableCategoryStops(
                     color,
                     this.fieldOption(color.field)?.valueKind ?? color.categoryValueKind),
+                ...(color.domain ? {domain: {...color.domain}} : {}),
+                ...(color.domain && color.specialStops ? {specials: color.specialStops.flatMap(stop =>
+                    stop.value === null ? [] : [{value: stop.value, color: stop.color}])} : {}),
                 ...(color.fallbackEnabled === false ? {} : {fallbackColor})
             };
         }
@@ -307,6 +308,9 @@ export class SearchStyleRuleDraftCodec {
             field: color.field,
             ...(color.customField ? {customField: true} : {}),
             stops: serializableGradientStops(color) ?? [],
+            ...(color.domain ? {domain: {...color.domain}} : {}),
+            ...(color.domain && color.specialStops ? {specials: color.specialStops.flatMap(stop =>
+                stop.value === null ? [] : [{value: stop.value, color: stop.color}])} : {}),
             ...(color.fallbackEnabled === false ? {} : {fallbackColor})
         };
     }
@@ -329,6 +333,8 @@ export class SearchStyleRuleDraftCodec {
                 field,
                 customField: !!color.customField,
                 categoryValueKind: categoryValueKind(color.stops),
+                ...(color.domain ? {domain: {...color.domain}} : {}),
+                ...(color.specials ? {specialStops: gradientStopsToDraft(color.specials, () => this.nextColorStopId++)} : {}),
                 solidColor: fallbackColor,
                 fallbackEnabled: color.fallbackColor !== undefined,
                 fallbackColor,
@@ -343,6 +349,8 @@ export class SearchStyleRuleDraftCodec {
             solidColor: fallbackColor,
             fallbackEnabled: color.fallbackColor !== undefined,
             fallbackColor,
+            ...(color.domain ? {domain: {...color.domain}} : {}),
+            ...(color.specials ? {specialStops: gradientStopsToDraft(color.specials, () => this.nextColorStopId++)} : {}),
             gradientStops: gradientStopsToDraft(color.stops, () => this.nextColorStopId++)
         };
     }

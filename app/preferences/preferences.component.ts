@@ -329,6 +329,9 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                                                           appendTo="body"
                                                           placeholder="Select field">
                                                 </p-select>
+                                                @if (hoverLabelSchemaError) {
+                                                    <small role="status">{{ hoverLabelSchemaError }}</small>
+                                                }
                                             }
                                             <input class="hover-label-display-key"
                                                    type="text"
@@ -651,6 +654,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     inspectionValuePresentationSelection: string[] = [];
     sourceDataColumnSelection: string[] = [];
     hoverLabelFields: HoverLabelFieldConfig[] = [];
+    hoverLabelSchemaError = "";
     hoverLabelFieldOptions: Array<{ label: string; value: string }> = [{
         label: "Feature ID",
         value: "id"
@@ -896,7 +900,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Loads unique scalar feature fields from the shared schema worker. */
     private refreshHoverLabelFieldOptions(): void {
         this.searchSchema.requestSearchStyleFields("true", "feature")
-            .then(options => this.applyHoverLabelFieldOptions(options));
+            .then(options => {
+                this.hoverLabelSchemaError = "";
+                this.applyHoverLabelFieldOptions(options);
+            }).catch(error => {
+                this.hoverLabelSchemaError = `Schema fields are unavailable. ${String(error)}`;
+            });
     }
 
     /** Merges per-layer schema candidates into the concise hover-field picker. */

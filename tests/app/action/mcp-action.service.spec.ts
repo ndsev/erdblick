@@ -612,29 +612,49 @@ describe("McpActionService", () => {
         expect(stateOwners(state).viewSettings.getBackgroundState(0)).toEqual(previous);
     });
 
-    it("pages the default layer catalog and includes advertised levels and feature types", () => {
+    it("pages advertised layers and reads produced/reference types from the ready native graph", () => {
         const { service, maps } = fixture();
+        const featureTypes = vi.fn((mapId: string, layerId: string, references: boolean) => {
+            expect(mapId).toBe("map");
+            return layerId === "Raw" ? [] : references ? [layerId, "ReferenceOnly"] : [layerId];
+        });
+        Object.defineProperty(maps, "tileLayerParser", {value: {featureTypes}});
         const layers = new Map(["Road", "Lane", "POI"].map(id => [id, {
             id, type: "Features", viewConfig: [{ visible: true }],
-            info: { zoomLevels: [11, 13], featureTypes: [{ name: id }, { name: "ReferenceOnly" }], schemaFeatureTypes: [id], partitionKind: "tile" }
+            info: { zoomLevels: [11, 13], partitionKind: "tile" }
         }]));
         layers.set("Raw", {
             id: "Raw", type: "SourceData", viewConfig: [{ visible: false }],
-            info: { zoomLevels: [], featureTypes: [], schemaFeatureTypes: [], partitionKind: "tile" }
+            info: { zoomLevels: [], partitionKind: "tile" }
         });
-        maps.maps.maps.set("map", { id: "map", layers } as never);
+        const info = {schemaId: "schema-1", schemaStatus: "ready"};
+        maps.maps.maps.set("map", { id: "map", layers, info } as never);
         expect(service.execute("viewer_list_layers", { layerType: "SourceData" }))
             .toMatchObject({ complete: true, items: [{ id: "Raw" }] });
         expect(viewerActions.viewer_list_layers.outputSchema.parse(service.execute("viewer_list_layers", { layerType: "all" })).items).toHaveLength(4);
         const first = viewerActions.viewer_list_layers.outputSchema.parse(service.execute("viewer_list_layers", { limit: 2 }));
         expect(first).toMatchObject({
             complete: false, nextOffset: 2,
-            items: [{ id: "Road", zoomLevels: [11, 13], featureTypes: ["Road", "ReferenceOnly"], schemaFeatureTypes: ["Road"], partitionKind: "tile" }, { id: "Lane" }]
+            items: [{ id: "Road", zoomLevels: [11, 13], featureTypes: ["Road"],
+                referenceTypes: ["ReferenceOnly"], schemaStatus: "ready", schemaId: "schema-1",
+                partitionKind: "tile" }, { id: "Lane" }]
         });
         expect(service.execute("viewer_list_layers", { offset: first.nextOffset, limit: 2 }))
             .toMatchObject({ complete: true, items: [{ id: "POI" }] });
         expect(service.execute("viewer_list_maps", {}))
             .toMatchObject({ complete: true, items: [{ id: "map", available: true }] });
+
+        // A catalog can list a source before its graph reaches this browser.
+        // Discovery must retain the layer but must not fabricate empty types.
+        vi.mocked(maps.isMapReady).mockReturnValue(false);
+        info.schemaStatus = "loading";
+        featureTypes.mockClear();
+        const pending = viewerActions.viewer_list_layers.outputSchema.parse(
+            service.execute("viewer_list_layers", {}));
+        expect(pending.items[0]).toMatchObject({id: "Road", available: false, schemaStatus: "loading"});
+        expect(pending.items[0]).not.toHaveProperty("featureTypes");
+        expect(pending.items[0]).not.toHaveProperty("referenceTypes");
+        expect(featureTypes).not.toHaveBeenCalled();
     });
 
     it("returns selection provenance without narrowing object partition identities", () => {

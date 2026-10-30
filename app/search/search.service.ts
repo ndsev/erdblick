@@ -8,6 +8,7 @@ import {
 } from "rxjs";
 import { filter } from "rxjs/operators";
 import { z } from "zod";
+import {schemaScalarDomainSchema, type SchemaScalarDomain} from "../mapdata/schema-domain.model";
 
 import {
     AppActionCandidate,
@@ -468,8 +469,9 @@ export class SearchService implements AppActionContributor {
         });
         this.mapInfo.layerStateChanged.subscribe((reason) => {
             if (reason === "datasources" && this.stateService.ready.getValue()) {
-                this.invalidateAllSchemaAnalysis();
-                this.reconcilePersistedFeatureSearchState(this.state.featureSearches);
+                if (this.invalidateChangedSchemaAnalysis()) {
+                    this.reconcilePersistedFeatureSearchState(this.state.featureSearches);
+                }
             }
         });
         this.installFeatureSearchDiagnostics();
@@ -1232,13 +1234,12 @@ export class SearchService implements AppActionContributor {
         if (!normalizedTypes.length) {
             return [];
         }
+        // Pending schema installation is not evidence that a saved type vanished.
+        if (!this.mapInfo.canPruneStateForCurrentCatalog()) return normalizedTypes;
         const availableTypes = new Set<string>();
         for (const ref of selectedMapLayers) {
-            const layer = this.mapInfo.maps.maps.get(ref.mapId)?.layers.get(ref.layerId);
-            for (const featureType of layer?.info.featureTypes ?? []) {
-                if (featureType.name) {
-                    availableTypes.add(featureType.name);
-                }
+            for (const type of this.mapInfo.featureTypesForLayer(ref.mapId, ref.layerId)) {
+                availableTypes.add(type);
             }
         }
         return normalizedTypes.filter(type => availableTypes.has(type));
@@ -1810,9 +1811,7 @@ export class SearchService implements AppActionContributor {
         definition: FeatureSearchResolvedDefinition,
         layer: MapgetLayer
     ): string[] | null {
-        const layerTypes = (layer.info.featureTypes ?? [])
-            .map(featureType => featureType.name)
-            .filter((name): name is string => !!name);
+        const layerTypes = this.mapInfo.featureTypesForLayer(layer.mapId, layer.layerId);
         if (!definition.selectedFeatureTypes.length) {
             return layerTypes;
         }
@@ -2084,12 +2083,15 @@ export class SearchService implements AppActionContributor {
         };
     }
 
-    /** Drops schema-analysis caches for live sessions after datasource metadata changed. */
-    private invalidateAllSchemaAnalysis(): void {
-        this.pendingSchemaAnalysisSignatures.clear();
+    /** Invalidates only sessions whose selected source models changed, preserving unrelated live searches. */
+    private invalidateChangedSchemaAnalysis(): boolean {
+        let changed = false;
         for (const session of this.searchSessions) {
+            if (session.schemaAnalysis.signature === this.searchScopeAnalysisSignature(session.definition)) continue;
             session.schemaAnalysis = this.initialSchemaAnalysis(session.definition);
+            changed = true;
         }
+        return changed;
     }
 
     /** Returns the resolved definition consumed by MapTileStreamService, keeping the previous one during same-signature re-analysis. */
@@ -2484,9 +2486,11 @@ export class SearchService implements AppActionContributor {
         const kindsRecord = this.recordFromUnknown(record?.["kinds"]);
         const histogramValue = Array.isArray(record?.["histogram"]) ? record["histogram"] : [];
         const summary: SearchValueSummary = {
+            ...(record?.["domain"] ? {domain: schemaScalarDomainSchema.parse(record["domain"])} : {}),
             count: this.nonNegativeNumber(record?.["count"], 0),
             missing: this.nonNegativeNumber(record?.["missing"], 0),
             nulls: this.nonNegativeNumber(record?.["nulls"], 0),
+            specials: this.nonNegativeNumber(record?.["specials"], 0),
             kinds: this.normalizeKindCounts(kindsRecord),
             histogram: histogramValue
                 .map(item => this.normalizeHistogramBucket(item))
@@ -2511,6 +2515,7 @@ export class SearchService implements AppActionContributor {
             object: this.nonNegativeNumber(record?.["object"], 0),
             list: this.nonNegativeNumber(record?.["list"], 0),
             blob: this.nonNegativeNumber(record?.["blob"], 0),
+            bitmask: this.nonNegativeNumber(record?.["bitmask"], 0),
             unknown: this.nonNegativeNumber(record?.["unknown"], 0)
         };
     }
@@ -2551,14 +2556,15 @@ export class SearchService implements AppActionContributor {
         tileSummary: SearchTileValueSummaries
     ): void {
         for (const resultField of tileSummary.resultFields) {
-            const key = `${resultField.index}\n${resultField.expression}`;
+            const domain = resultField.summary.domain;
+            const key = JSON.stringify([resultField.index, resultField.expression, domain?.schemaId, domain?.domainId]);
             let target = resultFieldsByKey.get(key);
             if (!target) {
                 target = {
                     source: "resultField",
                     index: resultField.index,
                     expression: resultField.expression,
-                    summary: this.emptyValueSummary()
+                    summary: this.emptyValueSummary(domain)
                 };
                 resultFieldsByKey.set(key, target);
             }
@@ -2566,16 +2572,18 @@ export class SearchService implements AppActionContributor {
         }
 
         for (const trace of tileSummary.traces) {
-            let target = tracesByName.get(trace.name);
+            const domain = trace.summary.domain;
+            const key = JSON.stringify([trace.name, domain?.schemaId, domain?.domainId]);
+            let target = tracesByName.get(key);
             if (!target) {
                 target = {
                     source: "trace",
                     name: trace.name,
                     calls: 0,
                     totalus: 0,
-                    summary: this.emptyValueSummary()
+                    summary: this.emptyValueSummary(domain)
                 };
-                tracesByName.set(trace.name, target);
+                tracesByName.set(key, target);
             }
             target.calls += trace.calls;
             target.totalus += trace.totalus;
@@ -2584,11 +2592,13 @@ export class SearchService implements AppActionContributor {
     }
 
     /** Creates a zeroed mutable summary accumulator. */
-    private emptyValueSummary(): SearchValueSummary {
+    private emptyValueSummary(domain?: SchemaScalarDomain): SearchValueSummary {
         return {
+            domain,
             count: 0,
             missing: 0,
             nulls: 0,
+            specials: 0,
             kinds: this.normalizeKindCounts(null),
             histogram: [],
             otherCount: 0,
@@ -2601,6 +2611,7 @@ export class SearchService implements AppActionContributor {
         target.count += source.count;
         target.missing += source.missing;
         target.nulls += source.nulls;
+        target.specials += source.specials;
         target.kinds.integer += source.kinds.integer;
         target.kinds.number += source.kinds.number;
         target.kinds.boolean += source.kinds.boolean;
@@ -2608,6 +2619,7 @@ export class SearchService implements AppActionContributor {
         target.kinds.object += source.kinds.object;
         target.kinds.list += source.kinds.list;
         target.kinds.blob += source.kinds.blob;
+        target.kinds.bitmask += source.kinds.bitmask;
         target.kinds.unknown += source.kinds.unknown;
         target.otherCount += source.otherCount;
         target.distinctLimitReached = target.distinctLimitReached || source.distinctLimitReached;
