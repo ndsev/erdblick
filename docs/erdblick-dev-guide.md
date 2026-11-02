@@ -247,17 +247,9 @@ layers, filter refs, subsets, and visualizations survive until the logical
 view/controller disposes them.
 
 Worker completion only advances the pending render queue; it does not reconcile
-the full view or rebuild style plans. The controller retains a separate set of
-allocation-paused visualizations. Capacity notifications retry only eligible
-members of that set, after available bytes or reusable installed ranges increase.
-Cleanup of a failed attempt alone does not restart it. Point-cloud demand and
-camera scale do not change the count-based sampling policy.
-
-`gpuMemoryManagementEnabled` is persisted AppState (default `true`, absent from
-URLs). Disabling it bypasses the shared GPU allowance and cloud GPU reservations,
-while preserving allocation accounting and normal resource disposal. Re-enabling
-it reclaims existing presentations before rendering within the saved allowance.
-Point-cloud working-memory admission remains independent.
+the full view or rebuild style plans. Jobs dispatch in queue order as worker
+slots become available. Point-cloud ownership and camera scale do not change
+the count-based sampling policy.
 
 ### Transport refs
 
@@ -974,18 +966,13 @@ See [Style System](erdblick-stylesystem.md).
 
 ## Failure and cancellation rules
 
-- GPU allowance failures are recoverable presentation failures. Physical buffer
-  allocations check `GpuMemoryBudget`; scheduling estimates must not charge
-  existing scene buffers again or reject reuse of their free ranges. Paused
-  visualizations become eligible after additional free bytes, safe retirement of
-  installed ranges, or changed input/allowances. A failed job's own temporary
-  cleanup does not make it eligible again. Capacity notifications reconsider
-  paused visualizations as well as queued work; smaller jobs can bypass waiting
-  larger jobs. Under pressure, superseded regular-layer fallback owners retire
-  before their replacements are ready. Deck's presentation/rebind boundary
-  controls safe buffer retirement. Point counts are not reduced to satisfy
-  admission. This path is distinct from renderer invalidation after unsafe
-  publication or WebGL context loss.
+- Failed buffer allocation or upload releases the attempt's uncommitted resources.
+  An unchanged failed render signature is not resubmitted on every scheduler tick;
+  changed input, style, or a recreated scene can request a new render. Deck's
+  presentation/rebind boundary controls safe retirement of installed buffers.
+  Empty material stores are reclaimed after their contributions leave the
+  presentation. Renderer invalidation remains necessary after unsafe publication
+  or WebGL context loss.
 - A new filter generation makes older subset/status/render completions stale.
 - Filter status frames use `filterId` and `generation`, independent of viewport
   request IDs. Route them before request-status filtering; the subscription

@@ -22,12 +22,12 @@ function createPreferences() {
 }
 
 describe('service-owned rendering preferences', () => {
-    it('publishes a complete resource-budget edit once and retains historical snapshots', () => {
+    it('publishes a complete sampling edit once and retains historical snapshots', () => {
         const { preferences } = createPreferences();
         const policies: typeof preferences.state.pointCloudPolicy[] = [];
         preferences.state.pointCloudPolicyChanges.subscribe(policy => policies.push(policy));
         const original = { ...policies[0] };
-        const next = { enabled: true, detailPixels: 8, workingMemoryMiB: 128, gpuMemoryMiB: 64 };
+        const next = { enabled: true, detailPixels: 8 };
         preferences.setPointCloudPolicy(next);
         expect(policies).toEqual([original, next]);
         expect(policies[0]).toEqual(original);
@@ -36,7 +36,7 @@ describe('service-owned rendering preferences', () => {
     it('validates the complete edit before changing any slot', () => {
         const { preferences } = createPreferences();
         const before = preferences.state.pointCloudPolicy;
-        expect(() => preferences.setPointCloudPolicy({ ...before, gpuMemoryMiB: 0 })).toThrow();
+        expect(() => preferences.setPointCloudPolicy({ ...before, detailPixels: 0 })).toThrow();
         expect(preferences.state.pointCloudPolicy).toEqual(before);
     });
 

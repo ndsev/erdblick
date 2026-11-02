@@ -1230,8 +1230,6 @@ export class MapViewService implements AppActionContributor {
         this.stateService.transaction(() => {
             this.state.pointCloudDownsamplingEnabledState.next(parsed.enabled);
             this.state.pointCloudDetailPixelsState.next(parsed.detailPixels);
-            this.state.pointCloudWorkingMemoryMiBState.next(parsed.workingMemoryMiB);
-            this.state.pointCloudGpuMemoryMiBState.next(parsed.gpuMemoryMiB);
         });
     }
 

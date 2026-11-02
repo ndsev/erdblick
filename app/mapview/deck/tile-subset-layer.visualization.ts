@@ -1,4 +1,3 @@
-import {GpuAllocationError, gpuMemoryBudget} from "./gpu-memory-budget.model";
 import type { Device } from "@luma.gl/core";
 import { Matrix4 } from "@math.gl/core";
 import type { TileFeatureId } from "../../inspection/inspection.model";
@@ -89,7 +88,6 @@ export class TileSubsetLayerVisualization {
     private renderedSignature = "";
     private requestedSignature = "";
     private failedSignature = "";
-    private failedGpuCapacity: {availableBytes: number; reclamationVersion: number} | null = null;
     private disposed = false;
     private pointCloud: PointCloudRenderPolicy | undefined;
     private pointCloudScale: number | null = null;
@@ -102,17 +100,6 @@ export class TileSubsetLayerVisualization {
     private readonly failedIconUris = new Set<string>();
     private pickSubset: GpuPickSubset | null = null;
     private pickSubsetValueVersion = -1;
-
-    get waitingForGpuMemory(): boolean {
-        return !this.disposed && !!this.failedGpuCapacity;
-    }
-
-    /** Retry only when other work has released bytes or reusable installed ranges. */
-    canRetryGpuAllocation(): boolean {
-        return this.waitingForGpuMemory && !!this.failedGpuCapacity &&
-            (gpuMemoryBudget.availableBytes > this.failedGpuCapacity.availableBytes ||
-                gpuMemoryBudget.reclamationVersion !== this.failedGpuCapacity.reclamationVersion);
-    }
 
     /** Retain one immutable tile subset and its stable scene contribution identity. */
     constructor(
@@ -178,24 +165,16 @@ export class TileSubsetLayerVisualization {
         }
     }
 
-    /** Refresh density before presentation checks; smaller budgets retire old GPU ownership first. */
-    setPointCloudScale(metersPerPixel: number | null, reclaim = false): void {
+    /** Refresh count-based sampling and the immutable worker cache identity. */
+    setPointCloudScale(metersPerPixel: number | null): void {
         this.pointCloudScale = metersPerPixel;
-        // The allowance covers all primitive stores, including ordinary map geometry.
-        if (reclaim) {
-            this.renderService.cancel(this.visualizationId);
-            this.renderedSignature = "";
-            this.requestedSignature = "";
-            ++this.sceneRevision;
-            TileSubsetLayerVisualization.retireContributions(this.sceneHandle, this.contributionIdentities);
-        }
         if (!this.owner.filterPlan.channels.some(channel => channel.pointCloudMaxPoints !== undefined)) return;
-        this.renderService.registerPointCloud(this.visualizationId, this.viewIndex, this.state.subsetBlob?.byteLength ?? 0);
+        this.renderService.registerPointCloud(this.visualizationId);
         const next = this.renderService.pointCloudPolicyFor(this.visualizationId, metersPerPixel,
             this.pointCloud?.spacingMeters);
         next.cacheKey = JSON.stringify([this.owner.mapInfo.sourceCatalogRevision, this.owner.ownerId,
         this.state.mapTileKey, this.state.valueVersion]);
-        if (JSON.stringify(next) === JSON.stringify(this.pointCloud) && !reclaim) return;
+        if (JSON.stringify(next) === JSON.stringify(this.pointCloud)) return;
         this.pointCloud = next;
         this.renderService.cancel(this.visualizationId);
         this.renderedSignature = "";
@@ -279,9 +258,6 @@ export class TileSubsetLayerVisualization {
             this.owner.plannedLod,
             this.lineSimplificationToleranceMeters,
             JSON.stringify(this.pointCloud),
-            this.renderService.pointCloudPolicy.workingMemoryMiB,
-            this.renderService.pointCloudPolicy.gpuMemoryMiB,
-            this.renderService.gpuMemoryManagementEnabled,
             this.owner.style.id,
             this.owner.renderStyleKey,
             this.owner.styleOrder,
@@ -293,12 +269,7 @@ export class TileSubsetLayerVisualization {
             return true;
         }
         // A rejected immutable job must not be resubmitted on every scheduler tick.
-        // GPU work becomes eligible again when reclamation provides its missing capacity.
-        if (signature === this.failedSignature && !this.canRetryGpuAllocation())
-            return false;
-        const capacityBeforeRender = {availableBytes: gpuMemoryBudget.availableBytes,
-            reclamationVersion: gpuMemoryBudget.reclamationVersion};
-        this.failedGpuCapacity = null;
+        if (signature === this.failedSignature) return false;
         this.requestedSignature = signature;
         const valueVersion = this.state.valueVersion;
         const sceneRevision = this.sceneRevision;
@@ -425,7 +396,6 @@ export class TileSubsetLayerVisualization {
             }
             this.renderedSignature = signature;
             this.failedSignature = "";
-            this.failedGpuCapacity = null;
             this.requestedSignature = "";
             this.installRenderStats(
                 result,
@@ -440,13 +410,6 @@ export class TileSubsetLayerVisualization {
             }
             this.requestedSignature = "";
             this.failedSignature = signature;
-            this.failedGpuCapacity = error instanceof GpuAllocationError ? capacityBeforeRender : null;
-            if (error instanceof GpuAllocationError) {
-                this.renderedSignature = "";
-                TileSubsetLayerVisualization.retireContributions(this.sceneHandle, this.contributionIdentities);
-                this.renderService.reportAllocationFailure(error);
-                return false;
-            }
             throw error;
         } finally {
             scene.finishRender(reservation);

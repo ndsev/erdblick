@@ -133,15 +133,9 @@ Preferences → Rendering → Point clouds controls adaptive detail. Disabling i
 requests exact backend geometry and renders all delivered points, subject to
 available memory.
 
-The separate **Memory** section controls browser working memory for point clouds
-(default **6144 MiB**) and the shared GPU allocation allowance for all map geometry
-(default **3072 MiB**). **Manage GPU memory** is enabled by default. Turning it off
-immediately bypasses GPU allowance checks and resumes work paused by that allowance;
-it keeps normal rendering and resource disposal, point-count sampling, and the
-point-cloud working-memory allowance. Turning it back on releases existing
-presentations and rebuilds them within the saved GPU allowance. These settings
-persist in this browser. The allowances are not preallocated memory or measurements
-of available VRAM. Saved user values take precedence over defaults.
+The adaptive-detail preference persists in this browser and is included in
+exported state snapshots; it is not added to shared URLs. Press **Apply** to
+commit the change.
 
 Custom styles opt in on a top-level, feature-scope, point-only rule:
 
@@ -164,26 +158,9 @@ can use a different decoded order from native arrays. The canonical model,
 inspection and export remain exact.
 
 The frontend selects before projection and packet generation. Statistics expose
-delivered/rendered instance counts. The GPU allowance accounts for requested
-primitive-buffer capacity, replacement overlap and observed luma resources.
-Memory admission pauses work that cannot fit; it does not silently lower the
-point count.
-
-Reducing working memory, or reducing the GPU allowance while GPU management is
-enabled, terminates render workers to release their WASM heaps and retires GPU
-contributions from all layers. Lowering working memory may
-additionally evict retained cloud input.
-Replacement work waits for safe retirement after Deck rebinds its models. It can
-reuse released ranges inside buffers that remain allocated. Under allocation
-pressure, superseded fallback visuals retire before their replacements are ready;
-this may leave a temporary gap while the replacement renders.
-GPU allocation exhaustion produces one warning per memory or point-cloud preference change.
-Affected work retries automatically when usable capacity is released or its
-allowance/input changes. Smaller jobs can proceed while larger jobs wait. Hide
-data or restrict a style's filter to reduce demand without raising the allowance
-or reloading the viewer. An object that still cannot fit remains paused. If browser working-memory
-admission rejects input or rendering, raise that allowance, or hide other clouds
-and refresh the affected layer.
+delivered/rendered instance counts. Sampling does not depend on available memory
+or other visible clouds. Hide unused layers/styles, narrow a style's filter, or
+lower **Max Tiles to Load** to reduce rendering demand.
 
 <!-- mcp:
 keywords: [style, YAML, search visualization]
@@ -1194,7 +1171,5 @@ stay renderer-local.
 
 Point-cloud picking reuses compact worker-produced feature identities, without
 deserializing another full cloud on the main thread. Browser subset routing
-accepts metadata prefixes up to 256 KiB. Increasing the working-memory setting
-retries clouds whose input was rejected; after hiding other clouds, refresh the
-affected layer to retry it. Complete delivered sources within their point quota
-keep all records, including duplicates.
+accepts metadata prefixes up to 256 KiB. Complete delivered sources within their
+point quota keep all records, including duplicates.

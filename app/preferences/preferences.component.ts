@@ -395,31 +395,6 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                     </p-tabpanel>
 
                     <p-tabpanel value="rendering">
-                        <section data-testid="rendering-memory-preferences">
-                            <h3>Memory</h3>
-                            <div class="button-container">
-                                <label for="gpu-memory-management">Manage GPU memory</label>
-                                <p-toggleswitch inputId="gpu-memory-management"
-                                               [ngModel]="viewSettings.gpuMemoryManagementEnabledState.getValue()"
-                                               (ngModelChange)="viewSettings.gpuMemoryManagementEnabledState.next($event)" />
-                            </div>
-                            <p>Pause work that exceeds the GPU allowance and resume it when capacity is freed.
-                                Turn this off to render without an application GPU allowance.</p>
-                            <div class="slider-container">
-                                <label for="point-cloud-gpu-memory">GPU allocation allowance (MiB)</label>
-                                <input id="point-cloud-gpu-memory" type="number" pInputText
-                                       min="16" max="8192" [(ngModel)]="pointCloudPolicyDraft.gpuMemoryMiB"
-                                       [disabled]="!viewSettings.gpuMemoryManagementEnabledState.getValue()" />
-                            </div>
-                            <div class="slider-container">
-                                <label for="point-cloud-working-memory">Rendering working memory (MiB)</label>
-                                <input id="point-cloud-working-memory" type="number" pInputText
-                                       min="32" max="16384" [(ngModel)]="pointCloudPolicyDraft.workingMemoryMiB" />
-                            </div>
-                            <small>GPU allowance applies to all map geometry. Working memory applies to point clouds.
-                                Both are shared across views. Apply numeric changes below.</small>
-                        </section>
-                        <p-divider></p-divider>
                         <section data-testid="point-cloud-preferences">
                             <h3>Point clouds</h3>
                             <div class="button-container">
@@ -428,7 +403,7 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                                                [(ngModel)]="pointCloudPolicyDraft.enabled" />
                             </div>
                             <p>Objects below 14 million points keep every point. Larger objects are
-                                progressively sampled to just below that count. This setting is independent of GPU memory management.</p>
+                                progressively sampled to just below that count.</p>
                             <p-button label="Apply" data-testid="point-cloud-apply"
                                       [disabled]="!pointCloudPolicyChanged" (click)="applyPointCloudPolicy()" />
                         </section>
@@ -1063,7 +1038,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.lod3TileThresholdChanged = false;
     }
 
-    /** Keep numeric drafts out of persisted state until the whole policy is applied. */
+    /** Keep draft sampling preferences separate until the edit is applied. */
     get pointCloudPolicyChanged(): boolean {
         return JSON.stringify(this.pointCloudPolicyDraft) !== JSON.stringify(this.mapService.state.pointCloudPolicy);
     }
@@ -1072,7 +1047,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     applyPointCloudPolicy(): void {
         const parsed = pointCloudPolicySchema.safeParse(this.pointCloudPolicyDraft);
         if (!parsed.success) {
-            this.messageService.showError("Working memory must be 32–16384 MiB and GPU allowance 16–8192 MiB.");
+            this.messageService.showError("Invalid point-cloud sampling preferences.");
             return;
         }
         this.mapService.setPointCloudPolicy(parsed.data);

@@ -62,7 +62,7 @@ The main service boundaries are:
 
 | Owner | Responsibility |
 | --- | --- |
-| `MapViewState` | Durable identities, committed cameras, projection/sync values, rendering budgets and GPU-management switch, positional codecs and coherent membership edits |
+| `MapViewState` | Durable identities, committed cameras, projection/sync values, rendering and point-cloud sampling preferences, positional codecs and coherent membership edits |
 | `MapViewService` | Renderer lifetimes, live camera previews, navigation, view teardown and view/render-preference actions and controls |
 | `MapDataState` | Layer values, style-option associations, preset selections, compression and retry preferences |
 | `MapDataService` | Loaded catalog/tree, preset application, complete-catalog cleanup and transport-preference controls |
@@ -360,7 +360,7 @@ Release baseline: `6f5ba2fd6d6cb3810cd9bf4c305e0d5b229f4ef8`. The actual owner s
 | Owner file | Stored keys |
 | --- | --- |
 | `app/coordinates/coordinates.state.ts` | `coordinatesEnabled`, `coordinatesLegalTermsAccepted`, `marker`, `markedPosition`, `enabledCoordsTileIds` |
-| `app/mapview/mapview.state.ts` (rendering) | `deckAntialiasingEnabled`, `semanticCompositingEnabled`, `contactShadingEnabled`, `lod3TileThreshold`, `tileSubsetRenderWorkerCount`, `pointCloudDownsamplingEnabled`, `pointCloudDetailPixels`, `pointCloudWorkingMemoryMiB`, `pointCloudGpuMemoryMiB`, `tilesLoadLimit` |
+| `app/mapview/mapview.state.ts` (rendering) | `deckAntialiasingEnabled`, `semanticCompositingEnabled`, `contactShadingEnabled`, `lod3TileThreshold`, `tileSubsetRenderWorkerCount`, `pointCloudDownsamplingEnabled`, `pointCloudDetailPixels`, `tilesLoadLimit` |
 | `app/mapview/mapview.state.ts` (views) | `viewIds`, `numberOfViews`, `focus`, `viewSync`, `cameraView`, `mode2d`, `mapZoomStep`, `featureZoomClearanceMeters`, `background`, `tileBorders`, `tileGridMode`, `tileGridLevel`, `tileGridAutoLevel`, `tileGridColor`, `tileGridOpacity` |
 | `app/mapdata/mapdata.state.ts` | `layerSyncOptions`, `layerNames`, `visibility`, `zoomLevel`, `autoZoomLevel`, `styleOptions`, `stylePresetSelection`, `mapPresetSelection` |
 | `app/layout/layout.state.ts` | `mapsOpenState`, `dockOpenState`, `dockWidth`, `viewPanelSizes`, `dockActiveTabState`, `dockAutoCollapse`, `dialogLayouts` |

@@ -34,7 +34,7 @@ describe("ViewLayerController", () => {
                 {} as any,
                 {styleAddedForId: idle, styleRemovedForId: idle, styleGroups: idle} as any,
                 {pointCloudPolicy: DEFAULT_POINT_CLOUD_POLICY, pointCloudPolicyChanged: idle,
-                    capacityChanged: capacity, allocationPressure: idle} as any,
+                    capacityChanged: capacity} as any,
                 {searchPresentationsChanged: idle} as any,
                 {selectionIdsTopic: idle, hoverIdsTopic: idle} as any,
                 {} as any, {register: () => () => {}} as any, {} as any, {} as any);
@@ -47,52 +47,6 @@ describe("ViewLayerController", () => {
             reconcile.mockRestore();
             dispatch.mockRestore();
         }
-    });
-
-    it("retries only allocation-paused work with new capacity and forgets retired work", () => {
-        const controller = Object.create(ViewLayerController.prototype) as any;
-        const eligible = {waitingForGpuMemory: true, canRetryGpuAllocation: () => true};
-        const blocked = {waitingForGpuMemory: true, canRetryGpuAllocation: () => false};
-        const retired = {waitingForGpuMemory: false, canRetryGpuAllocation: vi.fn()};
-        controller.sceneHandle = {};
-        controller.allocationPausedVisualizations = new Set([eligible, blocked, retired]);
-        controller.pendingVisualizationRenders = new Set();
-        controller.renderService = {availableWorkerSlots: () => 1};
-        controller.startVisualizationRender = vi.fn();
-        controller.dispatchOnePendingStyledLayerTile = () => false;
-        controller.reconcile = vi.fn();
-        controller.drainPendingTiles();
-        controller.drainPendingTiles();
-        expect(controller.startVisualizationRender).toHaveBeenCalledExactlyOnceWith(eligible);
-        expect(controller.allocationPausedVisualizations).toEqual(new Set([blocked]));
-        expect(retired.canRetryGpuAllocation).not.toHaveBeenCalled();
-        expect(controller.reconcile).not.toHaveBeenCalled();
-    });
-
-    it("does not miss reclamation that finishes before a failed render continuation", async () => {
-        const controller = Object.create(ViewLayerController.prototype) as any;
-        const visualization = {render: vi.fn().mockResolvedValue(false), waitingForGpuMemory: true};
-        controller.sceneHandle = {};
-        controller.allocationPausedVisualizations = new Set();
-        controller.schedulePendingTiles = vi.fn();
-        controller.startVisualizationRender(visualization);
-        await Promise.resolve();
-        expect(controller.allocationPausedVisualizations.has(visualization)).toBe(true);
-        expect(controller.schedulePendingTiles).toHaveBeenCalledOnce();
-    });
-
-    it("releases superseded fallback owners under allocation pressure without dropping current layers", () => {
-        const controller = Object.create(ViewLayerController.prototype);
-        const fallback = {id: "old style"};
-        const current = {id: "current style"};
-        controller.retiringRegularLayers = new Map([["slot", {owned: fallback}]]);
-        controller.styledLayers = new Map([["current", current]]);
-        controller.destroyOwnedLayer = vi.fn();
-        controller.releaseRegularFallbacksForAllocation();
-        controller.releaseRegularFallbacksForAllocation();
-        expect(controller.destroyOwnedLayer).toHaveBeenCalledExactlyOnceWith(fallback);
-        expect(controller.retiringRegularLayers.size).toBe(0);
-        expect(controller.styledLayers.get("current")).toBe(current);
     });
 
     it("owns mixed feature/row highlight plans independently and reuses them", () => {
@@ -307,7 +261,6 @@ describe("ViewLayerController", () => {
         controller.styledLayers = new Map([["previous-owner", existing]]);
         controller.retiringRegularLayers = new Map();
         controller.pendingVisualizationRenders = new Set();
-        controller.allocationPausedVisualizations = new Set();
         controller.localInteractionVisualizationsWithOverlays = new Set();
         controller.tilePartitionsByCoverage = new WeakMap();
         controller.featureSearch = {searchStyledLayersForView: () => []};
@@ -336,7 +289,6 @@ describe("ViewLayerController", () => {
         controller.diagnostics = {notifyChanged: vi.fn()};
         controller.renderService = {pointCloudPolicy: {enabled: true}};
         controller.pendingVisualizationRenders = new Set();
-        controller.allocationPausedVisualizations = new Set();
         controller.localInteractionVisualizationsWithOverlays = new Set();
         controller.scheduleInteractionPresenceReconcile = vi.fn();
 
@@ -466,7 +418,6 @@ describe("ViewLayerController", () => {
         const second = {};
         controller.sceneHandle = {scene: {}};
         controller.pendingVisualizationRenders = new Set([first, second]);
-        controller.allocationPausedVisualizations = new Set();
         controller.styledLayers = new Map();
         controller.renderService = {
             availableWorkerSlots: vi.fn()
@@ -498,7 +449,6 @@ describe("ViewLayerController", () => {
         controller.sceneHandle = {scene: {}};
         controller.nextStyledLayerDispatchIndex = 0;
         controller.pendingVisualizationRenders = new Set();
-        controller.allocationPausedVisualizations = new Set();
         controller.styledLayers = new Map([
             ["first", first],
             ["second", second],
@@ -571,7 +521,6 @@ describe("ViewLayerController", () => {
         controller.renderService = {pointCloudPolicy: {enabled: true}};
         controller.releaseRegularFallbackWhenReady = vi.fn();
 
-        controller.allocationPausedVisualizations = new Set();
         controller.startVisualizationRender(visualization);
         await vi.waitFor(() =>
             expect(controller.applyLocalInteractionOverlays)
@@ -598,7 +547,6 @@ describe("ViewLayerController", () => {
         };
         controller.sceneHandle = {scene: {}};
         controller.pendingVisualizationRenders = new Set([visualization]);
-        controller.allocationPausedVisualizations = new Set();
         controller.localInteractionVisualizationsWithOverlays =
             new Set([visualization]);
         controller.scheduleInteractionPresenceReconcile = vi.fn();
