@@ -10,7 +10,9 @@
 #include "mapget/model/sourcedata.h"
 #include "mapget/model/subsetlayer.h"
 
+#include <algorithm>
 #include <sstream>
+#include <utility>
 
 namespace
 {
@@ -107,6 +109,64 @@ TEST_CASE("Invalid metadata replacement preserves the previous bound graph", "[e
     REQUIRE_THROWS(parser.setDataSourceInfo(sourceFixture("Replacement", "unknown-schema")));
     REQUIRE(parser.info_.at("First").mapSchema_ == retained);
     REQUIRE(parser.featureTypes("First", "Road", false) == nlohmann::json::array({"Road"}));
+}
+
+TEST_CASE(
+    "Search styling exports widths only for concrete bitmask domains",
+    "[erdblick.schema][erdblick.search]")
+{
+    using Schema = simfil::Schema;
+    auto graph = std::make_shared<mapget::MapSchema>();
+    auto layer = graph->newLayer("Road", mapget::LayerType::Features);
+    auto root =
+        layer->addSchema(mapget::LayerSchema::FeatureKind, mapget::LayerSchema::featureKey("Road"));
+    auto properties = layer->addSchema(Schema::Kind::Object);
+    layer->addFieldSchema(root, "properties", properties);
+    for (auto const& [name, kind] :
+         {std::pair{"any", Schema::Kind::Any},
+          {"unknown", Schema::Kind::Unknown},
+          {"value", Schema::Kind::Value},
+          {"flags", Schema::Kind::Bitmask}})
+    {
+        auto id = layer->addSchema(kind);
+        layer->addFieldSchema(properties, name, id);
+        if (kind == Schema::Kind::Bitmask)
+            layer->setBitWidth(id, 8);
+    }
+    layer->addFeatureType(
+        mapget::FeatureTypeInfo::fromJson(
+            {{"name", "Road"},
+             {"uniqueIdCompositions", {{{{"partId", "id"}, {"datatype", "U32"}}}}}}),
+        root);
+    layer->setRootSchema(root);
+    graph->finalize();
+
+    erdblick::TileLayerParser parser;
+    parser.installMapSchema(schemaBytes(*graph), std::string(graph->schemaId()));
+    parser.setDataSourceInfo(sourceFixture("StyleDomains", std::string(graph->schemaId())));
+    auto fields = parser.searchStyleFieldsForQuery("true", "feature", nlohmann::json::object());
+
+    // Exercise the same native export consumed by the Visualization tab. An
+    // untyped Classic attribute must not invalidate its typed sibling fields.
+    for (auto const* name : {"any", "unknown", "value", "flags"}) {
+        for (auto const* prefix : {"properties.", "attributes."}) {
+            auto path = std::string(prefix) + name;
+            INFO(path);
+            auto field = std::ranges::find_if(
+                fields,
+                [&](auto const& candidate) { return candidate.at("path") == path; });
+            REQUIRE(field != fields.end());
+            REQUIRE(field->contains("domain"));
+            if (std::string_view(name) == "flags") {
+                CHECK(field->at("valueKind") == "bitmask");
+                CHECK(field->at("domain").at("bitWidth") == 8);
+            }
+            else {
+                CHECK(field->at("valueKind") == "unknown");
+                CHECK_FALSE(field->at("domain").contains("bitWidth"));
+            }
+        }
+    }
 }
 
 TEST_CASE(

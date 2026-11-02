@@ -126,7 +126,10 @@ JsValue JsValue::fromSchema(simfil::SchemaReference const& reference)
                  {"removed", JsValue(named.removed)}}));
         });
     result.set("namedValues", names);
-    if (domain->hasAffinity(simfil::ValueType::Bitmask))
+    // Generic domains such as Any may contain a mask without declaring one.
+    // Only concrete masks have a width; exporting a generic domain's zero
+    // would make the browser reject the entire search-style field catalog.
+    if (domain->isBitmask())
         result.set("bitWidth", JsValue(domain->bitWidth()));
     return result;
 }
