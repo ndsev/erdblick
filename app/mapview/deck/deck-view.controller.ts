@@ -563,7 +563,9 @@ export abstract class DeckMapView implements IRenderView {
         idSuffix = ""
     ): DeckMercatorView {
         return new ErdblickMapView({
-            id: `deck-view-${this._viewIndex}${idSuffix}`,
+            // The navigation adapter receives this same persistent identity.
+            // Reordering application views must not change Deck's controller ID.
+            id: `${this.viewId}${idSuffix}`,
             repeat: true,
             orthographic: this.useOrthographicProjection,
             controller
@@ -576,7 +578,7 @@ export abstract class DeckMapView implements IRenderView {
         idSuffix = ""
     ): DeckFirstPersonView {
         return new DeckFirstPersonView({
-            id: `deck-view-${this._viewIndex}${idSuffix}`,
+            id: `${this.viewId}${idSuffix}`,
             fovy: FIRST_PERSON_FOV_DEGREES,
             near: FIRST_PERSON_NEAR_METERS,
             far: FIRST_PERSON_FAR_METERS,

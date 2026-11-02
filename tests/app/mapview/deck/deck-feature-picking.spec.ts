@@ -37,7 +37,7 @@ function createView() {
 }
 
 /** Creates the perspective sibling used when a test exercises depth reconstruction. */
-function create3DView() {
+function create3DView(viewIds = ["0", "1"]) {
     return new DeckMapView3D(
         0,
         "canvas",
@@ -50,7 +50,7 @@ function create3DView() {
         { state: {} } as never,
         {} as never,
         {} as never,
-        {} as never, Object.assign({} as never, { viewIdAt: (index: number) => String(index), viewIds: ["0", "1"] }) as never, { state: {} } as never, {} as never as never, {} as never
+        {} as never, Object.assign({} as never, { viewIdAt: (index: number) => viewIds[index], viewIds, mapZoomStep: 0.2 }) as never, { state: {} } as never, {} as never as never, {} as never
     );
 }
 
@@ -64,6 +64,28 @@ function subsetPickResolver(
 }
 
 describe("Deck rendered-feature picking", () => {
+    it("acquires navigation targets through the real view wiring before and after reordering", () => {
+        const viewIds = ["view-north", "view-south"];
+        const view = create3DView(viewIds) as any;
+        const target = {position: [11, 48, 0], origin: "ground"};
+        const resolve = vi.spyOn(view, "resolveControllerNavigationTarget").mockReturnValue(target);
+        const controller = view.createDeckControllerOptions();
+        for (const reordered of [false, true]) {
+            if (reordered) viewIds.reverse();
+            const deckView = view.createMapDeckView(controller);
+            const viewport = deckView.makeViewport({width: 1000, height: 700,
+                viewState: {longitude: 11, latitude: 48, zoom: 16, pitch: 55}});
+            const acquired = controller.getInteractionTarget({
+                viewId: deckView.id, viewport, screenPosition: [500, 350],
+                operation: "rotate", source: "pointer"
+            });
+            expect(deckView.id).toBe("view-north");
+            expect(acquired?.coordinate).toEqual(target.position);
+            expect(view.createFirstPersonDeckView().id).toBe(deckView.id);
+        }
+        expect(resolve).toHaveBeenCalledTimes(2);
+    });
+
     it("uses one configured-radius deep query, excludes untagged layers, and continues after an unresolved hit", () => {
         const view = createView();
         const unselectableLayer = {
