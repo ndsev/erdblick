@@ -115,7 +115,9 @@ jobs:
             tests/playwright/tests/viewer-actions-auth.spec.ts --project='' --workers=1
 
       - name: Run Playwright integration tests (with coverage)
-        timeout-minutes: 35
+        # One worker runs all three browser projects and collects coverage.
+        # Budget for the complete suite, including its coverage report.
+        timeout-minutes: 60
         run: |
           source ./venv/bin/activate
           EB_FIREFOX_HEADED=1 xvfb-run -a $GITHUB_WORKSPACE/ci/run-integration-with-venv-mapget.sh
