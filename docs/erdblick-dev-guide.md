@@ -273,18 +273,15 @@ A Deck/device recreation replaces only the scene handle. Logical styled
 layers, filter refs, subsets, and visualizations survive until the logical
 view/controller disposes them.
 
-Worker completion only advances the pending render queue; it does not reconcile
-the full view or rebuild style plans. The controller retains a separate set of
-allocation-paused visualizations. Capacity notifications retry only eligible
-members of that set, after available bytes or reusable installed ranges increase.
-Cleanup of a failed attempt alone does not restart it. Point-cloud demand and
-camera scale do not change the count-based sampling policy.
+Worker completion advances the pending render queue without reconciling the full
+view or rebuilding style plans. Point-cloud demand and camera scale do not change
+the count-based sampling policy. The working-memory allowance bounds retained
+point-cloud input and worker heaps across views; it does not limit GPU allocation.
 
-`gpuMemoryManagementEnabled` is persisted AppState (default `true`, absent from
-URLs). Disabling it bypasses the shared GPU allowance and cloud GPU reservations,
-while preserving allocation accounting and normal resource disposal. Re-enabling
-it reclaims existing presentations before rendering within the saved allowance.
-Point-cloud working-memory admission remains independent.
+GPU buffers follow their scene's presentation lifetime. Replaced buffers remain
+alive until Deck has rebound its models; empty material stores are then destroyed.
+The retired `gpuMemoryManagementEnabled` and `pointCloudGpuMemoryMiB` preferences
+are ignored when importing existing snapshots or deployment defaults.
 
 ### Transport refs
 
@@ -1001,18 +998,13 @@ See [Style System](erdblick-stylesystem.md).
 
 ## Failure and cancellation rules
 
-- GPU allowance failures are recoverable presentation failures. Physical buffer
-  allocations check `GpuMemoryBudget`; scheduling estimates must not charge
-  existing scene buffers again or reject reuse of their free ranges. Paused
-  visualizations become eligible after additional free bytes, safe retirement of
-  installed ranges, or changed input/allowances. A failed job's own temporary
-  cleanup does not make it eligible again. Capacity notifications reconsider
-  paused visualizations as well as queued work; smaller jobs can bypass waiting
-  larger jobs. Under pressure, superseded regular-layer fallback owners retire
-  before their replacements are ready. Deck's presentation/rebind boundary
-  controls safe buffer retirement. Point counts are not reduced to satisfy
-  admission. This path is distinct from renderer invalidation after unsafe
-  publication or WebGL context loss.
+- GPU buffer allocations are performed by the graphics device, without an
+  application-wide allowance. Failed allocations roll back unpublished ranges
+  and release partial render work. An unchanged failed render is not retried on
+  every worker-completion notification. Deck's presentation/rebind boundary
+  controls safe retirement of replaced buffers; empty stores are reclaimed once
+  their final contribution is gone.
+
 - A new filter generation makes older subset/status/render completions stale.
 - Filter status frames use `filterId` and `generation`, independent of viewport
   request IDs. Route them before request-status filtering; the subscription

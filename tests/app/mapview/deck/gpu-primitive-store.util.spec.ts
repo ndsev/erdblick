@@ -1,6 +1,4 @@
-import {DEFAULT_POINT_CLOUD_POLICY} from "../../../../app/mapview/point-cloud-policy.model";
-import {GpuAllocationError, gpuMemoryBudget} from "../../../../app/mapview/deck/gpu-memory-budget.model";
-import {describe, expect, it} from "vitest";
+import {describe, expect, it, vi} from "vitest";
 import type {Buffer, Device} from "@luma.gl/core";
 import {GpuPrimitiveStore} from "../../../../app/mapview/deck/gpu-primitive-store.util";
 
@@ -63,24 +61,24 @@ class FakeDevice {
 }
 
 describe("GpuPrimitiveStore", () => {
-    it("drops optional growth slack and can allocate again after exhaustion is reclaimed", () => {
+    it("rolls back rejected device allocations and preserves the published buffer", () => {
         const device = new FakeDevice();
         const store = new GpuPrimitiveStore(device as unknown as Device, 99n, 4);
-        const baseline = gpuMemoryBudget.allocatedBytes;
-        gpuMemoryBudget.setLimit(baseline + 400);
-        try {
-            store.allocate(100);
-            expect(store.snapshot().allocatedBytes).toBe(400);
-            expect(() => store.allocate(1)).toThrow(GpuAllocationError);
-            expect(store.highWaterRecord).toBe(100);
-            store.destroy();
-            expect(gpuMemoryBudget.allocatedBytes).toBe(baseline);
-            store.allocate(50);
-            expect(store.highWaterRecord).toBe(50);
-        } finally {
-            store.destroy();
-            gpuMemoryBudget.setLimit(DEFAULT_POINT_CLOUD_POLICY.gpuMemoryMiB * 1048576);
-        }
+        const original = store.allocate(64);
+        store.write(original, new Uint8Array(256).fill(17));
+        store.publish();
+        const published = store.presentedBuffer;
+        vi.spyOn(device, "createBuffer").mockImplementationOnce(() => {
+            throw new Error("Device allocation failed");
+        });
+        expect(() => store.allocate(512)).toThrow("Device allocation failed");
+        expect(store.highWaterRecord).toBe(64);
+        expect(store.presentedBuffer).toBe(published);
+        expect(device.buffers[0].destroyed).toBe(false);
+        expect(device.buffers[0].bytes.slice(0, 256)).toEqual(new Uint8Array(256).fill(17));
+        expect(() => store.allocate(512)).not.toThrow();
+        store.destroy();
+        expect(device.buffers.every(buffer => buffer.destroyed)).toBe(true);
     });
 
     it("reserves bounded headroom for early packet streams", () => {

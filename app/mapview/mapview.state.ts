@@ -2,7 +2,6 @@ import { clampLod3TileThreshold, DEFAULT_LOD3_TILE_THRESHOLD } from "./presentat
 import {
     DEFAULT_POINT_CLOUD_POLICY,
     pointCloudDetailSchema,
-    pointCloudGpuMemorySchema,
     type PointCloudPolicy,
     pointCloudWorkingMemorySchema
 } from "./point-cloud-policy.model";
@@ -840,10 +839,6 @@ export class MapViewState {
         fromStorage: (value) => clampTileSubsetRenderWorkerCount(value)
     });
 
-    readonly gpuMemoryManagementEnabledState = this.persistence.registerState<boolean>({
-        name: "gpuMemoryManagementEnabled", defaultValue: true, schema: Boolish
-    });
-
     readonly pointCloudDownsamplingEnabledState = this.persistence.registerState<boolean>({
         name: "pointCloudDownsamplingEnabled",
         defaultValue: DEFAULT_POINT_CLOUD_POLICY.enabled,
@@ -862,19 +857,12 @@ export class MapViewState {
         schema: pointCloudWorkingMemorySchema
     });
 
-    readonly pointCloudGpuMemoryMiBState = this.persistence.registerState<number>({
-        name: "pointCloudGpuMemoryMiB",
-        defaultValue: DEFAULT_POINT_CLOUD_POLICY.gpuMemoryMiB,
-        schema: pointCloudGpuMemorySchema
-    });
-
     /** Read the same validated policy for Preferences, rendering and worker admission. */
     get pointCloudPolicy(): PointCloudPolicy {
         return {
             enabled: this.pointCloudDownsamplingEnabledState.getValue(),
             detailPixels: this.pointCloudDetailPixelsState.getValue(),
-            workingMemoryMiB: this.pointCloudWorkingMemoryMiBState.getValue(),
-            gpuMemoryMiB: this.pointCloudGpuMemoryMiBState.getValue()
+            workingMemoryMiB: this.pointCloudWorkingMemoryMiBState.getValue()
         };
     }
 
@@ -884,16 +872,7 @@ export class MapViewState {
         (left, right) =>
             left.enabled === right.enabled &&
             left.detailPixels === right.detailPixels &&
-            left.workingMemoryMiB === right.workingMemoryMiB &&
-            left.gpuMemoryMiB === right.gpuMemoryMiB
-    );
-
-    /** Render admission observes the allowance and its enable switch atomically. */
-    readonly renderingMemoryPolicyChanges = this.persistence.observe(
-        () => ({...this.pointCloudPolicy, managed: this.gpuMemoryManagementEnabledState.value}),
-        (left, right) => left.enabled === right.enabled && left.detailPixels === right.detailPixels &&
-            left.workingMemoryMiB === right.workingMemoryMiB && left.gpuMemoryMiB === right.gpuMemoryMiB &&
-            left.managed === right.managed
+            left.workingMemoryMiB === right.workingMemoryMiB
     );
 
     readonly tilesLoadLimitState = this.persistence.registerState<number>({

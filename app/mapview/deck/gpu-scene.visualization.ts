@@ -19,7 +19,6 @@ import {
   type GpuPrimitiveStoreSnapshot,
 } from "./gpu-primitive-store.util";
 import { GpuRangeAllocator, type GpuRecordRange } from "./gpu-range-allocator.model";
-import { gpuMemoryBudget } from "./gpu-memory-budget.model";
 
 const LOOKUP_TEXTURE_WIDTH = 1024;
 const MAX_PICKING_INDEX = 0x00ff_fffe;
@@ -756,8 +755,6 @@ export class GpuScene {
   private fatalPresentationFailures = 0;
   private poisoned = false;
   private destroyed = false;
-  private finishGpuRetirement: ((reusableCapacity?: boolean) => void) | null = null;
-  private retiringContributionCapacity = false;
 
   /** Own all persistent vector buffers and semantic lookup tables for one view. */
   constructor(
@@ -1051,7 +1048,6 @@ export class GpuScene {
             // fragment becomes active. Advance the presentation generation so
             // existing models rebind on the next draw; activation remains
             // guarded by the contribution token until the final fragment.
-            this.markGpuRetirement();
             this._revision += 1;
             this.requestRedraw("GPU material buffer replaced");
           }
@@ -1164,7 +1160,6 @@ export class GpuScene {
           // slot during admission would create a tile-shaped hole in unrelated
           // Deck frames that still draw the previous buffer generation.
           this.presentationReleases.push(previous);
-          this.markGpuRetirement(true);
           this.changeSceneOrderReferences(previous, -1);
           this.queueContributionLookupClear(previous.contributionSlot);
         }
@@ -1267,7 +1262,6 @@ export class GpuScene {
       if (entry.active) {
         labelsChanged ||= entry.active.labels.length > 0;
         this.presentationReleases.push(entry.active);
-        this.markGpuRetirement(true);
         this.changeSceneOrderReferences(entry.active, -1);
         this.queueContributionLookupClear(entry.active.contributionSlot);
         entry.active = null;
@@ -1602,9 +1596,6 @@ export class GpuScene {
       return;
     }
     this.destroyed = true;
-    const finishRetirement = this.finishGpuRetirement ??
-      (this.storesByMaterial.size ? gpuMemoryBudget.beginRetirement() : null);
-    this.finishGpuRetirement = null;
     for (const store of this.storesByMaterial.values()) {
       store.destroy();
     }
@@ -1632,7 +1623,6 @@ export class GpuScene {
     this.pickOwnerSlots = new Uint32Array();
     this.pickIndicesByTileAndFeature.clear();
     this.picks.clear();
-    finishRetirement?.(true);
   }
 
   get revision(): number {
@@ -1691,17 +1681,6 @@ export class GpuScene {
       this._revision += 1;
       this.requestRedraw("Empty GPU stores reclaimed");
     }
-    const finishRetirement = this.finishGpuRetirement;
-    this.finishGpuRetirement = null;
-    const reusableCapacity = this.retiringContributionCapacity;
-    this.retiringContributionCapacity = false;
-    finishRetirement?.(reusableCapacity);
-  }
-
-  /** Publish the lifetime fence before a completed worker can wake admission. */
-  private markGpuRetirement(reusableCapacity = false): void {
-    this.retiringContributionCapacity ||= reusableCapacity;
-    this.finishGpuRetirement ??= gpuMemoryBudget.beginRetirement();
   }
 
   get originTexture(): Texture | null {
