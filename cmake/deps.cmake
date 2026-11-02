@@ -41,7 +41,7 @@ if (NOT TARGET mapget-model)
     CPMAddPackage(
       NAME mapget
       GIT_REPOSITORY "https://github.com/ndsev/mapget.git"
-      GIT_TAG "c0f30c37cb94ac46d94ffba4607ae02e5ffa0ca5"
+      GIT_TAG "3aa3d4df250fb4b97f07f33c8e065abd9de4b357"
       GIT_SHALLOW OFF
       OPTIONS
         "MAPGET_WITH_WHEEL OFF"
