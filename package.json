@@ -14,7 +14,7 @@
     "test": "ng test",
     "test:vitest": "vitest run",
     "test:lint-rules": "node --test tools/eslint/*.test.mjs tools/source-structure.test.mjs",
-    "prelint": "npm run test:lint-rules",
+    "prelint": "npm run generate:viewer-actions && npm run test:lint-rules",
     "lint": "eslint app tests/app tests/support && npm run lint:structure",
     "lint:structure": "node tools/source-structure.mjs",
     "test:integration": "playwright test",

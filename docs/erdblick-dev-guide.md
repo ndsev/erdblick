@@ -698,8 +698,12 @@ same DOM-free Zod definitions used at runtime. Both webapp variants package
 `web-mcp-actions.json` beside `index.html`. Its `catalogId` hashes compact JSON
 with recursively sorted object keys, retained array order and ECMAScript JSON
 scalar encoding; the digest and timestamps are not hash input. Generated files
-under `app/action/generated/` are ignored build outputs. Argument, result,
-relay and connection-info parity fixtures live in `tests/fixtures/viewer-actions/`.
+under `app/action/generated/` are ignored build outputs. Lint regenerates this
+catalog before scanning application sources. Generation also removes the known,
+untracked outputs from the former `app/actions/generated/` location, so reused
+checkouts do not lint obsolete files; tracked files are always preserved.
+Argument, result, relay and connection-info parity fixtures live in
+`tests/fixtures/viewer-actions/`.
 String bounds use Unicode code points, as Draft-07 specifies, not JavaScript's
 UTF-16 length. Use the shared `boundedUnicodeString`/`unicodePrefix` helpers for
 bounded contract strings and text summaries; byte budgets remain UTF-8 byte limits.
