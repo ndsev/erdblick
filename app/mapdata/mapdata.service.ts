@@ -3,10 +3,13 @@ import { HttpClient } from "@angular/common/http";
 import { Injectable } from "@angular/core";
 import {
     BehaviorSubject,
+    EMPTY,
     filter,
     firstValueFrom,
+    fromEvent,
     Subject,
-    take
+    take,
+    takeUntil
 } from "rxjs";
 import { z } from "zod";
 import type { FeatureLayerStyle, TileLayerParser } from "../../build/libs/core/erdblick-core";
@@ -84,8 +87,11 @@ export class MapDataService implements AppActionContributor {
     public readonly legalInformationUpdated = new Subject<boolean>();
     public readonly layerStateChanged = new Subject<string>();
     public readonly styleOptionsChanged = new Subject<StyleOptionChange[]>();
-    /** Emits on replacement/removal, requiring a stream reset; additions leave existing consumers live. */
-    public readonly dataSourceInfoChanged = new Subject<void>();
+    /**
+     * Fences old transport/work before retiring these maps' native metadata.
+     * Unlisted maps keep their dictionaries, layers and retained presentations.
+     */
+    public readonly dataSourceInfoChanged = new Subject<readonly string[]>();
     public readonly maps$: BehaviorSubject<MapLayerTree>;
 
     /** Shared parser instance whose datasource metadata is populated from `/sources`. */
@@ -315,6 +321,43 @@ export class MapDataService implements AppActionContributor {
         return !!map?.layers.has(layerId) && isDataSourceCatalogEntryReady(map.info);
     }
 
+    /**
+     * Restored inspections can start while this map's schema is still loading.
+     * Wait for its installed metadata before requesting bytes that need that
+     * schema to decode. Other maps may remain loading; cancellation releases
+     * the catalog subscription when an inspection is closed or replaced.
+     */
+    async waitForMapLayersReady(
+        layers: readonly {mapId: string; layerId: string}[],
+        signal?: AbortSignal
+    ): Promise<void> {
+        signal?.throwIfAborted();
+        try {
+            await firstValueFrom(this.maps$.pipe(
+                filter(tree => {
+                    let ready = true;
+                    for (const {mapId, layerId} of layers) {
+                        const map = tree.maps.get(mapId);
+                        if (!map) throw new Error(`Datasource '${mapId}' is unavailable.`);
+                        const status = dataSourceReadinessStatus(map.info);
+                        if (status === "failed") throw new Error(this.dataSourceStatusText(map.info));
+                        if (status !== "ready") {
+                            ready = false;
+                        } else if (!map.layers.has(layerId)) {
+                            throw new Error(`Layer '${mapId}/${layerId}' is unavailable.`);
+                        }
+                    }
+                    return ready;
+                }),
+                take(1),
+                takeUntil(signal ? fromEvent(signal, "abort") : EMPTY)
+            ));
+        } catch (error) {
+            signal?.throwIfAborted();
+            throw error;
+        }
+    }
+
     /** Returns the immutable catalog identity for one feature layer. */
     mapgetLayer(mapId: string, layerId: string): MapgetLayer | undefined {
         return this.mapgetLayersByKey.get(`${mapId}/${layerId}`);
@@ -447,16 +490,23 @@ export class MapDataService implements AppActionContributor {
      * or removal resets the stream, independently of schema download completion.
      */
     private reconcileReadySources(catalogHints?: MapInfoItem[]): void {
-        const removed = [...this.readySourceMetadata.keys()].some(key => !this.catalogMetadata.has(key));
-        if (removed) {
-            const retained = [...this.readySourceMetadata].filter(([key]) => this.catalogMetadata.has(key));
-            uint8ArrayToWasmOrThrow(
-                buffer => this.tileLayerParser.setDataSourceInfo(buffer),
-                new TextEncoder().encode(JSON.stringify(retained.map(([, source]) => source)))
-            );
-            this.readySourceMetadata = new Map(retained);
-            this.invalidateFieldDictBlobCache();
-            this.renderDataSourceInfoBlobCache.clear();
+        const retired = [...this.readySourceMetadata]
+            .filter(([signature]) => !this.catalogMetadata.has(signature));
+        if (retired.length) {
+            const mapIds = retired.map(([, source]) => source.mapId);
+            for (const mapId of mapIds) {
+                // Invalidate pending work now, including while the replacement
+                // schema is still downloading. Readiness is published below.
+                this.mapMetadataGenerations.set(mapId, ++this.nextMetadataGeneration);
+                this.renderDataSourceInfoBlobCache.delete(mapId);
+            }
+            this.dataSourceInfoChanged.next(mapIds);
+            this.applyNativeCatalogChanges(mapIds, []);
+            for (const [signature] of retired) this.readySourceMetadata.delete(signature);
+            const retainedPools = this.tileLayerParser.getFieldDictOffsets();
+            for (const poolId of this.fieldDictBlobCache.keys()) {
+                if (!Object.hasOwn(retainedPools, poolId)) this.fieldDictBlobCache.delete(poolId);
+            }
         }
         this.sourceCatalogEntries = this.sourceCatalogEntries.map(source => {
             if (dataSourceCatalogStatus(source) !== "ready") return source;
@@ -473,10 +523,7 @@ export class MapDataService implements AppActionContributor {
                     if (artifact) {
                         uint8ArrayToWasmOrThrow(bytes => this.tileLayerParser.installMapSchema(bytes, artifact.schemaId), artifact.bytes);
                     }
-                    uint8ArrayToWasmOrThrow(
-                        buffer => this.tileLayerParser.addDataSourceInfo(buffer),
-                        new TextEncoder().encode(JSON.stringify([metadata]))
-                    );
+                    this.applyNativeCatalogChanges([], [metadata]);
                     this.readySourceMetadata.set(signature, metadata);
                     this.mapMetadataGenerations.set(metadata.mapId, ++this.nextMetadataGeneration);
                     this.renderDataSourceInfoBlobCache.delete(metadata.mapId);
@@ -497,8 +544,15 @@ export class MapDataService implements AppActionContributor {
         this.dataSourceInfoJson = JSON.stringify([...this.readySourceMetadata.values()]);
         this.dataSourceInfoBlobValue = new TextEncoder().encode(this.dataSourceInfoJson);
         this.publishSourceCatalogTree(this.sourceCatalogEntries);
-        if (removed) this.dataSourceInfoChanged.next();
         this.layerStateChanged.next("datasources");
+    }
+
+    /** Apply the same explicit catalog delta to the native metadata/dictionary owner. */
+    private applyNativeCatalogChanges(removedMapIds: readonly string[], addedSources: readonly MapInfoItem[]): void {
+        uint8ArrayToWasmOrThrow(
+            bytes => this.tileLayerParser.applyDataSourceChanges(bytes),
+            new TextEncoder().encode(JSON.stringify({removedMapIds, addedSources}))
+        );
     }
 
     /** Completes one exact catalog snapshot; a replaced source cannot be revived by a late response. */

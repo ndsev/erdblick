@@ -51,10 +51,11 @@ public:
     void setDataSourceInfo(SharedUint8Array const& dataSourceInfoJson);
 
     /**
-     * Append newly ready maps without resetting existing metadata or string pools.
-     * Rejects already registered map ids; replacements must use setDataSourceInfo.
+     * Apply {removedMapIds, addedSources} atomically. Replacement explicitly
+     * removes the old map before adding its new metadata. Unchanged maps keep
+     * their layer-info, schema and dictionary owners, including add-on pools.
      */
-    void addDataSourceInfo(SharedUint8Array const& dataSourceInfoJson);
+    void applyDataSourceChanges(SharedUint8Array const& changesJson);
 
     /**
      * Get the data source info JSON that was set earlier.
@@ -243,6 +244,8 @@ public:
     std::set<std::pair<std::string, std::string>> incomingRelationCoverageUnknown_;
     std::unique_ptr<mapget::TileLayerStream::Reader> reader_;
     std::shared_ptr<mapget::TileLayerStream::StringPoolCache> cachedStrings_;
+    /** Serialized subsets can use add-on dictionaries absent from catalog metadata. */
+    std::map<std::string, std::set<std::string>> stringPoolsByMap_;
     std::function<void(mapget::TileFeatureLayer::Ptr)> tileParsedFun_;
     std::shared_ptr<mapget::LayerInfo> fallbackLayerInfo_;
     struct SchemaCompletionBinding;
@@ -252,12 +255,18 @@ public:
     /** Resolve an already installed graph; model decoding never performs network IO. */
     std::shared_ptr<mapget::MapSchema const> resolveMapSchema(std::string_view schemaId) const;
 
+    /** Validate a complete edit before replacing indexes or releasing any dictionary. */
+    void changeDataSources(nlohmann::json const& removedMapIds, nlohmann::json const& addedSources);
+
+    /** Keep dictionaries needed by lazily decoded retained subsets across unrelated edits. */
+    void trackStringPool(mapget::PartitionLayer const& layer);
+
     /**
      * Resolve layer metadata for a `(mapId, layerId)` pair using loaded datasource info
      * and the optional fallback layer info used by tests.
      */
     std::shared_ptr<mapget::LayerInfo>
-    resolveMapLayerInfo(std::string const& mapId, std::string const& layerId);
+    resolveMapLayerInfo(std::string const& mapId, std::string const& layerId) const;
 
     /** Type info registry. */
     std::map<std::string, FeatureJumpTarget> featureJumpTargets_;

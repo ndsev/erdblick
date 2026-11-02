@@ -890,6 +890,9 @@ export class MapTileStreamService implements OnDestroy {
             );
         }
 
+        await this.mapInfo.waitForMapLayersReady([...groups.values()], signal);
+        signal?.throwIfAborted();
+
         const transport = new MapTileStreamClientTiles(
             "/tiles",
             this.mapInfo.tileLayerParser
@@ -921,11 +924,23 @@ export class MapTileStreamService implements OnDestroy {
         }));
         let timeout: ReturnType<typeof setTimeout> | undefined;
         let abort: (() => void) | undefined;
+        let catalogSubscription: Subscription | undefined;
         try {
             const cancelled = new Promise<never>((_, reject) => {
-                abort = () => reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+                const cancel = (reason: unknown) => {
+                    // Stop decoding before a catalog edit releases this map's
+                    // dictionaries; promise cleanup alone would run too late.
+                    transport.destroy();
+                    reject(reason);
+                };
+                abort = () => cancel(signal?.reason ?? new DOMException("Aborted", "AbortError"));
                 signal?.addEventListener("abort", abort, { once: true });
                 if (signal?.aborted) abort();
+                catalogSubscription = this.mapInfo.dataSourceInfoChanged.subscribe(mapIds => {
+                    if ([...groups.values()].some(group => mapIds.includes(group.mapId))) {
+                        cancel(new DOMException("Inspection datasource changed.", "AbortError"));
+                    }
+                });
             });
             const timeoutPromise = new Promise<never>((_, reject) => {
                 timeout = setTimeout(
@@ -947,6 +962,7 @@ export class MapTileStreamService implements OnDestroy {
                 );
             }
         } finally {
+            catalogSubscription?.unsubscribe();
             if (abort) signal?.removeEventListener("abort", abort);
             if (timeout) {
                 clearTimeout(timeout);

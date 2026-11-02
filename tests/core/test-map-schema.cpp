@@ -72,7 +72,7 @@ TEST_CASE(
     corrupt.back() ^= 1;
     REQUIRE_THROWS(parser.installMapSchema(erdblick::SharedUint8Array(corrupt), id));
     REQUIRE_THROWS(parser.installMapSchema(erdblick::SharedUint8Array("truncated"), id));
-    parser.addDataSourceInfo(sourceFixture("StillReady", id));
+    parser.setDataSourceInfo(sourceFixture("StillReady", id));
     REQUIRE(parser.featureTypes("StillReady", "Road", false) == nlohmann::json::array({"Road"}));
 }
 
@@ -85,12 +85,12 @@ TEST_CASE(
     auto const id = std::string(graph->schemaId());
     erdblick::TileLayerParser first;
     erdblick::TileLayerParser second;
-    REQUIRE_THROWS(first.addDataSourceInfo(sourceFixture("First", id)));
+    REQUIRE_THROWS(first.setDataSourceInfo(sourceFixture("First", id)));
     REQUIRE_THROWS(first.installMapSchema(bytes, id + "-wrong"));
     first.installMapSchema(bytes, id);
     second.installMapSchema(bytes, id);
-    first.addDataSourceInfo(sourceFixture("First", id));
-    second.addDataSourceInfo(sourceFixture("Second", id));
+    first.setDataSourceInfo(sourceFixture("First", id));
+    second.setDataSourceInfo(sourceFixture("Second", id));
     REQUIRE(first.info_.at("First").mapSchema_ == second.info_.at("Second").mapSchema_);
     REQUIRE(first.featureTypes("First", "Road", false) == nlohmann::json::array({"Road"}));
     REQUIRE(first.featureTypes("First", "Road", true).size() == 2);
@@ -102,7 +102,7 @@ TEST_CASE("Invalid metadata replacement preserves the previous bound graph", "[e
     auto const id = std::string(graph->schemaId());
     erdblick::TileLayerParser parser;
     parser.installMapSchema(schemaBytes(*graph), id);
-    parser.addDataSourceInfo(sourceFixture("First", id));
+    parser.setDataSourceInfo(sourceFixture("First", id));
     auto retained = parser.info_.at("First").mapSchema_;
     REQUIRE_THROWS(parser.setDataSourceInfo(sourceFixture("Replacement", "unknown-schema")));
     REQUIRE(parser.info_.at("First").mapSchema_ == retained);

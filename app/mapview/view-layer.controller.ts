@@ -156,8 +156,8 @@ export class ViewLayerController {
         let previousCloudWorkingMiB = this.renderService.pointCloudPolicy.workingMemoryMiB;
         this.subscriptions.push(
             this.mapInfo.maps$.subscribe(() => this.scheduleReconcile()),
-            this.mapInfo.dataSourceInfoChanged.subscribe(() =>
-                this.resetInteractionStyleCaches()),
+            this.mapInfo.dataSourceInfoChanged.subscribe(mapIds =>
+                this.retireDataSources(mapIds)),
             this.mapInfo.layerStateChanged.subscribe(() => this.scheduleReconcile()),
             this.mapInfo.styleOptionsChanged.subscribe(changes => {
                 if (changes.some(change => change.viewIndex === this.viewIndex)) {
@@ -1392,8 +1392,20 @@ export class ViewLayerController {
         return effect;
     }
 
-    /** Drops schema-derived interaction caches after a datasource catalog replacement. */
-    private resetInteractionStyleCaches(): void {
+    /** Retire changed-map work before its parser metadata is replaced; keep sibling scenes live. */
+    private retireDataSources(mapIds: readonly string[]): void {
+        for (const [key, owned] of this.styledLayers) {
+            if (mapIds.includes(owned.layer.mapgetLayer.mapId)) {
+                this.destroyOwnedLayer(owned);
+                this.styledLayers.delete(key);
+            }
+        }
+        for (const [key, fallback] of this.retiringRegularLayers) {
+            if (mapIds.includes(fallback.owned.layer.mapgetLayer.mapId)) {
+                this.destroyOwnedLayer(fallback.owned);
+                this.retiringRegularLayers.delete(key);
+            }
+        }
         this.interactionLayerAffinityCache = new WeakMap();
         this.interactionFilterPlanCache = new WeakMap();
         this.interactionEffectCache = new WeakMap();

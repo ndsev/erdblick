@@ -1034,7 +1034,9 @@ void TileLayerParser::setDataSourceInfo(const erdblick::SharedUint8Array& dataSo
     // source must not clear the working catalog or its streamed dictionary state.
     TileLayerParser replacement;
     replacement.schemas_ = schemas_;
-    replacement.addDataSourceInfo(dataSourceInfoJson);
+    replacement.changeDataSources(
+        nlohmann::json::array(),
+        nlohmann::json::parse(dataSourceInfoJson.toString()));
     // Decoded layers pin their own graph. The parser only retains owners used
     // by the replacement catalog, so repeated source reloads do not leak graphs.
     replacement.schemas_.clear();
@@ -1047,31 +1049,43 @@ void TileLayerParser::setDataSourceInfo(const erdblick::SharedUint8Array& dataSo
     schemas_.swap(replacement.schemas_);
     schemaCompletionBindings_.clear();
     cachedStrings_ = std::make_shared<mapget::TileLayerStream::StringPoolCache>();
+    stringPoolsByMap_.clear();
     reset();
 }
 
-void TileLayerParser::addDataSourceInfo(const erdblick::SharedUint8Array& dataSourceInfoJson)
+void TileLayerParser::applyDataSourceChanges(SharedUint8Array const& changesJson)
 {
-    // Validate the entire batch before changing live parser state. Appending a
-    // map is safe on the existing stream; replacing one is not.
-    std::vector<DataSourceInfo> additions;
-    std::set<std::string> addedMapIds;
-    for (auto const& node : nlohmann::json::parse(dataSourceInfoJson.toString())) {
+    auto const changes = nlohmann::json::parse(changesJson.toString());
+    changeDataSources(changes.at("removedMapIds"), changes.at("addedSources"));
+}
+
+void TileLayerParser::changeDataSources(
+    nlohmann::json const& removedMapIds,
+    nlohmann::json const& addedSources)
+{
+    auto const removed = removedMapIds.get<std::set<std::string>>();
+    auto nextInfo = info_;
+    for (auto const& mapId : removed)
+        nextInfo.erase(mapId);
+    for (auto const& node : addedSources) {
         auto dsInfo = DataSourceInfo::fromJson(
             node,
             [this](std::string_view id) { return resolveMapSchema(id); });
         if (dsInfo.isAddOn_)
             continue;
-        if (info_.contains(dsInfo.mapId_) || !addedMapIds.insert(dsInfo.mapId_).second)
+        auto const mapId = dsInfo.mapId_;
+        if (!nextInfo.emplace(mapId, std::move(dsInfo)).second)
             throw std::runtime_error(
-                fmt::format("Datasource map '{}' is already registered", dsInfo.mapId_));
-        additions.push_back(std::move(dsInfo));
+                fmt::format("Datasource map '{}' is already registered", mapId));
     }
 
+    // Work on copied metadata and indexes until validation succeeds. In
+    // particular, a rejected replacement must leave the old dictionary usable.
+    std::map<std::string, FeatureJumpTarget> nextTargets;
     // Index available feature types by their feature id compositions.
     // These will be the available jump-to-feature targets.
     // For each composition, allow a version with and without optional params.
-    for (auto& dsInfo : additions) {
+    for (auto const& [_, dsInfo] : nextInfo) {
         for (auto const& [_, l] : dsInfo.layers_) {
             for (auto const& tp : l->featureTypes()) {
                 if (!l->layerSchema()->producesFeatureType(tp.name_))
@@ -1088,7 +1102,7 @@ void TileLayerParser::addDataSourceInfo(const erdblick::SharedUint8Array& dataSo
                             }
                         }
 
-                        auto& typeInfo = featureJumpTargets_[compositionId];
+                        auto& typeInfo = nextTargets[compositionId];
                         if (typeInfo.idParts_.empty()) {
                             typeInfo.id_ = compositionId;
                             typeInfo.idParts_ = idParts;
@@ -1101,19 +1115,57 @@ void TileLayerParser::addDataSourceInfo(const erdblick::SharedUint8Array& dataSo
                 }
             }
         }
-
-        schemas_.insert_or_assign(dsInfo.schemaId_, dsInfo.mapSchema_);
-        info_.emplace(dsInfo.mapId_, std::move(dsInfo));
     }
+
+    info_.swap(nextInfo);
+    featureJumpTargets_.swap(nextTargets);
+    for (auto const& mapId : removed) {
+        stringPoolsByMap_.erase(mapId);
+        std::erase_if(
+            incomingRelationTargets_,
+            [&](auto const& item) { return item.first.first == mapId; });
+        std::erase_if(
+            incomingRelationCoverageUnknown_,
+            [&](auto const& key) { return key.first == mapId; });
+    }
+    std::set<std::string> retainedPools;
+    std::set<std::string> retainedSchemas;
+    for (auto const& [mapId, source] : info_) {
+        retainedPools.insert(source.stringPoolId_);
+        retainedSchemas.insert(source.schemaId_);
+        schemas_.insert_or_assign(source.schemaId_, source.mapSchema_);
+        if (auto pools = stringPoolsByMap_.find(mapId); pools != stringPoolsByMap_.end())
+            retainedPools.insert(pools->second.begin(), pools->second.end());
+    }
+    // Fields can arrive before a map's first tile. Only prune after retirement,
+    // when the transport has been fenced and will resend unacknowledged pools.
+    if (!removed.empty())
+        cachedStrings_->retainStringPools(retainedPools);
+    std::erase_if(
+        schemas_,
+        [&](auto const& entry) { return !retainedSchemas.contains(entry.first); });
+    std::erase_if(
+        schemaCompletionBindings_,
+        [&](auto const& entry) { return !retainedSchemas.contains(entry.first.first); });
+}
+
+void TileLayerParser::trackStringPool(mapget::PartitionLayer const& layer)
+{
+    stringPoolsByMap_[layer.mapId()].insert(layer.stringPoolId());
 }
 
 void TileLayerParser::readFieldDictUpdate(SharedUint8Array const& bytes)
 {
+    // A missing dictionary poisons later semantic reads. Let the transport
+    // fail and reconnect at this boundary instead of logging and continuing.
     try {
         reader_->read(bytes.toString());
     }
-    catch(std::exception const& e) {
-        std::cout << "ERROR: " << e.what() << std::endl;
+    catch (...) {
+        // Reader framing may be mid-message after a decoding error. Its
+        // replacement shares the intact dictionary cache for the next stream.
+        reset();
+        throw;
     }
 }
 
@@ -1144,6 +1196,7 @@ TileFeatureLayer TileLayerParser::readTileFeatureLayer(const SharedUint8Array& b
         { return resolveMapLayerInfo(std::string(mapId), std::string(layerId)); },
         [this](auto&& stringPoolId) { return cachedStrings_->getStringPool(stringPoolId); },
         [this](std::string_view schemaId) { return resolveMapSchema(schemaId); }));
+    trackStringPool(*result.model_);
     return result;
 }
 
@@ -1188,6 +1241,7 @@ TileSourceDataLayer TileLayerParser::readTileSourceDataLayer(SharedUint8Array co
         { return resolveMapLayerInfo(std::string(mapId), std::string(layerId)); },
         [this](auto&& stringPoolId) { return cachedStrings_->getStringPool(stringPoolId); },
         [this](std::string_view schemaId) { return resolveMapSchema(schemaId); }));
+    trackStringPool(*result.model_);
     return result;
 }
 
@@ -1199,6 +1253,7 @@ TileSubsetLayer TileLayerParser::readTileSubsetLayer(SharedUint8Array const& buf
         { return resolveMapLayerInfo(std::string(mapId), std::string(layerId)); },
         [this](auto&& stringPoolId) { return cachedStrings_->getStringPool(stringPoolId); },
         [this](std::string_view schemaId) { return resolveMapSchema(schemaId); }));
+    trackStringPool(*result.model_);
     return result;
 }
 
@@ -1213,6 +1268,7 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
         {
             return resolveMapLayerInfo(std::string(mapId), std::string(layerId));
         });
+    trackStringPool(tileLayer);
     int32_t numFeatures = -1;
     auto layerInfo = tileLayer.info();
     auto allScalarFields = JsValue::Dict();
@@ -1345,12 +1401,17 @@ void TileLayerParser::setFallbackLayerInfo(std::shared_ptr<mapget::LayerInfo> in
 }
 
 std::shared_ptr<mapget::LayerInfo>
-TileLayerParser::resolveMapLayerInfo(std::string const& mapId, std::string const& layerId)
+TileLayerParser::resolveMapLayerInfo(std::string const& mapId, std::string const& layerId) const
 {
-    auto& map = info_[mapId];
-    auto it = info_[mapId].layers_.find(layerId);
-    if (it != map.layers_.end())
-        return it->second;
+    // A late tile or an inspection restored before schema readiness may refer
+    // to an absent map. Looking it up must not insert an empty datasource and
+    // prevent the real catalog entry from being registered later.
+    auto const map = info_.find(mapId);
+    if (map != info_.end()) {
+        auto const layer = map->second.layers_.find(layerId);
+        if (layer != map->second.layers_.end())
+            return layer->second;
+    }
     return fallbackLayerInfo_;
 }
 
@@ -1442,7 +1503,8 @@ void TileLayerParser::addFieldDict(const SharedUint8Array& buffer)
     auto stringPoolId =
         mapget::StringPool::readDataSourceStringPoolId(buffer.bytes(), 0, &bytesRead);
     auto fieldDict = cachedStrings_->getStringPool(stringPoolId);
-    (void) fieldDict->read(buffer.bytes(), bytesRead);
+    if (auto result = fieldDict->read(buffer.bytes(), bytesRead); !result)
+        throw std::runtime_error(result.error().message);
 }
 
 NativeJsValue TileLayerParser::completeSearchQuery(

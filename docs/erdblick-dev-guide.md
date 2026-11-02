@@ -155,12 +155,22 @@ The C++ core wraps mapget models and exposes:
 The retired full-feature visualizers and `TileSearchResultLayer` wrappers do
 not coexist with this path.
 
-During nonblocking datasource startup, `MapDataService` retains unchanged layer
-identities and appends newly ready maps through `TileLayerParser.addDataSourceInfo`.
-Existing string dictionaries, style planners, rendered tiles and the interactive
-connection remain live. Catalog status/progress changes are not model changes.
-Replacing or removing installed metadata still uses `setDataSourceInfo` and resets
-the stream dictionaries; the additive API rejects already registered map IDs.
+`MapDataService` applies catalog differences through
+`TileLayerParser.applyDataSourceChanges({removedMapIds, addedSources})`. The native
+parser validates the entire change before updating its catalog and indexes.
+Unchanged maps retain their layer metadata, schema owners and string dictionaries,
+including combined add-on dictionaries recorded when subset metadata is read.
+This matters even after rendering: first hover can decode a retained subset for
+the first time. Catalog status/progress decoration is not a model change.
+
+Before removing or replacing a ready map, the service advances that map's model
+generation, cancels its pending inspections and retires its visualizations. It
+closes the interactive session to discard old queued/in-flight payloads before
+applying the native removal. Unaffected map data and dictionary offsets survive
+the reconnect. A replacement becomes ready only after its exact schema is installed;
+a late artifact from an older catalog cannot revive it. `setDataSourceInfo` remains
+the full installation API for fresh/private parsers and intentionally resets all
+dictionary state.
 
 Canonical catalog entries carry a small `mapFormat` and an exact `schemaId`.
 `MapDataService` fetches the binary artifact from `/schema` using both `sourceId`
@@ -365,6 +375,11 @@ sequenceDiagram
 
 Processing order follows request tile order; stream arrival order may differ.
 The transport supports bounded outgoing queues and adaptive payload batches.
+One payload GET is outstanding at a time, including the body download, so a
+subset cannot overtake its dictionary update. Fetching the next batch overlaps
+FIFO frame processing, with at most one extra batch waiting behind the current
+batch. Pausing frame processing therefore applies backpressure to HTTP fetching.
+Closing the connection also releases these batch waits and discards their bytes.
 `/tiles` and `/tiles/next` remain fallback aliases for stale proxy
 deployments; new clients use `/interactive` and `/interactive/payload`.
 
@@ -1017,7 +1032,7 @@ See [Style System](erdblick-stylesystem.md).
 - Long loops check cancellation at feature boundaries and fixed batches.
 - There is no datasource-wide snapshot/revision contract, so independently
   refreshed tiles need not form a transactionally consistent global snapshot.
-- An ambiguous payload fetch, undecodable VTLV message, or failure to install
+- An ambiguous payload fetch, invalid dictionary update, undecodable VTLV message, or failure to install
   a current subset closes the interactive connection. Ordinary reconnect
   starts a fresh mapget session and resends the complete pending snapshot.
 - A VTLV protocol mismatch is terminal for that client rather than retried.

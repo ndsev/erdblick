@@ -73,7 +73,7 @@ describe('MapTileStreamClient', () => {
                 type: 'mapget.tiles.request-context', requestId: 1,
                 clientId: 'b3e68f32-3b51-472d-8cab-14b597f7de91'
             }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
-            expect(signals).toHaveLength(2);
+            expect(signals).toHaveLength(1);
 
             client.close(1000, 'page hidden');
 
@@ -90,6 +90,81 @@ describe('MapTileStreamClient', () => {
         }
     });
 
+    it.each(['resume', 'replace'])('orders delayed payloads and bounds paused batches across %s', async mode => {
+        const client = new MapTileStreamClient('/interactive');
+        const observed: string[] = [];
+        const fields = vi.spyOn(client.parser, 'readFieldDictUpdate').mockImplementation(() => {
+            observed.push('dictionary');
+        });
+        client.onSubsets = () => observed.push('subset');
+        client.setFrameProcessingPaused(true);
+        let finishBody!: (body: ArrayBuffer) => void;
+        const first = new Response();
+        const firstBody = vi.spyOn(first, 'arrayBuffer').mockImplementation(() => new Promise(resolve => {finishBody = resolve;}));
+        const second = new Response(packedFrames(jsonFrame(MAP_TILE_STREAM_TYPE_SUBSETS, {})));
+        const secondBody = vi.spyOn(second, 'arrayBuffer');
+        const fetcher = vi.fn()
+            .mockResolvedValueOnce(first)
+            .mockResolvedValueOnce(second)
+            .mockImplementation((_url, init: RequestInit) => new Promise((_resolve, reject) => {
+                init.signal!.addEventListener('abort', () => reject(init.signal!.reason), {once: true});
+            }));
+        vi.stubGlobal('fetch', fetcher);
+        const controller = new AbortController();
+        client['pullClientId'] = 'b3e68f32-3b51-472d-8cab-14b597f7de91';
+        client['pullController'] = controller;
+        const running = client['runPullLoop'](controller);
+        try {
+            await vi.waitFor(() => expect(firstBody).toHaveBeenCalledOnce());
+            // A second GET used to overtake this still-downloading dictionary.
+            expect(fetcher).toHaveBeenCalledOnce();
+            finishBody(packedFrames(jsonFrame(MAP_TILE_STREAM_TYPE_FIELDS, {})));
+            await vi.waitFor(() => expect(secondBody).toHaveBeenCalledOnce());
+            expect(fetcher).toHaveBeenCalledTimes(2);
+            expect(observed).toEqual([]);
+            expect(client.getPendingFrameQueueSize()).toBe(1);
+            if (mode === 'resume') {
+                client.setFrameProcessingPaused(false);
+                await vi.waitFor(() => expect(observed).toEqual(['dictionary', 'subset']));
+                client.close();
+            } else {
+                // Retire the old catalog while one batch is queued and another
+                // has arrived. Neither may reach the replacement parser state.
+                client.resetAfterDataSourceInfoChange();
+            }
+            await running;
+            expect(client.getPendingFrameQueueSize()).toBe(0);
+            if (mode === 'replace') expect(observed).toEqual([]);
+        } finally {
+            client.destroy();
+            fields.mockRestore();
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('fails the stream at a dictionary error before processing dependent subsets', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const fields = vi.spyOn(client.parser, 'readFieldDictUpdate').mockImplementation(() => {
+            throw new Error('Malformed dictionary');
+        });
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const subset = vi.fn();
+        client.onSubsets = subset;
+        try {
+            await client['enqueueFrame'](packedFrames(
+                jsonFrame(MAP_TILE_STREAM_TYPE_FIELDS, {}),
+                jsonFrame(MAP_TILE_STREAM_TYPE_SUBSETS, {})
+            ));
+            expect(error).toHaveBeenCalledWith('Tile stream frame could not be processed.', expect.any(Error));
+            expect(subset).not.toHaveBeenCalled();
+            expect(client.getPendingFrameQueueSize()).toBe(0);
+        } finally {
+            client.destroy();
+            fields.mockRestore();
+            error.mockRestore();
+        }
+    });
+
     it('does not report a cancelled payload body as a transport failure', async () => {
         const client = new MapTileStreamClient('/interactive');
         const controller = new AbortController();
@@ -101,7 +176,7 @@ describe('MapTileStreamClient', () => {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
         try {
             client['pullClientId'] = 'b3e68f32-3b51-472d-8cab-14b597f7de91';
-            client['pullControllers'] = [controller];
+            client['pullController'] = controller;
             const pending = client['runPullLoop'](controller);
             await vi.waitFor(() => expect(readBody).toHaveBeenCalledOnce());
 
@@ -128,7 +203,7 @@ describe('MapTileStreamClient', () => {
         try {
             client['socket'] = {readyState: WebSocket.OPEN, close} as unknown as WebSocket;
             client['pullClientId'] = 'b3e68f32-3b51-472d-8cab-14b597f7de91';
-            client['pullControllers'] = [controller];
+            client['pullController'] = controller;
 
             await client['runPullLoop'](controller);
 
@@ -200,7 +275,7 @@ describe('MapTileStreamClient', () => {
         const controls: unknown[] = [];
         const data: unknown[] = [];
         tileStream.socket = socket;
-        tileStream.startPullLoops = vi.fn();
+        tileStream.startPullLoop = vi.fn();
         tileStream.latestRequestedRequestId = 3;
         client.onClientId = id => {
             if (id) expect(client.sendActionControl(id, {type: 'test-register'})).toBe(true);
@@ -227,7 +302,7 @@ describe('MapTileStreamClient', () => {
             expect(tileStream.incomingRequestId).toBeNull();
             expect(tileStream.latestRequestedRequestId).toBe(3);
             expect(client.getPendingFrameQueueSize()).toBe(4);
-            expect(tileStream.startPullLoops).not.toHaveBeenCalled();
+            expect(tileStream.startPullLoop).not.toHaveBeenCalled();
             expect(client.onStatus).not.toHaveBeenCalled();
             expect(data).toEqual([]);
 
@@ -300,6 +375,24 @@ describe('MapTileStreamClient', () => {
         } finally {
             client.destroy();
         }
+    });
+
+    it('decodes the replacement stream without waiting for an obsolete body', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        let finishOld!: (frames: any[]) => void;
+        const decode = vi.spyOn(client as any, 'decodeMessage')
+            .mockImplementationOnce(() => new Promise(resolve => {finishOld = resolve;}));
+        const received = vi.fn();
+        client.onFrame = received;
+        try {
+            const old = client['enqueueFrame'](new ArrayBuffer(0));
+            await Promise.resolve();
+            client.resetAfterDataSourceInfoChange();
+            await client['enqueueFrame'](packedFrames(jsonFrame(41, {})));
+            expect(received).toHaveBeenCalledOnce();
+            finishOld([]);
+            await old;
+        } finally {client.destroy(); decode.mockRestore();}
     });
 
     it('never opens or replays action sends and retains the UUID in payload URLs', () => {
@@ -385,6 +478,46 @@ describe('MapTileStreamClient', () => {
                 .rejects.toThrow('after EndOfStream');
         } finally {
             client.destroy();
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it.each(['stream', 'buffer'])('discards an already-resolved HTTP %s read after retirement', async mode => {
+        const parser = new coreLib.TileLayerParser();
+        const fields = vi.spyOn(parser, 'readFieldDictUpdate');
+        const client = new MapTileStreamClientTiles('/tiles', parser);
+        const subset = vi.fn();
+        client.onSubsets = subset;
+        const bytes = packedFrames(
+            jsonFrame(MAP_TILE_STREAM_TYPE_FIELDS, {}),
+            jsonFrame(MAP_TILE_STREAM_TYPE_SUBSETS, {})
+        );
+        let finish!: () => void;
+        const response = mode === 'stream' ? new Response(new ReadableStream({
+            start(controller) {finish = () => controller.enqueue(new Uint8Array(bytes));}
+        })) : new Response();
+        if (mode === 'buffer') {
+            vi.spyOn(response, 'arrayBuffer').mockImplementation(() => new Promise(resolve => {
+                finish = () => resolve(bytes);
+            }));
+        }
+        const read = mode === 'stream'
+            ? vi.spyOn(response.body!, 'getReader')
+            : vi.mocked(response.arrayBuffer);
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+        try {
+            const pending = client.request([]);
+            const cancelled = expect(pending).rejects.toMatchObject({name: 'AbortError'});
+            await vi.waitFor(() => expect(read).toHaveBeenCalledOnce());
+            // Both operations occur before the queued read continuation runs.
+            finish();
+            client.destroy();
+            await cancelled;
+            expect(fields).not.toHaveBeenCalled();
+            expect(subset).not.toHaveBeenCalled();
+        } finally {
+            client.destroy();
+            parser.delete();
             vi.unstubAllGlobals();
         }
     });
@@ -652,10 +785,6 @@ describe('MapTileStreamClient', () => {
             expect(new URL(tileStream.resolvePullUrl(7)).pathname).toBe('/interactive/payload');
 
             expect(tileStream.activateLegacyPullFallbackForStatus(404)).toBe(true);
-            expect(tileStream.activateLegacyPullFallbackForStatus(
-                404,
-                new URL('/interactive/payload', document.baseURI).toString()
-            )).toBe(true);
 
             const url = new URL(tileStream.resolvePullUrl(7));
             expect(url.pathname).toBe('/tiles/next');
@@ -666,10 +795,7 @@ describe('MapTileStreamClient', () => {
                 usingLegacyWebSocketFallback: false,
                 usingLegacyPullFallback: true
             });
-            expect(tileStream.activateLegacyPullFallbackForStatus(
-                404,
-                url.toString()
-            )).toBe(false);
+            expect(tileStream.activateLegacyPullFallbackForStatus(404)).toBe(false);
         } finally {
             client.destroy();
         }

@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include "erdblick/geo/point-conversion.h"
 #include "erdblick/geometry.h"
 #include "erdblick/inspection.h"
@@ -11,6 +12,7 @@
 #include "mapget/model/sourcedatareference.h"
 #include "mapget/model/sourceinfo.h"
 #include "mapget/model/stringpool.h"
+#include "mapget/model/subsetlayer.h"
 #include "nlohmann/json.hpp"
 
 #include <algorithm>
@@ -1484,9 +1486,16 @@ TEST_CASE("TileLayerParser appends ready maps without invalidating live dictiona
     SharedUint8Array dictionaryBefore;
     parser.getFieldDict(dictionaryBefore, "FirstPool");
 
+    auto change = [&](nlohmann::json added, nlohmann::json removed = nlohmann::json::array())
+    {
+        parser.applyDataSourceChanges(SharedUint8Array(nlohmann::json{
+            {"removedMapIds", removed},
+            {"addedSources", added}}.dump()));
+    };
+
     SECTION("new maps extend the index while retaining existing dictionary bytes and layer pointers")
     {
-        parser.addDataSourceInfo(SharedUint8Array(nlohmann::json::array({second}).dump()));
+        change(nlohmann::json::array({second}));
         auto updated = parser.filterFeatureJumpTargets("Way.7");
         REQUIRE(updated.size() == 1);
         REQUIRE(updated.front().jumpTarget_.maps_ == std::vector<std::string>{"First", "Second"});
@@ -1497,15 +1506,136 @@ TEST_CASE("TileLayerParser appends ready maps without invalidating live dictiona
         REQUIRE(dictionaryAfter.toString() == dictionaryBefore.toString());
     }
 
+    SECTION("a tile arriving before its map cannot poison subsequent registration")
+    {
+        mapget::TileFeatureLayer earlyTile(
+            mapget::TileId::fromWgs84(11., 48., 13),
+            "SecondPool",
+            "Second",
+            layerInfo,
+            std::make_shared<mapget::StringPool>("SecondPool"));
+        std::ostringstream bytes;
+        REQUIRE(earlyTile.write(bytes));
+        REQUIRE_THROWS(parser.readTileLayerMetadata(SharedUint8Array(bytes.str())));
+
+        REQUIRE_NOTHROW(change(nlohmann::json::array({second})));
+        REQUIRE(parser.readTileLayerMetadata(SharedUint8Array(bytes.str())).mapName == "Second");
+        REQUIRE(parser.getFieldDictOffsets() == offsets);
+    }
+
     SECTION("a rejected replacement does not partially install earlier maps from the same batch")
     {
-        REQUIRE_THROWS(parser.addDataSourceInfo(SharedUint8Array(nlohmann::json::array({second, first}).dump())));
+        REQUIRE_THROWS(change(nlohmann::json::array({second, first})));
         auto unchanged = parser.filterFeatureJumpTargets("Way.7");
         REQUIRE(unchanged.front().jumpTarget_.maps_ == std::vector<std::string>{"First"});
         REQUIRE(parser.getFieldDictOffsets() == offsets);
         // The rejected batch did not install Second, so it can still be added.
-        REQUIRE_NOTHROW(parser.addDataSourceInfo(SharedUint8Array(nlohmann::json::array({second}).dump())));
+        REQUIRE_NOTHROW(change(nlohmann::json::array({second})));
     }
+    SECTION("retiring a sibling preserves the first lazy pick, including an add-on dictionary")
+    {
+        change(nlohmann::json::array({second}));
+        parser.addFieldDict(serializedStringPool("SecondPool", "retired-field"));
+        // Rendering reads metadata and retains bytes; the main-thread model is
+        // only decoded on first hover, potentially after an unrelated edit.
+        auto strings = std::make_shared<mapget::StringPool>("FirstPlusAddon");
+        auto subset = std::make_shared<mapget::TileSubsetLayer>(
+            mapget::TileId::fromWgs84(11., 48., 13),
+            "FirstPlusAddon",
+            "First",
+            layerInfo,
+            strings,
+            "roads",
+            1);
+        auto channel = subset->newChannel("features", mapget::Scope::Feature, 0, {}, {});
+        channel->newFeatureEntry(
+            subset->newFeatureId("Way", {{"wayId", int64_t{7}}}),
+            subset->newGeometryCollection(0),
+            {});
+        std::ostringstream payload;
+        REQUIRE(subset->write(payload));
+        std::ostringstream dictionary;
+        REQUIRE(strings->write(dictionary, 0));
+        TileLayerParser missingDictionaryParser;
+        missingDictionaryParser
+            .installMapSchema(SharedUint8Array(artifact.str()), std::string(schema->schemaId()));
+        missingDictionaryParser
+            .setDataSourceInfo(SharedUint8Array(nlohmann::json::array({first}).dump()));
+        auto withoutDictionary =
+            missingDictionaryParser.readTileSubsetLayer(SharedUint8Array(payload.str()));
+        REQUIRE_THROWS_WITH(
+            withoutDictionary.resolvePick(0, 0, 0),
+            Catch::Matchers::ContainsSubstring(
+                "is missing from dictionary 'FirstPlusAddon' for map 'First' layer 'LineLayer'"));
+        parser.addFieldDict(SharedUint8Array(dictionary.str()));
+        REQUIRE(parser.readTileLayerMetadata(SharedUint8Array(payload.str())).mapName == "First");
+        auto oldSecondPool = parser.cachedStrings_->getStringPool("SecondPool");
+
+        change(nlohmann::json::array(), nlohmann::json::array({"Second"}));
+
+        auto decoded = parser.readTileSubsetLayer(SharedUint8Array(payload.str()));
+        REQUIRE(decoded.resolvePick(0, 0, 0)["featureId"] == "Way.7");
+        REQUIRE(
+            parser.filterFeatureJumpTargets("Way.7").front().jumpTarget_.layerInfo_ ==
+            originalLayerInfo);
+        auto retained = parser.getFieldDictOffsets();
+        REQUIRE(retained.contains("FirstPool"));
+        REQUIRE(retained.contains("FirstPlusAddon"));
+        REQUIRE_FALSE(retained.contains("SecondPool"));
+        // Existing decoded models may still own the retired dictionary. Removing
+        // the cache entry must not erase strings through those shared owners.
+        REQUIRE(oldSecondPool->resolve(oldSecondPool->get("retired-field")) == "retired-field");
+    }
+
+    SECTION("failed replacement leaves the old catalog and dictionary untouched")
+    {
+        auto invalid = second;
+        invalid["schemaId"] = "missing-schema";
+        REQUIRE_THROWS(change(nlohmann::json::array({invalid}), nlohmann::json::array({"First"})));
+        REQUIRE(parser.info_.contains("First"));
+        REQUIRE(parser.getFieldDictOffsets() == offsets);
+        REQUIRE(
+            parser.filterFeatureJumpTargets("Way.7").front().jumpTarget_.layerInfo_ ==
+            originalLayerInfo);
+    }
+
+    SECTION("replacement retires the old namespace and binds the new one")
+    {
+        auto replacement = first;
+        replacement["stringPoolId"] = "NewFirstPool";
+        change(nlohmann::json::array({replacement}), nlohmann::json::array({"First"}));
+        REQUIRE(parser.info_.at("First").stringPoolId_ == "NewFirstPool");
+        REQUIRE_FALSE(parser.getFieldDictOffsets().contains("FirstPool"));
+    }
+}
+
+TEST_CASE(
+    "Invalid dictionary frames propagate without poisoning reconnect offsets",
+    "[erdblick.parser]")
+{
+    TileLayerParser parser;
+    auto const valid = serializedStringPool("Pool", "complete-field").toString();
+    auto truncated = valid.substr(0, valid.size() - 1);
+    // Keep the outer frame valid: the fault is inside the dictionary decoder,
+    // whose error used to be printed and swallowed by TileLayerParser.
+    auto frame = [](std::string const& payload)
+    {
+        std::string result;
+        mapget::TileLayerStream::StringPoolOffsetMap offsets;
+        mapget::TileLayerStream::Writer
+            writer([&](std::string bytes, auto) { result = std::move(bytes); }, offsets);
+        writer.sendStatus(payload);
+        result.at(6) = static_cast<char>(mapget::TileLayerStream::MessageType::StringPool);
+        return SharedUint8Array(result);
+    };
+    auto pool = parser.cachedStrings_->getStringPool("Pool");
+    auto const offsets = parser.getFieldDictOffsets();
+    REQUIRE_THROWS(parser.readFieldDictUpdate(frame(truncated)));
+    REQUIRE(parser.getFieldDictOffsets() == offsets);
+    REQUIRE_THROWS(parser.addFieldDict(SharedUint8Array(truncated)));
+    REQUIRE(parser.getFieldDictOffsets() == offsets);
+    REQUIRE_NOTHROW(parser.readFieldDictUpdate(frame(valid)));
+    REQUIRE(pool->resolve(pool->get("complete-field")) == "complete-field");
 }
 
 TEST_CASE("TileLayerParser exposes the tile lifetime in milliseconds", "[erdblick.parser]")
