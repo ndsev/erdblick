@@ -2,6 +2,7 @@ import { clampLod3TileThreshold, DEFAULT_LOD3_TILE_THRESHOLD } from "./presentat
 import {
     DEFAULT_POINT_CLOUD_POLICY,
     pointCloudDetailSchema,
+    pointCloudMaxPointsSchema,
     type PointCloudPolicy
 } from "./point-cloud-policy.model";
 import { clampTileSubsetRenderWorkerCount, DEFAULT_VISIBLE_TILE_LIMIT } from "./tile-render-policy.model";
@@ -850,10 +851,17 @@ export class MapViewState {
         schema: pointCloudDetailSchema
     });
 
+    readonly pointCloudMaxPointsState = this.persistence.registerState<number>({
+        name: "pointCloudMaxPoints",
+        defaultValue: DEFAULT_POINT_CLOUD_POLICY.maxPoints,
+        schema: pointCloudMaxPointsSchema
+    });
+
     /** Read the same sampling preferences for the UI and rendering. */
     get pointCloudPolicy(): PointCloudPolicy {
         return {
             enabled: this.pointCloudDownsamplingEnabledState.getValue(),
+            maxPoints: this.pointCloudMaxPointsState.getValue(),
             detailPixels: this.pointCloudDetailPixelsState.getValue()
         };
     }
@@ -863,6 +871,7 @@ export class MapViewState {
         () => this.pointCloudPolicy,
         (left, right) =>
             left.enabled === right.enabled &&
+            left.maxPoints === right.maxPoints &&
             left.detailPixels === right.detailPixels
     );
 

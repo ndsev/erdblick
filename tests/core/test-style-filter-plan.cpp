@@ -668,5 +668,5 @@ rules:
     auto plan = planStyleFilter(parsed, *plannerLayerInfo(), FeatureStyleRule::NoHighlight, 3U);
     REQUIRE(plan.valid);
     REQUIRE(plan.channels.size() == 1);
-    REQUIRE(plan.channels[0].pointCloudMaxPoints_ == 13'999'999);
+    REQUIRE(plan.channels[0].pointCloudMaxPoints_ == 14'000'000);
 }

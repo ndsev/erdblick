@@ -1229,6 +1229,7 @@ export class MapViewService implements AppActionContributor {
         const parsed = pointCloudPolicySchema.parse(policy);
         this.stateService.transaction(() => {
             this.state.pointCloudDownsamplingEnabledState.next(parsed.enabled);
+            this.state.pointCloudMaxPointsState.next(parsed.maxPoints);
             this.state.pointCloudDetailPixelsState.next(parsed.detailPixels);
         });
     }

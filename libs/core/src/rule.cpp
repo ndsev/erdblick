@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include "simfil/value.h"
 #include "search.h"
 
@@ -544,7 +545,8 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     if (yaml["point-cloud"].IsDefined()) pointCloud_ = yaml["point-cloud"].as<bool>();
     if (yaml["point-cloud-max-points"].IsDefined()) {
         auto const quota = yaml["point-cloud-max-points"].as<int64_t>();
-        if (quota < 0 || quota > mapget::DefaultPointCloudMaxPoints) throw std::invalid_argument("point-cloud-max-points must be in 0..13999999");
+        if (quota < 0 || quota > std::numeric_limits<uint32_t>::max())
+            throw std::invalid_argument("point-cloud-max-points must be an unsigned 32-bit integer");
         pointCloudMaxPoints_ = static_cast<uint32_t>(quota);
     }
     if (yaml["billboard"].IsDefined()) {

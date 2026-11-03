@@ -1,22 +1,17 @@
 import "@angular/compiler";
-import {SimpleChange} from "@angular/core";
-import {
-    beforeAll,
-    describe,
-    expect,
-    it,
-    vi
-} from "vitest";
-
-import {AppModule} from "../../../app/app.module";
-import {initializeLibrary} from "../../../app/integrations/wasm.adapter";
-import {featureSearchResultFields} from "../../../app/search/feature-search-runtime-state.model";
-import {createFeatureSearchStateEntry} from "../../../app/search/search-definition.model";
-import {SearchService, type FeatureSearchSession} from "../../../app/search/search.service";
-import {buildFeatureSearchFilterChannels} from "../../../app/search/feature-search-style.adapter";
-import {SearchStyleColorComponent} from "../../../app/search/search-style-color.component";
-import {defaultSearchStyleColorDraft} from "../../../app/search/search-style-color.util";
-import type {SearchValueSummary} from "../../../app/search/search.model";
+import { SimpleChange } from "@angular/core";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { AppModule } from "../../../app/app.module";
+import { initializeLibrary } from "../../../app/integrations/wasm.adapter";
+import { featureSearchResultFields } from "../../../app/search/feature-search-runtime-state.model";
+import { buildFeatureSearchFilterChannels } from "../../../app/search/feature-search-style.adapter";
+import { createFeatureSearchStateEntry } from "../../../app/search/search-definition.model";
+import { SearchResultDensityIndex } from "../../../app/search/search-result-density.visualization";
+import { SearchResults } from "../../../app/search/search-results.model";
+import { SearchStyleColorComponent } from "../../../app/search/search-style-color.component";
+import { defaultSearchStyleColorDraft } from "../../../app/search/search-style-color.util";
+import type { SearchValueSummary } from "../../../app/search/search.model";
+import { SearchService } from "../../../app/search/search.service";
 
 void AppModule;
 
@@ -73,10 +68,10 @@ describe("Search observed category values", () => {
             results: [], diagnostics: null, layerBlob: new Uint8Array(), valueSummary: null, points: []
         };
 
-        const summary = service["valueSummariesForContribution"](contribution);
+        const summary = service["valueSummariesForContribution"](contribution, new SearchResults(new SearchResultDensityIndex()));
         expect(subset.valueSummaries).toHaveBeenCalledWith(resultChannelOrdinal, 64, 2048);
         expect(subset.delete).toHaveBeenCalledOnce();
-        expect(service["valueSummariesForContribution"](contribution)).toBe(summary);
+        expect(service["valueSummariesForContribution"](contribution, new SearchResults(new SearchResultDensityIndex()))).toBe(summary);
         expect(subset.valueSummaries).toHaveBeenCalledOnce();
     });
 
@@ -113,7 +108,7 @@ describe("Search observed category values", () => {
 
     it("does not wait for retired filters' chunks after replacing a style", () => {
         const service = Object.create(SearchService.prototype) as SearchService;
-        const session = Object.create(null) as FeatureSearchSession;
+        const session = new SearchResults(new SearchResultDensityIndex());
         session.progressByRequestKey = new Map([
             ["old\n1", {tilesQueued: 2, tilesSearched: 2, chunksEmitted: 2, chunksReported: true, matches: 0, terminal: true}],
             ["old\n2", {tilesQueued: 2, tilesSearched: 2, chunksEmitted: 2, chunksReported: true, matches: 0, terminal: true}],
@@ -123,20 +118,19 @@ describe("Search observed category values", () => {
         for (let tile = 0; tile < 4; ++tile) {
             session.searchResultTilesBySourceKey.set(String(tile), Object.create(null));
         }
-        service["updateSearchResultIngressProgress"](session);
+        session.updateSearchResultIngressProgress();
         expect(session.resultTileIngressDone).toBe(4);
         expect(session.resultTileIngressTotal).toBe(8);
 
-        service["clearFilterSearchProgress"](session, "old");
+        session.clearFilterSearchProgress("old");
         expect([...session.progressByRequestKey.keys()]).toEqual(["old-replacement\n1"]);
         expect(session.resultTileIngressDone).toBe(4);
         expect(session.resultTileIngressTotal).toBe(4);
         session.backendComplete = true;
         session.complete = false;
-        session.paused = false;
         session.progressTotal = 4;
         session.progressDone = 4;
-        expect(service["updateSessionCompletion"](session)).toBe(true);
-        expect(service["canSummarizeSessionValues"](session)).toBe(true);
+        expect(session.updateSessionCompletion(false)).toBe(true);
+        expect(session.canSummarizeSessionValues()).toBe(true);
     });
 });

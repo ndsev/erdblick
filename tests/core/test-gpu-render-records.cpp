@@ -601,9 +601,107 @@ TEST_CASE("GpuRenderPacketBuilder bounds and orders oversized packet fragments")
             if (read<uint16_t>(bytes, descriptor) ==
                 static_cast<uint16_t>(GpuPrimitiveKind::Point))
             {
-                encodedPointCount += read<uint32_t>(bytes, descriptor + 16U);
+                auto const count = read<uint32_t>(bytes, descriptor + 16U);
+                auto const data = read<uint32_t>(bytes, descriptor + 20U);
+                REQUIRE(count > 0U);
+                CHECK(read<float>(bytes, data) == static_cast<float>(encodedPointCount));
+                CHECK(read<float>(bytes, data + (count - 1U) * kGpuPointRecordBytes) ==
+                    static_cast<float>(encodedPointCount + count - 1U));
+                encodedPointCount += count;
             }
         }
     }
     CHECK(encodedPointCount == kPointCount);
+
+    // The consuming browser path must preserve the same packet bytes/order
+    // while releasing native blocks instead of retaining another full output.
+    size_t emitted = 0U;
+    builder.consumeFragments([&](std::vector<std::byte>&& bytes) {
+        REQUIRE(emitted < fragments.size());
+        CHECK(bytes == fragments[emitted++]);
+    });
+    CHECK(emitted == fragments.size());
+    CHECK(builder.contributionCount() == 0U);
+}
+
+TEST_CASE("GpuRenderPacketBuilder retains blocks until their last contribution")
+{
+    using namespace erdblick;
+    GpuRenderPacketBuilder builder;
+    auto populate = [&] {
+        builder.configure(1U, 1U, 0U, {});
+        // Both contributions share the first block; the second crosses its end.
+        for (uint32_t owner = 0U; owner < 2U; ++owner) {
+            builder.beginContribution(owner + 1U, 1U, owner, owner + 1U);
+            for (uint32_t index = 0U; index < 60'000U; ++index) {
+                builder.appendPoint({
+                    .position = {static_cast<double>(owner * 60'000U + index), 0.0, 0.0},
+                    .radius = 1.0F,
+                    .style = style(kGpuUnselectable),
+                }, false, false);
+            }
+            builder.endContribution();
+        }
+    };
+    populate();
+    auto const expected = builder.buildFragments();
+    REQUIRE(expected.size() > 2U);
+    size_t emitted = 0U;
+    builder.consumeFragments([&](std::vector<std::byte>&& bytes) {
+        CHECK(bytes == expected.at(emitted++));
+        static_cast<void>(GpuRenderPacketCodec::validate(bytes));
+    });
+    CHECK(emitted == expected.size());
+
+    populate();
+    emitted = 0U;
+    CHECK_THROWS_AS(builder.consumeFragments([&](std::vector<std::byte>&&) {
+        if (++emitted == 2U) throw std::logic_error("consumer stopped");
+    }), std::logic_error);
+    CHECK(builder.contributionCount() == 0U);
+    populate();
+    CHECK(builder.buildFragments() == expected);
+}
+
+TEST_CASE("GpuRenderPacketBuilder patches paths across record blocks")
+{
+    using namespace erdblick;
+    GpuRenderPacketBuilder builder;
+    builder.configure(1U, 1U, 0U, {});
+    builder.beginContribution(1U, 1U, 0U, 1U);
+    std::vector<mapget::Point> points(30'000U);
+    for (size_t index = 0U; index < points.size(); ++index) {
+        points[index] = {static_cast<double>(index), 0.0, 0.0};
+    }
+    auto const handle = builder.appendPath({
+        .points = points,
+        .width = 2.0F,
+        .dashLength = 2.0F,
+        .dashGap = 1.0F,
+        .forwardArrow = true,
+        .style = style(kGpuUnselectable),
+    }, false, false);
+    builder.updateAdaptiveOffsetThreshold(handle, 7.0F);
+    builder.endContribution();
+    uint32_t pathCount = 0U;
+    uint32_t arrowCount = 0U;
+    builder.consumeFragments([&](std::vector<std::byte>&& bytes) {
+        auto const info = GpuRenderPacketCodec::validate(bytes);
+        auto const table = read<uint32_t>(bytes, 72U);
+        for (uint32_t index = 0U; index < info.streamCount; ++index) {
+            auto const descriptor = table + index * 48U;
+            auto const kind = static_cast<GpuPrimitiveKind>(read<uint16_t>(bytes, descriptor));
+            auto const stride = read<uint32_t>(bytes, descriptor + 12U);
+            auto const count = read<uint32_t>(bytes, descriptor + 16U);
+            auto const data = read<uint32_t>(bytes, descriptor + 20U);
+            auto const thresholdOffset = kind == GpuPrimitiveKind::PathSegment ? 108U : 40U;
+            for (uint32_t record = 0U; record < count; ++record) {
+                CHECK(read<float>(bytes, data + record * stride + thresholdOffset) == 7.0F);
+            }
+            if (kind == GpuPrimitiveKind::PathSegment) pathCount += count;
+            else if (kind == GpuPrimitiveKind::Arrow) arrowCount += count;
+        }
+    });
+    CHECK(pathCount == points.size() - 1U);
+    CHECK(arrowCount == 1U);
 }

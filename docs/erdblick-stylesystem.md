@@ -120,8 +120,8 @@ Enable **Point clouds**, then choose a layer preset:
 layer's style options. All presets retain depth occlusion and object picking.
 Overlay changes point appearance. The style opts into count-based downsampling
 for `PointCloudObject`; picking still identifies the
-containing object. By default, objects with fewer than 14,000,000 points retain
-every point. Objects with at least 14,000,000 points retain 13,999,999 original
+containing object. By default, objects with up to 14,000,000 points retain
+every point. Larger objects retain 14,000,000 original
 points, spaced evenly through the object's point sequence, including both
 endpoints. This is deterministic selection by source index; spatial coverage
 depends on source ordering. For example, a 16-million-point object
@@ -129,13 +129,27 @@ retains approximately 87.5% of its points. Zooming out or opening another view
 does not reduce this per-object count. LiveSource converts the complete source
 objects; sampling applies only to visualization.
 
-Preferences → Rendering → Point clouds controls adaptive detail. Disabling it
-requests exact backend geometry and renders all delivered points, subject to
-available memory.
+**Enable point-cloud downsampling** under **Preferences → Rendering → Point clouds**
+is on by default. **Maximum points per cloud object** sets the same quota for
+the backend and browser, from 100,000 to 14,000,000 points (default 14,000,000).
+Use the slider in 100,000-point steps or enter an exact count in the numeric field.
+With the standard style, the backend samples before transferring geometry; the
+browser retains every delivered point when the result already fits the quota.
+Turning the setting off requests exact backend geometry and renders all delivered
+points, subject to available memory.
 
-The adaptive-detail preference persists in this browser and is included in
-exported state snapshots; it is not added to shared URLs. Press **Apply** to
-commit the change.
+When at least one object is downsampled, its tile receives a warning in the
+current tile diagnostics and the diagnostics log. The warning covers backend
+and viewer sampling once per tile value; it does not prevent rendering. Tiles
+that retain every point do not warn. An unsampled replacement clears the current
+warning; previous log entries remain as history. Inspection and export stay exact.
+
+Both preferences persist in this browser and are included in
+exported state snapshots; neither is added to shared URLs. Press **Apply** to
+commit the change; dragging the slider alone does not reload geometry. Applying
+a different count releases the old cloud presentation before uploading its replacement,
+so retaining the old records cannot block a reduction in detail. A saved user
+choice takes precedence over the default.
 
 Custom styles opt in on a top-level, feature-scope, point-only rule:
 
@@ -143,24 +157,26 @@ Custom styles opt in on a top-level, feature-scope, point-only rule:
 rules:
   - geometry: point
     point-cloud: true
-    point-cloud-max-points: 13999999
     color: "#70D6C7"
     width: 2
 ```
 
-`point-cloud-max-points` is a backend visualization quota for each object,
-combining its matching point geometries. Its default is 13999999; custom styles
-may explicitly request a smaller sample. Set it to zero for exact backend
-delivery with frontend sampling. Allowed values are 0–13999999. Subrules inherit
-the policy and must not override it. Ordinary point/POI rules remain unchanged.
+The preference combines each object's matching point geometries. Regular viewer
+rendering overrides any authored `point-cloud-max-points` value, including zero;
+styles opt in with `point-cloud: true` and do not choose a separate detail limit.
+The older key remains accepted for native filter-plan consumers, where zero
+requests exact geometry and positive unsigned 32-bit values specify a quota.
+Subrules inherit the policy and must not override it. Ordinary point/POI rules remain unchanged.
 Selection preserves original coordinates, source order and duplicates; Draco
 can use a different decoded order from native arrays. The canonical model,
 inspection and export remain exact.
 
 The frontend selects before projection and packet generation. Statistics expose
 delivered/rendered instance counts. Sampling does not depend on available memory
-or other visible clouds. Hide unused layers/styles, narrow a style's filter, or
-lower **Max Tiles to Load** to reduce rendering demand.
+or other visible clouds. The threshold is not a combined tile/view memory budget:
+several small objects can still exhaust a shared GPU buffer. Lower the threshold,
+hide unused layers/styles, narrow a style's filter, or lower **Max Tiles to Load**
+to reduce rendering demand.
 
 <!-- mcp:
 keywords: [style, YAML, search visualization]

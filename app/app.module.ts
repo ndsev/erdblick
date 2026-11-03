@@ -1,14 +1,5 @@
-import {LocationPolicyService} from "./geolocation/location-policy.service";
-import {LocationTermsDialogComponent} from "./geolocation/location-terms-dialog.component";
-import {LocationAttributionComponent} from "./geolocation/location-attribution.component";
-import {StyleDocumentEditorComponent} from "./mapstyle/style-document-editor.component";
 import { provideHttpClient, withFetch } from "@angular/common/http";
-import {
-    inject,
-    Injector,
-    NgModule,
-    provideAppInitializer
-} from "@angular/core";
+import { inject, Injector, NgModule, provideAppInitializer } from "@angular/core";
 import { FormsModule, ReactiveFormsModule } from "@angular/forms";
 import { BrowserModule } from '@angular/platform-browser';
 import { BrowserAnimationsModule } from "@angular/platform-browser/animations";
@@ -70,25 +61,21 @@ import { TreeModule } from "primeng/tree";
 import { TreeSelectModule } from "primeng/treeselect";
 import { TreeTableModule } from "primeng/treetable";
 import { McpActionService } from "./action/mcp-action.service";
-import { OmnibarComponent } from "./omnibar/omnibar.component";
+import { PresentationStateBridgeService } from "./action/presentation-state-bridge.service";
 import { ViewerActionStatusComponent } from "./action/viewer-action-status.component";
 import { WebMcpService } from "./action/web-mcp.service";
-import { AppComponent } from './app.component';
-import { MainBarComponent } from "./layout/app-mainbar.component";
+import { AppConfirmPopupComponent } from "./alert/app-confirm-popup.component";
 import { AppRoutingModule } from './app-routing.module';
+import { AppComponent } from './app.component';
 import { registerApplication } from "./application-registration";
+import { AppUrlStateService } from "./appstate/appstate-url.service";
+import { AppStateService } from "./appstate/appstate.service";
+import { ClipboardService } from "./clipboard/clipboard.service";
 import { AboutComponent } from "./config/about.component";
-import { AdvancedPreferencesComponent } from "./preferences/advanced-preferences.component";
-import { CacheResetComponent } from "./mapdata/cache-reset.component";
-import { DatasourcesComponent } from "./mapdata/datasources.component";
-import { KeyboardComponent } from "./keyboard/keyboard.component";
-import { LegalInfoDialogComponent } from "./mapdata/legalinfo.component";
-import { PreferencesComponent } from "./preferences/preferences.component";
-import { SurveyComponent } from "./survey/survey.component";
 import { AppConfigService } from "./config/appconfig.service";
 import { CoordinatesLegalTermsDialogComponent } from "./coordinates/coordinates-legal-terms-dialog.component";
-import { CoordinatesPolicyService } from "./coordinates/coordinates-policy.service";
 import { CoordinatesPanelComponent } from "./coordinates/coordinates-panel.component";
+import { CoordinatesPolicyService } from "./coordinates/coordinates-policy.service";
 import { CoordinatesService } from "./coordinates/coordinates.service";
 import { DiagnosticsExportDialogComponent } from "./diagnostics/diagnostics-export.component";
 import { DiagnosticsFacadeService } from "./diagnostics/diagnostics-facade.service";
@@ -96,55 +83,67 @@ import { DiagnosticsIndicatorComponent } from "./diagnostics/diagnostics-indicat
 import { DiagnosticsLogDialogComponent } from "./diagnostics/diagnostics-log.component";
 import { DiagnosticsPerformanceDialogComponent } from "./diagnostics/diagnostics-perf.component";
 import { DiagnosticsProgressComponent } from "./diagnostics/diagnostics-progress.component";
+import { InfoMessageService } from "./diagnostics/info.service";
+import { EditorComponent } from "./editor/editor.component";
+import { EditorService } from "./editor/editor.service";
+import { GeolocationService } from "./geolocation/geolocation.service";
+import { LocationAttributionComponent } from "./geolocation/location-attribution.component";
+import { LocationPolicyService } from "./geolocation/location-policy.service";
+import { LocationTermsDialogComponent } from "./geolocation/location-terms-dialog.component";
 import { FeaturePanelComponent } from "./inspection/feature-panel.component";
-import { HighlightSearch } from "./inspection/highlight.pipe";
 import { HighlightRegion } from "./inspection/highlight-region.pipe";
+import { HighlightSearch } from "./inspection/highlight.pipe";
 import { InspectionComparisonDialogComponent } from "./inspection/inspection-comparison-dialog.component";
-import { InspectionSelectionService } from "./inspection/inspection-selection.service";
 import { InspectionContainerComponent } from "./inspection/inspection-container.component";
 import { InspectionPanelDialogComponent } from "./inspection/inspection-dialog.component";
 import { InspectionDialogsComponent } from "./inspection/inspection-dialogs.component";
 import { InspectionPanelComponent } from "./inspection/inspection-panel.component";
+import { InspectionSelectionService } from "./inspection/inspection-selection.service";
 import { InspectionTreeComponent } from "./inspection/inspection-tree.component";
 import { SourceDataPanelComponent } from "./inspection/sourcedata-panel.component";
 import { SourceDataLayerSelectionDialogComponent } from "./inspection/sourcedata-selection-dialog.component";
 import { TreeTableFilterPatchDirective } from "./inspection/treetablefilter-patch.directive";
 import { initializeLibrary } from "./integrations/wasm.adapter";
+import { KeyboardComponent } from "./keyboard/keyboard.component";
+import { OnEnterClickDirective } from "./keyboard/keyboard.service";
 import { AppDialogComponent } from "./layout/app-dialog.component";
+import { MainBarComponent } from "./layout/app-mainbar.component";
 import { AppPanelComponent } from "./layout/app-panel.component";
 import { AppSurfaceHeaderComponent } from "./layout/app-surface-header.component";
 import { DockableLayoutComponent } from "./layout/dockable-layout.component";
-import { MapDataService } from "./mapdata/mapdata.service";
-import { MapTileStreamService } from "./mapdata/map-tile-stream.service";
+import { CacheResetComponent } from "./mapdata/cache-reset.component";
+import { DatasourcesComponent } from "./mapdata/datasources.component";
+import { LegalInfoDialogComponent } from "./mapdata/legalinfo.component";
 import { MapPanelComponent } from "./mapdata/map-panel.component";
-import { TileSubsetLayerRenderService } from "./mapview/deck/tile-subset-layer-render.service";
-import { RightClickMenuService } from "./mapview/rightclickmenu.service";
-import { MapViewComponent } from "./mapview/view.component";
-import { MapViewContainerComponent } from "./mapview/view-container.component";
-import { ErdblickViewUIComponent } from "./mapview/view-ui.component";
-import { JumpTargetService } from "./navigation/jump.service";
-import { FeatureSearchExportDialogComponent } from "./search/feature-search-export-dialog.component";
-import { SearchComponent } from "./search/search.component";
-import { SearchDialogsComponent } from "./search/search-dialogs.component";
-import { SearchService } from "./search/search.service";
-import { GeolocationService } from "./geolocation/geolocation.service";
-import { SearchCompletionPopupComponent } from "./search/search-completion-popup.component";
-import { SearchStyleColorComponent } from "./search/search-style-color.component";
-import { SearchStyleRuleEditorComponent } from "./search/search-style-rule-editor.component";
-import { SearchStyleSaveDialogComponent } from "./search/search-style-save-dialog.component";
-import { SimfilExpressionInputComponent } from "./search/simfil-expression-input.component";
-import { AppConfirmPopupComponent } from "./alert/app-confirm-popup.component";
-import { ClipboardService } from "./clipboard/clipboard.service";
-import { EditorComponent } from "./editor/editor.component";
-import { EditorService } from "./editor/editor.service";
-import { InfoMessageService } from "./diagnostics/info.service";
-import { OnEnterClickDirective } from "./keyboard/keyboard.service";
-import { PresentationStateBridgeService } from "./action/presentation-state-bridge.service";
-import { AppStateService } from "./appstate/appstate.service";
-import { AppUrlStateService } from "./appstate/appstate-url.service";
+import { MapTileStreamService } from "./mapdata/map-tile-stream.service";
+import { MapDataService } from "./mapdata/mapdata.service";
 import { MapPresetService } from "./mapstyle/map-preset.service";
 import { StyleComponent } from "./mapstyle/mapstyle.component";
 import { MapStyleService } from "./mapstyle/mapstyle.service";
+import { StyleDocumentEditorComponent } from "./mapstyle/style-document-editor.component";
+import { TileSubsetLayerRenderService } from "./mapview/deck/tile-subset-layer-render.service";
+import { RightClickMenuService } from "./mapview/rightclickmenu.service";
+import { MapViewContainerComponent } from "./mapview/view-container.component";
+import { ErdblickViewUIComponent } from "./mapview/view-ui.component";
+import { MapViewComponent } from "./mapview/view.component";
+import { JumpTargetService } from "./navigation/jump.service";
+import { OmnibarComponent } from "./omnibar/omnibar.component";
+import { AdvancedPreferencesComponent } from "./preferences/advanced-preferences.component";
+import { PreferencesComponent } from "./preferences/preferences.component";
+import { FeatureSearchExportDialogComponent } from "./search/feature-search-export-dialog.component";
+import { SearchCompletionPopupComponent } from "./search/search-completion-popup.component";
+import { SearchDiagnosticsComponent } from "./search/search-diagnostics.component";
+import { SearchDialogsComponent } from "./search/search-dialogs.component";
+import { SearchResultsComponent } from "./search/search-results.component";
+import { SearchScopeComponent } from "./search/search-scope.component";
+import { SearchStyleColorComponent } from "./search/search-style-color.component";
+import { SearchStyleRuleEditorComponent } from "./search/search-style-rule-editor.component";
+import { SearchStyleSaveDialogComponent } from "./search/search-style-save-dialog.component";
+import { SearchVisualizationComponent } from "./search/search-visualization.component";
+import { SearchComponent } from "./search/search.component";
+import { SearchService } from "./search/search.service";
+import { SimfilExpressionInputComponent } from "./search/simfil-expression-input.component";
+import { SurveyComponent } from "./survey/survey.component";
 
 /** PrimeNG theme preset used across the application. */
 export const ErdblickTheme = definePreset(Aura, {
@@ -247,6 +246,10 @@ export const initializeServices = () => {
         LocationTermsDialogComponent,
         LocationAttributionComponent,
         SearchComponent,
+        SearchDiagnosticsComponent,
+        SearchVisualizationComponent,
+        SearchScopeComponent,
+        SearchResultsComponent,
         SearchStyleColorComponent,
         SearchStyleRuleEditorComponent,
         SearchDialogsComponent,

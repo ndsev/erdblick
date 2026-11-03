@@ -1,18 +1,12 @@
-import {SearchService} from "../../../app/search/search.service";
-import {createFeatureSearchStateEntry} from "../../../app/search/search-definition.model";
 import "@angular/compiler";
-import {load} from "js-yaml";
-import {
-    describe,
-    expect,
-    it,
-    vi
-} from "vitest";
-
-import type {FeatureSearchStyleRule} from "../../../app/search/search-definition.model";
-import {AppModule} from "../../../app/app.module";
-import {SearchComponent} from "../../../app/search/search.component";
-import type {SearchStyleSaveRequest} from "../../../app/search/search-style-save-dialog.component";
+import { load } from "js-yaml";
+import { describe, expect, it, vi } from "vitest";
+import { AppModule } from "../../../app/app.module";
+import type { FeatureSearchStyleRule } from "../../../app/search/search-definition.model";
+import { createFeatureSearchStateEntry } from "../../../app/search/search-definition.model";
+import type { SearchStyleSaveRequest } from "../../../app/search/search-style-save-dialog.component";
+import { SearchVisualizationComponent } from "../../../app/search/search-visualization.component";
+import { SearchService } from "../../../app/search/search.service";
 
 void AppModule;
 
@@ -24,7 +18,7 @@ const RULES: FeatureSearchStyleRule[] = [{
 }];
 
 function fixture(importedStyleId: string | undefined = "Folder/Saved") {
-    const component = Object.create(SearchComponent.prototype) as any;
+    const component = Object.create(SearchVisualizationComponent.prototype) as any;
     component.searchStyleSavePending = false;
     component.searchStyleSaveVisible = true;
     component.pendingSearchStyle = {

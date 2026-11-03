@@ -1,16 +1,6 @@
-import {
-    beforeAll,
-    describe,
-    expect,
-    it
-} from 'vitest';
 import "@angular/compiler";
-import {coreLib, initializeLibrary} from "../../../app/integrations/wasm.adapter";
-import {
-    SearchResultDensityIndex,
-    SearchResultDensityMarker,
-    SearchResultPoint
-} from "../../../app/search/search-result-density.visualization";
+import { beforeAll, describe, expect, it } from 'vitest';
+import { coreLib, initializeLibrary } from "../../../app/integrations/wasm.adapter";
 import {
     layoutSearchResultDensityMarkers,
     SEARCH_RESULT_DENSITY_DEFAULT_SIZE_SCALE,
@@ -18,6 +8,8 @@ import {
     searchResultDensityCountDomain,
     searchResultDensityRenderSizePixels
 } from "../../../app/mapview/deck/deck-search-result-density.layer";
+import { SearchResultDensityIndex } from "../../../app/search/search-result-density.visualization";
+import type { SearchResultDensityMarker, SearchResultPoint } from "../../../app/search/search-results.model";
 
 beforeAll(async () => {
     await initializeLibrary();

@@ -1,38 +1,30 @@
 import "@angular/compiler";
 import domToImage from "dom-to-image-more";
 import { BehaviorSubject, Subject } from "rxjs";
-import {
-    afterEach,
-    describe,
-    expect,
-    it,
-    vi
-} from "vitest";
-import { stateOwners } from '../../support/state-owners';
-import { InspectionSelectionService } from '../../../app/inspection/inspection-selection.service';
-import { MapDataService } from '../../../app/mapdata/mapdata.service';
-import { MapTileStreamService } from '../../../app/mapdata/map-tile-stream.service';
-import { StyleOptionNode } from "../../../app/mapdata/map-tree.controller";
-import { MapViewService } from "../../../app/mapview/mapview.service";
-import { ExternalViewerService } from "../../../app/navigation/external-viewer.service";
-import { type FeatureSearchSession } from "../../../app/search/search.service";
-import { JumpTargetService } from "../../../app/navigation/jump.service";
-import { LocationNavigationService } from '../../../app/navigation/location-navigation.service';
-import { AppStateService } from "../../../app/appstate/appstate.service";
-import {
-    VIEW_SYNC_MOVEMENT,
-    VIEW_SYNC_POSITION,
-    type CameraViewState
-} from "../../../app/mapview/mapview.model";
-import { createFeatureSearchStateEntry } from "../../../app/search/search-definition.model";
-import type { StyleValidationReport } from "../../../app/mapstyle/style-validation.model";
-import { type ErdblickStyle } from "../../../app/mapstyle/mapstyle.model";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppActionRegistry } from '../../../app/action/action-registry.service';
 import { VIEWER_ACTION_CATALOG_ID } from "../../../app/action/generated/catalog-id";
-import { ViewerActionFailure } from "../../../app/action/viewer-action-relay.contract";
-import { applicationControls, viewerActions, type ViewerActionOutput } from "../../support/action-contract";
 import { McpActionService } from "../../../app/action/mcp-action.service";
 import { UiAutomationService } from "../../../app/action/ui-automation.service";
+import { ViewerActionFailure } from "../../../app/action/viewer-action-relay.contract";
+import { AppStateService } from "../../../app/appstate/appstate.service";
+import { InspectionSelectionService } from '../../../app/inspection/inspection-selection.service';
+import { MapTileStreamService } from '../../../app/mapdata/map-tile-stream.service';
+import { StyleOptionNode } from "../../../app/mapdata/map-tree.controller";
+import { MapDataService } from '../../../app/mapdata/mapdata.service';
+import { type ErdblickStyle } from "../../../app/mapstyle/mapstyle.model";
+import type { StyleValidationReport } from "../../../app/mapstyle/style-validation.model";
+import { VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION, type CameraViewState } from "../../../app/mapview/mapview.model";
+import { MapViewService } from "../../../app/mapview/mapview.service";
+import { ExternalViewerService } from "../../../app/navigation/external-viewer.service";
+import { JumpTargetService } from "../../../app/navigation/jump.service";
+import { LocationNavigationService } from '../../../app/navigation/location-navigation.service';
+import { createFeatureSearchStateEntry } from "../../../app/search/search-definition.model";
+import { SearchResultDensityIndex } from "../../../app/search/search-result-density.visualization";
+import { SearchResults } from "../../../app/search/search-results.model";
+import type { FeatureSearchSession } from "../../../app/search/search-session.model";
+import { viewerActions, type ViewerActionOutput } from "../../support/action-contract";
+import { stateOwners } from '../../support/state-owners';
 
 vi.mock("dom-to-image-more", () => ({ default: { toCanvas: vi.fn() } }));
 
@@ -872,14 +864,15 @@ describe("McpActionService", () => {
             label: "sign", mapId: "m", layerId: "l", featureId: "Road.1", resultIndex: 0, resultKey: "r", mapTileKey: "Features:m:l:1",
             sourceTileKey: "Features:m:l:1", sourceMapId: "m", sourceLayerId: "l", sourceTileId: -2147483648, hoverFeatureId: "Road.1"
         };
-        const session = {
-            id: "s", definition, runId: "run-1", refresh: 2, complete: true, paused: false,
+        const session: FeatureSearchSession = {
+            layoutId: "search-test", startTime: 0, endTime: 0, pointColor: "#ffffff", timeElapsed: "0ms",
+            id: "s", definition, runId: "run-1", refresh: 2, paused: false,
             schemaAnalysis: readySearchAnalysis(definition.query),
-            searchResults: [result, { ...result, resultKey: "r2" }], errors: new Set<string>(), progressDone: 2, progressTotal: 2
-        } satisfies Partial<FeatureSearchSession> as FeatureSearchSession;
+            results: Object.assign(new SearchResults(new SearchResultDensityIndex()), {complete: true, searchResults: [result, { ...result, resultKey: "r2" }], progressDone: 2, progressTotal: 2})
+        } satisfies FeatureSearchSession;
         searches.getSession.mockReturnValue(session);
         expect(viewerActions.viewer_get_search.outputSchema.parse(service.execute("viewer_get_search", { searchId: "s" }))).toMatchObject({ responseComplete: true, searchComplete: true, settings: { scope: "auto" }, status: { resultCount: 2 } });
-        searches.getSession.mockReturnValue({ ...session, complete: false } as FeatureSearchSession);
+        searches.getSession.mockReturnValue({ ...session, results: {...session.results, complete: false} });
         expect(viewerActions.viewer_get_search.outputSchema.parse(service.execute("viewer_get_search", { searchId: "s" })))
             .toMatchObject({ responseComplete: true, searchComplete: false, status: { complete: false } });
         searches.getSession.mockReturnValue({
@@ -960,13 +953,13 @@ describe("McpActionService", () => {
         const { service, searches, state, views } = fixture();
         const definition = createFeatureSearchStateEntry({ id: "patch", query: "true", bookmarked: true });
         const sibling = createFeatureSearchStateEntry({ id: "sibling", query: "false" });
-        const searchResults: FeatureSearchSession["searchResults"] = [];
-        const session = {
-            id: definition.id, definition, runId: "run", refresh: 0, complete: false,
+        const searchResults: FeatureSearchSession["results"]["searchResults"] = [];
+        const session: FeatureSearchSession = {
+            layoutId: "search-test", startTime: 0, endTime: 0, pointColor: "#ffffff", timeElapsed: "0ms",
+            id: definition.id, definition, runId: "run", refresh: 0,
             schemaAnalysis: readySearchAnalysis(definition.query),
-            paused: false, searchResults, errors: new Set<string>(), progressDone: 0,
-            progressTotal: 1
-        } satisfies Partial<FeatureSearchSession> as FeatureSearchSession;
+            paused: false, results: Object.assign(new SearchResults(new SearchResultDensityIndex()), {searchResults})
+        } satisfies FeatureSearchSession;
         searches.getSession.mockReturnValue(session);
         stateOwners(state).searchService.state.featureSearches = [definition, sibling];
         const settings = { autoUpdate: false, renderStrategy: { showHighFiGeometry: true, showLowFiDots: false } };

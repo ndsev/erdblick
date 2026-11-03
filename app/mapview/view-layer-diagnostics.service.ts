@@ -21,6 +21,9 @@ interface DiagnosticsProvider {
     presentationDemanded: PresentationDemandProvider;
 }
 
+const POINT_CLOUD_DOWNSAMPLING_WARNING =
+    "One or more point-cloud objects were downsampled for visualization. Inspection and export retain the original points.";
+
 /**
  * Read-through registry for current view presentation diagnostics.
  *
@@ -30,7 +33,10 @@ interface DiagnosticsProvider {
 @Injectable({providedIn: "root"})
 export class ViewLayerDiagnosticsService {
     readonly tileWarning = new Subject<SubsetDiagnosticsError>();
-    private readonly warnedVersions = new WeakMap<FilterTileState, number>();
+    private readonly warnedValues = new WeakMap<FilterTileState, {
+        version: number;
+        messages: Set<string>;
+    }>();
     readonly tileError = new Subject<SubsetDiagnosticsError>();
     readonly cameraInteracting$ = new BehaviorSubject(false);
     private readonly providers = new Map<number, DiagnosticsProvider>();
@@ -133,12 +139,23 @@ export class ViewLayerDiagnosticsService {
                         continue;
                     }
                     presentationTileSeen.add(presentationTileKey);
-                    if (state.warnings.length && this.warnedVersions.get(state) !== state.valueVersion) {
-                        this.warnedVersions.set(state, state.valueVersion);
-                        for (const message of state.warnings) this.tileWarning.next({
-                            viewIndex, ownerId: layer.ownerId, presentationKind: layer.identity.presentationKind,
-                            mapName: state.mapId, layerName: state.layerId, mapTileKey: state.mapTileKey, message
-                        });
+                    const warnings = this.tileWarnings(state);
+                    if (warnings.length) {
+                        let warned = this.warnedValues.get(state);
+                        if (warned?.version !== state.valueVersion) {
+                            warned = {version: state.valueVersion, messages: new Set()};
+                            this.warnedValues.set(state, warned);
+                        }
+                        // Worker sampling can become known after backend warnings
+                        // were logged for this same value. Emit only new messages.
+                        for (const message of warnings) {
+                            if (warned.messages.has(message)) continue;
+                            warned.messages.add(message);
+                            this.tileWarning.next({
+                                viewIndex, ownerId: layer.ownerId, presentationKind: layer.identity.presentationKind,
+                                mapName: state.mapId, layerName: state.layerId, mapTileKey: state.mapTileKey, message
+                            });
+                        }
                     }
                     result.expected += 1;
                     if (this.presentationReady(provider, layer, state)) {
@@ -276,7 +293,7 @@ export class ViewLayerDiagnosticsService {
                             : null,
                         ready: this.presentationReady(provider, layer, state),
                         error: state.error,
-                        warnings: state.warnings,
+                        warnings: this.tileWarnings(state),
                         sourceFeatureCount: state.sourceFeatureCount,
                         renderedEntryCount: state.renderedEntryCount,
                         stats
@@ -286,6 +303,17 @@ export class ViewLayerDiagnosticsService {
         }
         this.cachedTiles = result;
         return result;
+    }
+
+    /** Merge sampling diagnostics from existing counts without visiting geometry. */
+    private tileWarnings(state: FilterTileState): readonly string[] {
+        const source = state.info["PointCloud/SourceRecords"];
+        const delivered = state.info["PointCloud/DeliveredRecords"];
+        const backendSampled = typeof source === "number" && typeof delivered === "number" && source > delivered;
+        const workerSampled = state.renderStats["pointCloudDeliveredCount"] > state.renderStats["pointCloudRenderedCount"];
+        return (backendSampled || workerSampled) && !state.warnings.includes(POINT_CLOUD_DOWNSAMPLING_WARNING)
+            ? [...state.warnings, POINT_CLOUD_DOWNSAMPLING_WARNING]
+            : state.warnings;
     }
 
     private presentationReady(

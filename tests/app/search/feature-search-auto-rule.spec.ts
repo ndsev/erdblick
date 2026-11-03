@@ -1,24 +1,18 @@
 import "@angular/compiler";
-import {
-    describe,
-    expect,
-    it,
-    vi
-} from "vitest";
-
-import {AppModule} from "../../../app/app.module";
+import { describe, expect, it, vi } from "vitest";
+import { AppModule } from "../../../app/app.module";
 import {
     searchAutoStyleFieldOptions,
     searchAutoStyleFieldOptionsArePortable
 } from "../../../app/search/feature-search-auto-style.util";
-import {SearchComponent} from "../../../app/search/search.component";
-import {SearchStyleRuleDraftCodec} from "../../../app/search/search-style-rule-editor.model";
+import { SearchStyleRuleDraftCodec } from "../../../app/search/search-style-rule-editor.model";
+import { SearchVisualizationComponent } from "../../../app/search/search-visualization.component";
 
 void AppModule;
 
 describe("Feature Search automatic rule geometry", () => {
     it("merges a Classic warning-sign field across attribute layers into one portable option", () => {
-        const component = Object.create(SearchComponent.prototype) as any;
+        const component = Object.create(SearchVisualizationComponent.prototype) as any;
         component.styleAttributeOptions = [];
         component.styleScalarAttributeOptions = [];
         component.styleAttributeOptionsLoading = true;
@@ -92,7 +86,7 @@ describe("Feature Search automatic rule geometry", () => {
     });
 
     it("uses one 20 px point rule and one 5 px non-point rule", () => {
-        const component = Object.create(SearchComponent.prototype) as any;
+        const component = Object.create(SearchVisualizationComponent.prototype) as any;
         const codec = new SearchStyleRuleDraftCodec();
         component.nextStyleRuleId = 1;
         component.autoStyleFieldOptions = () => [];
@@ -119,7 +113,7 @@ describe("Feature Search automatic rule geometry", () => {
     });
 
     it("creates solid fallback rules when broad-query rewriting is suppressed", () => {
-        const component = Object.create(SearchComponent.prototype) as any;
+        const component = Object.create(SearchVisualizationComponent.prototype) as any;
         component.styleAttributeOptionsRefreshTimer = null;
         component.styleAttributeOptions = [{value: "warningSign"}];
         component.styleScalarAttributeOptions = [{value: "warningSign"}];
@@ -149,7 +143,7 @@ describe("Feature Search automatic rule geometry", () => {
     });
 
     it("creates solid fallback rules while schema style fields are still loading", () => {
-        const component = Object.create(SearchComponent.prototype) as any;
+        const component = Object.create(SearchVisualizationComponent.prototype) as any;
         let fallbackCreated = false;
         component.resultPanelIndex = "results";
         component.styleAttributeOptionsRefreshTimer = null;

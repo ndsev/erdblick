@@ -2,7 +2,6 @@ import { Injectable, Optional } from "@angular/core";
 import { auditTime, skip, Subject } from "rxjs";
 import {
     DEFAULT_POINT_CLOUD_POLICY,
-    POINT_CLOUD_MAX_POINTS,
     type PointCloudRenderPolicy
 } from "../point-cloud-policy.model";
 import { AUTO_TILE_SUBSET_RENDER_WORKER_COUNT } from "../tile-render-policy.model";
@@ -233,7 +232,7 @@ export class TileSubsetLayerRenderService {
     }
     /** Apply the per-object point limit independently of other visible clouds. */
     pointCloudPolicyFor(id: string, _metersPerPixel: number | null, _previousSpacing = 0): PointCloudRenderPolicy {
-        return {enabled: this.pointCloudPolicy.enabled, maxPoints: POINT_CLOUD_MAX_POINTS,
+        return {enabled: this.pointCloudPolicy.enabled, maxPoints: this.pointCloudPolicy.maxPoints,
             spacingMeters: 0, cacheKey: id};
     }
 

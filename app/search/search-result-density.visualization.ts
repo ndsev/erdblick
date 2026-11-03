@@ -3,59 +3,12 @@
  * Search owns indexed contributions and each view requests its visible marker
  * projection; native tile geometry supplies the canonical ancestor positions.
  */
-import {coreLib} from "../integrations/wasm.adapter";
-
-/**
- * Flat result point exposed to map overlays and result-tree hover interactions.
- */
-export interface SearchResultPoint {
-    coordinates: [number, number];
-    mapId: string;
-    layerId: string;
-    tileId: number;
-    mapTileKey: string;
-    sourceTileKey: string;
-    sourceMapId: string;
-    sourceLayerId: string;
-    sourceTileId: number;
-    featureId: string;
-    resultIndex: number;
-    resultKey: string;
-    featureKey: string;
-    hoverFeatureId: string;
-}
-
-/** Result points grouped by their streamed source tile for viewport/density materialization. */
-export interface SearchResultPointBucket {
-    sourceTileKey: string;
-    mapId: string;
-    layerId: string;
-    tileId: number;
-    requestOrder: number;
-    points: SearchResultPoint[];
-}
-
-/** Circle marker rendered by the search-result density overlay. */
-export interface SearchResultDensityMarker {
-    coordinates: [number, number];
-    pixelOffset?: [number, number];
-    count: number;
-    mapId: string;
-    layerId: string;
-    tileId: number;
-    featureId: string;
-    resultKey: string;
-    featureKey: string;
-    featureKeys: string[];
-    resultKeys: string[];
-    showBucketLabel?: boolean;
-}
-
-/** Parameters for materializing visible source-tile contributions into density markers. */
-export interface SearchResultDensityMaterializationRequest {
-    sourceTileKeys: Iterable<string>;
-    targetLevel: number;
-}
+import type {
+    SearchResultDensityMarker,
+    SearchResultDensityMaterializationRequest,
+    SearchResultPoint
+} from "./search-results.model";
+import { coreLib } from "../integrations/wasm.adapter";
 
 interface SearchResultDensityNodeDelta {
     key: string;

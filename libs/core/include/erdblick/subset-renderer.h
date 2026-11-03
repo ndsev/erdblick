@@ -88,8 +88,8 @@ public:
     /** Build all individually bounded packet fragments for native callers and tests. */
     [[nodiscard]] std::vector<std::vector<std::byte>>
     renderPacketFragmentsBytes() const;
-    /** Return the complete packet sequence as individually bounded JavaScript arrays. */
-    [[nodiscard]] NativeJsValue renderPackets() const;
+    /** Consume record blocks into individually bounded JavaScript packet arrays. */
+    [[nodiscard]] NativeJsValue renderPackets();
     /** Return the number of source geometry vertices inspected by this run. */
     [[nodiscard]] uint32_t vertexCount() const;
 

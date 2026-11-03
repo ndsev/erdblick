@@ -570,9 +570,13 @@ export class ViewLayerController {
                     coreLib.HighlightMode.NO_HIGHLIGHT.value,
                     plannedLod
                 ) as StyleFilterPlan;
-                if (!this.renderService.pointCloudPolicy.enabled) {
-                    for (const channel of plan.channels)
-                        if (channel.pointCloudMaxPoints !== undefined) channel.pointCloudMaxPoints = 0;
+                // One preference controls both server and worker sampling. An authored
+                // quota must not silently discard more points than the user selected.
+                const pointCloud = this.renderService.pointCloudPolicy;
+                for (const channel of plan.channels) {
+                    if (channel.pointCloudMaxPoints !== undefined) {
+                        channel.pointCloudMaxPoints = pointCloud.enabled ? pointCloud.maxPoints : 0;
+                    }
                 }
                 if (!plan.channels.length) {
                     continue;
@@ -647,8 +651,14 @@ export class ViewLayerController {
                         candidate.replacementSlot === replacementSlot
                 )
                 : undefined;
+            // Sampling edits are also how users reduce memory pressure. Keeping
+            // the old cloud until its replacement fits can prevent that reduction.
+            const samplingChanged = replacement && owned.layer.filterPlan.channels.some(
+                (channel, index) => channel.pointCloudMaxPoints !==
+                    replacement[1].plan.channels[index]?.pointCloudMaxPoints
+            );
             if (replacementSlot && replacement &&
-                replacement[0] !== key) {
+                replacement[0] !== key && !samplingChanged) {
                 this.retainAsRegularFallback(
                     replacementSlot,
                     key,

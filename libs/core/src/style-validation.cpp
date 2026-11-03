@@ -1607,7 +1607,7 @@ bool validateStyleRuleYamlImpl(
     }
 
     markInvalid(readScalar<bool>(ruleYaml, "point-cloud", rulePath, report, sourceRuleIndex));
-    markInvalid(validateNumericRange(ruleYaml, "point-cloud-max-points", 0., double(mapget::DefaultPointCloudMaxPoints), rulePath, report, sourceRuleIndex));
+    markInvalid(validateNumericRange(ruleYaml, "point-cloud-max-points", 0., double(std::numeric_limits<uint32_t>::max()), rulePath, report, sourceRuleIndex));
     markInvalid(readScalar<uint32_t>(ruleYaml, "point-cloud-max-points", rulePath, report, sourceRuleIndex));
     if (ruleYaml["geometry-name"].IsDefined()) {
         std::string geometryName;

@@ -1,12 +1,11 @@
 import { Component, OnDestroy, ViewChild } from "@angular/core";
 import { Subscription } from "rxjs";
+import { AppStateService } from "../appstate/appstate.service";
+import { InfoMessageService } from "../diagnostics/info.service";
 import { AppDialogComponent } from "../layout/app-dialog.component";
+import { DialogStackService } from "../layout/dialog-stack.service";
 import { FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID } from "../layout/layout.model";
 import { LayoutService } from "../layout/layout.service";
-import { AppStateService } from "../appstate/appstate.service";
-import { DialogStackService } from "../layout/dialog-stack.service";
-import type { FeatureSearchMapLayerRef } from "./search-definition.model";
-import { InfoMessageService } from "../diagnostics/info.service";
 import {
     featureSearchExportFilename,
     featureSearchExportPayload,
@@ -15,7 +14,9 @@ import {
     featureSearchMapLayerLabel,
     type FeatureSearchExportSelection
 } from "./feature-search-export.util";
-import { FeatureSearchExportDialogRequest, SearchService } from "./search.service";
+import type { FeatureSearchMapLayerRef } from "./search-definition.model";
+import type { FeatureSearchExportDialogRequest } from "./search-session.model";
+import { SearchService } from "./search.service";
 
 interface FeatureSearchExportOptions extends FeatureSearchExportSelection {
     closeAfterExport: boolean;
@@ -147,7 +148,7 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
             const selection = this.currentSelection();
             const payload = featureSearchExportPayload(
                 session.definition,
-                session.searchResults,
+                session.results.searchResults,
                 request.grouping,
                 request.filterValue,
                 selection,

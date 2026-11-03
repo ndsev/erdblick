@@ -69,9 +69,9 @@ describe("ViewLayerDiagnosticsService", () => {
         state.renderedValueVersion = 1;
         state.sourceFeatureCount = 7;
         state.renderStats = {vertexCount: 11};
-        Object.defineProperty(state, "info", {
-            get: () => {
-                throw new Error("Detailed tile info must remain lazy.");
+        state.info = new Proxy({}, {
+            ownKeys: () => {
+                throw new Error("Progress must not enumerate detailed tile statistics.");
             }
         });
         const layer = {
@@ -164,4 +164,87 @@ it("keeps warned tiles ready and logs each retained value once", () => {
     state.warnings = [];
     service.notifyChanged();
     expect(service.currentTiles()[0].warnings).toEqual([]);
+});
+
+describe("point-cloud tile warnings", () => {
+    const warning = "One or more point-cloud objects were downsampled for visualization. Inspection and export retain the original points.";
+
+    /** Register one current cloud tile and capture the ordinary warning events. */
+    function setup() {
+        const service = new ViewLayerDiagnosticsService();
+        const state = new FilterTileState("Map", "PointCloudObject", tilePartition(42), "Features:Map:PointCloudObject:42", 1);
+        state.status = "ready";
+        state.valueVersion = state.renderedValueVersion = 1;
+        const layer = {ownerId: "regular", identity: {presentationKind: "regular"},
+            tileStates: new Map([[state.partitionKey, state]]), latestStatus: null} as any;
+        service.register(0, () => [layer]);
+        const messages: string[] = [];
+        service.tileWarning.subscribe(event => messages.push(event.message));
+        return {service, state, messages};
+    }
+
+    it.each([
+        {stage: "backend", source: 201, delivered: 8, workerInput: 8, rendered: 8},
+        {stage: "worker", source: 201, delivered: 201, workerInput: 201, rendered: 8},
+        {stage: "both", source: 201, delivered: 8, workerInput: 8, rendered: 4}
+    ])("reports one nonfatal warning for $stage sampling", ({source, delivered, workerInput, rendered}) => {
+        const {service, state, messages} = setup();
+        state.info = {"PointCloud/SourceRecords": source, "PointCloud/DeliveredRecords": delivered};
+        state.renderStats = {pointCloudDeliveredCount: workerInput, pointCloudRenderedCount: rendered};
+
+        expect(service.currentSummary()).toMatchObject({ready: 1, errors: 0});
+        expect(service.currentTiles()[0]).toMatchObject({mapTileKey: state.mapTileKey, warnings: [warning]});
+        service.notifyChanged();
+        service.currentSummary();
+        expect(messages).toEqual([warning]);
+        expect(state.warnings).toEqual([]); // Source warnings remain unchanged.
+    });
+
+    it.each([0, 8, 14_000_000, 25_127_298])("does not warn for %i unchanged points", count => {
+        const {service, state, messages} = setup();
+        state.info = {"PointCloud/SourceRecords": count, "PointCloud/DeliveredRecords": count};
+        state.renderStats = {pointCloudDeliveredCount: count, pointCloudRenderedCount: count};
+        service.currentSummary();
+        expect(service.currentTiles()[0].warnings).toEqual([]);
+        expect(messages).toEqual([]);
+    });
+
+    it("logs a late worker warning without repeating earlier tile warnings", () => {
+        const {service, state, messages} = setup();
+        state.warnings = ["An existing source warning"];
+        service.currentSummary();
+        expect(messages).toEqual(state.warnings);
+
+        state.renderStats = {pointCloudDeliveredCount: 201, pointCloudRenderedCount: 8};
+        service.notifyChanged();
+        service.currentSummary();
+        service.notifyChanged();
+        service.currentSummary();
+        expect(messages).toEqual([...state.warnings, warning]);
+        expect(service.currentTiles()[0].warnings).toEqual([...state.warnings, warning]);
+    });
+
+    it("clears sampling warnings with an exact replacement and warns again for a later sampled value", () => {
+        const {service, state, messages} = setup();
+        state.info = {"PointCloud/SourceRecords": 201, "PointCloud/DeliveredRecords": 8};
+        state.renderStats = {pointCloudDeliveredCount: 8, pointCloudRenderedCount: 4};
+        service.currentSummary();
+
+        state.valueVersion++;
+        state.info = {};
+        state.renderStats = {};
+        service.notifyChanged();
+        service.currentSummary();
+        expect(service.currentTiles()[0].warnings).toEqual([]);
+        expect(messages).toEqual([warning]);
+
+        state.valueVersion++;
+        state.info = {"PointCloud/SourceRecords": 201, "PointCloud/DeliveredRecords": 8};
+        service.notifyChanged();
+        service.currentSummary();
+        expect(messages).toEqual([warning, warning]);
+        state.dispose();
+        service.notifyChanged();
+        expect(service.currentTiles()[0].warnings).toEqual([]);
+    });
 });

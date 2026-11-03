@@ -75,43 +75,96 @@ async function sampleMap(page: Page, points: number[][]): Promise<number[][]> {
 
 test.use({ stateSnapshot: 'location_navigation' });
 
-test('requires local consent and keeps preference links available while disabled', async ({page}) => {
+test('applies both location choices and disables dependent controls when search is off', async ({page}) => {
     await page.goto('/');
     await waitForAppReady(page, {keepLocationTerms: true});
     await disableUiAnimations(page);
-    await expect(page.getByTestId('location-boundary-terms')).toBeVisible();
+    const terms = page.getByTestId('location-boundary-terms');
+    await expect(terms).toBeVisible();
+    await expect(terms.getByRole('button')).toHaveCount(1);
+    await expect(terms.getByText('You can change these settings later', {exact: false})).toBeVisible();
+    await expect(terms.getByLabel('Enable location search', {exact: true})).toBeChecked();
+    const termsBoundaries = terms.getByLabel('Use location boundaries', {exact: true});
+    await expect(termsBoundaries).not.toBeChecked();
+    await terms.getByLabel('Enable location search', {exact: true}).uncheck();
+    await expect(termsBoundaries).toBeDisabled();
+    await expect(termsBoundaries).toHaveAttribute('disabled', '');
+    expect((await locationPreferences(page)).searchEnabled).toBe(true);
     expect((await locationPreferences(page)).boundariesEnabled).toBe(false);
-    await page.getByTestId('location-boundaries-refuse').click();
+    await terms.getByRole('button', {name: 'Apply', exact: true}).click();
+    expect((await locationPreferences(page)).searchEnabled).toBe(false);
     await page.reload();
     await waitForAppReady(page, {keepLocationTerms: true});
     await disableUiAnimations(page);
-    await expect(page.getByTestId('location-boundary-terms')).not.toBeVisible();
+    await expect(terms).not.toBeVisible();
 
     const preferences = await openLocationPreferences(page);
-    await preferences.getByLabel('Enable location search', {exact: true}).uncheck();
+    const searchToggle = preferences.getByLabel('Enable location search', {exact: true});
+    const boundaryToggle = preferences.getByLabel('Use location boundaries', {exact: true});
+    const matches = preferences.getByTestId('location-matches-setting');
+    const matchInput = matches.getByRole('textbox', {name: 'Location Matches', exact: true});
+    await expect(searchToggle).not.toBeChecked();
+    await expect(boundaryToggle).toBeDisabled();
+    await expect(boundaryToggle).toHaveAttribute('disabled', '');
+    await expect(matchInput).toHaveAttribute('disabled', '');
+    await expect(matches.getByRole('slider')).toBeDisabled();
+    await expect(matches.getByRole('slider')).not.toHaveAttribute('tabindex');
+    await expect(matches.getByRole('button')).toBeDisabled();
     for (const setting of ['location-search-setting', 'location-boundaries-setting']) {
         const row = preferences.getByTestId(setting);
         await expect(row.getByRole('link', {name: "Who's On First"})).toHaveAttribute('href', 'https://whosonfirst.org/');
         await expect(row.getByRole('link', {name: 'License', exact: true})).toHaveAttribute('href', 'https://whosonfirst.org/docs/licenses/');
         await row.getByRole('link', {name: 'Disclaimer'}).click();
-        await expect(page.getByTestId('location-boundary-terms')).toBeVisible();
-        await expect(page.getByTestId('location-boundaries-accept')).toHaveCount(0);
-        await page.getByTestId('location-terms-close').click();
+        await expect(terms).toBeVisible();
+        await expect(termsBoundaries).toBeDisabled();
+        await expect(terms.getByLabel('Enable location search', {exact: true})).not.toBeChecked();
+        await terms.getByRole('button', {name: 'Apply', exact: true}).click();
     }
     expect((await locationPreferences(page)).searchEnabled).toBe(false);
-    await preferences.getByLabel('Enable location search', {exact: true}).check();
-    const boundaryToggle = preferences.getByLabel('Location boundaries', {exact: true});
+    await searchToggle.check();
+    await expect(boundaryToggle).toBeEnabled();
+    await expect(matchInput).toBeEnabled();
+    await expect(matches.getByRole('slider')).toBeEnabled();
+    await matchInput.fill('15');
+    await expect(matches.getByRole('button')).toBeEnabled();
+    await searchToggle.uncheck();
+    await expect(matches.getByRole('button')).toBeDisabled();
+    await searchToggle.check();
+    await expect(matchInput).toHaveValue('15');
+    await expect(matches.getByRole('button')).toBeEnabled();
+    await matches.getByRole('button').click();
+    await expect(matches.getByRole('button')).toBeDisabled();
+});
+
+test('requires Apply for consent, preserves saved choices, and asks again after disabling boundaries', async ({page}) => {
+    await navigateToStateSnapshotRoot(page);
+    const preferences = await openLocationPreferences(page);
+    const searchToggle = preferences.getByLabel('Enable location search', {exact: true});
+    const boundaryToggle = preferences.getByLabel('Use location boundaries', {exact: true});
+    const terms = page.getByTestId('location-boundary-terms');
     await boundaryToggle.click();
     expect((await locationPreferences(page)).boundariesEnabled).toBe(false);
-    await page.getByTestId('location-boundaries-refuse').click();
+    await expect(terms.getByLabel('Use location boundaries', {exact: true})).toBeChecked();
+    await terms.getByLabel('Use location boundaries', {exact: true}).uncheck();
+    await page.getByTestId('location-terms-apply').click();
     await expect(boundaryToggle).not.toBeChecked({timeout: 5000});
     await boundaryToggle.click();
-    await page.getByTestId('location-boundaries-accept').click();
+    await page.getByTestId('location-terms-apply').click();
     await expect(boundaryToggle).toBeChecked();
+    await searchToggle.uncheck();
+    await expect(boundaryToggle).toBeDisabled();
+    expect((await locationPreferences(page)).boundariesEnabled).toBe(false);
+    await preferences.getByTestId('location-boundaries-setting').getByRole('link', {name: 'Disclaimer'}).click();
+    await expect(terms.getByLabel('Use location boundaries', {exact: true})).toBeChecked();
+    await expect(terms.getByLabel('Use location boundaries', {exact: true})).toBeDisabled();
+    await page.getByTestId('location-terms-apply').click();
+    await searchToggle.check();
+    expect((await locationPreferences(page)).boundariesEnabled).toBe(true);
+    await expect(boundaryToggle).toBeEnabled();
     await boundaryToggle.uncheck();
     await boundaryToggle.click();
-    await expect(page.getByTestId('location-boundaries-accept')).toBeVisible();
-    await page.getByTestId('location-boundaries-accept').click();
+    await expect(page.getByTestId('location-terms-apply')).toBeVisible();
+    await page.getByTestId('location-terms-apply').click();
     await page.reload();
     await waitForAppReady(page, {keepLocationTerms: true});
     await expect(page.getByTestId('location-boundary-terms')).not.toBeVisible();
@@ -189,7 +242,7 @@ test('disabling boundaries cancels a delayed area fit', async ({page}) => {
     await selectPlace(page);
     await expect.poll(() => requested).toBe(true);
     const preferences = await openLocationPreferences(page);
-    await preferences.getByLabel('Location boundaries', {exact: true}).uncheck();
+    await preferences.getByLabel('Use location boundaries', {exact: true}).uncheck();
     release();
     await preferences.getByRole('button', {name: /Close$/}).last().click();
     expect((await camera(page)).destination).toEqual(before.destination);
@@ -218,7 +271,7 @@ test('disabling boundaries removes a visible highlight without waiting for its f
     const preferences = page.getByRole('dialog', {name: 'Preferences', exact: true});
     await preferences.getByRole('tab', {name: 'Inspect & Search', exact: true}).click();
     await page.clock.runFor(100);
-    await preferences.getByLabel('Location boundaries', {exact: true}).uncheck();
+    await preferences.getByLabel('Use location boundaries', {exact: true}).uncheck();
     await preferences.getByRole('button', {name: /Close$/}).last().click();
     await page.clock.runFor(100);
     const removed = (await sampleMap(page, [[8, 8]]))[0];

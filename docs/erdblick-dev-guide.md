@@ -730,44 +730,53 @@ browser UI only copies commands and never handles OAuth credentials. See the off
 
 ## Render pipeline
 
-`TileSubsetLayerRenderService` is a global finite worker service. It schedules
-one immutable pre-render Morton block of subset blobs plus style/pass inputs.
-Newer render signatures replace queued work and stale completions are
-rejected.
-
-`ViewLayerController` assembles canonical half-level Morton-prefix rectangles:
-`1x1`, `2x1`, `2x2`, `4x2`, and `4x4`. It chooses the largest ready block
-whose subsets share style-plan ownership and string-pool identity and whose combined
-stored geometry contains at most 16,384 vertices. The 4x4 limit remains the
-hard spatial ceiling; an individual oversized tile is still rendered as a
-singleton.
+`TileSubsetLayerRenderService` schedules one immutable tile subset and its
+style/pass inputs per worker job. New render signatures replace queued work,
+and stale completions are rejected. `TileSubsetLayerVisualization` owns the
+resulting tile/style contribution and its GLTF bridge. Each view's `GpuScene`
+combines compatible material records from multiple contributions into shared
+GPU buffers, while retaining separate contribution and picking identities.
 
 Workers:
 
-1. parse every subset in the block;
+1. parse the subset, reusing an unchanged point-cloud input when possible;
 2. run `TileSubsetLayerRenderer`;
-3. return logical point/path/surface/label/arrow buffers;
+3. return bounded GPU packet fragments plus the GLTF bridge;
 4. return exact `(channel ordinal, typed-entry ordinal)` pick refs;
 5. report attachment demand, issues, and timing.
 
-`TileSubsetLayerVisualization` is the block coordinator and atomically installs
-three tile-scoped presenters. `TileSubsetVectorPresentation` owns arena and
-direct Deck contributions for surfaces, paths, points, labels, and arrows.
-`TileSubsetGltfPresentation` owns attachment transfer, a
-`DeckTileGltfAssetRef`, visible nodes, pick proxies, and GLTF interaction
-contributions. `DeckTileGltfAssetStore` coalesces parsing into an immutable
-CPU-side document without a luma-device key. `DeckGltfNodeLayer` alone creates
-and destroys the per-device scenegraph models and texture resources. The
-`TileSubsetInteractionPresentation` owns the local semantic-target index,
-style-glow masks, hover/selection masks, direct fallback layers, and transient
-GLTF interaction contributions. Pure buffer selection and mask construction
-live in `tile-subset-interaction-data.ts`; the coordinator retains picking
-resolution because it owns the exact worker pick table. The visualization
-keeps the exact immutable subset bytes which produced those
-presentations until every contribution and pick reference is removed. A block
-remains alive while any constituent tile overlaps current demand.
-Primitive-level information such as relation endpoint role or nested
-render-rule index stays renderer-local.
+### Native record storage and packet encoding
+
+`GpuRenderPacketBuilder` stores each material stream in record-aligned blocks
+bounded by the existing 4 MiB packet size. Small streams allocate only the
+capacity they need; growth never reallocates the entire accumulated stream.
+This avoids a large vector's old and replacement allocations coexisting when
+its capacity doubles, which previously exhausted the worker's WASM heap on
+dense point clouds. Record indices remain stable for later path/arrow patches.
+
+Fragment planning calculates how many records fit after packet metadata and
+borrows slices of these blocks. It does not copy the remaining cloud into
+oversized candidates. The browser uses `consumeFragments`: one fragment is
+encoded and copied into its JavaScript array, then blocks whose last slice
+has been consumed are released. Native `buildFragments()` collects output
+through the same encoder for callers that need to retain the bytes. Success,
+failure, and renderer reset release record blocks; large capacities are not
+kept in the renderer cache.
+
+The packet ABI, contribution completion markers, feature identities, and
+point-cloud downsampling policy are unchanged. The worker still parses a
+whole input subset, and JavaScript can retain the completed packet arrays
+until transfer/upload. Bounded native allocations therefore do not imply
+constant total memory or remove the separate limits of shared GPU buffers.
+
+`MapViewState.pointCloudPolicy` owns the enabled flag and per-object `maxPoints`.
+Regular `ViewLayerController` filter plans replace authored cloud quotas with this
+preference (zero when disabled); the worker receives the same value. Applying a
+new quota changes filter identity and releases the previous cloud presentation
+instead of retaining it as a replacement fallback. Otherwise old records can
+occupy the capacity needed to apply a lower count. Backend/native validation
+checks the quota's representation and channel semantics, not an independent
+14-million-point ceiling.
 
 Large GLBs are requested only after renderer output reports demand. The
 GLTF presenter combines attachment bytes with subset GLTF-node/AABB entries.
@@ -781,6 +790,12 @@ WebGL context. `DeckMapView` therefore publishes its immutable scene handle
 only after `onDeviceInitialized`; otherwise attachment-backed presentation
 would permanently observe a null device and never request its GLB.
 
+Background, search, tile and location overlays are per-view presentation owners;
+`DeckPicking` owns readback/hover scheduling. They receive explicit values or
+narrow renderer surfaces and retire before the layer registry and device.
+`DeckMapView` keeps camera, context-loss and final renderer ownership. See
+[Deck Render View Contract](deck-render-view-contract.md#per-canvas-ownership).
+
 `FrameBudgetLoop<T>` is the shared main-thread time-slice utility. It services
 bounded work such as search-result ingestion without creating a global
 "schedule anything" ownership service.
@@ -789,9 +804,15 @@ bounded work such as search-result ingestion without creating a global
 
 Search is an ordinary styled presentation:
 
-- the editor/session service owns query and result-list state;
-- `feature-search-style.ts` creates a synthetic version-2 style;
-- one `StyledMapgetLayer` runs that style through `/filter`;
+- `SearchComponent` owns the dialog/dock/query shell; local scope, results,
+  visualization and diagnostics components own their drafts and scheduling;
+- `SearchService` coordinates sessions; `SearchResults` owns each session's
+  contributions/progress and pure summary aggregation;
+- `FeatureSearchSchemaService` owns lazy schema/completion workers and each
+  input owner's independent completion cancellation;
+- `feature-search-style.adapter.ts` creates a synthetic version-2 style;
+- `SearchPresentation` owns the compiled style, `StyledMapgetLayer` subscription,
+  coverage and cleanup;
 - subset rows feed both map rendering and frame-budgeted list ingestion;
 - category/gradient choices become `color-scale` with typed list-pair stops.
 
@@ -1003,7 +1024,15 @@ suffix solely to restore older links.
 
 ## Tile warnings and transient datasource recovery
 
-Protocol 5.4 metadata exposes warnings, errors and ordinary timestamp/TTL pairs for every tile type. Warned subset values remain ready and render normally. Warnings are retained with the current value and emitted once per value into diagnostics logs at warning severity, including map/layer/partition context. Replacing or disposing a value replaces or clears its diagnostics. Feature and source-data inspection also surface warnings without discarding content.
+Protocol 5.4 metadata exposes warnings, errors and ordinary timestamp/TTL pairs for every tile type. Warned subset values remain ready and render normally. Warnings are retained with the current value and each distinct message is emitted once per value into diagnostics logs at warning severity, including map/layer/partition context. Replacing or disposing a value replaces or clears its diagnostics. Feature and source-data inspection also surface warnings without discarding content.
+
+View diagnostics add one point-cloud downsampling warning when backend
+`PointCloud/SourceRecords` exceeds `PointCloud/DeliveredRecords`, or the worker's
+`pointCloudDeliveredCount` exceeds `pointCloudRenderedCount`. These existing
+counters avoid inspecting point geometry or changing canonical source warnings.
+Per-message deduplication lets a later worker warning appear even after other
+warnings for the same value were logged. Exact replacements clear the derived
+warning; historical log entries remain.
 
 Failed tile values expire through the same `TileExpiryScheduler` as successful finite-lifetime values. Mapget caps error tiles with `mapget.serve.error-tile-ttl` (default five seconds). Mapget also caps successful empty source layers with `mapget.serve.empty-tile-ttl` (default five seconds), including missing LiveSource tiles/objects. Empty search/inspection matches inherit their source lifetime; they do not receive a separate empty-result cap. Filter errors retain their per-output diagnostics and earliest dependency expiry; unrelated new coverage is sent immediately. There is no subscription-level suppression, retry deadline map, or tile-specific backoff. Release and coverage pruning cancel expiry ownership. Retained inspection renewals preserve older content on error and schedule the returned value's absolute expiry. Initial inspection failures are surfaced immediately, not hidden in a transport retry loop.
 

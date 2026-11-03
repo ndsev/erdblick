@@ -1,4 +1,4 @@
-import {POINT_CLOUD_MAX_POINTS} from "../../../../app/mapview/point-cloud-policy.model";
+import {DEFAULT_POINT_CLOUD_MAX_POINTS} from "../../../../app/mapview/point-cloud-policy.model";
 import {MapViewState} from "../../../../app/mapview/mapview.state";
 import {testPersistence} from "../../../support/state-owners";
 import {
@@ -122,8 +122,13 @@ describe("TileSubsetLayerRenderService scheduling", () => {
             await vi.waitFor(() => expect(changed).toHaveBeenCalledOnce());
             state.pointCloudDownsamplingEnabledState.next(false);
             state.pointCloudDetailPixelsState.next(8);
+            state.pointCloudMaxPointsState.next(500_000);
             await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(2));
             expect(service.pointCloudPolicyFor("cloud", 1).enabled).toBe(false);
+            expect(service.pointCloudPolicyFor("cloud", 1).maxPoints).toBe(500_000);
+            state.pointCloudMaxPointsState.next(1_000_000);
+            await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(3));
+            expect(service.pointCloudPolicyFor("cloud", 1).maxPoints).toBe(1_000_000);
             expect(pump).not.toHaveBeenCalled();
         } finally {
             subscription.unsubscribe();
@@ -175,7 +180,7 @@ describe("TileSubsetLayerRenderService scheduling", () => {
 
         expect(postMessage.mock.calls.map(([task]) => task.taskId)).toEqual(["0", "1"]);
         expect(postMessage.mock.calls.map(([task]) => task.pointCloud.maxPoints))
-            .toEqual([POINT_CLOUD_MAX_POINTS, POINT_CLOUD_MAX_POINTS]);
+            .toEqual([DEFAULT_POINT_CLOUD_MAX_POINTS, DEFAULT_POINT_CLOUD_MAX_POINTS]);
         expect(internal.queue).toEqual([jobs[2]]);
         for (const job of jobs) expect(job.reject).not.toHaveBeenCalled();
     });
@@ -784,7 +789,7 @@ describe("point-cloud sampling", () => {
         const first = service.pointCloudPolicyFor("a", 1);
         const second = service.pointCloudPolicyFor("b", 1);
         const third = service.pointCloudPolicyFor("c", 1);
-        expect(whole).toBe(POINT_CLOUD_MAX_POINTS);
+        expect(whole).toBe(DEFAULT_POINT_CLOUD_MAX_POINTS);
         expect(first.maxPoints).toBe(whole);
         expect(second.maxPoints).toBe(third.maxPoints);
         expect(first.maxPoints).toBe(second.maxPoints);

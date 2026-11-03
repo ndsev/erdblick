@@ -23,29 +23,69 @@ Mapget owns:
 - projected values, traces, and issues;
 - immutable `TileSubsetLayer` output.
 
+### Runtime and UI owners
+
+| Owner | Lifetime and responsibilities |
+| --- | --- |
+| `SearchService` | Application controller: create/clone/close, reconcile saved definitions, resolve coverage, coordinate views, decode native result values, and bind actions/controls. |
+| `FeatureSearchSchemaService` | Schema analysis and completion worker lanes, owner-specific completion states, timers, serials and cancellation. Workers start on demand; catalog-only construction performs no worker IO. |
+| `SearchResults` (`search-results.model.ts`) | One session's contributions, append/rebuild cursor, progress, result points/buckets, density index and pure summary aggregation. Accepts only the current run and rejects work after destruction. |
+| `SearchPresentation` (`search-visualization.presentation.ts`) | One search/layer's compiled style, `StyledMapgetLayer` subscription, coverage, object discovery and expiry. Replacement disposes its subscription and native style; late discovery is ignored. |
+| `search-session.model.ts` | Public value contracts. Type-only consumers do not import the controller; `session.results` exposes result/progress values without the owner's mutation API. |
+
+`SearchResults` has no Angular, DOM, map-controller or WASM dependency. The
+controller supplies a density adapter through a narrow contribution/projection
+interface and performs native decoding before adding contributions. The existing
+frame-budgeted ingress loop remains in the controller; tasks check the session
+run, presentation, tile generation and value version before accepting data.
+Replacements/removals coalesce derived-array rebuilding. Native summary extraction
+remains in the controller, while normalization, histogram limits and merging live
+with the results.
+
+`SearchComponent` is the dialog/dock shell: session selection, query editing,
+header actions, close confirmation and export requests. Its local children own:
+
+- `SearchResultsComponent`: PrimeNG tree, grouping/expansion, append cursor,
+  animation frames and resize observer. Appends retain the 1,000-entry/8 ms budget
+  and cancel when the child is removed, including docking transitions.
+- `SearchScopeComponent`: map/layer selection, inferred scope and type/level/view
+  drafts. It commits semantic edits through the existing search controller.
+- `SearchVisualizationComponent`: rule drafts, asynchronous field metadata,
+  automatic initialization, rendering choices, and apply/save. It reuses the
+  shared rule/color editors and stylesheet converter.
+- `SearchDiagnosticsComponent`: progress and diagnostics presentation, histogram
+  labels and lazy summary requests. It does not compute summaries itself.
+
+Children receive an explicit session ID and current values; they do not receive
+the parent component or mutate runtime sessions. Timers, drafts and expanded nodes
+stay local, while persisted definitions remain in `SearchState`. Scope/style
+inputs track definition/schema changes independently of streamed result progress,
+so each chunk does not rebuild the selectors or overwrite style drafts.
+
 ## End-to-end flow
 
 ```mermaid
 flowchart LR
-  Editor["SearchComponent<br/>query + scope + fields"]
-  Session["SearchService<br/>session state"]
+  Editor["SearchComponent + sections<br/>query + scope + fields"]
+  Session["SearchService<br/>session controller"]
   Style["synthetic FeatureLayerStyle v2"]
-  Styled["StyledMapgetLayer<br/>presentationKind=search"]
+  Styled["SearchPresentation / StyledMapgetLayer<br/>presentationKind=search"]
   Filter["/interactive filter channels"]
   Subset["TileSubsetLayer"]
   Ingest["FrameBudgetLoop<br/>list ingestion"]
   Render["ordinary subset renderer"]
+  Results["SearchResults<br/>current run contributions"]
   UI["tree / export / density"]
   Map["Deck map"]
 
   Editor --> Session --> Style --> Styled --> Filter --> Subset
-  Subset --> Ingest --> UI
+  Subset --> Ingest --> Results --> UI
   Subset --> Render --> Map
 ```
 
-`SearchService` owns a shared search presentation rather than one
-backend request per view. Every consuming view attaches that presentation to
-its own controller/render scene.
+`SearchService` owns the collection of shared search presentations, with one
+resource owner per session/layer. Every consuming view attaches that presentation
+to its own controller/render scene; it does not create another backend request.
 
 ## Query and scope
 
@@ -77,7 +117,7 @@ otherwise both appear as index zero/count one.
 
 ## Synthetic stylesheet
 
-`feature-search-style.ts` translates the session's GUI rules into flat
+`feature-search-style.adapter.ts` translates the session's GUI rules into flat
 top-level rules. The concrete search scope is applied only to this transient
 runtime source; it is not written into a reusable stylesheet. Labels,
 category/gradient expressions, and geometry choices use the same native style

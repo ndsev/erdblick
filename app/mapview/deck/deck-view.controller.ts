@@ -1,11 +1,16 @@
-import {GeolocationState} from "../../geolocation/geolocation.state";
 /**
  * The current Deck implementation behind one map view component.
  * ViewComponent supplies this controller and switches its 2D/3D variant. The
  * controller coordinates camera behavior, overlays and renderer resource cleanup.
  */
+import { GeolocationState } from "../../geolocation/geolocation.state";
+import { DeckBackground } from "./deck-background.presentation";
+import { DeckLocationOverlay } from "./deck-location-overlay.presentation";
+import { DeckPicking } from "./deck-picking.controller";
+import { rectangleOverlayData, toDeckColor } from "./deck-rectangle-overlay.layer";
+import { DeckSearchOverlay, type DeckSearchOverlayFrame } from "./deck-search-overlay.presentation";
+import { DeckTileOverlay, type DeckTileOverlayFrame } from "./deck-tile-overlay.presentation";
 import {
-    COORDINATE_SYSTEM,
     FirstPersonView as DeckFirstPersonView,
     Deck as DeckGlDeck,
     MapView as DeckMercatorView,
@@ -16,58 +21,25 @@ import {
     type PickingInfo,
     type WebMercatorViewport
 } from "@deck.gl/core";
-import {
-    BitmapLayer,
-    IconLayer,
-    PolygonLayer,
-    TextLayer
-} from "@deck.gl/layers";
-import { WMSImageSource } from "@loaders.gl/wms";
-import type { Device, Parameters as LumaParameters } from "@luma.gl/core";
-import {
-    BehaviorSubject,
-    distinctUntilChanged,
-    Subject,
-    Subscription
-} from "rxjs";
+import type { Device } from "@luma.gl/core";
+import { BehaviorSubject, distinctUntilChanged, Subject, Subscription } from "rxjs";
 import { Viewport } from "../../../build/libs/core/erdblick-core";
+import { deepEquals } from "../../appstate/appstate.model";
+import { AppStateService } from "../../appstate/appstate.service";
 import { AppConfigService } from "../../config/appconfig.service";
-import { type WmsBackgroundLayerConfig, type XyzBackgroundLayerConfig } from "../background-layer.model";
 import { CoordinatesService } from "../../coordinates/coordinates.service";
 import { environment } from "../../environments/environment";
 import { InspectionPanelService } from "../../inspection/inspection-panel.service";
 import { InspectionSelectionService } from "../../inspection/inspection-selection.service";
-import { TileFeatureId } from "../../inspection/inspection.model";
-import { type TileLayerProps, WMSLayer } from "../../integrations/deckgl.adapter";
-import {
-    Cartographic,
-    Color,
-    GeoMath,
-    SceneMode
-} from "../../integrations/geo.adapter";
-import { coreLib } from "../../integrations/wasm.adapter";
-import { featureSetsEqual } from "../../mapdata/feature-inspection.adapter";
+import { Cartographic, Color, GeoMath, SceneMode } from "../../integrations/geo.adapter";
+import { MapTileStreamService } from "../../mapdata/map-tile-stream.service";
 import { MapDataService } from "../../mapdata/mapdata.service";
 import { MapDataState } from "../../mapdata/mapdata.state";
-import { MapTileStreamService } from "../../mapdata/map-tile-stream.service";
 import { featureSearchVisibleInView } from "../../search/search-definition.model";
-import {
-    type FeatureSearchOverlayLayer,
-    SearchService
-} from "../../search/search.service";
-import type {
-    SearchResultDensityMarker,
-    SearchResultPoint
-} from "../../search/search-result-density.visualization";
-import { deepEquals } from "../../appstate/appstate.model";
-import { AppStateService } from "../../appstate/appstate.service";
+import { SearchService } from "../../search/search.service";
 import {
     CameraViewState,
     DEFAULT_MAP_ZOOM_STEP,
-    DEFAULT_TILE_GRID_COLOR,
-    DEFAULT_TILE_GRID_LEVEL,
-    DEFAULT_TILE_GRID_OPACITY,
-    TileGridMode,
     tileGridRgba,
     VIEW_SYNC_MOVEMENT,
     VIEW_SYNC_POSITION
@@ -78,24 +50,12 @@ import {
     IRenderSceneHandle,
     IRenderView,
     LocationArea,
-    LocationPolygon,
     RenderedFeaturePickResult,
     RenderNavigationTarget,
     RenderViewCameraState
 } from "../render-view.model";
 import { RightClickMenuService, TileOutlinePayload } from "../rightclickmenu.service";
-import {
-    autoTileGridLevel,
-    coarsenedTileLevel,
-    tileGridExtentForLevel,
-    tileGridLatToNormY,
-    type TileGridLevelExtent,
-    tileGridLonToNormX,
-    tileGridVisibleCellCount,
-    wrapColumnIntoExtent
-} from "../tile-grid-visibility.util";
 import { ViewLayerController } from "../view-layer.controller";
-import { BatchedTileLayer } from "./batched-tile.layer";
 import { DeckContactShading } from "./deck-contact-shading.visualization";
 import {
     createFirstPersonCoverageViewport,
@@ -108,62 +68,28 @@ import {
     type FixedFirstPersonCameraState,
     updateFixedFirstPersonLook
 } from "./deck-first-person-navigation.util";
-import {
-    DeckInteractionOutline,
-    isDeckInteractionMaskLayer
-} from "./deck-interaction-outline.visualization";
+import { DeckInteractionOutline, isDeckInteractionMaskLayer } from "./deck-interaction-outline.visualization";
 import { DeckLayerRegistry } from "./deck-layer-registry.util";
-import {
-    fitLocationArea,
-    LOCATION_MIN_MAP_ZOOM,
-    locationOverlayPolygons
-} from "./deck-location-area-navigation.util";
+import { fitLocationArea, LOCATION_MIN_MAP_ZOOM } from "./deck-location-area-navigation.util";
 import { NavigationTargetOverlay } from "./deck-navigation-target.presentation";
 import { planarPanViewState } from "./deck-planar-pan.util";
-import {
-    createSearchResultDensityLabelLayer,
-    createSearchResultDensityLayer,
-    layoutSearchResultDensityMarkers,
-    SEARCH_RESULT_DENSITY_DEFAULT_SIZE_SCALE,
-    searchResultDensityCountDomain,
-    type SearchResultDensityCountDomain,
-    type SearchResultDensityLayoutEntry
-} from "./deck-search-result-density.layer";
 import {
     DeckSemanticZIndex,
     isSemanticZIndexPassLayer,
     isSemanticZIndexPickingLayer
 } from "./deck-semantic-z-index.visualization";
-import {
-    TILE_STATE_KIND_EMPTY,
-    TILE_STATE_KIND_ERROR,
-    tileGridOverlayData,
-    TileGridOverlayDatum,
-    TileGridOverlayLayer,
-    TileGridStateOverlayLayer
-} from "./deck-tile-grid-overlay.layer";
 import { clippedGeographicBounds } from "./deck-viewport-coverage.util";
-import {
-    createErdblickVectorLayers,
-    ErdblickVectorLayer
-} from "./erdblick-vector.layer";
+import { createErdblickVectorLayers, ErdblickVectorLayer } from "./erdblick-vector.layer";
 import { gpuIconAtlas } from "./gpu-icon-atlas.visualization";
-import { GpuScene } from "./gpu-scene.visualization";
 import { GpuSceneMaskController } from "./gpu-scene-mask.controller";
+import { GpuScene } from "./gpu-scene.visualization";
 import {
     createGpuTextLayerHost,
     DeckTextOverlayService,
     GpuTextLayerHost,
     isDeckTextOverlayLayer
 } from "./gpu-text-layer.host";
-import { LocationAreaLayer } from "./location-area.layer";
-import {
-    type DeckFeaturePickLayerProps,
-    markerAnchorFromPickingInfo,
-    NAVIGATION_PICK_RADIUS_PIXELS,
-    navigationTargetFromPickingInfo,
-    pickNavigationAnchor
-} from "./navigation/erdblick-navigation-anchor.util";
+import { NAVIGATION_PICK_RADIUS_PIXELS } from "./navigation/erdblick-navigation-anchor.util";
 import { ErdblickTargetNavigationAdapter } from "./navigation/erdblick-target-navigation.adapter";
 import type {
     NavigationAnchor,
@@ -205,61 +131,6 @@ interface FirstPersonSession {
 
 type DeckView = DeckMercatorView | DeckFirstPersonView;
 
-/** Geometry description for one tile-grid overlay level after local normalization. */
-interface TileGridOverlayGeometry {
-    data: TileGridOverlayDatum[];
-    localMin: [number, number];
-    localSize: [number, number];
-    subdivisionX: number;
-    subdivisionY: number;
-}
-
-/** Map/layer pair used when aggregating tile-state overlays per visible feature level. */
-interface VisibleLayerRef {
-    mapId: string;
-    layerId: string;
-}
-
-/** One active search layer together with the visible source tiles it contributes to this view. */
-interface SearchResultOverlayInput {
-    searchLayer: FeatureSearchOverlayLayer;
-    dotLayerKey: string;
-    labelLayerKey: string;
-    pinLayerKey: string;
-    lowFiSourceTileKeys: Set<string>;
-    highFiPinMarkers: SearchResultDensityMarker[];
-    targetLevel: number;
-    densitySizeScale: number;
-    sourceTileKeySignature: string;
-}
-
-/** Search-result marker data plus its observed count range for one deck dot layer. */
-interface SearchResultOverlayLayerData {
-    markers: SearchResultDensityMarker[];
-    countDomain: SearchResultDensityCountDomain;
-}
-
-/** Shared rectangle overlay datum for tile outlines and jump-area highlights. */
-interface DeckRectangleOverlayDatum {
-    polygon: [number, number][];
-    fillColor: [number, number, number, number];
-    lineColor: [number, number, number, number];
-    lineWidthPixels: number;
-}
-
-/** Single location marker datum for the search/jump marker overlay. */
-interface DeckLocationMarkerDatum {
-    position: [number, number, number];
-}
-
-/** Single transient place-name label datum for location-search jumps. */
-interface DeckLocationLabelDatum {
-    position: [number, number];
-    label: string;
-    textColor: [number, number, number, number];
-    backgroundColor: [number, number, number, number];
-}
-
 /** Minimal event shape used by deck click callbacks. */
 interface DeckGestureEventLike {
     srcEvent?: {
@@ -281,15 +152,6 @@ export abstract class DeckMapView implements IRenderView {
     private static readonly FALLBACK_VIEWPORT_HEIGHT_PX = 1080;
     private static readonly MIN_MAP_ZOOM = LOCATION_MIN_MAP_ZOOM;
     private static readonly MAX_MAP_ZOOM = 22;
-    private static readonly BACKGROUND_LAYER_KEY = "background/layer";
-    private static readonly TILE_GRID_LAYER_KEY = "builtin/tile-grid";
-    private static readonly TILE_STATE_LAYER_KEY = "builtin/tile-state";
-    private static readonly TILE_OUTLINE_LAYER_KEY = "builtin/tile-outline";
-    private static readonly JUMP_AREA_LAYER_KEY = "builtin/jump-area";
-    private static readonly LOCATION_AREA_LAYER_KEY = "builtin/location-area";
-    private static readonly SEARCH_RESULTS_LAYER_PREFIX = "builtin/search-results";
-    private static readonly LOCATION_MARKER_LAYER_KEY = "builtin/location-marker";
-    private static readonly LOCATION_LABEL_LAYER_KEY = "builtin/location-label";
     private static readonly CANVAS_RESIZE_DEBOUNCE_MS = 64;
     private static readonly CANVAS_USE_DEVICE_PIXELS = 1;
     private static readonly CANVAS_STYLE: Partial<CSSStyleDeclaration> = {
@@ -299,32 +161,9 @@ export abstract class DeckMapView implements IRenderView {
         height: "100%",
         display: "block"
     };
-    private static readonly LOCATION_MARKER_ICON_NAME = "marker";
-    private static readonly LOCATION_MARKER_ICON_SIZE_PX = 48;
-    private static readonly LOCATION_MARKER_RENDER_SIZE_PX = 32;
-    private static readonly SEARCH_RESULT_PIN_RENDER_SIZE_PX = 24;
-    private static readonly LOCATION_LABEL_FADE_DURATION_MS = 4200;
-    private static readonly UNSELECTABLE_FEATURE_INDEX = 0xffffffff;
-    private static readonly JUMP_AREA_HIGHLIGHT_DURATION_MS = 3000;
-    private static readonly TILE_GRID_LINE_WIDTH_PX = 1.0;
-    private static readonly TILE_GRID_MAX_VISIBLE_CELLS = 16 * 1024;
-    private static readonly SEARCH_RESULT_DENSITY_SIZE_SCALE = SEARCH_RESULT_DENSITY_DEFAULT_SIZE_SCALE;
-    private static readonly SEARCH_RESULT_SOURCE_TILE_HASH_OFFSET = 0x811c9dc5;
-    private static readonly SEARCH_RESULT_SOURCE_TILE_HASH_PRIME = 0x01000193;
-    private static readonly HOVER_ANCHOR_PICK_THROTTLE_MS = 16;
-    private static readonly HOVER_DETAIL_PICK_IDLE_MS = 80;
-    private static readonly HOVER_PICK_MAX_OBJECTS = 10;
     private static readonly GPU_SCENE_REDRAW_QUIET_MS = 50;
     private static readonly GPU_SCENE_REDRAW_MAX_LATENCY_MS = 1_000;
-    private static readonly TILE_GRID_DATA_REFRESH_DEBOUNCE_MS = 250;
     private static readonly NAVIGATION_COMMAND_STEP_PX = 64;
-    private static readonly TILE_STATE_ERROR_COLOR: [number, number, number, number] = [225, 45, 45, 105];
-    private static readonly TILE_STATE_EMPTY_COLOR: [number, number, number, number] = [122, 126, 133, 64];
-    private static readonly NO_DEPTH_PARAMETERS: LumaParameters = {
-        depthWriteEnabled: false,
-        depthCompare: "always",
-        cullMode: "none"
-    };
 
     /** Presentation indices are resolved from logical identity each time a renderer publishes. */
     protected get _viewIndex(): number { return this.viewSettings.viewIds.indexOf(this.viewId); }
@@ -333,6 +172,16 @@ export abstract class DeckMapView implements IRenderView {
     protected deck: DeckGlDeck<DeckView> | null = null;
     private deckContainer: HTMLDivElement | null = null;
     protected readonly layerRegistry = new DeckLayerRegistry();
+    private readonly background = new DeckBackground(this.layerRegistry);
+    private readonly searchOverlay = new DeckSearchOverlay(this.layerRegistry, () => this.searchOverlayFrame());
+    private readonly tileOverlay = new DeckTileOverlay(this.layerRegistry,
+        () => this.tileOverlayFrame(),
+        (tileId, layers) => this.layerController.occupancyForTile(tileId, layers));
+    private readonly locationOverlay = new DeckLocationOverlay(this.layerRegistry, {
+        onTick: callback => this.onTick(callback),
+        offTick: callback => this.offTick(callback),
+        requestRender: () => this.requestRender()
+    }, () => this.mapViewState.locationBoundaryUnavailableTopic.next());
     protected readonly interactionOutline =
         new DeckInteractionOutline(this.layerRegistry);
     protected readonly semanticZIndex =
@@ -356,7 +205,23 @@ export abstract class DeckMapView implements IRenderView {
         position: [0, 0, 0]
     };
 
-    hoveredFeatureIds = new BehaviorSubject<TileFeatureId[]>([]);
+    private readonly picking = new DeckPicking(
+        {
+            deck: () => this.deck,
+            scene: () => this.gpuScene,
+            viewport: () => this.createWebMercatorViewport() ?? null
+        },
+        () => ({
+            radius: this.inspectionState.state.drillPickRadius,
+            maxObjects: this.inspectionState.state.inspectionsLimit,
+            navigationAnchors: this.allowPitchAndBearing
+        }),
+        result => {
+            if (result.updateInspection) this.inspectionSelection.setHoveredFeatures(result.featureIds);
+        },
+        target => this.setHoverNavigationPivot(target)
+    );
+    readonly hoveredFeatureIds = this.picking.hoveredFeatureIds;
     readonly firstPersonViewActive = new BehaviorSubject(false);
     readonly rendererInvalidated = new Subject<void>();
 
@@ -372,27 +237,7 @@ export abstract class DeckMapView implements IRenderView {
     private lastCanvasCssSize?: { width: number; height: number };
     private clippedLayoutCanvasCssSize?: { width: number; height: number };
     private layoutResizeRestoreRaf?: number;
-    private backgroundLayerSignature = "";
-    private tileGridEnabled = false;
-    private tileGridMode: TileGridMode = "nds";
-    private tileGridLevel = DEFAULT_TILE_GRID_LEVEL;
-    private tileGridAutoLevel = false;
-    private tileGridLineColor = tileGridRgba(DEFAULT_TILE_GRID_COLOR, DEFAULT_TILE_GRID_OPACITY);
-    private tileGridLayerKeys = new Set<string>();
-    private tileStateLayerKeys = new Set<string>();
-    private tileGridOverlayUpdateRaf: number | null = null;
-    private tileGridOverlayDataRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-    private searchResultsOverlayUpdateRaf: number | null = null;
     private viewportUpdateRaf: number | null = null;
-    private searchResultsOverlayDataRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-    private lastSearchResultsSignature = "";
-    private searchResultLayerKeys = new Set<string>();
-    private lastLocationMarkerSignature = "";
-    private jumpAreaHighlightTick: (() => void) | null = null;
-    private locationAreaHighlightTick: (() => void) | null = null;
-    private locationAreaHighlightStartedAt: number | undefined;
-    private locationLabelTick: (() => void) | null = null;
-    private isHoveringFeature = false;
     private hoverNavigationPivot: NavigationAnchor | null = null;
     private hoverNavigationSurfaceNormal: NavigationSurfaceNormal | null = null;
     private hoverNavigationOrigin: NavigationTargetOrigin | null = null;
@@ -404,18 +249,6 @@ export abstract class DeckMapView implements IRenderView {
     private retainedNavigationOrigin: NavigationTargetOrigin | null = null;
     private readonly targetNavigationAdapter: ErdblickTargetNavigationAdapter;
     private firstPersonSession: FirstPersonSession | null = null;
-    private hoverAnchorPickTimer: ReturnType<typeof setTimeout> | null = null;
-    private hoverDetailPickTimer: ReturnType<typeof setTimeout> | null = null;
-    private pendingHoverAnchorPosition: { x: number; y: number } | null = null;
-    private pendingHoverDetailPosition: { x: number; y: number } | null = null;
-    private latestHoverPosition: { x: number; y: number } | null = null;
-    private hoverDetailPickDueAtMs = 0;
-    private hoverPickInFlight = false;
-    private hoverPickGeneration = 0;
-    private topHoverFeatureIds: TileFeatureId[] = [];
-    private topHoverFeatureGeneration = -1;
-    private deckCanvasPointerInside = false;
-    private lastHoverAnchorPickAtMs = 0;
     private isCameraInteracting = false;
     private deckPreviousFrameCompletedAtMs = 0;
     private gpuSceneRedrawTimer: ReturnType<typeof setTimeout> | null = null;
@@ -426,16 +259,13 @@ export abstract class DeckMapView implements IRenderView {
     private cameraStatePushPending = false;
     private retiringForViewRemoval = false;
     private readonly deckCanvasPointerEnter = () => {
-        this.deckCanvasPointerInside = true;
+        this.picking.pointerEnter();
     };
     private readonly deckCanvasPointerMove = (event: PointerEvent) => {
         this.onCanvasPointerMove(event);
     };
     private readonly deckCanvasPointerDown = (event: PointerEvent) => {
-        this.hoverPickGeneration += 1;
-        this.pendingHoverAnchorPosition = null;
-        this.pendingHoverDetailPosition = null;
-        this.cancelHoverPickScheduling();
+        this.picking.pointerDown();
         if (!this.allowPitchAndBearing || this.firstPersonSession) {
             return;
         }
@@ -443,31 +273,14 @@ export abstract class DeckMapView implements IRenderView {
             event.preventDefault();
         }
     };
+    private readonly deckCanvasPointerLeave = (event: PointerEvent) => {
+        const preserveInspectionHover = event.relatedTarget instanceof Element
+            && event.relatedTarget.closest("inspection-container") !== null;
+        this.picking.pointerLeave(preserveInspectionHover);
+    };
     private readonly deckCanvasContextMenu = (event: MouseEvent) => {
         event.preventDefault();
     };
-    private readonly deckCanvasPointerLeave = (event: PointerEvent) => {
-        this.deckCanvasPointerInside = false;
-        // Deck throttles expensive drill picks. A sample queued just before
-        // the pointer enters an inspection panel must not run afterward and
-        // erase the panel-owned validity hover.
-        this.latestHoverPosition = null;
-        this.pendingHoverAnchorPosition = null;
-        this.pendingHoverDetailPosition = null;
-        this.hoverPickGeneration += 1;
-        this.cancelHoverPickScheduling();
-        this.setFeatureHoverState(false);
-        this.setHoverNavigationPivot(null);
-        this.hoveredFeatureIds.next([]);
-        const destinationOwnsInspectionHover = event.relatedTarget instanceof Element
-            && event.relatedTarget.closest("inspection-container") !== null;
-        if (!destinationOwnsInspectionHover) {
-            this.inspectionSelection.setHoveredFeatures([]);
-        }
-    };
-    private desktopDrillPickingEnabled = true;
-    private readonly deckCursor = ({ isDragging }: { isDragging: boolean }) =>
-        this.isHoveringFeature ? "pointer" : (isDragging ? "grabbing" : "grab");
     /**
      * Routes deferred text and GLTF pick proxies to their dedicated passes.
      *
@@ -505,13 +318,23 @@ export abstract class DeckMapView implements IRenderView {
     };
     private static readonly DEFAULT_DECK_SCROLL_ZOOM_SPEED = 0.01;
 
-    get viewIndex() {
-        return this._viewIndex;
+    /** Enables desktop-only point drill-picking without broadening touch taps. */
+    setDesktopDrillPickingEnabled(enabled: boolean): void {
+        this.picking.setDesktopDrillPickingEnabled(enabled);
     }
 
-    /** Enables desktop-only point drill-picking without broadening touch/narrow-view taps. */
-    setDesktopDrillPickingEnabled(enabled: boolean): void {
-        this.desktopDrillPickingEnabled = enabled;
+    /** Resolves physical surfaces through this canvas's picking owner. */
+    pickNavigationTarget(screenPos: {x: number; y: number}): RenderNavigationTarget | undefined {
+        return this.picking.pickNavigationTarget(screenPos);
+    }
+
+    /** Exposes bounded feature picking through the renderer contract. */
+    drillPickFeatures(screenPos: {x: number; y: number}, radius: number, maxObjects: number): RenderedFeaturePickResult {
+        return this.picking.drillPickFeatures(screenPos, radius, maxObjects);
+    }
+
+    get viewIndex() {
+        return this._viewIndex;
     }
 
     protected abstract readonly sceneMode: SceneMode;
@@ -643,11 +466,11 @@ export abstract class DeckMapView implements IRenderView {
             onResize: ({ width, height }) => {
                 this.lastCanvasCssSize = this.normalizedCanvasCssSize(width, height);
                 this.scheduleViewportUpdate();
-                this.scheduleTileGridOverlayUpdate();
-                this.scheduleSearchResultsOverlayUpdate();
+                this.tileOverlay.scheduleUpdate();
+                this.searchOverlay.scheduleUpdate();
                 this.scheduleCanvasResize(width, height);
             },
-            getCursor: this.deckCursor,
+            getCursor: this.picking.cursor,
             onViewStateChange: ({ viewState, interactionState }) =>
                 this.onDeckViewStateChange(
                     viewState as DeckCameraState | DeckFirstPersonCameraState,
@@ -656,9 +479,7 @@ export abstract class DeckMapView implements IRenderView {
             onInteractionStateChange: (interactionState) => this.onInteractionStateChange(interactionState),
             onClick: (info, event) => this.onClick(info, event),
             onAfterRender: () => {
-                if (this.locationAreaHighlightTick && this.locationAreaHighlightStartedAt === undefined) {
-                    this.locationAreaHighlightStartedAt = performance.now();
-                }
+                this.locationOverlay.onAfterRender();
                 if (this.contactShadingEnabled && this.contactShading) {
                     const viewport = this.deck?.getViewports()[0];
                     if (viewport) {
@@ -814,34 +635,17 @@ export abstract class DeckMapView implements IRenderView {
         this.subscriptions.length = 0;
         this.stopTickLoop();
         this.cancelViewportUpdateScheduling();
-        this.cancelTileGridOverlayUpdateScheduling();
-        this.cancelSearchResultsOverlayScheduling();
         this.cancelCanvasResizeScheduling();
         this.cancelLayoutResizeRestore();
         this.cancelGpuSceneRedraw();
-        this.tickCallbacks.clear();
-        this.setFeatureHoverState(false);
-        this.hoveredFeatureIds.next([]);
-        this.cancelHoverPickScheduling();
-        this.hoverPickGeneration += 1;
-        this.pendingHoverAnchorPosition = null;
-        this.pendingHoverDetailPosition = null;
-        this.latestHoverPosition = null;
+        this.picking.destroy();
         this.firstPersonSession = null;
         this.firstPersonViewActive.next(false);
-        this.removeBackgroundLayer();
-        this.removeTileGridLayers();
-        this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
-        this.layerRegistry.remove(DeckMapView.JUMP_AREA_LAYER_KEY);
-        this.removeSearchResultLayers();
-        this.layerRegistry.remove(DeckMapView.LOCATION_MARKER_LAYER_KEY);
-        this.layerRegistry.remove(DeckMapView.LOCATION_LABEL_LAYER_KEY);
-        this.removeTileStateLayers();
-        this.stopJumpAreaHighlight();
-        this.stopLocationAreaHighlight();
-        this.stopLocationLabel();
-        this.backgroundLayerSignature = "";
-        this.tileGridEnabled = false;
+        this.background.destroy();
+        this.tileOverlay.destroy();
+        this.searchOverlay.destroy();
+        this.locationOverlay.destroy();
+        this.tickCallbacks.clear();
         this.gpuMaskController?.destroy();
         this.gpuMaskController = null;
         this.semanticZIndex.unbindScene();
@@ -1293,303 +1097,6 @@ export abstract class DeckMapView implements IRenderView {
         };
     }
 
-    /**
-     * Resolves the first eligible physical surface beneath a screen position.
-     * Multiple-object picking lets non-physical labels remain above the actual anchor;
-     * surfaces without application identity intentionally return an empty feature list.
-     */
-    pickNavigationTarget(screenPos: { x: number; y: number }): RenderNavigationTarget | undefined {
-        if (!this.deck) {
-            return undefined;
-        }
-        const layerIds = this.navigationPickLayerIds();
-        const picked = pickNavigationAnchor(
-            this.deck,
-            [screenPos.x, screenPos.y],
-            pickingInfo => this.featureIdsFromPickingInfo(pickingInfo),
-            (first, second) => first.length > 0 && second.length > 0 &&
-                first.some(firstId => second.some(secondId =>
-                    firstId.mapTileKey === secondId.mapTileKey
-                    && firstId.featureId === secondId.featureId
-                )),
-            this.inspectionState.state.drillPickRadius,
-            layerIds.length ? layerIds : undefined
-        );
-        if (picked) {
-            const { position, surfaceNormal, origin, value: featureIds } = picked;
-            return surfaceNormal
-                ? { position, surfaceNormal, origin, featureIds }
-                : { position, origin, featureIds };
-        }
-        return undefined;
-    }
-
-    /** Resolves a finite visible point on the zero-height ground plane as the universal fallback pivot. */
-    private groundNavigationTarget(
-        screenPos: { x: number; y: number },
-        viewport: WebMercatorViewport | null | undefined = this.createWebMercatorViewport()
-    ): NavigationVisualTarget | null {
-        if (!viewport) {
-            return null;
-        }
-        const ground = viewport.unproject(
-            [screenPos.x, screenPos.y],
-            { targetZ: 0 }
-        );
-        if (ground.length < 3 || !ground.every(Number.isFinite)) {
-            return null;
-        }
-        const position: NavigationAnchor = [ground[0], ground[1], ground[2]];
-        return isNavigationAnchorUsable(viewport, position, true)
-            ? { position, origin: "ground" }
-            : null;
-    }
-
-    /** Resolves one exact eligible physical surface for a controller acquisition. */
-    private pickControllerNavigationTarget(
-        context: Readonly<InteractionTargetContext<WebMercatorViewport>>,
-        screenPosition: [number, number]
-    ): NavigationVisualTarget | null {
-        const layerIds = this.navigationPickLayerIds();
-        if (!this.deck || !layerIds.length) {
-            return null;
-        }
-        const radius = Math.max(0, Math.trunc(this.inspectionState.state.drillPickRadius));
-        const canvasPosition = [
-            context.viewport.x + screenPosition[0],
-            context.viewport.y + screenPosition[1]
-        ];
-        try {
-            const picked = this.deck.pickObject({
-                x: canvasPosition[0],
-                y: canvasPosition[1],
-                radius,
-                layerIds,
-                unproject3D: true
-            });
-            return picked
-                ? navigationTargetFromPickingInfo({
-                    ...picked,
-                    x: canvasPosition[0],
-                    y: canvasPosition[1],
-                    viewport: context.viewport
-                }, radius, true)
-                : null;
-        } catch (error) {
-            console.error("Navigation controller picking failed.", error);
-            return null;
-        }
-    }
-
-    /**
-     * Resolves every eligible rendered feature returned by one bounded point drill-pick.
-     * Layer filtering happens before the pick so excluded representations cannot consume depth.
-     */
-    drillPickFeatures(
-        screenPos: { x: number; y: number },
-        radius: number,
-        maxObjects: number
-    ): RenderedFeaturePickResult {
-        if (!this.deck) {
-            return { topFeatureIds: [], featureIds: [] };
-        }
-        const pickedObjects = this.deck.pickMultipleObjects({
-            x: screenPos.x,
-            y: screenPos.y,
-            radius,
-            depth: maxObjects,
-            layerIds: this.drillPickLayerIds(),
-            unproject3D: false
-        });
-        return this.featurePickResultFromPickingInfos(
-            pickedObjects,
-            maxObjects);
-    }
-
-    /** Returns the current top-level layer ids explicitly marked as ordinary feature representations. */
-    private drillPickLayerIds(): string[] {
-        return this.eligiblePickLayerIds("drillPickEligible");
-    }
-
-    /** Returns physical feature-representation layers that can supply navigation anchors. */
-    private navigationPickLayerIds(): string[] {
-        return this.eligiblePickLayerIds("navigationAnchorEligible");
-    }
-
-    /** Collects stable top-level layer ids carrying one explicit interaction capability. */
-    private eligiblePickLayerIds(
-        capability: "drillPickEligible" | "navigationAnchorEligible"
-    ): string[] {
-        if (!this.deck) {
-            return [];
-        }
-        const result: string[] = [];
-        const seen = new Set<string>();
-        const visit = (entry: unknown): void => {
-            if (Array.isArray(entry)) {
-                entry.forEach(visit);
-                return;
-            }
-            if (!entry || typeof entry !== "object") {
-                return;
-            }
-            const layer = entry as { id?: unknown; props?: DeckFeaturePickLayerProps };
-            if (layer.props?.[capability] !== true || typeof layer.id !== "string" || seen.has(layer.id)) {
-                return;
-            }
-            seen.add(layer.id);
-            result.push(layer.id);
-        };
-        visit(this.deck.props?.layers);
-        return result;
-    }
-
-    /** Orders picks, preserving the first render object's atomic feature group while flattening all hits. */
-    private featurePickResultFromPickingInfos(
-        pickedObjects: PickingInfo[],
-        maxFeatures = Number.POSITIVE_INFINITY
-    ): RenderedFeaturePickResult {
-        let topFeatureIds: TileFeatureId[] = [];
-        const featureIds: TileFeatureId[] = [];
-        const seen = new Set<string>();
-        const candidates = pickedObjects.map((picked, index) => ({
-            picked,
-            index,
-            order: this.renderedPickOrder(picked)
-        }));
-        const orderedVectorPicks = candidates
-            .filter(candidate => candidate.order !== undefined)
-            .sort((left, right) =>
-                right.order!.zIndex - left.order!.zIndex ||
-                right.order!.primitiveOrder - left.order!.primitiveOrder ||
-                left.index - right.index);
-        let vectorPickIndex = 0;
-        for (const candidate of candidates) {
-            const picked = candidate.order === undefined
-                ? candidate.picked
-                : orderedVectorPicks[vectorPickIndex++].picked;
-            const groupFeatureIds: TileFeatureId[] = [];
-            const groupSeen = new Set<string>();
-            for (const featureId of this.featureIdsFromPickingInfo(picked)) {
-                const identity = `${featureId.mapTileKey}\u0000${featureId.featureId}`;
-                if (!groupSeen.has(identity)) {
-                    groupSeen.add(identity);
-                    groupFeatureIds.push(featureId);
-                }
-            }
-            if (!groupFeatureIds.length) {
-                continue;
-            }
-            if (!topFeatureIds.length) {
-                // One rendered point can represent several server-grouped
-                // features. Preserve that atomic membership independently of
-                // the flat, bounded context-menu result.
-                topFeatureIds = groupFeatureIds;
-            }
-            for (const featureId of groupFeatureIds) {
-                const identity = `${featureId.mapTileKey}\u0000${featureId.featureId}`;
-                if (seen.has(identity)) {
-                    continue;
-                }
-                seen.add(identity);
-                featureIds.push(featureId);
-                if (featureIds.length >= maxFeatures) {
-                    return { topFeatureIds, featureIds };
-                }
-            }
-        }
-        return { topFeatureIds, featureIds };
-    }
-
-    /** Resolve ordering metadata for one GPU vector picking result. */
-    private renderedPickOrder(
-        picked: PickingInfo
-    ): { zIndex: number; primitiveOrder: number } | undefined {
-        const globalPickIndex = Number(
-            (picked.object as { globalPickIndex?: unknown } | undefined)
-                ?.globalPickIndex ?? picked.index
-        );
-        if (!this.gpuScene || !Number.isInteger(globalPickIndex) ||
-            globalPickIndex < 0 ||
-            (!(picked.layer instanceof ErdblickVectorLayer) &&
-                !(picked.sourceLayer instanceof ErdblickVectorLayer))) {
-            return undefined;
-        }
-        return this.gpuScene.pickOrder(globalPickIndex);
-    }
-
-    /** Resolves feature ids from metadata already returned by a deck picking operation. */
-    private featureIdsFromPickingInfo(picked: PickingInfo): TileFeatureId[] {
-        const globalPickIndex = Number(
-            (picked.object as { globalPickIndex?: unknown } | undefined)
-                ?.globalPickIndex ?? picked.index
-        );
-        if ((picked.layer instanceof ErdblickVectorLayer ||
-            picked.sourceLayer instanceof ErdblickVectorLayer ||
-            picked.layer instanceof GpuTextLayerHost ||
-            picked.sourceLayer instanceof GpuTextLayerHost) &&
-            this.gpuScene && Number.isInteger(globalPickIndex) &&
-            globalPickIndex >= 0) {
-            return this.gpuScene.resolvePick(globalPickIndex);
-        }
-        const readFeatureAddress = (buffer: ArrayLike<number | null> | undefined, index: number): number | null => {
-            if (!buffer || index < 0 || index >= buffer.length) {
-                return null;
-            }
-            const value = buffer[index];
-            if (!Number.isInteger(value) || value === DeckMapView.UNSELECTABLE_FEATURE_INDEX) {
-                return null;
-            }
-            return value;
-        };
-
-        const layerProps = picked.layer?.props as DeckFeaturePickLayerProps | undefined;
-        const pickedObject = picked.object;
-        const objectFeatureAddresses = pickedObject?.featureAddresses ?? pickedObject?.featureAddress;
-        const objectFeatureAddressesAreBinaryBuffer = typeof objectFeatureAddresses === "object"
-            && objectFeatureAddresses !== null
-            && ArrayBuffer.isView(objectFeatureAddresses as ArrayBufferView);
-        if (objectFeatureAddresses !== undefined && objectFeatureAddresses !== null && !objectFeatureAddressesAreBinaryBuffer) {
-            if (Array.isArray(objectFeatureAddresses)) {
-                return objectFeatureAddresses
-                    .map(value => Number.isInteger(value)
-                        ? layerProps?.subsetPickResolver?.(Number(value)) ?? []
-                        : [])
-                    .flat();
-            }
-            if (Number.isInteger(objectFeatureAddresses)) {
-                const subsetResult = layerProps?.subsetPickResolver?.(
-                    objectFeatureAddresses as number
-                );
-                if (subsetResult?.length) {
-                    return subsetResult;
-                }
-            }
-            return [];
-        }
-
-        const pickedIndex = Number(picked.index);
-        if (Number.isInteger(pickedIndex) && pickedIndex >= 0) {
-            const featureAddress = readFeatureAddress(layerProps?.featureAddresses, pickedIndex);
-            if (featureAddress !== null) {
-                const subsetResult = layerProps?.subsetPickResolver?.(featureAddress);
-                if (subsetResult?.length) {
-                    return subsetResult;
-                }
-                return [];
-            }
-            const featureAddressByPath = readFeatureAddress(layerProps?.featureAddressesByPath, pickedIndex);
-            if (featureAddressByPath !== null) {
-                const subsetResult = layerProps?.subsetPickResolver?.(featureAddressByPath);
-                if (subsetResult?.length) {
-                    return subsetResult;
-                }
-                return [];
-            }
-        }
-        return [];
-    }
-
     /** Unprojects a map-view screen position onto the ground plane. */
     pickCartographic(screenPos: { x: number; y: number }): { lon: number; lat: number; alt: number } | undefined {
         if (this.firstPersonSession) {
@@ -1725,12 +1232,12 @@ export abstract class DeckMapView implements IRenderView {
             coverageViewport: createFirstPersonCoverageViewport(localTarget, viewState.bearing)
         };
         this.firstPersonViewActive.next(true);
-        this.clearHoverPickingState();
+        this.picking.clearHoverPickingState();
         this.applyActiveDeckView();
         this.cancelViewportUpdateScheduling();
         this.updateViewport();
-        this.scheduleTileGridOverlayUpdate();
-        this.scheduleSearchResultsOverlayUpdate();
+        this.tileOverlay.scheduleUpdate();
+        this.searchOverlay.scheduleUpdate();
         this.requestRender("Enter first-person view");
     }
 
@@ -1741,13 +1248,13 @@ export abstract class DeckMapView implements IRenderView {
         }
         this.firstPersonSession = null;
         this.firstPersonViewActive.next(false);
-        this.clearHoverPickingState();
+        this.picking.clearHoverPickingState();
         this.applyActiveDeckView();
         this.cancelViewportUpdateScheduling();
         this.updateViewport();
         this.updateBackgroundLayer();
-        this.scheduleTileGridOverlayUpdate();
-        this.scheduleSearchResultsOverlayUpdate();
+        this.tileOverlay.scheduleUpdate();
+        this.searchOverlay.scheduleUpdate();
         this.requestRender("Exit first-person view");
     }
 
@@ -1890,20 +1397,20 @@ export abstract class DeckMapView implements IRenderView {
     private setupSubscriptions(): void {
         this.subscriptions.push(this.mapViewState.clearLocationHighlightTopic.subscribe(index => {
             if (index === this._viewIndex) {
-                this.stopLocationAreaHighlight();
-                this.stopLocationLabel();
+                this.locationOverlay.stopLocationAreaHighlight();
+                this.locationOverlay.stopLocationLabel();
             }
         }));
         this.subscriptions.push(this.stateService.stateApplied.subscribe(() => {
-            this.stopLocationAreaHighlight();
-            this.stopLocationLabel();
+            this.locationOverlay.stopLocationAreaHighlight();
+            this.locationOverlay.stopLocationLabel();
         }));
         this.subscriptions.push(this.mapViewState.moveToLocationAreaTopic.subscribe(({ targetView, area }) => {
             if (targetView === this._viewIndex) this.moveToLocationArea(area);
         }));
         this.subscriptions.push(this.locationState.locationPolicyChanges.subscribe(() => {
-            if (!this.locationState.locationBoundariesEnabled) this.stopLocationAreaHighlight();
-            if (!this.locationState.locationSearchEnabled) this.stopLocationLabel();
+            this.locationOverlay.setBoundariesEnabled(this.locationState.locationBoundariesEnabled);
+            if (!this.locationState.locationSearchEnabled) this.locationOverlay.stopLocationLabel();
         }));
         this.subscriptions.push(
             this.viewSettings.cameraViewDataState
@@ -1986,65 +1493,51 @@ export abstract class DeckMapView implements IRenderView {
         this.subscriptions.push(
             this.viewSettings.viewTileBordersState
                 .pipe(this._viewIndex, distinctUntilChanged())
-                .subscribe(enabled => {
-                    this.tileGridEnabled = enabled;
-                    this.scheduleTileGridOverlayUpdate();
-                })
+                .subscribe(() => this.tileOverlay.scheduleUpdate())
         );
         this.subscriptions.push(
             this.viewSettings.viewTileGridModeState
                 .pipe(this._viewIndex, distinctUntilChanged())
-                .subscribe(mode => {
-                    this.tileGridMode = mode;
-                    this.tileGridLevel = this.mapInfo.maps.getViewTileGridLevel(this._viewIndex);
-                    this.scheduleTileGridOverlayUpdate();
-                })
+                .subscribe(() => this.tileOverlay.scheduleUpdate())
         );
         this.subscriptions.push(
             this.viewSettings.viewTileGridLevelState
                 .pipe(this._viewIndex, distinctUntilChanged())
-                .subscribe(_ => {
-                    this.tileGridLevel = this.mapInfo.maps.getViewTileGridLevel(this._viewIndex);
-                    this.scheduleTileGridOverlayUpdate();
-                })
+                .subscribe(() => this.tileOverlay.scheduleUpdate())
         );
         this.subscriptions.push(
             this.viewSettings.viewTileGridAutoLevelState
                 .pipe(this._viewIndex, distinctUntilChanged())
-                .subscribe(autoLevel => {
-                    this.tileGridAutoLevel = autoLevel;
-                    this.scheduleTileGridOverlayUpdate();
-                })
+                .subscribe(() => this.tileOverlay.scheduleUpdate())
         );
         this.subscriptions.push(
             this.stateService.observe(() => [
                 this.viewSettings.viewTileGridColorState.getValue(this.viewId),
                 this.viewSettings.viewTileGridOpacityState.getValue(this.viewId)
             ] as const, deepEquals).subscribe(([color, opacity]) => {
-                this.tileGridLineColor = tileGridRgba(color, opacity);
-                this.scheduleTileGridOverlayUpdate();
+                this.tileOverlay.scheduleUpdate();
             })
         );
         this.subscriptions.push(
             this.layerState.layerVisibilityState
                 .pipe(this._viewIndex)
-                .subscribe(() => this.scheduleTileGridOverlayUpdate())
+                .subscribe(() => this.tileOverlay.scheduleUpdate())
         );
         this.subscriptions.push(
             this.layerState.layerZoomLevelState
                 .pipe(this._viewIndex)
-                .subscribe(() => this.scheduleTileGridOverlayUpdate())
+                .subscribe(() => this.tileOverlay.scheduleUpdate())
         );
         this.subscriptions.push(
-            this.mapInfo.maps$.subscribe(() => this.scheduleTileGridOverlayUpdate())
+            this.mapInfo.maps$.subscribe(() => this.tileOverlay.scheduleUpdate())
         );
         this.subscriptions.push(
             this.layerController.occupancyChanged.subscribe(() =>
-                this.scheduleTileGridOverlayDataRefresh()
+                this.tileOverlay.scheduleDataRefresh(this.viewSettings.viewTileBordersState.getValue(this._viewIndex))
             )
         );
         this.subscriptions.push(
-            this.featureSearchService.progress.subscribe(() => this.scheduleSearchResultsOverlayDataRefresh())
+            this.featureSearchService.progress.subscribe(() => this.searchOverlay.scheduleDataRefresh())
         );
 
         this.subscriptions.push(
@@ -2052,8 +1545,8 @@ export abstract class DeckMapView implements IRenderView {
                 if (value.targetView !== this._viewIndex) {
                     return;
                 }
-                this.stopLocationAreaHighlight();
-                this.stopLocationLabel();
+                this.locationOverlay.stopLocationAreaHighlight();
+                this.locationOverlay.stopLocationLabel();
                 this.prepareForNavigation();
                 const alt = value.z ?? this.zoomToAltitude(this.viewState.zoom, value.y);
                 this.viewSettings.setView(
@@ -2078,8 +1571,8 @@ export abstract class DeckMapView implements IRenderView {
                 if (value.targetView !== this._viewIndex) {
                     return;
                 }
-                this.stopLocationAreaHighlight();
-                this.stopLocationLabel();
+                this.locationOverlay.stopLocationAreaHighlight();
+                this.locationOverlay.stopLocationLabel();
                 this.prepareForNavigation();
                 this.exitFirstPersonView();
                 const centerLon = (value.rectangle.west + value.rectangle.east) / 2;
@@ -2095,7 +1588,7 @@ export abstract class DeckMapView implements IRenderView {
                     latitude: centerLat,
                     zoom
                 }, true, true);
-                this.startJumpAreaHighlight(value.rectangle);
+                this.locationOverlay.startJumpAreaHighlight(value.rectangle);
             })
         );
 
@@ -2105,16 +1598,9 @@ export abstract class DeckMapView implements IRenderView {
             })
         );
 
-        this.tileGridEnabled = this.viewSettings.viewTileBordersState.getValue(this._viewIndex);
-        this.tileGridMode = this.viewSettings.viewTileGridModeState.getValue(this._viewIndex);
-        this.tileGridLevel = this.mapInfo.maps.getViewTileGridLevel(this._viewIndex);
-        this.tileGridAutoLevel = this.mapInfo.maps.getViewTileGridAutoLevel(this._viewIndex);
-        this.tileGridLineColor = tileGridRgba(
-            this.mapInfo.maps.getViewTileGridColor(this._viewIndex),
-            this.mapInfo.maps.getViewTileGridOpacity(this._viewIndex));
         this.updateLocationMarkerOverlay();
-        this.scheduleTileGridOverlayUpdate();
-        this.scheduleSearchResultsOverlayUpdate();
+        this.tileOverlay.scheduleUpdate();
+        this.searchOverlay.scheduleUpdate();
     }
 
     /** Dispatches controlled camera updates to the active map or first-person state model. */
@@ -2148,8 +1634,8 @@ export abstract class DeckMapView implements IRenderView {
         if (wasCameraInteracting && !this.isCameraInteracting) {
             this.flushPendingViewStatePush();
             this.scheduleViewportUpdate();
-            this.scheduleTileGridOverlayUpdate();
-            this.scheduleSearchResultsOverlayUpdate();
+            this.tileOverlay.scheduleUpdate();
+            this.searchOverlay.scheduleUpdate();
         }
     }
 
@@ -2213,8 +1699,8 @@ export abstract class DeckMapView implements IRenderView {
         const screenPosition: [number, number] = context.screenPosition
             ? [...context.screenPosition]
             : [context.viewport.width / 2, context.viewport.height / 2];
-        return this.pickControllerNavigationTarget(context, screenPosition)
-            ?? this.groundNavigationTarget(
+        return this.picking.pickControllerNavigationTarget(context, screenPosition)
+            ?? this.picking.groundNavigationTarget(
                 { x: screenPosition[0], y: screenPosition[1] },
                 context.viewport
             );
@@ -2256,45 +1742,8 @@ export abstract class DeckMapView implements IRenderView {
         if (cameraInteracting !== this.isCameraInteracting) {
             this.isCameraInteracting = cameraInteracting;
             this.layerController.setCameraInteracting(cameraInteracting);
-            this.hoverPickGeneration += 1;
-            this.cancelHoverPickScheduling();
-            if (cameraInteracting) {
-                this.pendingHoverAnchorPosition = null;
-                this.pendingHoverDetailPosition = null;
-                if (this.hoverNavigationPivot) {
-                    this.setHoverNavigationPivot(null);
-                }
-            } else if (this.latestHoverPosition) {
-                this.queueHoverPicks(this.latestHoverPosition);
-            }
+            this.picking.setCameraInteracting(cameraInteracting);
         }
-    }
-
-    /** Cancels any pending deferred hover-pick work. */
-    private cancelHoverPickScheduling(): void {
-        if (this.hoverAnchorPickTimer) {
-            clearTimeout(this.hoverAnchorPickTimer);
-            this.hoverAnchorPickTimer = null;
-        }
-        if (this.hoverDetailPickTimer) {
-            clearTimeout(this.hoverDetailPickTimer);
-            this.hoverDetailPickTimer = null;
-        }
-    }
-
-    /** Clears hover work and highlights that belong to the previously installed deck view. */
-    private clearHoverPickingState(): void {
-        this.hoverPickGeneration += 1;
-        this.pendingHoverAnchorPosition = null;
-        this.pendingHoverDetailPosition = null;
-        this.latestHoverPosition = null;
-        this.topHoverFeatureIds = [];
-        this.topHoverFeatureGeneration = -1;
-        this.cancelHoverPickScheduling();
-        this.setFeatureHoverState(false);
-        this.setHoverNavigationPivot(null);
-        this.hoveredFeatureIds.next([]);
-        this.inspectionSelection.setHoveredFeatures([]);
     }
 
     /** Records pointer coordinates immediately and queues only the newest hover sample. */
@@ -2303,7 +1752,6 @@ export abstract class DeckMapView implements IRenderView {
         if (!Number.isFinite(position.x) || !Number.isFinite(position.y)) {
             return;
         }
-        this.latestHoverPosition = position;
         if (!environment.visualizationOnly) {
             // First-person surface coordinates require a geometry pick. That navigation mode is
             // intentionally left to its controller instead of adding a second hover readback.
@@ -2316,258 +1764,7 @@ export abstract class DeckMapView implements IRenderView {
                 );
             }
         }
-        if (event.buttons !== 0 || this.isCameraInteracting) {
-            this.pendingHoverAnchorPosition = null;
-            this.pendingHoverDetailPosition = null;
-            this.cancelHoverPickScheduling();
-            return;
-        }
-        this.queueHoverPicks(position);
-    }
-
-    /** Queues a quick anchor sample and resets the deep hover query's pointer-idle deadline. */
-    private queueHoverPicks(position: { x: number; y: number }): void {
-        this.pendingHoverAnchorPosition = position;
-        this.pendingHoverDetailPosition = position;
-        this.hoverDetailPickDueAtMs = performance.now()
-            + DeckMapView.HOVER_DETAIL_PICK_IDLE_MS;
-        if (this.hoverDetailPickTimer) {
-            clearTimeout(this.hoverDetailPickTimer);
-            this.hoverDetailPickTimer = null;
-        }
-        this.scheduleHoverAnchorPick();
-        this.scheduleHoverDetailPick();
-    }
-
-    /** Schedules the latest top-object sample at a bounded interactive rate. */
-    private scheduleHoverAnchorPick(): void {
-        if (this.hoverPickInFlight || this.hoverAnchorPickTimer ||
-            !this.pendingHoverAnchorPosition) {
-            return;
-        }
-        const now = performance.now();
-        const nextEligibleAt = this.lastHoverAnchorPickAtMs
-            + DeckMapView.HOVER_ANCHOR_PICK_THROTTLE_MS;
-        const delayMs = Math.max(0, nextEligibleAt - now);
-        this.hoverAnchorPickTimer = setTimeout(() => {
-            this.hoverAnchorPickTimer = null;
-            if (!this.deckCanvasPointerInside) {
-                this.pendingHoverAnchorPosition = null;
-                return;
-            }
-            if (this.isCameraInteracting || this.hoverPickInFlight) {
-                return;
-            }
-            const pendingPosition = this.pendingHoverAnchorPosition;
-            this.pendingHoverAnchorPosition = null;
-            if (!pendingPosition) {
-                return;
-            }
-            this.lastHoverAnchorPickAtMs = performance.now();
-            void this.processHoverAnchorPick(pendingPosition);
-        }, delayMs);
-    }
-
-    /** Resolves one top object without paying for a depth readback on every pointer move. */
-    private async processHoverAnchorPick(position: { x: number; y: number }): Promise<void> {
-        const deck = this.deck;
-        if (!deck || !this.deckCanvasPointerInside) {
-            return;
-        }
-        if (this.hoverPickInFlight) {
-            this.pendingHoverAnchorPosition = position;
-            return;
-        }
-        const generation = this.hoverPickGeneration;
-        const radius = Math.max(0, Math.trunc(this.inspectionState.state.drillPickRadius));
-        const navigationLayerIds = this.navigationPickLayerIds();
-        this.hoverPickInFlight = true;
-        try {
-            const topPick = navigationLayerIds.length
-                ? await deck.pickObjectAsync({
-                    x: position.x,
-                    y: position.y,
-                    radius,
-                    layerIds: navigationLayerIds,
-                    unproject3D: false
-                })
-                : null;
-            if (deck !== this.deck || generation !== this.hoverPickGeneration ||
-                !this.deckCanvasPointerInside || this.isCameraInteracting ||
-                !this.isHoverSampleLocal(position, radius)) {
-                return;
-            }
-            const topFeatureIds = topPick
-                ? this.featureIdsFromPickingInfo(topPick)
-                : [];
-            this.topHoverFeatureIds = topFeatureIds;
-            this.topHoverFeatureGeneration = generation;
-            // Do not make the visible highlight wait for the more expensive drill pass.
-            // A provisional top pick must not collapse an already settled
-            // drill stack while the cursor still covers one of its objects.
-            const settledFeatureIds = this.hoveredFeatureIds.getValue();
-            const remainsInSettledStack = topFeatureIds.length > 0 &&
-                topFeatureIds.every(topFeature =>
-                    settledFeatureIds.some(settledFeature =>
-                        settledFeature.mapTileKey === topFeature.mapTileKey &&
-                        settledFeature.featureId === topFeature.featureId));
-            this.publishHoveredFeatures(
-                remainsInSettledStack ? settledFeatureIds : topFeatureIds
-            );
-            if (!this.allowPitchAndBearing) {
-                return;
-            }
-            this.setHoverNavigationPivot(
-                (topPick
-                    ? navigationTargetFromPickingInfo({
-                        ...topPick,
-                        x: position.x,
-                        y: position.y
-                    }, radius)
-                    : null) ?? this.groundNavigationTarget(position)
-            );
-        } catch (error) {
-            if (deck === this.deck && generation === this.hoverPickGeneration) {
-                console.error("Hover anchor picking failed.", error);
-            }
-        } finally {
-            this.hoverPickInFlight = false;
-            this.continueHoverPickQueue();
-        }
-    }
-
-    /** Schedules the deep feature stack only after the pointer has settled briefly. */
-    private scheduleHoverDetailPick(): void {
-        if (this.hoverPickInFlight || this.hoverDetailPickTimer ||
-            !this.pendingHoverDetailPosition) {
-            return;
-        }
-        this.hoverDetailPickTimer = setTimeout(() => {
-            this.hoverDetailPickTimer = null;
-            if (!this.deckCanvasPointerInside) {
-                this.pendingHoverDetailPosition = null;
-                return;
-            }
-            if (this.isCameraInteracting || this.hoverPickInFlight) {
-                return;
-            }
-            const pendingPosition = this.pendingHoverDetailPosition;
-            this.pendingHoverDetailPosition = null;
-            if (pendingPosition) {
-                void this.processHoverDetailPick(pendingPosition);
-            }
-        }, Math.max(0, this.hoverDetailPickDueAtMs - performance.now()));
-    }
-
-    /** Resolves the bounded feature stack that drives hover highlights and the HUD label. */
-    private async processHoverDetailPick(position: { x: number; y: number }): Promise<void> {
-        const deck = this.deck;
-        if (!deck || !this.deckCanvasPointerInside) {
-            return;
-        }
-        if (this.hoverPickInFlight) {
-            this.pendingHoverDetailPosition = position;
-            return;
-        }
-        const generation = this.hoverPickGeneration;
-        const radius = Math.max(0, Math.trunc(this.inspectionState.state.drillPickRadius));
-        const canvas = deck.getCanvas();
-        const left = Math.max(0, position.x - radius);
-        const top = Math.max(0, position.y - radius);
-        const right = Math.min(canvas?.clientWidth ?? position.x + radius + 1,
-            position.x + radius + 1);
-        const bottom = Math.min(canvas?.clientHeight ?? position.y + radius + 1,
-            position.y + radius + 1);
-        const drillLayerIds = this.drillPickLayerIds();
-        this.hoverPickInFlight = true;
-        try {
-            const picked = drillLayerIds.length && right > left && bottom > top
-                ? await deck.pickObjectsAsync({
-                    x: left,
-                    y: top,
-                    width: right - left,
-                    height: bottom - top,
-                    layerIds: drillLayerIds,
-                    maxObjects: DeckMapView.HOVER_PICK_MAX_OBJECTS
-                })
-                : [];
-            if (deck !== this.deck || generation !== this.hoverPickGeneration ||
-                !this.deckCanvasPointerInside || this.isCameraInteracting ||
-                !this.isHoverSampleLocal(position, radius)) {
-                return;
-            }
-            const featureIds = this.featurePickResultFromPickingInfos(
-                picked,
-                DeckMapView.HOVER_PICK_MAX_OBJECTS
-            ).featureIds;
-            const topFeatureIds = generation === this.topHoverFeatureGeneration
-                ? this.topHoverFeatureIds
-                : [];
-            if (this.allowPitchAndBearing && featureIds.length) {
-                for (const item of picked) {
-                    const target = navigationTargetFromPickingInfo(
-                        { ...item, x: position.x, y: position.y },
-                        radius
-                    );
-                    if (target) {
-                        this.setHoverNavigationPivot(target);
-                        break;
-                    }
-                }
-            }
-            this.publishHoveredFeatures(featureIds.length ? featureIds : topFeatureIds);
-        } catch (error) {
-            if (deck === this.deck && generation === this.hoverPickGeneration) {
-                console.error("Hover detail picking failed.", error);
-            }
-        } finally {
-            this.hoverPickInFlight = false;
-            this.continueHoverPickQueue();
-        }
-    }
-
-    /** Gives a pending anchor sample priority before resuming a settled deep query. */
-    private continueHoverPickQueue(): void {
-        if (this.pendingHoverAnchorPosition) {
-            this.scheduleHoverAnchorPick();
-        } else if (this.pendingHoverDetailPosition) {
-            this.scheduleHoverDetailPick();
-        }
-    }
-
-    /** Accepts an asynchronous readback while the cursor remains inside its sampled radius. */
-    private isHoverSampleLocal(
-        position: { x: number; y: number },
-        radius: number
-    ): boolean {
-        const latest = this.latestHoverPosition;
-        return !!latest && Math.hypot(
-            latest.x - position.x,
-            latest.y - position.y
-        ) <= Math.max(1, radius);
-    }
-
-    /** Updates hover consumers only when the logical feature stack actually changed. */
-    private publishHoveredFeatures(featureIds: TileFeatureId[]): void {
-        const current = this.hoveredFeatureIds.getValue();
-        const unchanged = featureSetsEqual(current, featureIds);
-        this.setFeatureHoverState(featureIds.length > 0);
-        if (unchanged) {
-            return;
-        }
-        this.inspectionSelection.setHoveredFeatures(featureIds);
-        this.hoveredFeatureIds.next(featureIds);
-    }
-
-    /** Tracks whether the cursor should show as a pointer over selectable geometry. */
-    private setFeatureHoverState(isHoveringFeature: boolean): void {
-        if (this.isHoveringFeature === isHoveringFeature) {
-            return;
-        }
-        this.isHoveringFeature = isHoveringFeature;
-        if (this.deck) {
-            this.deck.setProps({ getCursor: this.deckCursor });
-        }
+        this.picking.pointerMove(position, event.buttons);
     }
 
     /** Handles primary-click drill inspection, marker placement, and background deselection. */
@@ -2587,37 +1784,7 @@ export abstract class DeckMapView implements IRenderView {
         }
 
         const screenPosition = { x: info.x, y: info.y };
-        const useDesktopDrillPick = this.desktopDrillPickingEnabled
-            && (!srcEvent?.pointerType || srcEvent.pointerType === "mouse");
-        let featureIds = useDesktopDrillPick
-            ? this.drillPickFeatures(
-                screenPosition,
-                this.inspectionState.state.drillPickRadius,
-                this.inspectionState.state.inspectionsLimit
-            ).topFeatureIds
-            : this.featurePickResultFromPickingInfos([info]).topFeatureIds;
-        // Deck's speculative pointer-down picker is intentionally disabled. Touch taps therefore
-        // perform their bounded pick here, after the recognizer has ruled out a drag.
-        if (!featureIds.length && !useDesktopDrillPick) {
-            featureIds = this.drillPickFeatures(
-                screenPosition,
-                this.inspectionState.state.drillPickRadius,
-                1
-            ).topFeatureIds;
-        }
-        // Primary click means "the top rendered object". A server-grouped
-        // point is one object with several semantic members, all of which
-        // belong to the click; unrelated lower objects remain context-menu
-        // selections only.
-        const featurePosition = featureIds.length
-            ? this.markerPositionForFeature(
-                info,
-                screenPosition,
-                featureIds[0],
-                this.inspectionState.state.drillPickRadius,
-                this.inspectionState.state.inspectionsLimit
-            )
-            : null;
+        const {featureIds, markerPosition: featurePosition} = this.picking.click(info, srcEvent?.pointerType);
         const markerPosition = this.coordinatesService.state.marker ? featurePosition : null;
         const cartographic = markerPosition
             ? { lon: markerPosition[0], lat: markerPosition[1], alt: markerPosition[2] }
@@ -2637,51 +1804,6 @@ export abstract class DeckMapView implements IRenderView {
         this.inspectionSelection.inspectFeatureIds(featureIds, !!srcEvent?.ctrlKey);
     }
 
-    /** Resolves the first drill hit's physical feature anchor for marker placement. */
-    private markerPositionForFeature(
-        clickInfo: PickingInfo,
-        screenPosition: { x: number; y: number },
-        targetFeature: TileFeatureId,
-        radius: number,
-        maxObjects: number
-    ): NavigationAnchor | null {
-        if (this.pickingInfoContainsFeature(clickInfo, targetFeature)) {
-            const clickPosition = markerAnchorFromPickingInfo(clickInfo);
-            if (clickPosition) {
-                return clickPosition;
-            }
-        }
-        if (!this.deck) {
-            return null;
-        }
-        const pickedObjects = this.deck.pickMultipleObjects({
-            x: screenPosition.x,
-            y: screenPosition.y,
-            radius,
-            depth: maxObjects,
-            layerIds: this.drillPickLayerIds(),
-            unproject3D: true
-        });
-        for (const picked of pickedObjects) {
-            if (!this.pickingInfoContainsFeature(picked, targetFeature)) {
-                continue;
-            }
-            const position = markerAnchorFromPickingInfo(picked);
-            if (position) {
-                return position;
-            }
-        }
-        return null;
-    }
-
-    /** Returns whether one Deck pick resolves to the exact supplied tile-feature identity. */
-    private pickingInfoContainsFeature(picked: PickingInfo, target: TileFeatureId): boolean {
-        return this.featureIdsFromPickingInfo(picked).some(featureId =>
-            featureId.mapTileKey === target.mapTileKey
-            && featureId.featureId === target.featureId
-        );
-    }
-
     /** Applies a sanitized camera state to deck and optionally refreshes viewport-dependent overlays. */
     private updateViewState(nextState: DeckCameraState, setDeckProps: boolean, updateViewport: boolean): void {
         const sanitized = this.sanitizeViewState(nextState);
@@ -2694,17 +1816,7 @@ export abstract class DeckMapView implements IRenderView {
             || sanitized.position.some((value, index) =>
                 value !== this.viewState.position[index]);
         if (cameraChanged) {
-            this.hoverPickGeneration += 1;
-            this.cancelHoverPickScheduling();
-            this.pendingHoverAnchorPosition = null;
-            this.pendingHoverDetailPosition = null;
-            if (this.hoverNavigationPivot) {
-                this.setHoverNavigationPivot(null);
-            }
-            if (this.deckCanvasPointerInside && !this.isCameraInteracting &&
-                this.latestHoverPosition) {
-                this.queueHoverPicks(this.latestHoverPosition);
-            }
+            this.picking.cameraChanged();
         }
         this.viewState = sanitized;
         if (cameraChanged && this.activeNavigationPivot) {
@@ -2719,8 +1831,8 @@ export abstract class DeckMapView implements IRenderView {
         if (updateViewport) {
             this.updateBackgroundLayer();
             this.scheduleViewportUpdate();
-            this.scheduleTileGridOverlayUpdate();
-            this.scheduleSearchResultsOverlayUpdate();
+            this.tileOverlay.scheduleUpdate();
+            this.searchOverlay.scheduleUpdate();
         }
     }
 
@@ -2971,834 +2083,61 @@ export abstract class DeckMapView implements IRenderView {
             this.useOrthographicProjection
         );
     }
-
-    /** Adds, updates, or removes the configured raster background according to the current view mode and state. */
+    /** Resolve the application's background choice before handing it to this canvas's owner. */
     private updateBackgroundLayer(): void {
         if (!this.deck) {
-            this.removeBackgroundLayer();
+            this.background.destroy();
             return;
         }
-
-        const backgroundLayers = this.configService.snapshot.backgroundLayers;
-        const defaultBackgroundLayerId = this.configService.snapshot.defaultBackgroundLayerId;
-        const backgroundState = this.viewSettings.resolveBackgroundState(
-            this._viewIndex,
-            backgroundLayers,
-            defaultBackgroundLayerId
-        );
-        const selectedLayer = backgroundLayers.find(layer => layer.id === backgroundState.layerId);
-        if (!selectedLayer) {
-            this.removeBackgroundLayer();
-            return;
-        }
-
-        if (!this.viewSettings.mode2dState.getValue(this._viewIndex) && selectedLayer.type === "wms") {
-            // WMS backgrounds remain a 2D-only option in erdblick. Dropping them here avoids
-            // carrying an unstable layer into pitched 3D views where it cannot render correctly.
-            this.removeBackgroundLayer();
-            return;
-        }
-
-        const opacity = Math.max(0, Math.min(1, backgroundState.opacity / 100));
-        const signature = JSON.stringify({
-            layerId: selectedLayer.id,
-            opacity,
-            mode2d: this.viewSettings.mode2dState.getValue(this._viewIndex)
-        });
-        if (signature === this.backgroundLayerSignature) {
-            // Skip deck layer churn when only unrelated state changed.
-            return;
-        }
-
-        const layer = selectedLayer.type === "xyz"
-            ? this.createXyzBackgroundLayer(selectedLayer, opacity)
-            : this.createWmsBackgroundLayer(selectedLayer, opacity);
-        this.layerRegistry.upsert(DeckMapView.BACKGROUND_LAYER_KEY, layer, -1000);
-        this.backgroundLayerSignature = signature;
+        const config = this.configService.snapshot;
+        const state = this.viewSettings.resolveBackgroundState(
+            this._viewIndex, config.backgroundLayers, config.defaultBackgroundLayerId);
+        this.background.update(
+            config.backgroundLayers.find(layer => layer.id === state.layerId),
+            state.opacity,
+            this.viewSettings.mode2dState.getValue(this._viewIndex));
     }
 
-    /** Removes the current background layer and clears the memoized render signature. */
-    private removeBackgroundLayer(): void {
-        this.layerRegistry.remove(DeckMapView.BACKGROUND_LAYER_KEY);
-        this.backgroundLayerSignature = "";
-    }
-
-    /**
-     * Builds a fetch override for authenticated background layers while preserving deck/loaders.gl
-     * request options such as abort signals.
-     */
-    private createBackgroundFetchOverride(headers: Readonly<Record<string, string>>): typeof fetch | undefined {
-        if (Object.keys(headers).length === 0) {
-            return undefined;
-        }
-
-        return async (input: URL | RequestInfo, init?: RequestInit): Promise<Response> => {
-            const mergedHeaders = new Headers(init?.headers);
-            for (const [name, value] of Object.entries(headers)) {
-                mergedHeaders.set(name, value);
-            }
-
-            return fetch(input, {
-                ...init,
-                headers: mergedHeaders
-            });
-        };
-    }
-
-    /** Wraps the optional background fetch override in the deck/loaders.gl `loadOptions` structure. */
-    private createBackgroundLoadOptions(headers: Readonly<Record<string, string>>): { core: { fetch: typeof fetch } } | undefined {
-        const fetchOverride = this.createBackgroundFetchOverride(headers);
-        if (!fetchOverride) {
-            return undefined;
-        }
-
+    /** Supply current search values and view-local visibility decisions to the overlay owner. */
+    private searchOverlayFrame(): DeckSearchOverlayFrame | null {
+        if (!this.deck) return null;
+        const viewIndex = this._viewIndex;
         return {
-            core: {
-                fetch: fetchOverride
-            }
+            layers: this.featureSearchService.getSearchResultOverlayLayers()
+                .filter(layer => featureSearchVisibleInView(layer, viewIndex)),
+            markerAtlas: () => this.featureSearchService.markerGraphics(),
+            showsTile: (mapId, layerId, tileId) =>
+                this.mapViewState.showsFeatureSearchTileInView(viewIndex, mapId, layerId, tileId),
+            prefersHighFidelity: (searchId, tileId, maxVisibleTiles) =>
+                this.mapViewState.prefersHighFidelityForSearchResultTile(viewIndex, searchId, tileId, maxVisibleTiles),
+            densityTargetLevel: (maxVisibleLevel, maxVisibleTiles) =>
+                this.mapViewState.searchResultDensityTargetLevel(viewIndex, maxVisibleLevel, maxVisibleTiles)
         };
     }
 
-    /**
-     * Creates the tiled XYZ background layer used for OSM and bundled imagery.
-     *
-     * The deck layer id includes the configured background id so switching
-     * sources forces a fresh TileLayer instance and tile selection pass.
-     * The layer also prefers deck's `best-available` refinement so panning
-     * keeps already loaded detailed tiles visible instead of collapsing to a
-     * coarse parent tile while sibling requests are still in flight. Bitmap
-     * opacity is blended against the map's black background inside the shader
-     * so overlapping parent/child placeholders do not briefly compound alpha.
-     * When `headers` are configured, tile requests use them for authenticated
-     * HTTP endpoints without changing local bundled backgrounds.
-     */
-    private createXyzBackgroundLayer(layerConfig: XyzBackgroundLayerConfig, opacity: number): BatchedTileLayer<string> {
-        return new BatchedTileLayer<string>({
-            id: `${DeckMapView.BACKGROUND_LAYER_KEY}/${layerConfig.id}`,
-            data: layerConfig.urlTemplate,
-            loadOptions: this.createBackgroundLoadOptions(layerConfig.headers),
-            minZoom: layerConfig.minZoom,
-            maxZoom: layerConfig.maxZoom,
-            tileSize: layerConfig.tileSize,
-            extent: layerConfig.extent,
-            opacity,
-            pickable: false,
-            refinementStrategy: "best-available",
-            updateTriggers: {
-                renderSubLayers: [opacity]
-            },
-            renderSubLayers: (
-                props: Parameters<NonNullable<TileLayerProps<string>["renderSubLayers"]>>[0]
-            ) => {
-                const boundingBox = props.tile?.boundingBox;
-                if (!boundingBox || !props.data) {
-                    return null;
-                }
-                return new BitmapLayer({
-                    id: `${props.id}-bitmap`,
-                    image: props.data,
-                    bounds: [
-                        boundingBox[0][0],
-                        boundingBox[0][1],
-                        boundingBox[1][0],
-                        boundingBox[1][1]
-                    ],
-                    opacity,
-                    transparentColor: [0, 0, 0, 255],
-                    pickable: false,
-                    parameters: { depthTest: false }
-                });
-            }
-        });
-    }
-
-    /**
-     * Creates the experimental WMS background layer from the config-driven service parameters.
-     *
-     * The source-specific layer id mirrors the XYZ path so deck does not reuse
-     * stale internal state when the selected background changes. WMS metadata
-     * and image requests reuse the same optional header override as XYZ tiles.
-     */
-    private createWmsBackgroundLayer(layerConfig: WmsBackgroundLayerConfig, opacity: number): WMSLayer {
-        const imageSource = new WMSImageSource(layerConfig.url, {
-            core: {
-                loadOptions: this.createBackgroundLoadOptions(layerConfig.headers) ?? {}
-            },
-            wms: {
-                wmsParameters: {
-                    layers: layerConfig.layers,
-                    version: layerConfig.version,
-                    crs: layerConfig.crs,
-                    format: layerConfig.format,
-                    transparent: layerConfig.transparent
-                },
-                vendorParameters: layerConfig.vendorParameters
-            }
-        });
-
-        return new WMSLayer({
-            id: `${DeckMapView.BACKGROUND_LAYER_KEY}/${layerConfig.id}`,
-            data: imageSource,
-            layers: layerConfig.layers,
-            serviceType: "wms",
-            srs: layerConfig.crs,
-            opacity,
-            pickable: false,
-            parameters: DeckMapView.NO_DEPTH_PARAMETERS,
-            onMetadataLoadError: (error) => console.error("[DeckMapView] Failed to load WMS metadata", error),
-            onImageLoadError: (_requestId, error) => console.error("[DeckMapView] Failed to load WMS image", error)
-        });
-    }
-
-    /** Schedules one tile-grid overlay refresh on the next animation frame. */
-    private scheduleTileGridOverlayUpdate(): void {
-        if (this.tileGridOverlayUpdateRaf !== null) {
-            return;
-        }
-        this.tileGridOverlayUpdateRaf = requestAnimationFrame(() => {
-            this.tileGridOverlayUpdateRaf = null;
-            this.updateTileGridOverlay();
-        });
-    }
-
-    /** Recolors tile state after a tile-arrival burst without redrawing the full scene per tile. */
-    private scheduleTileGridOverlayDataRefresh(): void {
-        if (!this.tileGridEnabled) {
-            return;
-        }
-        if (this.tileGridOverlayDataRefreshTimer !== null) {
-            clearTimeout(this.tileGridOverlayDataRefreshTimer);
-        }
-        this.tileGridOverlayDataRefreshTimer = setTimeout(() => {
-            this.tileGridOverlayDataRefreshTimer = null;
-            this.scheduleTileGridOverlayUpdate();
-        }, DeckMapView.TILE_GRID_DATA_REFRESH_DEBOUNCE_MS);
-    }
-
-    /** Cancels pending tile-grid overlay refresh work. */
-    private cancelTileGridOverlayUpdateScheduling(): void {
-        if (this.tileGridOverlayUpdateRaf !== null) {
-            cancelAnimationFrame(this.tileGridOverlayUpdateRaf);
-            this.tileGridOverlayUpdateRaf = null;
-        }
-        if (this.tileGridOverlayDataRefreshTimer !== null) {
-            clearTimeout(this.tileGridOverlayDataRefreshTimer);
-            this.tileGridOverlayDataRefreshTimer = null;
-        }
-    }
-
-    /** Schedules one search-result overlay refresh on the next animation frame. */
-    private scheduleSearchResultsOverlayUpdate(): void {
-        if (this.searchResultsOverlayUpdateRaf !== null) {
-            return;
-        }
-        this.searchResultsOverlayUpdateRaf = requestAnimationFrame(() => {
-            this.searchResultsOverlayUpdateRaf = null;
-            this.updateSearchResultsOverlay();
-        });
-    }
-
-    /** Debounces search-result overlay rebuilds after search progress changes. */
-    private scheduleSearchResultsOverlayDataRefresh(): void {
-        if (this.searchResultsOverlayDataRefreshTimer !== null) {
-            return;
-        }
-        this.searchResultsOverlayDataRefreshTimer = setTimeout(() => {
-            this.searchResultsOverlayDataRefreshTimer = null;
-            this.scheduleSearchResultsOverlayUpdate();
-        }, 120);
-    }
-
-    /** Cancels pending search-result overlay refresh work. */
-    private cancelSearchResultsOverlayScheduling(): void {
-        if (this.searchResultsOverlayUpdateRaf !== null) {
-            cancelAnimationFrame(this.searchResultsOverlayUpdateRaf);
-            this.searchResultsOverlayUpdateRaf = null;
-        }
-        if (this.searchResultsOverlayDataRefreshTimer !== null) {
-            clearTimeout(this.searchResultsOverlayDataRefreshTimer);
-            this.searchResultsOverlayDataRefreshTimer = null;
-        }
-    }
-
-    /** Rebuilds the search-result dot/density overlay. */
-    private updateSearchResultsOverlay(): void {
-        if (!this.deck) {
-            this.removeSearchResultLayers();
-            this.lastSearchResultsSignature = "";
-            return;
-        }
-
-        const searchLayers = this.featureSearchService.getSearchResultOverlayLayers()
-            .filter(searchLayer => featureSearchVisibleInView(searchLayer, this._viewIndex));
-        const overlayInputs: SearchResultOverlayInput[] = searchLayers.map(searchLayer => {
-            const lowFiSourceTileKeys = new Set<string>();
-            const highFiPinMarkers: SearchResultDensityMarker[] = [];
-            const highFidelityByLevel = new Map<number, boolean>();
-            let sourceTileKeyHash = DeckMapView.SEARCH_RESULT_SOURCE_TILE_HASH_OFFSET;
-            let sourceTileKeyCount = 0;
-            let maxVisibleLevel = 0;
-            for (const bucket of searchLayer.pointBuckets) {
-                if (!this.mapViewState.showsFeatureSearchTileInView(this._viewIndex, bucket.mapId, bucket.layerId, bucket.tileId)) {
-                    continue;
-                }
-                const bucketLevel = Number(coreLib.getTileLevel(bucket.tileId));
-                sourceTileKeyHash = this.hashSearchResultSourceTileKey(sourceTileKeyHash, bucket.sourceTileKey);
-                sourceTileKeyCount += 1;
-                let highFidelityActive = highFidelityByLevel.get(bucketLevel);
-                if (highFidelityActive === undefined) {
-                    highFidelityActive = this.prefersHighFidelityForSearchResultOverlay(searchLayer, bucket.tileId);
-                    highFidelityByLevel.set(bucketLevel, highFidelityActive);
-                }
-                if (highFidelityActive) {
-                    if (searchLayer.renderStrategy.showHighFiResultDots) {
-                        // Dense searches can produce more per-feature pins than V8 accepts
-                        // as spread-call arguments; append one marker at a time.
-                        for (const point of bucket.points) {
-                            highFiPinMarkers.push(this.searchResultPointMarker(point));
-                        }
-                    }
-                    continue;
-                }
-                if (!searchLayer.renderStrategy.showLowFiDots) {
-                    continue;
-                }
-                lowFiSourceTileKeys.add(bucket.sourceTileKey);
-                maxVisibleLevel = Math.max(maxVisibleLevel, bucketLevel);
-            }
-            const targetLevel = this.mapViewState.searchResultDensityTargetLevel(
-                this._viewIndex,
-                maxVisibleLevel,
-                searchLayer.renderStrategy.highFidelityMaxVisibleTiles);
-            return {
-                searchLayer,
-                dotLayerKey: this.searchResultLayerKey(searchLayer.id, "dot"),
-                labelLayerKey: this.searchResultLayerKey(searchLayer.id, "label"),
-                pinLayerKey: this.searchResultLayerKey(searchLayer.id, "pin"),
-                lowFiSourceTileKeys,
-                highFiPinMarkers,
-                targetLevel,
-                densitySizeScale: this.searchResultDensitySizeScale(searchLayer.renderStrategy.densitySizeMultiplier),
-                sourceTileKeySignature: `${sourceTileKeyCount}:${sourceTileKeyHash.toString(16)}`
-            };
-        });
-
-        const signature = overlayInputs
-            .map(input => [
-                input.searchLayer.id,
-                input.searchLayer.pointsVersion,
-                input.searchLayer.pointColor,
-                input.searchLayer.styleRuleCount,
-                JSON.stringify(input.searchLayer.renderStrategy),
-                input.targetLevel,
-                input.sourceTileKeySignature
-            ].join(":"))
-            .join("|");
-        if (this.lastSearchResultsSignature === signature) {
-            return;
-        }
-        this.lastSearchResultsSignature = signature;
-
-        const densityMarkersByLayerKey = new Map<string, SearchResultOverlayLayerData>();
-        const layoutEntries: SearchResultDensityLayoutEntry[] = [];
-        for (const input of overlayInputs) {
-            const lowFiDensityMarkers = input.lowFiSourceTileKeys.size > 0 && !input.searchLayer.densityIndex.isEmpty
-                ? input.searchLayer.densityIndex.materialize({
-                    sourceTileKeys: input.lowFiSourceTileKeys,
-                    targetLevel: input.targetLevel
-                })
-                : [];
-            const layerMarkers = lowFiDensityMarkers;
-            const countDomain = searchResultDensityCountDomain(layerMarkers);
-            for (const marker of lowFiDensityMarkers) {
-                layoutEntries.push({
-                    marker,
-                    sortKey: `${input.searchLayer.id}\n${marker.resultKey}`,
-                    countDomain,
-                    sizeScale: input.densitySizeScale
-                });
-            }
-            densityMarkersByLayerKey.set(input.dotLayerKey, { markers: layerMarkers, countDomain });
-        }
-        layoutSearchResultDensityMarkers(layoutEntries, DeckMapView.SEARCH_RESULT_DENSITY_SIZE_SCALE);
-
-        const nextKeys = new Set<string>();
-        for (const input of overlayInputs) {
-            if ((densityMarkersByLayerKey.get(input.dotLayerKey)?.markers.length ?? 0) > 0) {
-                nextKeys.add(input.dotLayerKey);
-                if (input.searchLayer.renderStrategy.showBucketLabels) {
-                    nextKeys.add(input.labelLayerKey);
-                }
-            }
-            if (input.highFiPinMarkers.length > 0) {
-                nextKeys.add(input.pinLayerKey);
-            }
-        }
-        for (const layerKey of this.searchResultLayerKeys) {
-            if (!nextKeys.has(layerKey)) {
-                this.layerRegistry.remove(layerKey);
-            }
-        }
-        this.searchResultLayerKeys = nextKeys;
-
-        for (const input of overlayInputs) {
-            const layerData = densityMarkersByLayerKey.get(input.dotLayerKey);
-            if (layerData?.markers.length) {
-                this.layerRegistry.upsert(
-                    input.dotLayerKey,
-                    createSearchResultDensityLayer({
-                        id: input.dotLayerKey,
-                        data: layerData.markers,
-                        pickable: false,
-                        sizeScale: input.densitySizeScale,
-                        dotColor: input.searchLayer.pointColorRgba,
-                        countDomain: layerData.countDomain,
-                        heatGradient: input.searchLayer.renderStrategy.densityHeatGradient
-                    }),
-                    650);
-                if (input.searchLayer.renderStrategy.showBucketLabels) {
-                    this.layerRegistry.upsert(
-                        input.labelLayerKey,
-                        createSearchResultDensityLabelLayer({
-                            id: input.labelLayerKey,
-                            data: layerData.markers,
-                            pickable: false
-                        }),
-                        651);
-                }
-            } else {
-                this.layerRegistry.remove(input.dotLayerKey);
-                this.layerRegistry.remove(input.labelLayerKey);
-            }
-            if (input.highFiPinMarkers.length) {
-                this.layerRegistry.upsert(
-                    input.pinLayerKey,
-                    this.createSearchResultPinLayer(input.pinLayerKey, input.highFiPinMarkers, input.searchLayer.pointColorRgba),
-                    652);
-            } else {
-                this.layerRegistry.remove(input.pinLayerKey);
-            }
-        }
-    }
-
-    /** Returns whether this search wants high-fidelity overlay state for the supplied source tile. */
-    private prefersHighFidelityForSearchResultOverlay(
-        searchLayer: FeatureSearchOverlayLayer,
-        tileId: number
-    ): boolean {
-        const strategy = searchLayer.renderStrategy;
-        const hasHighFidelityVisualization = strategy.showHighFiResultDots
-            || (strategy.showHighFiGeometry && searchLayer.styleRuleCount > 0);
-        if (!hasHighFidelityVisualization) {
-            return false;
-        }
-        if (!strategy.showLowFiDots) {
-            return true;
-        }
-        return this.mapViewState.prefersHighFidelityForSearchResultTile(
-            this._viewIndex,
-            searchLayer.id,
-            tileId,
-            strategy.highFidelityMaxVisibleTiles
-        );
-    }
-
-    /** Applies the user-visible density marker size multiplier to the default deck icon scale. */
-    private searchResultDensitySizeScale(multiplier: number): number {
-        const normalizedMultiplier = Number.isFinite(multiplier)
-            ? Math.max(0.5, Math.min(10, multiplier))
-            : 1;
-        return DeckMapView.SEARCH_RESULT_DENSITY_SIZE_SCALE * normalizedMultiplier;
-    }
-
-    /** Creates the explicit per-feature high-fidelity result-pin layer. */
-    private createSearchResultPinLayer(
-        layerKey: string,
-        markers: SearchResultDensityMarker[],
-        color: [number, number, number, number]
-    ): IconLayer<SearchResultDensityMarker> {
-        const iconSize = DeckMapView.LOCATION_MARKER_ICON_SIZE_PX;
-        return new IconLayer<SearchResultDensityMarker>({
-            id: layerKey,
-            data: markers,
-            coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-            iconAtlas: this.featureSearchService.markerGraphics(),
-            iconMapping: {
-                [DeckMapView.LOCATION_MARKER_ICON_NAME]: {
-                    x: 0,
-                    y: 0,
-                    width: iconSize,
-                    height: iconSize,
-                    anchorX: iconSize / 2,
-                    anchorY: iconSize,
-                    mask: true
-                }
-            },
-            getIcon: () => DeckMapView.LOCATION_MARKER_ICON_NAME,
-            getPosition: marker => marker.coordinates,
-            getColor: () => color,
-            getSize: () => DeckMapView.SEARCH_RESULT_PIN_RENDER_SIZE_PX,
-            sizeUnits: "pixels",
-            billboard: true,
-            pickable: false,
-            alphaCutoff: 0.05,
-            parameters: DeckMapView.NO_DEPTH_PARAMETERS
-        });
-    }
-
-    /** Updates the FNV-1a source-key hash used to avoid sorting visible search tiles per overlay refresh. */
-    private hashSearchResultSourceTileKey(hash: number, sourceTileKey: string): number {
-        let nextHash = hash;
-        for (let index = 0; index < sourceTileKey.length; index++) {
-            nextHash ^= sourceTileKey.charCodeAt(index);
-            nextHash = Math.imul(nextHash, DeckMapView.SEARCH_RESULT_SOURCE_TILE_HASH_PRIME);
-        }
-        return nextHash >>> 0;
-    }
-
-    /** Returns a stable deck-layer key for one feature-search session. */
-    private searchResultLayerKey(searchId: string, kind: "dot" | "label" | "pin"): string {
-        return `${DeckMapView.SEARCH_RESULTS_LAYER_PREFIX}/${searchId}/${kind}`;
-    }
-
-    /** Converts an individual high-fidelity search result into a positioned dot marker. */
-    private searchResultPointMarker(point: SearchResultPoint): SearchResultDensityMarker {
-        return {
-            coordinates: point.coordinates,
-            count: 1,
-            mapId: point.mapId,
-            layerId: point.layerId,
-            tileId: point.tileId,
-            featureId: point.featureId,
-            resultKey: point.resultKey,
-            featureKey: point.featureKey,
-            featureKeys: [point.featureKey],
-            resultKeys: [point.resultKey],
-            showBucketLabel: false
-        };
-    }
-
-    /** Removes every feature-search result layer from this deck view. */
-    private removeSearchResultLayers(): void {
-        for (const layerKey of this.searchResultLayerKeys) {
-            this.layerRegistry.remove(layerKey);
-        }
-        this.searchResultLayerKeys.clear();
-    }
-
-    /**
-     * Mirrors the legacy Cesium single-location pin as a dedicated deck IconLayer.
-     */
-    private updateLocationMarkerOverlay(): void {
-        const markerEnabled = this.coordinatesService.state.markerState.getValue();
-        const markedPosition = this.coordinatesService.state.markedPositionState.getValue();
-        if (!this.deck || !markerEnabled || markedPosition.length < 2) {
-            this.layerRegistry.remove(DeckMapView.LOCATION_MARKER_LAYER_KEY);
-            this.lastLocationMarkerSignature = "";
-            return;
-        }
-
-        const longitude = Number(markedPosition[0]);
-        const latitude = Number(markedPosition[1]);
-        const altitude = Number(markedPosition[2] ?? 0);
-        if (!Number.isFinite(longitude) || !Number.isFinite(latitude) || !Number.isFinite(altitude)) {
-            this.layerRegistry.remove(DeckMapView.LOCATION_MARKER_LAYER_KEY);
-            this.lastLocationMarkerSignature = "";
-            return;
-        }
-
-        const iconAtlas = this.featureSearchService.markerGraphics();
-        const signature = `${longitude},${latitude},${altitude},${iconAtlas}`;
-        if (this.lastLocationMarkerSignature === signature) {
-            return;
-        }
-
-        this.lastLocationMarkerSignature = signature;
-        const iconSize = DeckMapView.LOCATION_MARKER_ICON_SIZE_PX;
-        const layer = new IconLayer<DeckLocationMarkerDatum>({
-            id: DeckMapView.LOCATION_MARKER_LAYER_KEY,
-            data: [{ position: [longitude, latitude, altitude] }],
-            coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-            iconAtlas,
-            iconMapping: {
-                [DeckMapView.LOCATION_MARKER_ICON_NAME]: {
-                    x: 0,
-                    y: 0,
-                    width: iconSize,
-                    height: iconSize,
-                    anchorX: iconSize / 2,
-                    anchorY: iconSize,
-                    mask: false
-                }
-            },
-            getIcon: () => DeckMapView.LOCATION_MARKER_ICON_NAME,
-            getPosition: (marker: DeckLocationMarkerDatum) => marker.position,
-            getSize: () => DeckMapView.LOCATION_MARKER_RENDER_SIZE_PX,
-            sizeUnits: "pixels",
-            billboard: true,
-            pickable: false,
-            alphaCutoff: 0.05,
-            parameters: DeckMapView.NO_DEPTH_PARAMETERS
-        });
-        this.layerRegistry.upsert(DeckMapView.LOCATION_MARKER_LAYER_KEY, layer, 700);
-    }
-
-    /** Rebuilds the independent line grid and data-derived tile-state overlays. */
-    private updateTileGridOverlay(): void {
-        if (!this.deck || !this.tileGridEnabled) {
-            this.removeTileGridLayers();
-            this.removeTileStateLayers();
-            return;
-        }
+    /** Resolve visibility and configuration once at the renderer's application boundary. */
+    private tileOverlayFrame(): DeckTileOverlayFrame | null {
+        if (!this.deck || !this.viewSettings.viewTileBordersState.getValue(this._viewIndex)) return null;
         const viewport = this.computeViewport();
-        if (!viewport) {
-            this.removeTileGridLayers();
-            this.removeTileStateLayers();
-            return;
-        }
-        const layerLevels = this.visibleMapLayerLevels();
-        if (layerLevels.length) {
-            this.updateTileStateOverlays(layerLevels, viewport);
-        } else {
-            this.removeTileStateLayers();
-        }
-        const effectiveGridLevel = this.tileGridAutoLevel
-            ? autoTileGridLevel(
-                this.zoomToAltitude(this.viewState.zoom, 0),
-                this.tileGridMode
-            )
-            : coarsenedTileLevel(
-                this.tileGridLevel,
-                viewport,
-                DeckMapView.TILE_GRID_MAX_VISIBLE_CELLS,
-                this.tileGridMode
-            );
-        this.updateTileGridLayers([effectiveGridLevel], viewport);
-    }
-
-    /** Reconciles the line-only grid overlay layers for the requested levels. */
-    private updateTileGridLayers(levels: number[], viewport: Viewport): void {
-        const nextLayerKeys = new Set<string>();
-        levels.forEach((level, index) => {
-            const layerKey = `${DeckMapView.TILE_GRID_LAYER_KEY}/${level}`;
-            const layer = this.createTileGridLayer(level, viewport, layerKey);
-            this.layerRegistry.upsert(layerKey, layer, 325 + index);
-            nextLayerKeys.add(layerKey);
-        });
-        for (const key of this.tileGridLayerKeys) {
-            if (!nextLayerKeys.has(key)) {
-                this.layerRegistry.remove(key);
-            }
-        }
-        this.tileGridLayerKeys = nextLayerKeys;
-    }
-
-    /** Creates one shader-driven tile-grid line layer for a specific level. */
-    private createTileGridLayer(level: number, viewport: Viewport, layerId: string): TileGridOverlayLayer {
-        const overlayGeometry = this.tileGridOverlayGeometry(level, viewport);
-        return new TileGridOverlayLayer({
-            id: layerId,
-            data: overlayGeometry.data,
-            getPolygon: (datum: TileGridOverlayDatum) => datum.polygon,
-            getFillColor: [0, 0, 0, 0],
-            coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-            filled: true,
-            extruded: false,
-            // Keep the overlay quad in unwrapped longitude space. The shader
-            // already works with unwrapped/projection-space X coordinates.
-            wrapLongitude: false,
-            pickable: false,
-            gridMode: this.tileGridMode,
-            localMin: overlayGeometry.localMin,
-            localSize: overlayGeometry.localSize,
-            subdivisionX: overlayGeometry.subdivisionX,
-            subdivisionY: overlayGeometry.subdivisionY,
-            lineColor: this.tileGridLineColor,
-            lineWidthPixels: DeckMapView.TILE_GRID_LINE_WIDTH_PX,
-            parameters: DeckMapView.NO_DEPTH_PARAMETERS
-        });
-    }
-
-    /** Rebuilds the raster tile-state overlays that color error/empty cells behind the grid lines. */
-    private updateTileStateOverlays(
-        levels: number[],
-        viewport: Viewport
-    ): void {
-        const visibleLayersByLevel = this.visibleMapLayersByLevel(levels);
-        const nextLayerKeys = new Set<string>();
-        const tileLimitPerView = this.tileLimitPerView();
-        for (const level of levels) {
-            if (tileGridVisibleCellCount(level, viewport, this.tileGridMode) >
-                DeckMapView.TILE_GRID_MAX_VISIBLE_CELLS) {
-                continue;
-            }
-            const visibleLayers = visibleLayersByLevel.get(level) ?? [];
-            if (!visibleLayers.length) {
-                continue;
-            }
-            const extent = tileGridExtentForLevel(level, viewport, this.tileGridMode);
-            if (!extent) {
-                continue;
-            }
-
-            const pixels = new Uint8ClampedArray(extent.width * extent.height * 4);
-            const visibleTileIds = coreLib.getTileIds(viewport, level, tileLimitPerView) as number[];
-            for (const tileId of visibleTileIds) {
-                const stateKind = this.tileStateKindForTile(tileId, visibleLayers);
-                if (stateKind === 0) {
-                    continue;
-                }
-                const cell = this.tileGridCellForTile(tileId, extent);
-                if (!cell) {
-                    continue;
-                }
-                const pixelIndex = (cell.row * extent.width + cell.col) * 4;
-                if (stateKind === TILE_STATE_KIND_ERROR) {
-                    pixels[pixelIndex + 0] = DeckMapView.TILE_STATE_ERROR_COLOR[0];
-                    pixels[pixelIndex + 1] = DeckMapView.TILE_STATE_ERROR_COLOR[1];
-                    pixels[pixelIndex + 2] = DeckMapView.TILE_STATE_ERROR_COLOR[2];
-                    pixels[pixelIndex + 3] = DeckMapView.TILE_STATE_ERROR_COLOR[3];
-                } else if (stateKind === TILE_STATE_KIND_EMPTY) {
-                    pixels[pixelIndex + 0] = DeckMapView.TILE_STATE_EMPTY_COLOR[0];
-                    pixels[pixelIndex + 1] = DeckMapView.TILE_STATE_EMPTY_COLOR[1];
-                    pixels[pixelIndex + 2] = DeckMapView.TILE_STATE_EMPTY_COLOR[2];
-                    pixels[pixelIndex + 3] = DeckMapView.TILE_STATE_EMPTY_COLOR[3];
-                }
-            }
-
-            const imageData = new ImageData(pixels, extent.width, extent.height);
-            const layerKey = `${DeckMapView.TILE_STATE_LAYER_KEY}/${level}`;
-            const overlayGeometry = this.tileStateOverlayGeometry(extent);
-            const layer = new TileGridStateOverlayLayer({
-                id: layerKey,
-                data: overlayGeometry.data,
-                getPolygon: (datum: TileGridOverlayDatum) => datum.polygon,
-                getFillColor: [255, 255, 255, 255],
-                coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-                filled: true,
-                extruded: false,
-                wrapLongitude: false,
-                pickable: false,
-                gridMode: this.tileGridMode,
-                localMin: overlayGeometry.localMin,
-                localSize: overlayGeometry.localSize,
-                imageData,
-                parameters: DeckMapView.NO_DEPTH_PARAMETERS
-            });
-            this.layerRegistry.upsert(layerKey, layer, 300);
-            nextLayerKeys.add(layerKey);
-        }
-
-        for (const key of this.tileStateLayerKeys) {
-            if (!nextLayerKeys.has(key)) {
-                this.layerRegistry.remove(key);
-            }
-        }
-        this.tileStateLayerKeys = nextLayerKeys;
-    }
-
-    /** Returns the effective feature levels currently visible across all enabled map layers in this view. */
-    private visibleMapLayerLevels(): number[] {
-        const levels = new Set<number>();
-        for (const [mapId, map] of this.mapInfo.maps.maps.entries()) {
+        if (!viewport) return null;
+        const layers: Array<{mapId: string; layerId: string; level: number}> = [];
+        for (const [mapId, map] of this.mapInfo.maps.maps) {
             for (const layer of map.allFeatureLayers()) {
-                if (!this.mapInfo.maps.getMapLayerVisibility(this._viewIndex, mapId, layer.id)) {
-                    continue;
-                }
+                if (!this.mapInfo.maps.getMapLayerVisibility(this._viewIndex, mapId, layer.id)) continue;
                 const level = this.mapViewState.getEffectiveMapLayerLevel(this._viewIndex, mapId, layer.id);
-                if (!Number.isFinite(level)) {
-                    continue;
-                }
-                levels.add(Math.max(0, Math.floor(level)));
+                if (Number.isFinite(level)) layers.push({mapId, layerId: layer.id, level: Math.max(0, Math.floor(level))});
             }
         }
-        return Array.from(levels.values()).sort((lhs, rhs) => lhs - rhs);
-    }
-
-    /** Groups visible map layers by the effective feature level they currently render at. */
-    private visibleMapLayersByLevel(levels: number[]): Map<number, VisibleLayerRef[]> {
-        const levelSet = new Set(levels);
-        const result = new Map<number, VisibleLayerRef[]>();
-        for (const level of levels) {
-            result.set(level, []);
-        }
-
-        for (const [mapId, map] of this.mapInfo.maps.maps.entries()) {
-            for (const layer of map.allFeatureLayers()) {
-                if (!this.mapInfo.maps.getMapLayerVisibility(this._viewIndex, mapId, layer.id)) {
-                    continue;
-                }
-                const level = this.mapViewState.getEffectiveMapLayerLevel(this._viewIndex, mapId, layer.id);
-                if (!Number.isFinite(level)) {
-                    continue;
-                }
-                const normalizedLevel = Math.max(0, Math.floor(level));
-                if (!levelSet.has(normalizedLevel)) {
-                    continue;
-                }
-                const list = result.get(normalizedLevel);
-                if (!list) {
-                    continue;
-                }
-                list.push({ mapId, layerId: layer.id });
-            }
-        }
-        return result;
-    }
-
-    /** Removes every tile-state overlay layer currently registered with deck. */
-    private removeTileStateLayers(): void {
-        for (const key of this.tileStateLayerKeys) {
-            this.layerRegistry.remove(key);
-        }
-        this.tileStateLayerKeys.clear();
-    }
-
-    /** Removes every tile-grid line layer currently registered with deck. */
-    private removeTileGridLayers(): void {
-        for (const key of this.tileGridLayerKeys) {
-            this.layerRegistry.remove(key);
-        }
-        this.tileGridLayerKeys.clear();
-    }
-
-    /** Classifies one tile cell as error, empty, or uncolored across every visible layer at that level. */
-    private tileStateKindForTile(tileId: number, visibleLayers: VisibleLayerRef[]): number {
-        switch (this.layerController.occupancyForTile(tileId, visibleLayers)) {
-            case "error":
-                return TILE_STATE_KIND_ERROR;
-            case "empty":
-                return TILE_STATE_KIND_EMPTY;
-            default:
-                return 0;
-        }
-    }
-
-    /** Converts a tile id to its raster-cell coordinates inside the current tile-grid extent. */
-    private tileGridCellForTile(tileId: number, extent: TileGridLevelExtent): { col: number; row: number } | null {
-        const tileBox = coreLib.getTileBox(tileId) as unknown;
-        if (!Array.isArray(tileBox) || tileBox.length < 4) {
-            return null;
-        }
-        const west = Number(tileBox[0]);
-        const north = Number(tileBox[3]);
-        if (!Number.isFinite(west) || !Number.isFinite(north)) {
-            return null;
-        }
-        const colNorm = tileGridLonToNormX(west);
-        const rowNorm = tileGridLatToNormY(north, this.tileGridMode);
-        const rawCol = Math.floor(colNorm * extent.colCount + 1e-9);
-        const rawRow = Math.floor(rowNorm * extent.rowCount + 1e-9);
-        const row = Math.max(0, Math.min(extent.rowCount - 1, rawRow));
-        const col = wrapColumnIntoExtent(rawCol, extent);
-        if (col < 0 || col >= extent.width) {
-            return null;
-        }
-        const rowInExtent = row - extent.minRow;
-        if (rowInExtent < 0 || rowInExtent >= extent.height) {
-            return null;
-        }
-        return { col, row: rowInExtent };
+        return {
+            viewport, layers,
+            mode: this.viewSettings.viewTileGridModeState.getValue(this._viewIndex),
+            level: this.mapInfo.maps.getViewTileGridLevel(this._viewIndex),
+            autoLevel: this.mapInfo.maps.getViewTileGridAutoLevel(this._viewIndex),
+            lineColor: tileGridRgba(this.mapInfo.maps.getViewTileGridColor(this._viewIndex),
+                this.mapInfo.maps.getViewTileGridOpacity(this._viewIndex)),
+            altitude: this.zoomToAltitude(this.viewState.zoom, 0),
+            tileLimit: this.tileLimitPerView()
+        };
     }
 
     /** Returns the per-view tile budget derived from the global load limit and split-view count. */
@@ -3810,112 +2149,52 @@ export abstract class DeckMapView implements IRenderView {
     /** Adds or removes the temporary tile-outline overlay created from context-menu interactions. */
     private updateTileOutlineLayer(payload: TileOutlinePayload | null): void {
         if (!payload) {
-            this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
+            this.tileOverlay.setOutline(null);
             return;
         }
 
         const coordinates = payload.rectangle?.coordinates;
         if (!coordinates) {
-            this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
+            this.tileOverlay.setOutline(null);
             return;
         }
 
-        const data = this.rectangleOverlayData(
+        const data = rectangleOverlayData(
             GeoMath.toDegrees(coordinates.west),
             GeoMath.toDegrees(coordinates.south),
             GeoMath.toDegrees(coordinates.east),
             GeoMath.toDegrees(coordinates.north),
-            this.toDeckColor(payload.rectangle["material"] as Color | undefined, [255, 105, 180, 51]),
-            this.toDeckColor(payload.rectangle["outlineColor"] as Color | undefined, [255, 105, 180, 255]),
+            toDeckColor(payload.rectangle["material"] as Color | undefined, [255, 105, 180, 51]),
+            toDeckColor(payload.rectangle["outlineColor"] as Color | undefined, [255, 105, 180, 255]),
             Math.max(1, Number(payload.rectangle["outlineWidth"] ?? 3))
         );
         if (!data.length) {
-            this.layerRegistry.remove(DeckMapView.TILE_OUTLINE_LAYER_KEY);
+            this.tileOverlay.setOutline(null);
             return;
         }
 
-        this.upsertRectangleOverlayLayer(DeckMapView.TILE_OUTLINE_LAYER_KEY, data, 520);
+        this.tileOverlay.setOutline(data);
     }
 
-    /** Inserts or replaces one rectangle overlay layer with depth testing disabled. */
-    private upsertRectangleOverlayLayer(
-        layerKey: string,
-        data: DeckRectangleOverlayDatum[],
-        order: number
-    ): void {
-        const layer = new PolygonLayer<DeckRectangleOverlayDatum>({
-            id: layerKey,
-            data,
-            getPolygon: (datum: DeckRectangleOverlayDatum) => datum.polygon,
-            getFillColor: (datum: DeckRectangleOverlayDatum) => datum.fillColor,
-            getLineColor: (datum: DeckRectangleOverlayDatum) => datum.lineColor,
-            getLineWidth: (datum: DeckRectangleOverlayDatum) => datum.lineWidthPixels,
-            lineWidthUnits: "pixels",
-            coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-            filled: true,
-            stroked: true,
-            extruded: false,
-            wrapLongitude: false,
-            pickable: false,
-            parameters: DeckMapView.NO_DEPTH_PARAMETERS
-        });
-        this.layerRegistry.upsert(layerKey, layer, order);
+    /** Project marker preferences into this canvas's location overlay. */
+    private updateLocationMarkerOverlay(): void {
+        const visible = !!this.deck && this.coordinatesService.state.markerState.getValue();
+        this.locationOverlay.updateLocationMarkerOverlay(
+            visible,
+            this.coordinatesService.state.markedPositionState.getValue(),
+            visible ? this.featureSearchService.markerGraphics() : "");
     }
 
-    /** Converts one rectangle into one or more overlay data records depending on world-wrap needs. */
-    private rectangleOverlayData(
-        west: number,
-        south: number,
-        east: number,
-        north: number,
-        fillColor: [number, number, number, number],
-        lineColor: [number, number, number, number],
-        lineWidthPixels: number
-    ): DeckRectangleOverlayDatum[] {
-        return this.rectangleOverlayPolygons(west, south, east, north).map(polygon => ({
-            polygon,
-            fillColor,
-            lineColor,
-            lineWidthPixels
-        }));
-    }
-
-    /** Splits a wrapped rectangle into multiple polygons when it spans the full world. */
-    private rectangleOverlayPolygons(
-        west: number,
-        south: number,
-        east: number,
-        north: number
-    ): [number, number][][] {
-        if (east - west >= 360 - 1e-6) {
-            return [
-                [
-                    [-180, south],
-                    [-180, north],
-                    [0, north],
-                    [0, south]
-                ],
-                [
-                    [0, south],
-                    [0, north],
-                    [180, north],
-                    [180, south]
-                ]
-            ];
-        }
-        return [[
-            [west, south],
-            [west, north],
-            [east, north],
-            [east, south]
-        ]];
+    /** Labels can only be presented by a live canvas. */
+    private startLocationLabel(value: {x: number; y: number; label: string}): void {
+        if (this.deck) this.locationOverlay.startLocationLabel(value);
     }
 
     /** Fits a selected place independently of tile navigation, then publishes the settled camera. */
     private moveToLocationArea(area: LocationArea): void {
         if (!this.locationState.locationBoundariesEnabled) return;
-        this.stopLocationAreaHighlight();
-        this.stopLocationLabel();
+        this.locationOverlay.stopLocationAreaHighlight();
+        this.locationOverlay.stopLocationLabel();
         this.prepareForNavigation();
         this.exitFirstPersonView();
         const rect = this.getCanvasClientRect();
@@ -3924,7 +2203,7 @@ export abstract class DeckMapView implements IRenderView {
         this.clearNavigationPivots();
         this.updateViewState({ ...this.viewState, ...fitted, position: [0, 0, 0] }, true, true);
         this.pushViewStateToAppState();
-        this.startLocationAreaHighlight(area);
+        this.locationOverlay.startLocationAreaHighlight(area);
         const viewport = this.createWebMercatorViewport();
         const representative = area.representativePoint;
         const pixel = representative && viewport?.project([
@@ -3933,326 +2212,6 @@ export abstract class DeckMapView implements IRenderView {
             && pixel[0] >= 0 && pixel[0] <= rect.width && pixel[1] >= 0 && pixel[1] <= rect.height
             ? representative : [this.viewState.longitude, this.viewState.latitude];
         this.startLocationLabel({ x: anchor[0], y: anchor[1], label: area.label });
-    }
-
-    /** Keeps polygon data/accessors stable during fading so Deck only updates opacity. */
-    private startLocationAreaHighlight(area: LocationArea): void {
-        this.stopLocationAreaHighlight();
-        if (!this.locationState.locationBoundariesEnabled) return;
-        let data: LocationPolygon[];
-        try {
-            data = locationOverlayPolygons(area);
-        } catch {
-            if (area.polygons) {
-                this.mapViewState.locationBoundaryUnavailableTopic.next();
-                this.startLocationAreaHighlight({ ...area, polygons: undefined });
-            }
-            return;
-        }
-        if (!data.length) return;
-        const layer = new LocationAreaLayer({
-            id: DeckMapView.LOCATION_AREA_LAYER_KEY,
-            data,
-            pickable: false,
-            parameters: DeckMapView.NO_DEPTH_PARAMETERS,
-            onError: () => {
-                // Retire a bad boundary once, outside Deck's layer-update stack.
-                queueMicrotask(() => {
-                    if (this.locationAreaHighlightTick !== tick) return;
-                    this.stopLocationAreaHighlight();
-                    if (area.polygons) {
-                        this.mapViewState.locationBoundaryUnavailableTopic.next();
-                        this.startLocationAreaHighlight({ ...area, polygons: undefined });
-                    }
-                });
-                return true;
-            }
-        });
-        const tick = () => {
-            const start = this.locationAreaHighlightStartedAt;
-            if (start === undefined) return; // Tessellation and the first frame do not consume the fade.
-            const opacity = Math.max(0, 1 - (performance.now() - start) / 3000);
-            if (!opacity) { this.stopLocationAreaHighlight(); return; }
-            this.layerRegistry.upsert(DeckMapView.LOCATION_AREA_LAYER_KEY, layer.clone({ opacity }), 510);
-            this.requestRender();
-        };
-        this.locationAreaHighlightTick = tick;
-        this.layerRegistry.upsert(DeckMapView.LOCATION_AREA_LAYER_KEY, layer, 510);
-        this.onTick(tick);
-        this.requestRender();
-    }
-
-    /** Releases the current transient boundary and its animation callback. */
-    private stopLocationAreaHighlight(): void {
-        if (this.locationAreaHighlightTick) this.offTick(this.locationAreaHighlightTick);
-        this.locationAreaHighlightTick = null;
-        this.locationAreaHighlightStartedAt = undefined;
-        this.layerRegistry.remove(DeckMapView.LOCATION_AREA_LAYER_KEY);
-    }
-
-    /** Starts a short-lived animated rectangle highlight for fit-to-rectangle navigation. */
-    private startJumpAreaHighlight(rectangle: { west: number; south: number; east: number; north: number }): void {
-        this.stopJumpAreaHighlight();
-
-        const startTime = performance.now();
-        const tick = () => {
-            const elapsedMs = performance.now() - startTime;
-            const progress = Math.min(1, elapsedMs / DeckMapView.JUMP_AREA_HIGHLIGHT_DURATION_MS);
-            const fillAlpha = Math.max(0, (1 - progress) * 0.2);
-            const lineAlpha = Math.max(0, 1 - progress);
-            const data = this.rectangleOverlayData(
-                rectangle.west,
-                rectangle.south,
-                rectangle.east,
-                rectangle.north,
-                this.toDeckColor(Color.AQUA.withAlpha(fillAlpha), [0, 255, 255, 51]),
-                this.toDeckColor(Color.AQUA.withAlpha(lineAlpha), [0, 255, 255, 255]),
-                3
-            );
-            this.upsertRectangleOverlayLayer(DeckMapView.JUMP_AREA_LAYER_KEY, data, 510);
-            this.requestRender();
-
-            if (progress >= 1) {
-                this.stopJumpAreaHighlight();
-            }
-        };
-
-        this.jumpAreaHighlightTick = tick;
-        this.onTick(tick);
-        tick();
-    }
-
-    /** Stops and removes the temporary jump-area highlight overlay. */
-    private stopJumpAreaHighlight(): void {
-        if (this.jumpAreaHighlightTick) {
-            this.offTick(this.jumpAreaHighlightTick);
-            this.jumpAreaHighlightTick = null;
-        }
-        this.layerRegistry.remove(DeckMapView.JUMP_AREA_LAYER_KEY);
-    }
-
-    /** Starts a short-lived place-name label after a location-search jump. */
-    private startLocationLabel(value: { x: number; y: number; label: string }): void {
-        this.stopLocationLabel();
-
-        const longitude = Number(value.x);
-        const latitude = Number(value.y);
-        const label = value.label.trim().slice(0, 120);
-        if (!this.deck || !Number.isFinite(longitude) || !Number.isFinite(latitude) || !label) {
-            return;
-        }
-
-        const startTime = performance.now();
-        const tick = () => {
-            const elapsedMs = performance.now() - startTime;
-            const progress = Math.min(1, elapsedMs / DeckMapView.LOCATION_LABEL_FADE_DURATION_MS);
-            const alpha = Math.max(0, 1 - progress);
-            const data: DeckLocationLabelDatum[] = [{
-                position: [longitude, latitude],
-                label,
-                textColor: [255, 255, 255, Math.round(alpha * 255)],
-                backgroundColor: [0, 0, 0, Math.round(alpha * 235)]
-            }];
-            this.layerRegistry.upsert(DeckMapView.LOCATION_LABEL_LAYER_KEY, new TextLayer<DeckLocationLabelDatum>({
-                id: DeckMapView.LOCATION_LABEL_LAYER_KEY,
-                data,
-                coordinateSystem: COORDINATE_SYSTEM.LNGLAT,
-                getPosition: (datum: DeckLocationLabelDatum) => datum.position,
-                getText: (datum: DeckLocationLabelDatum) => datum.label,
-                getColor: (datum: DeckLocationLabelDatum) => datum.textColor,
-                getBackgroundColor: (datum: DeckLocationLabelDatum) => datum.backgroundColor,
-                getOutlineColor: () => [0, 0, 0, Math.round(alpha * 255)],
-                getOutlineWidth: () => 3,
-                getSize: () => 30,
-                sizeUnits: "pixels",
-                getTextAnchor: () => "middle",
-                getAlignmentBaseline: () => "bottom",
-                getPixelOffset: () => [0, -44],
-                background: true,
-                backgroundPadding: [14, 8],
-                billboard: true,
-                pickable: false,
-                parameters: DeckMapView.NO_DEPTH_PARAMETERS
-            } as any) as any, 720);
-            this.requestRender();
-
-            if (progress >= 1) {
-                this.stopLocationLabel();
-            }
-        };
-
-        this.locationLabelTick = tick;
-        this.onTick(tick);
-        tick();
-    }
-
-    /** Stops and removes the temporary location-search label overlay. */
-    private stopLocationLabel(): void {
-        if (this.locationLabelTick) {
-            this.offTick(this.locationLabelTick);
-            this.locationLabelTick = null;
-        }
-        this.layerRegistry.remove(DeckMapView.LOCATION_LABEL_LAYER_KEY);
-    }
-
-    /** Converts Cesium-style colors to deck RGBA tuples with a caller-supplied fallback. */
-    private toDeckColor(
-        color: Color | undefined,
-        fallback: [number, number, number, number]
-    ): [number, number, number, number] {
-        if (!color) {
-            return fallback;
-        }
-        return [
-            Math.max(0, Math.min(255, Math.round(color.r * 255))),
-            Math.max(0, Math.min(255, Math.round(color.g * 255))),
-            Math.max(0, Math.min(255, Math.round(color.b * 255))),
-            Math.max(0, Math.min(255, Math.round(color.a * 255)))
-        ];
-    }
-
-    /** Builds the geometry description for one tile-state overlay raster. */
-    private tileStateOverlayGeometry(extent: TileGridLevelExtent): TileGridOverlayGeometry {
-        const { localMin, localSize } = this.tileGridLocalBounds(extent);
-        return {
-            data: this.buildTileGridOverlayData(
-                extent.west,
-                extent.east,
-                extent.south,
-                extent.north,
-                [extent.level],
-                extent.coversFullWorldX
-            ),
-            localMin,
-            localSize,
-            subdivisionX: extent.width,
-            subdivisionY: extent.height
-        };
-    }
-
-    /** Builds the geometry description for one tile-grid line overlay level. */
-    private tileGridOverlayGeometry(level: number, viewport: Viewport): TileGridOverlayGeometry {
-        if (!viewport) {
-            return {
-                data: tileGridOverlayData(),
-                localMin: [0, 0],
-                localSize: [1, 1],
-                subdivisionX: 1,
-                subdivisionY: 1
-            };
-        }
-        const extent = tileGridExtentForLevel(level, viewport, this.tileGridMode);
-        if (!extent) {
-            return {
-                data: tileGridOverlayData(),
-                localMin: [0, 0],
-                localSize: [1, 1],
-                subdivisionX: 1,
-                subdivisionY: 1
-            };
-        }
-        const { localMin, localSize } = this.tileGridLocalBounds(extent);
-        const rowsForLevel = Math.pow(2, Math.max(0, Math.min(22, level)));
-        const colsForLevel = this.tileGridMode === "nds" ? rowsForLevel * 2 : rowsForLevel;
-        return {
-            data: this.buildTileGridOverlayData(
-                extent.west,
-                extent.east,
-                extent.south,
-                extent.north,
-                [level],
-                extent.coversFullWorldX
-            ),
-            localMin,
-            localSize,
-            subdivisionX: Math.max(1, Math.round(localSize[0] * colsForLevel)),
-            subdivisionY: Math.max(1, Math.round(localSize[1] * rowsForLevel))
-        };
-    }
-
-    /** Returns the local normalized bounds passed to the tile-grid shader modules. */
-    private tileGridLocalBounds(extent: TileGridLevelExtent): { localMin: [number, number]; localSize: [number, number] } {
-        return {
-            localMin: [
-                extent.minCol / extent.colCount,
-                extent.minRow / extent.rowCount
-            ],
-            localSize: [
-                Math.max(1e-6, (extent.maxCol - extent.minCol) / extent.colCount),
-                Math.max(1e-6, (extent.maxRow - extent.minRow) / extent.rowCount)
-            ]
-        };
-    }
-
-    /**
-     * Builds one or two overlay polygons covering the requested bounds.
-     * Full-world extents remain split to avoid deck's unstable 360-degree LNGLAT primitive.
-     */
-    private buildTileGridOverlayData(
-        west: number,
-        east: number,
-        south: number,
-        north: number,
-        levels: number[],
-        coversFullWorldX: boolean
-    ): TileGridOverlayDatum[] {
-        const polygons = coversFullWorldX
-            ? this.tileGridFullWorldPolygons(
-                -180,
-                180,
-                south,
-                north,
-                this.tileGridFullWorldSplitLongitude(levels)
-            )
-            : [[
-                [west, south],
-                [west, north],
-                [east, north],
-                [east, south]
-            ]] as [number, number][][];
-        return polygons.map(polygon => ({ polygon }));
-    }
-
-    /**
-     * A single 360-degree quad is unstable in deck's LNGLAT path. Split the
-     * full-world overlay into two adjacent primitives and keep shader space continuous.
-     */
-    private tileGridFullWorldPolygons(
-        west: number,
-        east: number,
-        south: number,
-        north: number,
-        splitLongitude: number
-    ): [number, number][][] {
-        return [
-            [
-                [west, south],
-                [west, north],
-                [splitLongitude, north],
-                [splitLongitude, south]
-            ],
-            [
-                [splitLongitude, south],
-                [splitLongitude, north],
-                [east, north],
-                [east, south]
-            ]
-        ];
-    }
-
-    /**
-     * Keep the full-world split seam away from all visible vertical grid lines.
-     * Otherwise the seam itself can swallow one subdivision family.
-     */
-    private tileGridFullWorldSplitLongitude(levels: number[]): number {
-        const finestLevel = levels.reduce(
-            (maxLevel, level) => Math.max(maxLevel, Math.max(0, Math.min(22, Math.floor(level)))),
-            0
-        );
-        const finestRowCount = Math.pow(2, finestLevel);
-        const finestColCount = this.tileGridMode === "nds" ? finestRowCount * 2 : finestRowCount;
-        const splitNormX = 0.5 + 0.5 / Math.max(2, finestColCount);
-        return -180 + 360 * splitNormX;
     }
 
     /** Normalizes longitude into the conventional [-180, 180] range. */

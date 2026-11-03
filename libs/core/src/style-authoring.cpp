@@ -70,7 +70,7 @@ nlohmann::ordered_json const& styleAuthoringSchema()
           "icon-url-expression": {"kind":"expression","group":"Points"},
           "point-merge-grid-cell": {"kind":"vector","sizes":[3],"group":"Points"},
           "point-cloud": {"kind":"boolean","group":"Points"},
-          "point-cloud-max-points": {"kind":"number","group":"Points","help":"Zero requests exact geometry; positive values use the native point quota limit."},
+          "point-cloud-max-points": {"kind":"number","group":"Points","help":"Native filter-plan quota; regular viewer rendering uses the point-cloud preference instead."},
           "label-color": {"kind":"color","group":"Labels"},
           "label-opacity": {"kind":"number","group":"Labels","seed":1},
           "label-font-family": {"kind":"string","group":"Labels","seed":"sans-serif"},
