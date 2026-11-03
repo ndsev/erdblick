@@ -6,12 +6,23 @@ import {
     vi
 } from "vitest";
 import {BehaviorSubject} from "rxjs";
+import {Buffer} from "node:buffer";
 import {ViewerActionStatusComponent} from "../../../app/action/viewer-action-status.component";
 import type {ViewerMcpInfo} from "../../../app/action/viewer-action-relay.contract";
 
 /** Constructs only the fixed command formatter; never launches a client or changes its config. */
 function component(info: ViewerMcpInfo, clipboard = {copyToClipboard: vi.fn()}) {
     return new ViewerActionStatusComponent({connectionInfo: info} as never, clipboard as never, {} as never);
+}
+
+/** Decodes the public Cursor installation-link format without opening the editor. */
+function cursorConfiguration(ui: ViewerActionStatusComponent): Record<string, unknown> {
+    const command = ui.connectionText("cursor");
+    expect(command).toMatch(/^cursor --open-url '[^']+'$/);
+    const link = new URL(command.slice("cursor --open-url '".length, -1));
+    expect(`${link.protocol}//${link.host}${link.pathname}`).toBe("cursor://anysphere.cursor-deeplink/mcp/install");
+    expect(link.searchParams.get("name")).toBe("mapviewer");
+    return JSON.parse(Buffer.from(link.searchParams.get("config")!, "base64").toString("utf8"));
 }
 
 describe("MCP activity indicator", () => {
@@ -39,6 +50,7 @@ describe("MCP connection copy commands", () => {
         expect(ui.connectionText("codex")).toBe("codex mcp add mapviewer --url 'http://localhost:8099/mcp'");
         expect(ui.connectionText("claude")).toBe("claude mcp add --transport http mapviewer 'http://localhost:8099/mcp'");
         expect(ui.connectionText("copilot")).toBe("copilot mcp add --transport http mapviewer 'http://localhost:8099/mcp'");
+        expect(cursorConfiguration(ui)).toEqual({url: "http://localhost:8099/mcp"});
     });
 
     it.each([
@@ -114,7 +126,27 @@ describe("MCP connection copy commands", () => {
         );
     });
 
-    it.each(["codex", "claude", "copilot"] as const)("copies the complete %s setup snippet", kind => {
+    it.each([
+        {scopes: ["viewer", "tiles:read"], oauthClientId: "public-client", auth: {CLIENT_ID: "public-client", scopes: ["viewer", "tiles:read"]}},
+        {scopes: [], oauthClientId: "public-client", auth: {CLIENT_ID: "public-client"}},
+        {scopes: ["viewer"], oauthClientId: undefined, auth: undefined},
+        {scopes: [], oauthClientId: undefined, auth: undefined}
+    ])("configures Cursor OAuth with client $oauthClientId and scopes $scopes", ({scopes, oauthClientId, auth}) => {
+        const ui = component({enabled: true, endpoint: "https://example.com/mcp", authentication: "oauth", scopes, oauthClientId});
+        expect(cursorConfiguration(ui)).toEqual({url: "https://example.com/mcp", ...(auth ? {auth} : {})});
+    });
+
+    it("preserves Unicode and shell punctuation as data in the Cursor installation link", () => {
+        const oauthClientId = "München'; echo unsafe; '😀";
+        const scopes = ["viewer", "scope'quoted"];
+        const ui = component({enabled: true, endpoint: "https://example.com/mcp?label=O'Reilly&view=1", authentication: "oauth", scopes, oauthClientId});
+        expect(cursorConfiguration(ui)).toEqual({
+            url: "https://example.com/mcp?label=O%27Reilly&view=1",
+            auth: {CLIENT_ID: oauthClientId, scopes}
+        });
+    });
+
+    it.each(["codex", "claude", "copilot", "cursor"] as const)("copies the complete %s setup snippet", kind => {
         const clipboard = {copyToClipboard: vi.fn()};
         const ui = component({enabled: true, endpoint: "https://example.com/mcp", authentication: "oauth", scopes: ["viewer"]}, clipboard);
         ui.copy(kind);
@@ -127,9 +159,11 @@ describe("MCP connection copy commands", () => {
         expect(ui.connectionText("codex")).toBe("");
         expect(ui.connectionText("claude")).toBe("");
         expect(ui.connectionText("copilot")).toBe("");
+        expect(ui.connectionText("cursor")).toBe("");
         ui.copy("codex");
         ui.copy("claude");
         ui.copy("copilot");
+        ui.copy("cursor");
         expect(clipboard.copyToClipboard).not.toHaveBeenCalled();
     });
 
@@ -139,9 +173,11 @@ describe("MCP connection copy commands", () => {
         expect(ui.connectionText("codex")).toBe("");
         expect(ui.connectionText("claude")).toBe("");
         expect(ui.connectionText("copilot")).toBe("");
+        expect(ui.connectionText("cursor")).toBe("");
         ui.copy("codex");
         ui.copy("claude");
         ui.copy("copilot");
+        ui.copy("cursor");
         expect(clipboard.copyToClipboard).not.toHaveBeenCalled();
     });
 });

@@ -759,7 +759,7 @@ renameable tab label, bounded recent action names/outcomes and Stop current acti
 Stop cancels pending agent work, not completed edits or human searches. Catalog
 mismatch disables agent controls only; ordinary viewing remains available.
 
-The compact Codex, Claude and Copilot buttons share the label
+The compact Codex, Claude, Copilot and Cursor buttons share the label
 **Copy Add-MCP-Command:** and stay together in one row (the label can wrap above
 them on narrow screens). They use the server's public connection metadata and fixed, POSIX-shell-quoted command
 syntax. Local mode copies only the add command. For Codex and Claude, OAuth mode
@@ -773,11 +773,19 @@ Copilot with `--additional-mcp-config` for that session only; it does not alter
 the saved configuration. The JSON carries the public client ID and scope array.
 Copilot requires a client ID for explicit scopes; without one, server discovery
 supplies both. Run `/mcp auth mapviewer` inside Copilot if sign-in is required.
+Cursor copies `cursor --open-url` with an MCP installation link, which opens an
+installation confirmation in the editor. The link contains the server URL and,
+when a public client ID is configured, `auth.CLIENT_ID` and optional `auth.scopes`.
+Without that ID, Cursor uses OAuth discovery. Its inherited `--add-mcp` option
+targets the separate VS Code configuration store, so this button uses Cursor's
+own installation flow instead.
 Run the copied snippet in a POSIX shell and complete login in the client; the
 browser UI only copies commands and never handles OAuth credentials. See the official
 [Codex MCP instructions](https://learn.chatgpt.com/docs/extend/mcp?surface=cli),
-[Claude Code MCP instructions](https://code.claude.com/docs/en/mcp), and the
-[Copilot CLI MCP reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#mcp-server-configuration).
+[Claude Code MCP instructions](https://code.claude.com/docs/en/mcp),
+[Copilot CLI MCP reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#mcp-server-configuration),
+[Cursor installation links](https://cursor.com/docs/mcp/install-links), and
+[Cursor MCP authentication](https://cursor.com/docs/mcp).
 
 ## Render pipeline
 
