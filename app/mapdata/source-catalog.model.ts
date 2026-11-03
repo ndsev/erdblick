@@ -17,7 +17,12 @@ export type MapSchemaStatus = "loading" | "ready" | "failed";
 export interface MapFormat {
     name: string;
     version: string;
-    subsystems?: Record<string, string>;
+    /**
+     * Canonical set of name/version pairs published by mapget. A subsystem may
+     * occur at several versions; a dictionary would silently discard that fact.
+     * Legacy object input is normalized by mapget before catalog publication.
+     */
+    subsystems: Array<{name: string; version: string}>;
 }
 
 /**
