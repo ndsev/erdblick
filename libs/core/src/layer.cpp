@@ -889,6 +889,9 @@ NativeJsValue TileSubsetLayer::entryRange(
         if (index < begin || index >= end || !featureId) {
             return;
         }
+        // Search/hover rows address the evaluated owned feature. Mapget does
+        // not expand cross-map relation targets into these host rows; those
+        // references remain structural in inspection and render picking.
         auto entry = JsValue::Dict({
             {"mapTileKey", JsValue(model_->id().toString())},
             {"featureId", JsValue(featureId->toString())},
@@ -1111,7 +1114,10 @@ NativeJsValue TileSubsetLayer::resolvePick(
     });
     auto setFeatureId = [&](mapget::model_ptr<mapget::FeatureId> const& id) {
         if (id) {
-            result.set("featureId", JsValue(id->toString()));
+            if (id->externalMapId())
+                result.set("featureReference", JsValue::fromFeatureId(*id));
+            else
+                result.set("featureId", JsValue(id->toString()));
             result.set("featureType", JsValue(std::string(id->typeId())));
         }
     };
@@ -1154,7 +1160,8 @@ NativeJsValue TileSubsetLayer::resolvePick(
             }
             auto endpoint = endpointRole == 2 ? entry->target() : entry->source();
             setFeatureId(endpoint ? endpoint->featureId() : mapget::model_ptr<mapget::FeatureId>{});
-            if (auto source = entry->source(); source && source->featureId()) {
+            if (auto source = entry->source(); source && source->featureId() &&
+                !source->featureId()->externalMapId()) {
                 auto const sourceFeatureId =
                     source->featureId()->toString();
                 result.set(
@@ -1169,6 +1176,9 @@ NativeJsValue TileSubsetLayer::resolvePick(
                         "relationIndex",
                         JsValue(*relationIndex));
                 }
+            }
+            else if (source && source->featureId()) {
+                result.set("relationSourceReference", JsValue::fromFeatureId(*source->featureId()));
             }
             result.set("relationId", JsValue(entry->relationId()));
             result.set("relationName", JsValue(entry->name()));
@@ -1185,6 +1195,7 @@ NativeJsValue TileSubsetLayer::resolvePick(
             }
             setFeatureId(entry->representativeFeatureId());
             auto members = JsValue::List();
+            auto references = JsValue::List();
             if (auto memberIds = entry->memberFeatureIds()) {
                 for (uint32_t index = 0; index < memberIds->size(); ++index) {
                     auto node = memberIds->at(index);
@@ -1192,11 +1203,15 @@ NativeJsValue TileSubsetLayer::resolvePick(
                         ? model_->resolve<mapget::FeatureId>(*node)
                         : mapget::model_ptr<mapget::FeatureId>{};
                     if (member) {
-                        members.push(JsValue(member->toString()));
+                        if (member->externalMapId())
+                            references.push(JsValue::fromFeatureId(*member));
+                        else
+                            members.push(JsValue(member->toString()));
                     }
                 }
             }
             result.set("memberFeatureIds", members);
+            result.set("memberFeatureReferences", references);
             return false;
         });
         break;
@@ -1222,7 +1237,7 @@ NativeJsValue TileSubsetLayer::findPickReferences(
         }));
     };
     auto matches = [&](mapget::model_ptr<mapget::FeatureId> const& candidate) {
-        return candidate && candidate->toString() == featureId;
+        return candidate && !candidate->externalMapId() && candidate->toString() == featureId;
     };
 
     uint32_t channelOrdinal = 0U;
@@ -1281,7 +1296,7 @@ NativeJsValue TileSubsetLayer::findPickReferences(
                         auto targetId = target
                             ? target->featureId()
                             : mapget::model_ptr<mapget::FeatureId>{};
-                        auto const sourceString = sourceId
+                        auto const sourceString = sourceId && !sourceId->externalMapId()
                             ? sourceId->toString()
                             : std::string{};
                         auto const relationIndex = sourceString.empty()

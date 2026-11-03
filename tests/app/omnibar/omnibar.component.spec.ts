@@ -1,3 +1,4 @@
+import { MapTileStreamService } from "../../../app/mapdata/map-tile-stream.service";
 import { CoordinatesState } from "../../../app/coordinates/coordinates.state";
 import '@angular/compiler';
 import {
@@ -57,7 +58,7 @@ function fixture() {
     const maps = { tileLayerParser: parser, maps: { maps: new Map() }, sourceDataLayerIdForLayerName: vi.fn() };
     const menu = { customTileAndMapId: new Subject<[string, string]>() };
     const jumps = new JumpTargetService(maps as never, {} as never, { showError: vi.fn() } as never,
-        menu as never, owners.configService, owners.coordinates, owners.inspectionState, owners.viewSettings, views as never);
+        menu as never, owners.configService, owners.coordinates, owners.inspectionState, owners.viewSettings, views as never, {} as never);
     jumps.initialize();
     const external = new ExternalViewerService(owners.configService, owners.coordinates.state, owners.viewSettings);
     const navigation = new LocationNavigationService(owners.locationSearch, views as never, state, {} as never, jumps,
@@ -84,6 +85,7 @@ describe('owner action candidates', () => {
                 { provide: DiagnosticsFacadeService, useValue: owners.diagnostics },
                 { provide: InspectionSelectionService, useValue: {} },
                 { provide: MapDataService, useValue: {} },
+                { provide: MapTileStreamService, useValue: {} },
                 { provide: MapViewService, useValue: {} },
                 { provide: InfoMessageService, useValue: { showError: vi.fn() } }
             ]

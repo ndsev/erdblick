@@ -258,6 +258,28 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "Native picking exports named foreign identities without a source composition",
+    "[erdblick.schema][erdblick.picking]")
+{
+    erdblick::test::ScalarSchema fixture;
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        mapget::TileId{}, fixture.source.stringPoolId_, fixture.source.mapId_,
+        fixture.source.getLayer("Road"), std::make_shared<mapget::StringPool>(fixture.source.stringPoolId_),
+        "foreign-pick", 1);
+    auto id = subset->newFeatureId("ExternalType", {
+        {"large", INT64_MAX}, {"negative", INT64_MIN}, {"text", "007"}, {"__proto__", "plain-data"}
+    }, "Remote");
+    auto channel = subset->newChannel("features", mapget::Scope::Feature, 0, {}, {});
+    channel->newFeatureEntry(id, subset->newGeometryCollection());
+    auto result = erdblick::TileSubsetLayer(subset).resolvePick(0, 0, 0);
+    CHECK_FALSE(result.contains("featureId"));
+    CHECK(result.at("featureReference") == nlohmann::json{
+        {"mapId", "Remote"}, {"typeId", "ExternalType"},
+        {"id", {{"large", INT64_MAX}, {"negative", INT64_MIN}, {"text", "007"}, {"__proto__", "plain-data"}}}
+    });
+}
+
+TEST_CASE(
     "Value summaries separate actual domains and exclude sentinel statistics",
     "[erdblick.schema][projection]")
 {

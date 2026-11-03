@@ -119,13 +119,16 @@ export interface TileSubsetGltfPickProxyBuffers {
 /** Pick identity retained only for the temporary GLTF bridge. */
 export interface TileSubsetPickResult {
     featureId?: string;
+    featureReference?: NamedFeatureReference;
     attributeIndex?: number;
     hasValidity?: boolean;
     validityIndex?: number;
     relationId?: string;
     relationSourceFeatureId?: string;
+    relationSourceReference?: NamedFeatureReference;
     relationIndex?: number;
     memberFeatureIds?: string[];
+    memberFeatureReferences?: NamedFeatureReference[];
 }
 
 /** Entry-sized point-cloud interaction identity; no point coordinates are copied. */
@@ -177,3 +180,4 @@ export type TileSubsetLayerRenderWorkerOutbound =
     TileSubsetLayerRenderCatalogInstalled |
     TileSubsetLayerRenderResult |
     TileSubsetLayerRenderWorkerReady;
+import type { NamedFeatureReference } from "../../inspection/feature-identity.model";

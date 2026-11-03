@@ -126,6 +126,16 @@ describe("TileSubsetLayerVisualization", () => {
         expect(visualization.gpuPickSubset).not.toHaveBeenCalled();
     });
 
+    it("retains foreign endpoint parts and prefers an available local relation row", () => {
+        const visualization = Object.create(TileSubsetLayerVisualization.prototype);
+        const reference = {mapId: "Target", typeId: "Road", id: {id: 9223372036854775807n}};
+        expect(visualization.featureIdsForPickResult({featureReference: reference})).toEqual({featureReference: reference});
+        expect(visualization.featureIdsForPickResult({featureReference: reference,
+            relationSourceFeatureId: "Source.1", relationIndex: 2})).toBe("Source.1:relation#2");
+        expect(visualization.featureIdsForPickResult({memberFeatureIds: ["Source.1"],
+            memberFeatureReferences: [reference]})).toEqual(["Source.1", {featureReference: reference}]);
+    });
+
     it("restores either endpoint of a merged relation in a mixed cloud style", () => {
         const visualization = Object.create(TileSubsetLayerVisualization.prototype);
         const picks = [0, 1, 2].map(endpointRole => ({

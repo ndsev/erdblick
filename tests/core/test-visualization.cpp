@@ -473,12 +473,14 @@ std::shared_ptr<mapget::LayerInfo> externalReferenceInspectionLayerInfo()
 /** Create one feature whose relation and validity both point to a detached external-map feature id. */
 std::shared_ptr<mapget::TileFeatureLayer> makeExternalReferenceInspectionTile(mapget::TileId tileId)
 {
+    // Structured mapget fields use its static dictionary entries (id, mapId,
+    // typeId). Match the production parser's pool instead of a bare Simfil pool.
     auto layer = std::make_shared<mapget::TileFeatureLayer>(
         tileId,
         "InspectionReferenceNode",
         "InspectionReferenceMap",
         externalReferenceInspectionLayerInfo(),
-        std::make_shared<simfil::StringPool>());
+        std::make_shared<mapget::StringPool>("InspectionReferenceNode"));
 
     auto const center = mapget::Point(tileId.centerWgs84());
     auto source = layer->newFeature("Way", {{"wayId", 1}});
@@ -489,7 +491,7 @@ std::shared_ptr<mapget::TileFeatureLayer> makeExternalReferenceInspectionTile(ma
 
     source->addRelation(
         "linkedWay",
-        layer->newFeatureId("Way", {{"wayId", 2}}, "ValidationMap"));
+        layer->newFeatureId("UnregisteredTarget", {{"externalPart", INT64_MAX}, {"label", "007"}}, "ValidationMap"));
 
     auto attr = source->attributeLayers()->newLayer("limits")->newAttribute("speed");
     attr->validity()->newFeatureId(
@@ -518,7 +520,7 @@ mapget::model_ptr<mapget::SourceDataReferenceCollection> makeInspectionSourceDat
 /** Recursively collect rendered FeatureId rows from the inspection tree for focused assertions. */
 void collectFeatureReferenceRows(
     nlohmann::json const& node,
-    std::vector<std::pair<std::string, std::string>>& featureRefs)
+    std::vector<nlohmann::json>& featureRefs)
 {
     if (node.is_array()) {
         for (auto const& child : node) {
@@ -532,9 +534,7 @@ void collectFeatureReferenceRows(
     }
 
     if (node.value("type", 0U) == static_cast<uint32_t>(InspectionConverter::ValueType::FeatureId)) {
-        featureRefs.emplace_back(
-            node.value("value", std::string{}),
-            node.value("mapId", std::string{}));
+        featureRefs.push_back(node);
     }
 
     if (node.contains("children")) {
@@ -775,19 +775,21 @@ TEST_CASE("FeatureInspection preserves external feature-reference map ids", "[er
     REQUIRE(feature);
 
     auto inspection = InspectionConverter().convert(feature);
-    std::vector<std::pair<std::string, std::string>> featureRefs;
+    std::vector<nlohmann::json> featureRefs;
     collectFeatureReferenceRows(*inspection, featureRefs);
-
-    REQUIRE(
-        std::find(
-            featureRefs.begin(),
-            featureRefs.end(),
-            std::pair<std::string, std::string>{"Way.2", "ValidationMap"}) != featureRefs.end());
-    REQUIRE(
-        std::find(
-            featureRefs.begin(),
-            featureRefs.end(),
-            std::pair<std::string, std::string>{"Way.3", "ValidationMap"}) != featureRefs.end());
+    for (auto const& expected : {
+        nlohmann::json{{"mapId", "ValidationMap"}, {"typeId", "UnregisteredTarget"},
+            {"id", {{"externalPart", INT64_MAX}, {"label", "007"}}}},
+        nlohmann::json{{"mapId", "ValidationMap"}, {"typeId", "Way"}, {"id", {{"wayId", 3}}}}}) {
+        auto row = std::ranges::find_if(featureRefs, [&](auto const& value) {
+            return value.contains("featureReference") && value.at("featureReference") == expected;
+        });
+        REQUIRE(row != featureRefs.end());
+        CHECK(row->at("mapId") == "ValidationMap");
+        // Display JSON is descriptive only; navigation consumes the typed
+        // reference, preserving named integer/string parts without a schema.
+        CHECK(nlohmann::json::parse(row->at("value").get<std::string>()) == expected);
+    }
 }
 
 TEST_CASE("FeatureInspection exposes traversal-based attribute hover ids", "[erdblick.inspection]")

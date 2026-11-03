@@ -141,6 +141,60 @@ describe("MapTileStreamService request failures", () => {
         } finally { fetchSpy.mockRestore(); }
     });
 
+    it("locates named foreign picks losslessly and caches only the matching target generation", async () => {
+        let generation = "first";
+        const service = serviceHarness({schemaScopeSignature: () => generation});
+        const partitionKey = "Features:Target:Road:object/18446744073709551615";
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({
+            responses: [[{partitionKey, canonicalFeatureId: "Road.9223372036854775807"}]]
+        })));
+        const reference = {mapId: "Target", typeId: "Road", id: {id: 9223372036854775807n, text: "42"}};
+        const pick = {mapTileKey: "Features:Source:Layer:object/1", featureReference: reference, attributeIndex: 2, validityIndex: 0};
+        try {
+            const result = await service.resolveFeaturePicks([pick]);
+            expect(result).toEqual([{mapTileKey: partitionKey, featureId: "Road.9223372036854775807:attribute#2:validity#0"}]);
+            expect(fetchSpy.mock.calls[0][1]?.body).toContain('"id":9223372036854775807');
+            expect(fetchSpy.mock.calls[0][1]?.body).toContain('"text":"42"');
+            expect(service.cachedFeaturePicks([pick])).toEqual(result);
+            await service.resolveFeaturePicks([pick]);
+            expect(fetchSpy).toHaveBeenCalledTimes(1);
+            generation = "replacement";
+            expect(service.cachedFeaturePicks([pick])).toEqual([]);
+            await service.resolveFeaturePicks([pick]);
+            expect(fetchSpy).toHaveBeenCalledTimes(2);
+        } finally {fetchSpy.mockRestore(); service.ngOnDestroy();}
+    });
+
+    it.each(["Source", "Target"])("rejects a locate overtaken by replacement of %s", async replacedMap => {
+        const generations: Record<string, string> = {Source: "original", Target: "original"};
+        const service = serviceHarness({schemaScopeSignature: (maps: string[]) => maps.map(map => generations[map]).join(",")});
+        let finish!: (response: Response) => void;
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+        try {
+            const pending = service.resolveFeaturePicks([{
+                mapTileKey: "Features:Source:Layer:object/1",
+                featureReference: {mapId: "Target", typeId: "Road", id: {id: 7}}
+            }]);
+            generations[replacedMap] = "replaced";
+            finish(new Response(JSON.stringify({responses: [[{
+                partitionKey: "Features:Target:Road:object/1", canonicalFeatureId: "Road.7"
+            }]]})));
+            await expect(pending).rejects.toThrow("datasource changed");
+        } finally { fetchSpy.mockRestore(); service.ngOnDestroy(); }
+    });
+
+    it("keeps an unavailable foreign target unresolved instead of persisting display text as an ID", async () => {
+        const service = serviceHarness({schemaScopeSignature: () => "ready"});
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response('{"responses":[[]]}'));
+        const pick = {mapTileKey: "Source/Layer/1", featureReference: {mapId: "Missing", typeId: "Road", id: {id: 42}}};
+        try {
+            await expect(service.resolveFeaturePicks([pick])).rejects.toThrow("unavailable in Missing");
+            expect(service.cachedFeaturePicks([pick])).toEqual([]);
+            await expect(service.resolveFeaturePicks([pick])).rejects.toThrow("unavailable in Missing");
+            expect(fetchSpy).toHaveBeenCalledTimes(2);
+        } finally {fetchSpy.mockRestore(); service.ngOnDestroy();}
+    });
+
     it("logs bulk viewport failures without flooding error toasts", () => {
         const service = serviceHarness();
         const messages = { showError: vi.fn() };

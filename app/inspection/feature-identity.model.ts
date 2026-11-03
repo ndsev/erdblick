@@ -3,11 +3,69 @@
  * These value operations keep feature, attribute and validity targets consistent
  * across inspection, selection, hover and search without loading a feature.
  */
-/** Validates feature references shared by inspection, navigation and tile requests. */
 import { z } from "zod";
 import { identifierSchema, indexSchema } from "../action/action.model";
 
 const count = indexSchema;
+
+/**
+ * An unresolved foreign reference names its parts independently of the source
+ * schema. BigInt is an in-browser transport value for exact native int64 parts;
+ * strings remain strings, including decimal-looking strings.
+ */
+export const namedFeatureReferenceSchema = z.strictObject({
+    mapId: identifierSchema,
+    typeId: identifierSchema,
+    // Keep the original own-key dictionary: an ordinary z.record projection
+    // drops '__proto__', which is a valid native part name rather than JS code.
+    id: z.custom<Record<string, string | number | bigint>>(parts => {
+        if (!parts || typeof parts !== "object" || Array.isArray(parts)) return false;
+        const entries = Object.entries(parts);
+        return entries.length > 0 && entries.length <= 255 && entries.every(([key, value]) =>
+            identifierSchema.safeParse(key).success && (typeof value === "string"
+                || (typeof value === "number" && Number.isSafeInteger(value))
+                || (typeof value === "bigint" && value >= -9223372036854775808n && value <= 9223372036854775807n)));
+    }, "A named feature reference requires 1–255 named string or exact int64 parts")
+});
+
+export type NamedFeatureReference = z.infer<typeof namedFeatureReferenceSchema>;
+
+/** A rendered foreign identity awaiting target-map locate, with optional local row selectors. */
+export interface NamedFeaturePick {
+    featureReference: NamedFeatureReference;
+    attributeIndex?: number;
+    relationIndex?: number;
+    validityIndex?: number;
+}
+
+/** Native rendering uses canonical strings for local IDs and named parts for foreign IDs. */
+export type FeaturePickIdentity = string | NamedFeaturePick;
+
+/** The subset key identifies the rendering owner; a foreign target's partition is not known yet. */
+export type FeaturePickTarget =
+    | (TileFeatureIdLike & {featureReference?: never})
+    | (NamedFeaturePick & {mapTileKey: string; featureId?: never});
+
+/**
+ * Write the established JSON reference shape without narrowing large integers.
+ * JSON.stringify cannot encode BigInt; quoting it instead would change an
+ * integer ID part into a string. Every string/key is escaped by JSON.stringify.
+ */
+export function namedFeatureReferenceJson(value: NamedFeatureReference): string {
+    const reference = namedFeatureReferenceSchema.parse(value);
+    const parts = Object.keys(reference.id).sort().map(key => {
+        const part = reference.id[key];
+        return `${JSON.stringify(key)}:${typeof part === "bigint" ? part.toString() : JSON.stringify(part)}`;
+    });
+    return `{"mapId":${JSON.stringify(reference.mapId)},"typeId":${JSON.stringify(reference.typeId)},"id":{${parts.join(",")}}}`;
+}
+
+/** Stable cache/comparison key; never exposed as a canonical feature ID or persisted in URL state. */
+export function featurePickIdentityKey(identity: FeaturePickIdentity): string {
+    if (typeof identity === "string") return `local:${identity}`;
+    return "foreign:" + namedFeatureReferenceJson(identity.featureReference)
+        + JSON.stringify([identity.attributeIndex, identity.relationIndex, identity.validityIndex]);
+}
 
 const inspectionTargetFields = {
     attributeIndex: count.optional().describe("Observed attribute index on the base feature; mutually exclusive with relationIndex and an ID suffix."),

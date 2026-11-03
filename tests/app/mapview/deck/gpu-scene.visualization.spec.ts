@@ -1775,6 +1775,44 @@ describe("GpuScene contribution lifecycle", () => {
     expect(scene.hasInteractionTarget(identities, target)).toBe(false);
   });
 
+  it("indexes a located foreign target without replacing the source pick or retaining retired aliases", () => {
+    const { scene } = createScene();
+    const reference = {mapId: "Remote", typeId: "Road", id: {id: 9007199254740993n}};
+    const alias = {...reference, id: {otherComposition: "same-road"}};
+    const sourceKey = "Features:Source:Layer:1:0";
+    const target = {mapTileKey: "Features:Remote:Road:2:0", featureId: "Road.9007199254740993"};
+    const reservation = scene.prepareRender("origin", [11, 48, 0], [{
+      identity: "tile", mapTileKey: sourceKey, styleOrder: 0, lod: 7
+    }]);
+    const packet = pointPacket(reservation, {featureId: "allocate-one-packed-pick"});
+    reservation.contributions[0].resolvePick = () => [
+      {featureReference: reference}, {featureReference: alias}
+    ];
+    scene.applyPacket(packet, reservation);
+    scene.finishRender(reservation);
+    const identities = new Set(["tile"]);
+    const raw = scene.resolvePick(0);
+    expect(raw).toEqual([
+      {mapTileKey: sourceKey, featureReference: reference}, {mapTileKey: sourceKey, featureReference: alias}
+    ]);
+    expect(scene.hasInteractionTarget(identities, target)).toBe(false);
+    scene.rememberLocatedPick(raw[0], [target]);
+    scene.rememberLocatedPick(raw[1], [target]);
+    expect(scene.hasInteractionTarget(identities, target)).toBe(true);
+    expect(scene.interactionPicks(identities, [target])).toHaveLength(1);
+    expect(scene.resolvePick(0)).toEqual(raw);
+
+    const replacement = {...target, mapTileKey: "Features:Remote:Road:3:0"};
+    scene.rememberLocatedPick(raw[0], [replacement]);
+    expect(scene.hasInteractionTarget(identities, target)).toBe(true);
+    scene.rememberLocatedPick(raw[1], []);
+    expect(scene.hasInteractionTarget(identities, target)).toBe(false);
+    expect(scene.hasInteractionTarget(identities, replacement)).toBe(true);
+    scene.removeContribution("tile");
+    scene.publishPresentation();
+    expect(scene.hasInteractionTarget(identities, replacement)).toBe(false);
+  });
+
   it("excludes admitted source rows which emitted no primitive", () => {
     const { scene } = createScene();
     const target = {

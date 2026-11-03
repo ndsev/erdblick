@@ -11,6 +11,8 @@
 #include "nlohmann/json.hpp"
 #endif
 
+namespace mapget { class FeatureId; }
+
 namespace erdblick
 {
 
@@ -60,6 +62,13 @@ struct JsValue
 
     /** Preserve a mask's raw uint64 bits and exact graph/domain identity at the JS boundary. */
     static JsValue fromBitmask(simfil::Bitmask const& mask);
+
+    /**
+     * Carry a named reference without consulting the source tile's schema.
+     * Integers outside JavaScript's exact Number range become BigInts so a
+     * subsequent target-map locate preserves both their value and their type.
+     */
+    static JsValue fromFeatureId(mapget::FeatureId const& reference);
 
     /**
      * Construct an Object as a new JS or JSON dictionary with provided initializers.

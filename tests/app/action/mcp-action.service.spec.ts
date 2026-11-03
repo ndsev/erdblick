@@ -120,7 +120,7 @@ function setup() {
         {} as never, owners.viewSettings, stream as never, inspections, zone as never);
     const ui = new UiAutomationService(views, owners.viewSettings);
     const jumps = new JumpTargetService(maps, inspections, {} as never, {} as never, config,
-        owners.coordinates, owners.inspectionState, owners.viewSettings, views);
+        owners.coordinates, owners.inspectionState, owners.viewSettings, views, stream as never);
     const external = new ExternalViewerService(config, owners.coordinates.state, owners.viewSettings);
     const actions = new AppActionRegistry(state);
     actions.registerContributors([jumps, external, views, maps, searches, inspections, styles, diagnostics, navigation, ui,

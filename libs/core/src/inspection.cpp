@@ -1895,7 +1895,14 @@ void InspectionConverter::assignFeatureReference(
         return;
     }
 
-    node.value_ = convertString(featureId->toString());
+    if (featureId->externalMapId()) {
+        node.featureReference_ = JsValue::fromFeatureId(*featureId);
+        // This is display text, never an encoded feature ID. Navigation uses
+        // the separate typed reference and resolves it against the target map.
+        node.value_ = convertString(featureId->toJson().dump());
+    }
+    else
+        node.value_ = convertString(featureId->toString());
     node.mapId_ = JsValue(featureId->mapId());
 }
 
@@ -2082,6 +2089,8 @@ JsValue InspectionConverter::InspectionNode::toJsValue(std::string_view const& m
         newDict.set("nodeId", JsValue(nodeId_));
     if (mapId_)
         newDict.set("mapId", *mapId_);
+    if (featureReference_)
+        newDict.set("featureReference", *featureReference_);
     if (address_)
         newDict.set("address", *address_);
     if (addressScope_)

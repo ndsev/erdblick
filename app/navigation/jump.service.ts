@@ -21,6 +21,8 @@ import { SelectedSourceData, TileFeatureId } from "../inspection/inspection.mode
 import { GeoMath, Rectangle } from "../integrations/geo.adapter";
 import { coreLib } from "../integrations/wasm.adapter";
 import { MapDataService } from "../mapdata/mapdata.service";
+import { MapTileStreamService } from "../mapdata/map-tile-stream.service";
+import type { NamedFeatureReference } from "../inspection/feature-identity.model";
 import { MapViewService } from "../mapview/mapview.service";
 import { MapViewState } from "../mapview/mapview.state";
 import { RightClickMenuService } from "../mapview/rightclickmenu.service";
@@ -138,7 +140,8 @@ export class JumpTargetService implements AppActionContributor {
         public readonly coordinates: CoordinatesService,
         public readonly inspectionState: InspectionPanelService,
         public readonly viewSettings: MapViewState,
-        private readonly views: MapViewService) {
+        private readonly views: MapViewService,
+        private readonly tileStream: MapTileStreamService) {
         // Forward marked positions to the coordinate owner.
         this.markedPosition.subscribe(position => {
             if (position.length >= 2) {
@@ -377,6 +380,36 @@ export class JumpTargetService implements AppActionContributor {
             return;
         }
         await this.highlightByJumpTarget(featureJumpTargets[validIndex], mapId, mode, cameraMoveViewIndex);
+    }
+
+    /** Resolve a schema-independent reference before it enters canonical inspection state. */
+    async highlightFeatureReference(
+        reference: NamedFeatureReference,
+        mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT,
+        signal?: AbortSignal
+    ): Promise<void> {
+        // A locate may outlive an inspection edit. Observe state notifications
+        // because callers can mutate the existing selection array in place.
+        let selectionChanged: boolean;
+        const guard = mode === coreLib.HighlightMode.SELECTION_HIGHLIGHT
+            ? this.inspectionState.state.selectionState.subscribe(() => { selectionChanged = true; })
+            : undefined;
+        selectionChanged = false;
+        try {
+            const targets = await this.tileStream.locateFeatureReference(reference, signal);
+            signal?.throwIfAborted();
+            if (selectionChanged) return;
+            if (!targets.length) {
+                throw new Error(`Referenced ${reference.typeId} is unavailable in ${reference.mapId}.`);
+            }
+            if (mode === coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
+                this.inspectionState.setSelection(targets);
+            } else {
+                this.inspectionSelection.setHoveredFeatures(targets, true);
+            }
+        } finally {
+            guard?.unsubscribe();
+        }
     }
 
     /**

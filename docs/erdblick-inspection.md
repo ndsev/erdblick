@@ -74,6 +74,14 @@ The tree view mirrors the internal inspection model rather than a flattened tabl
 - **Open the row action menu** with the three-dot button that appears on the left of a row when you hover it.
 - **Copy Search Path** from the row action menu when you want to reuse the same field in Simfil search.
 
+References into another map retain their target map, feature type and named ID
+parts. Their displayed JSON is descriptive; clicking or hovering resolves those
+parts against the target map through `/locate`. An unavailable target stays
+unresolved. A successful lookup supplies the canonical feature ID and partition
+used for selection and URL state. Large integer parts retain their exact value,
+and a late lookup cannot overwrite a newer inspection selection or departed
+hover.
+
 Erdblick also applies a few presentation rules that matter in practice:
 
 - null-heavy branches stay collapsed to reduce noise

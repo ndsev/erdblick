@@ -218,14 +218,23 @@ private:
     /** Semantic pick payload resolved into inspection targets by TypeScript. */
     struct PickResult {
         std::string featureId;
+        std::optional<JsValue> featureReference;
         std::optional<uint32_t> attributeIndex;
         std::optional<bool> hasValidity;
         uint32_t validityIndex = 0;
         std::string relationId;
         std::string relationSourceFeatureId;
+        std::optional<JsValue> relationSourceReference;
         std::optional<uint32_t> relationIndex;
         std::vector<std::string> memberFeatureIds;
+        std::vector<JsValue> memberFeatureReferences;
+
+        /** Local IDs are canonical; foreign IDs retain their named parts for target-map locate. */
+        void setFeatureId(mapget::model_ptr<mapget::FeatureId> const& id);
     };
+
+    /** Structural key for render bookkeeping only, never a public or persisted feature ID. */
+    [[nodiscard]] static std::string featureReferenceKey(mapget::model_ptr<mapget::FeatureId> const& id);
 
     /** Paths sharing one adaptive contraction threshold across transition legs. */
     struct TransitionOffsetScaleGroup {
@@ -369,7 +378,7 @@ private:
     /** Build a semantic attribute/validity pick payload. */
     [[nodiscard]] static PickResult pickResult(
         mapget::model_ptr<mapget::AttributeValidityEntry> const& entry,
-        std::string const& featureId);
+        mapget::model_ptr<mapget::FeatureId> const& featureId);
     /** Build a semantic group pick payload with member feature ids. */
     [[nodiscard]] static PickResult pickResult(
         mapget::model_ptr<mapget::GroupEntry> const& entry,

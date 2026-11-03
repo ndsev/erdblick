@@ -1,4 +1,5 @@
 #include "interop/js-object.h"
+#include "mapget/model/featureid.h"
 #include <stdexcept>
 #include "fmt/core.h"
 
@@ -10,6 +11,38 @@
 
 namespace erdblick
 {
+
+JsValue JsValue::fromFeatureId(mapget::FeatureId const& reference)
+{
+#ifdef EMSCRIPTEN
+    // Native field names are data. A null-prototype dictionary also preserves
+    // names such as '__proto__' when the parts cross into JavaScript.
+    auto parts = JsValue(emscripten::val::global("Object").call<emscripten::val>(
+        "create", emscripten::val::null()));
+#else
+    auto parts = Dict();
+#endif
+    for (auto const& [name, part] : reference.keyValuePairs()) {
+        auto value = std::visit([](auto const& raw) -> JsValue {
+            using T = std::decay_t<decltype(raw)>;
+            if constexpr (std::is_same_v<T, int64_t>) {
+#ifdef EMSCRIPTEN
+                if (raw < -9007199254740991LL || raw > 9007199254740991LL)
+                    return JsValue(emscripten::val::global("BigInt")(std::to_string(raw)));
+                return JsValue(static_cast<double>(raw));
+#else
+                return JsValue(raw);
+#endif
+            }
+            else
+                return JsValue(std::string(raw));
+        }, part);
+        parts.set(std::string(name), value);
+    }
+    return Dict({{"mapId", JsValue(reference.mapId())},
+                 {"typeId", JsValue(std::string(reference.typeId()))},
+                 {"id", parts}});
+}
 
 JsValue JsValue::fromBitmask(simfil::Bitmask const& mask)
 {

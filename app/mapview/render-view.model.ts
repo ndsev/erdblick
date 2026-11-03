@@ -113,7 +113,7 @@ export interface IRenderView {
         screenPos: { x: number; y: number },
         radius: number,
         maxObjects: number
-    ): RenderedFeaturePickResult;
+    ): Promise<RenderedFeaturePickResult>;
     setViewFromState(cameraData: CameraViewState): void;
     getViewState(): CameraViewState;
     /** Reads the live renderer pose without persisting it; unavailable in first-person mode. */

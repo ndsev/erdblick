@@ -8,7 +8,9 @@ import type { StyledMapgetLayer } from "../../mapdata/styled-mapget-layer.presen
 import type { PointCloudRenderPolicy } from "../point-cloud-policy.model";
 import {
     formatFeatureInspectionTarget,
-    parseFeatureInspectionTarget
+    parseFeatureInspectionTarget,
+    type FeaturePickIdentity,
+    type FeaturePickTarget
 } from "../../inspection/feature-identity.model";
 import { sipHash64Hex } from "../../utils/hash.util";
 import type { StyleValidationReportService } from "../../mapstyle/style-validation-report.service";
@@ -739,7 +741,7 @@ export class TileSubsetLayerVisualization {
     }
 
     /** Resolve GLTF-local pick addresses through the singleton worker bridge. */
-    private resolvePick(pickIndex: number): TileFeatureId[] {
+    private resolvePick(pickIndex: number): FeaturePickTarget[] {
         if (!Number.isInteger(pickIndex) ||
             pickIndex < 0 ||
             pickIndex === UNSELECTABLE) {
@@ -750,18 +752,18 @@ export class TileSubsetLayerVisualization {
         if (featureIds === undefined) {
             return [];
         }
-        return (typeof featureIds === "string" ? [featureIds] : featureIds)
-            .map(featureId => ({
-                mapTileKey: this.state.mapTileKey,
-                featureId
-            }));
+        const identities: readonly FeaturePickIdentity[] = Array.isArray(featureIds)
+            ? featureIds : [featureIds as FeaturePickIdentity];
+        return identities.map(identity => typeof identity === "string"
+            ? {mapTileKey: this.state.mapTileKey, featureId: identity}
+            : {mapTileKey: this.state.mapTileKey, ...identity});
     }
 
     /** Resolve one compact GPU tuple only after Deck reports an actual interaction. */
     private resolveGpuPick(
         reference: GpuScenePickReference,
         pointCloudPicks?: readonly PointCloudPickResult[]
-    ): string | readonly string[] | undefined {
+    ): FeaturePickIdentity | readonly FeaturePickIdentity[] | undefined {
         if (pointCloudPicks !== undefined) {
             return this.featureIdsForPickResult(pointCloudPicks.find(pick =>
                 pick.channelOrdinal === reference.channelOrdinal &&
@@ -800,7 +802,9 @@ export class TileSubsetLayerVisualization {
                     return false;
                 }
                 const ids = this.featureIdsForPickResult(pick);
-                return (typeof ids === "string" ? [ids] : ids ?? []).some(id =>
+                const identities: readonly FeaturePickIdentity[] = ids === undefined ? []
+                    : Array.isArray(ids) ? ids : [ids as FeaturePickIdentity];
+                return identities.some(id =>
                     id === targetFeatureId);
             });
         }
@@ -843,20 +847,33 @@ export class TileSubsetLayerVisualization {
         return this.pickSubset;
     }
 
-    /** Convert one native subset result into the canonical inspection target grammar. */
+    /** Keep foreign references structural while formatting local inspection row suffixes. */
     private featureIdsForPickResult(
         result: TileSubsetPickResult | undefined
-    ): string | readonly string[] | undefined {
-        if (!result?.featureId) {
+    ): FeaturePickIdentity | readonly FeaturePickIdentity[] | undefined {
+        if (!result) {
             return undefined;
         }
-        if (result.memberFeatureIds?.length) {
-            return [...new Set(result.memberFeatureIds)];
+        if (result.memberFeatureIds?.length || result.memberFeatureReferences?.length) {
+            return [...new Set(result.memberFeatureIds ?? []),
+                ...(result.memberFeatureReferences ?? []).map(featureReference => ({featureReference}))];
+        }
+        if (result.relationSourceFeatureId && typeof result.relationIndex === "number" &&
+            Number.isInteger(result.relationIndex)) {
+            return formatFeatureInspectionTarget({scope: "relation",
+                baseFeatureId: result.relationSourceFeatureId, relationIndex: result.relationIndex});
+        }
+        if (result.featureReference) {
+            return {featureReference: result.featureReference,
+                ...(result.attributeIndex !== undefined ? {attributeIndex: result.attributeIndex} : {}),
+                ...(result.hasValidity ? {validityIndex: result.validityIndex} : {})};
+        }
+        if (!result.featureId) {
+            return undefined;
         }
         let featureId = result.featureId;
         const attributeIndex = result.attributeIndex;
         const validityIndex = result.validityIndex;
-        const relationIndex = result.relationIndex;
         if (typeof attributeIndex === "number" &&
             Number.isInteger(attributeIndex)) {
             featureId = formatFeatureInspectionTarget({
@@ -868,14 +885,6 @@ export class TileSubsetLayerVisualization {
                     Number.isInteger(validityIndex)
                     ? { validityIndex }
                     : {})
-            });
-        } else if (result.relationSourceFeatureId &&
-            typeof relationIndex === "number" &&
-            Number.isInteger(relationIndex)) {
-            featureId = formatFeatureInspectionTarget({
-                scope: "relation",
-                baseFeatureId: result.relationSourceFeatureId,
-                relationIndex
             });
         }
         return featureId;

@@ -53,6 +53,8 @@ public:
         std::string displayValue_;
         std::optional<JsValue> scalarDomain_;
         std::optional<JsValue> mapId_;
+        /** Foreign references keep named, typed ID parts until target-map resolution. */
+        std::optional<JsValue> featureReference_;
         ValueType type_ = ValueType::Null;
         std::string hoverId_;  // For highlight attribs/relations on hovering.
         std::string info_;
