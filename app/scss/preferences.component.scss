@@ -290,12 +290,11 @@
     min-height: 0;
     overflow: auto;
 
-    > search-style-rule-editor {
+    > style-document-editor {
       flex: 0 0 auto;
-      min-height: 12em;
     }
 
-    &.read-only search-style-rule-editor {
+    &.read-only style-document-editor {
       opacity: 0.6;
       pointer-events: none;
     }

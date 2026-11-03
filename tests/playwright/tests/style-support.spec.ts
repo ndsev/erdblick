@@ -58,6 +58,17 @@ test('Quick edits nested native fields, options and effects without losing sourc
     await expect(source).toContainText('default: orange');
     await expect(source).toContainText('radius: 6');
     await editor.getByRole('tab', {name: 'Quick', exact: true}).click();
+    const savedBounds = await editor.boundingBox();
+    if (!savedBounds) throw new Error('Expected a visible style editor');
+    // Shrinking the viewport must clamp the open window, without replacing its saved desktop layout.
+    await page.setViewportSize({width: 480, height: 600});
+    await expect.poll(() => editor.evaluate(element => {
+        const rect = element.getBoundingClientRect();
+        return rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight;
+    })).toBe(true);
+    await expect(editor.getByTestId('style-editor-close-button')).toBeInViewport();
+    await page.setViewportSize({width: 1600, height: 900});
+    await expect.poll(() => editor.boundingBox()).toEqual(savedBounds);
     const corner = await editor.locator('[data-resize-corner="se"]').boundingBox();
     if (!corner) throw new Error('Expected a resizable style editor');
     await page.mouse.move(corner.x + 2, corner.y + 2);

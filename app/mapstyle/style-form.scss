@@ -1,6 +1,8 @@
 :host { display: block; min-width: 0; }
 :host([hidden]) { display: none; }
-.style-form { padding: .5rem; }
+.style-form { padding: .5rem; font-size: .9rem; line-height: 1.35; }
+// Native form controls otherwise use the browser's small default font instead of the app typography.
+button, input, select { font: inherit; }
 .style-form-body { border: 0; margin: 0; padding: 0; min-width: 0; }
 .style-form-field { display: grid; gap: .35rem; margin: .65rem 0; min-width: 0; }
 .style-field-heading, .style-item-heading { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
