@@ -1798,16 +1798,18 @@ TEST_CASE("Feature search auto-scope accepts Classic direct speed-limit fields",
     REQUIRE(scopes.front().at("mapId") == "ClassicScopeMap");
     REQUIRE(scopes.front().at("layerId") == "NDS.Classic-Routing");
 
-    auto styleFields = parser.searchStyleFieldsForQuery("**.speedLimit < 80", "auto", options);
-    REQUIRE(styleFields.is_array());
+    auto inventory = parser.searchStyleFieldsForQuery("**.speedLimit < 80", "auto", options);
+    auto const& styleFields = inventory.at("fields");
     auto speedLimitField = std::ranges::find_if(styleFields, [](auto const& field) {
-        return field.at("path") == "speedLimit" && field.at("attrName") == "SPEED_LIMIT";
+        return field.at("path") == "speedLimit";
     });
     REQUIRE(speedLimitField != styleFields.end());
-    REQUIRE(speedLimitField->at("valueKind") == "integer");
-    REQUIRE(speedLimitField->contains("numericRange"));
-    REQUIRE(speedLimitField->at("numericRange").at("min").get<double>() == 0.0);
-    REQUIRE(speedLimitField->at("numericRange").at("max").get<double>() == 255.0);
+    auto const& metadata = inventory.at("domains").at(speedLimitField->at("metadata").get<size_t>());
+    REQUIRE(metadata.at("valueKind") == "integer");
+    REQUIRE(metadata.at("numericRange").at("min").get<double>() == 0.0);
+    REQUIRE(metadata.at("numericRange").at("max").get<double>() == 255.0);
+    for (auto const& index : speedLimitField->at("contexts"))
+        REQUIRE(inventory.at("contexts").at(index.get<size_t>()).at("attrName") == "SPEED_LIMIT");
     REQUIRE(std::ranges::none_of(styleFields, [](auto const& field) {
         return field.at("path").template get<std::string>().starts_with("$feature");
     }));
@@ -1844,26 +1846,22 @@ TEST_CASE("Feature styling preserves JSON metadata through the attributes alias"
         {"stringPoolId", "AliasTest"}, {"mapId", "AliasMap"},
         {"layers", {{"NDS.Classic-Routing", layer}}}
     }}).dump()));
-    auto fields = parser.searchStyleFieldsForQuery("true", "feature", nlohmann::json::object());
+    auto inventory = parser.searchStyleFieldsForQuery("true", "feature", nlohmann::json::object());
+    auto const& fields = inventory.at("fields");
     for (auto const& suffix : {
              "layer.Guidance.SPEED_LIMIT.speedLimit", "nested.attributes",
              "nested.properties", "nested.laneGroup.numLaneConnectivityElements"}) {
         INFO(suffix);
-        auto find = [&](std::string const& prefix) {
-            return std::ranges::find_if(fields, [&](auto const& field) {
-                return field.at("path") == prefix + suffix;
-            });
-        };
-        auto canonical = find("properties.");
-        auto alias = find("attributes.");
-        REQUIRE(canonical != fields.end());
+        auto alias = std::ranges::find_if(fields, [&](auto const& field) {
+            return field.at("path") == std::string("attributes.") + suffix;
+        });
         REQUIRE(alias != fields.end());
-        REQUIRE(alias->at("valueKind") == canonical->at("valueKind"));
-        REQUIRE(alias->at("valueKind") != "unknown");
-        for (auto key : {"numericRange", "enumValues"}) {
-            REQUIRE(alias->value(key, nlohmann::json{}) == canonical->value(key, nlohmann::json{}));
-        }
+        auto const& metadata = inventory.at("domains").at(alias->at("metadata").get<size_t>());
+        REQUIRE(metadata.at("valueKind") != "unknown");
     }
+    REQUIRE(std::ranges::none_of(fields, [](auto const& field) {
+        return field.at("path").template get<std::string>().starts_with("properties.");
+    }));
 }
 
 TEST_CASE("Feature search auto-scope keeps all shared enum attribute scopes", "[erdblick.search]")
@@ -1894,17 +1892,13 @@ TEST_CASE("Feature search auto-scope keeps all shared enum attribute scopes", "[
     REQUIRE(attrNames.contains("WARNING_SIGN"));
     REQUIRE(attrNames.contains("MOVABLE_WARNING_SIGN"));
 
-    auto styleFields = parser.searchStyleFieldsForQuery("SPEED_LIMIT_END", "auto", options);
-    REQUIRE(styleFields.is_array());
-
+    auto inventory = parser.searchStyleFieldsForQuery("SPEED_LIMIT_END", "auto", options);
     std::set<std::pair<std::string, std::string>> fieldOwners;
-    for (auto const& field : styleFields) {
-        if (!field.contains("attrName") || !field.at("attrName").is_string()) {
-            continue;
+    for (auto const& field : inventory.at("fields")) {
+        for (auto const& index : field.at("contexts")) {
+            auto const& context = inventory.at("contexts").at(index.get<size_t>());
+            fieldOwners.emplace(field.at("path").get<std::string>(), context.at("attrName").get<std::string>());
         }
-        fieldOwners.emplace(
-            field.at("path").get<std::string>(),
-            field.at("attrName").get<std::string>());
     }
     REQUIRE(fieldOwners.contains({"attributeValue.warningSign", "WARNING_SIGN"}));
     REQUIRE(fieldOwners.contains({"attributeValue.movableWarningSign", "MOVABLE_WARNING_SIGN"}));

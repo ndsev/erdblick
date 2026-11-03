@@ -12,6 +12,7 @@
 #include <span>
 #include <sstream>
 #include <tuple>
+#include <unordered_map>
 #include <unordered_set>
 #include <nlohmann/json.hpp>
 #include "mapget/model/stringpool.h"
@@ -269,21 +270,6 @@ struct FeatureSchemaInfo
     simfil::SchemaId featureSchema = simfil::NoSchemaId;
 };
 
-struct SearchStyleFieldInfo
-{
-    std::string path;
-    std::string mapId;
-    std::string layerId;
-    std::string attrName;
-    std::string attrLayerName;
-    std::string featureType;
-    std::string valueKind = "unknown";
-    std::vector<std::string> enumValues;
-    std::optional<double> numericMinimum;
-    std::optional<double> numericMaximum;
-    JsValue domain = JsValue::Undefined();
-};
-
 struct SearchQueryMapLayerInfo
 {
     std::string mapId;
@@ -304,17 +290,6 @@ struct QueryLayerTerms
     std::set<std::string> enumValues;
     std::set<std::string> attributeNameLiterals;
     std::set<std::string> attributeLayerLiterals;
-};
-
-struct SearchStyleFieldPath
-{
-    std::string path;
-    simfil::SchemaId schemaId = simfil::NoSchemaId;
-    std::string valueKind = "unknown";
-    std::vector<std::string> enumValues;
-    std::optional<double> numericMinimum;
-    std::optional<double> numericMaximum;
-    JsValue domain = JsValue::Undefined();
 };
 
 /** Adds one inferred search map/layer while preserving first-seen order. */
@@ -688,21 +663,12 @@ SearchStyleSchemaMetadata typeIdSchemaMetadata(std::vector<std::string> typeIds)
     return {"enum", std::move(typeIds), std::nullopt, std::nullopt};
 }
 
-/** Returns all feature type ids a layer can produce. */
-std::vector<std::string> featureTypeIdsForLayer(mapget::LayerInfo const& layerInfo)
-{
-    std::vector<std::string> typeIds;
-    typeIds.reserve(layerInfo.featureTypes().size());
-    for (auto const& featureType : layerInfo.featureTypes()) {
-        if (layerInfo.layerSchema()->producesFeatureType(featureType.name_))
-            typeIds.push_back(featureType.name_);
-    }
-    return typeIds;
-}
-
 /** Classifies one concrete domain directly, retaining the primitive numeric type. */
 SearchStyleSchemaMetadata
-schemaMetadata(simfil::model_ptr<mapget::LayerSchema> const& registry, simfil::SchemaId schemaId)
+schemaMetadata(
+    simfil::model_ptr<mapget::LayerSchema> const& registry,
+    simfil::SchemaId schemaId,
+    std::shared_ptr<simfil::SchemaBinding const> const& binding)
 {
     SearchStyleSchemaMetadata metadata;
     if (!registry || schemaId == simfil::NoSchemaId)
@@ -729,7 +695,7 @@ schemaMetadata(simfil::model_ptr<mapget::LayerSchema> const& registry, simfil::S
     metadata.enumValues.assign(symbols.begin(), symbols.end());
     if (metadata.valueKind == "string" && !metadata.enumValues.empty())
         metadata.valueKind = "enum";
-    metadata.domain = JsValue::fromSchema({registry->mapSchema()->binding(), schemaId});
+    metadata.domain = JsValue::fromSchema({binding, schemaId});
     if (auto numeric = registry->numericDomain(schemaId)) {
         // Only ordinary measurement intervals seed a gradient. Specials remain
         // separate exact-value rules, even when they lie inside the raw encoding.
@@ -773,70 +739,6 @@ SearchStyleSchemaMetadata overlayFieldMetadata(std::string const& path)
         return {"string", {}};
     }
     return {};
-}
-
-/** Enumerates concrete native field domains without a JSON-schema export/reparse. */
-void collectSchemaFieldPaths(
-    std::vector<SearchStyleFieldPath>& paths,
-    simfil::model_ptr<mapget::LayerSchema> const& registry,
-    simfil::SchemaId schemaId,
-    std::string const& basePath,
-    std::set<simfil::SchemaId>& activeSchemas)
-{
-    if (!registry || schemaId == simfil::NoSchemaId || !activeSchemas.insert(schemaId).second)
-        return;
-    for (auto const field : registry->directFields(schemaId)) {
-        auto const path = appendFieldPathSegment(basePath, std::string(field));
-        auto const childSchema = registry->childSchema(schemaId, field);
-        auto metadata = schemaMetadata(registry, childSchema);
-        paths.push_back(
-            {path,
-             childSchema,
-             metadata.valueKind,
-             metadata.enumValues,
-             metadata.numericMinimum,
-             metadata.numericMaximum,
-             metadata.domain});
-        if (childSchema != simfil::NoSchemaId &&
-            (simfil::Schema::affinities(registry->kind(childSchema)) &
-             simfil::valueTypeAffinity(simfil::ValueType::Object)))
-            collectSchemaFieldPaths(paths, registry, childSchema, path, activeSchemas);
-    }
-    activeSchemas.erase(schemaId);
-}
-
-/** Adds one search-style field candidate while preserving map/layer/attribute context. */
-void addSearchStyleField(
-    std::vector<SearchStyleFieldInfo>& fields,
-    std::set<std::string>& seen,
-    std::string const& path,
-    std::string const& mapId,
-    std::string const& layerId,
-    std::string const& attrName,
-    std::string const& attrLayerName,
-    std::string const& featureType,
-    SearchStyleSchemaMetadata metadata = {})
-{
-    if (path.empty()) {
-        return;
-    }
-    auto const key = mapId + "\n" + layerId + "\n" + attrName + "\n"
-        + attrLayerName + "\n" + featureType + "\n" + path;
-    if (!seen.insert(key).second) {
-        return;
-    }
-    fields.push_back(
-        {path,
-         mapId,
-         layerId,
-         attrName,
-         attrLayerName,
-         featureType,
-         metadata.valueKind,
-         metadata.enumValues,
-         metadata.numericMinimum,
-         metadata.numericMaximum,
-         metadata.domain});
 }
 
 /** Converts native attribute-scope candidates into the embind JS value shape. */
@@ -946,38 +848,376 @@ void appendNormalizedAttributeScopes(
     }
 }
 
-/** Converts native search-style field candidates into the embind JS value shape. */
-NativeJsValue searchStyleFieldsToJs(std::vector<SearchStyleFieldInfo> const& fields)
-{
-    auto result = JsValue::List();
-    for (auto const& field : fields) {
-        auto item = JsValue::Dict({
-            {"path", JsValue(field.path)},
-            {"mapId", JsValue(field.mapId)},
-            {"layerId", JsValue(field.layerId)},
-            {"attrName", field.attrName.empty() ? JsValue::Undefined() : JsValue(field.attrName)},
-            {"attrLayerName", field.attrLayerName.empty() ? JsValue::Undefined() : JsValue(field.attrLayerName)},
-            {"featureType", field.featureType.empty() ? JsValue::Undefined() : JsValue(field.featureType)},
-            {"valueKind", JsValue(field.valueKind)}
-        });
-        auto enumValues = JsValue::List();
-        for (auto const& value : field.enumValues) {
-            enumValues.push(JsValue(value));
-        }
-        item.set("enumValues", enumValues);
-        if (field.numericMinimum && field.numericMaximum) {
-            item.set("numericRange", JsValue::Dict({
-                {"min", JsValue(*field.numericMinimum)},
-                {"max", JsValue(*field.numericMaximum)}
-            }));
-        }
-        item.set("domain", field.domain);
-        result.push(item);
-    }
-    return *result;
-}
-
 } // namespace
+
+/**
+ * One native picker request. The graph stays in MapSchema; this object owns only
+ * the projected paths and the compact context/domain tables crossing into JS.
+ * In particular, a shared Classic domain is exported once, even when several
+ * feature types expose it under thousands of paths.
+ */
+class TileLayerParser::StyleFieldDiscovery
+{
+    // An absent name denotes an array-element edge, never a wildcard field
+    // name. This keeps literal '*' and unusual names unambiguous at the API.
+    using Path = std::vector<std::optional<std::string>>;
+
+    /** One distinct domain meaning for a path, shared by all of its owner contexts. */
+    struct FieldMeaning
+    {
+        size_t domain;
+        std::vector<size_t> contexts;
+    };
+    using Fields = std::unordered_map<std::string, std::vector<FieldMeaning>>;
+
+public:
+    /** Capture one UI request; schema semantics are resolved only in collect. */
+    explicit StyleFieldDiscovery(JsValue const& options)
+        : recursive_(!options.has("recursive") || options["recursive"].as<bool>()),
+          scalarsOnly_(options.has("values") && options["values"].as<std::string>() == "scalar")
+    {
+        if (options.has("selectedFeatureTypes")) {
+            auto types = options["selectedFeatureTypes"];
+            for (uint32_t i = 0; i < types.size(); ++i)
+                featureTypes_.insert(types.at(i).as<std::string>());
+        }
+        if (options.has("path")) {
+            auto path = options["path"];
+            for (uint32_t i = 0; i < path.size(); ++i) {
+                auto step = path.at(i);
+                if (step.type() == JsValue::Type::String)
+                    path_.emplace_back(step.as<std::string>());
+                else if (step.has("elements") && step["elements"].as<bool>())
+                    path_.emplace_back(std::nullopt);
+                else
+                    throw std::invalid_argument("Style discovery path requires field names or {elements:true}");
+            }
+        }
+        if (options.has("context"))
+            contextFilter_ = options["context"];
+    }
+
+    /** Retain all context choices, then walk only those selected by the user. */
+    void collect(
+        simfil::model_ptr<mapget::LayerSchema> const& registry,
+        simfil::SchemaId root,
+        std::string const& mapId,
+        std::string const& layerId,
+        std::string const& featureType,
+        std::string const& attrName = {},
+        std::string const& attrLayerName = {})
+    {
+        if (!registry || (!featureTypes_.empty() && !featureTypes_.contains(featureType)))
+            return;
+        auto context = JsValue::Dict({
+            {"mapId", JsValue(mapId)}, {"layerId", JsValue(layerId)},
+            {"featureType", JsValue(featureType)}, {"attrName", JsValue(attrName)},
+            {"attrLayerName", JsValue(attrLayerName)}});
+        auto const contextIndex = contexts_.size();
+        contexts_.push_back(context);
+        for (auto const* name : {"mapId", "layerId", "featureType", "attrName", "attrLayerName"}) {
+            if (contextFilter_.has(name) &&
+                contextFilter_[name].as<std::string>() != context[name].as<std::string>())
+                return;
+        }
+        if (!attrName.empty()) {
+            auto queryRoot = registry->attributeQuerySchema(featureType, root);
+            if (queryRoot != simfil::NoSchemaId)
+                root = queryRoot;
+        }
+
+        // Resolve a requested branch by native field lookup. No expanded graph,
+        // dotted-path parser or schema traversal is recreated in TypeScript.
+        std::vector<simfil::SchemaId> roots{root};
+        std::string prefix;
+        for (auto const& segment : path_) {
+            std::vector<simfil::SchemaId> next;
+            for (auto rootSchema : roots) {
+                forEachAlternative(registry, rootSchema, [&](auto schema) {
+                    if (!segment) {
+                        registry->forEachElementSchema(schema, [&](auto child) { next.push_back(child); });
+                        return;
+                    }
+                    auto const name = schemaField(registry, schema, *segment, prefix.empty() && attrName.empty());
+                    registry->forEachDirectField(schema, [&](auto field, auto children) {
+                        if (field == name)
+                            next.insert(next.end(), children.begin(), children.end());
+                    });
+                });
+            }
+            std::ranges::sort(next);
+            next.erase(std::unique(next.begin(), next.end()), next.end());
+            roots = std::move(next);
+            prefix = appendStep(prefix, segment);
+        }
+        for (auto schema : roots) {
+            std::set<simfil::SchemaId> active;
+            walk(registry, schema, prefix, path_, contextIndex, active, attrName.empty());
+        }
+        if (attrName.empty() && path_.empty()) {
+            std::vector<std::string> types;
+            for (auto const& type : registry->featureTypes()) {
+                if (registry->producesFeatureType(type) &&
+                    (!contextFilter_.has("featureType") || type == featureType) &&
+                    (featureTypes_.empty() || featureTypes_.contains(type)))
+                    types.push_back(type);
+            }
+            auto [it, inserted] = typeIdDomains_.try_emplace(types, domains_.size());
+            if (inserted)
+                domains_.push_back(typeIdSchemaMetadata(std::move(types)));
+            addField("typeId", it->second, contextIndex);
+        }
+        if (!attrName.empty() && path_.empty()) {
+            for (auto const* name : {"$name", "$layer", "$validityIndex", "$validityCount"}) {
+                auto [it, inserted] = syntheticDomains_.try_emplace(name, domains_.size());
+                if (inserted)
+                    domains_.push_back(overlayFieldMetadata(name));
+                addField(name, it->second, contextIndex);
+            }
+        }
+    }
+
+    /** Sort grouped paths once and export metadata once per exact domain. */
+    NativeJsValue result()
+    {
+        auto contexts = JsValue::List();
+        for (auto const& context : contexts_)
+            contexts.push(context);
+        auto domains = JsValue::List();
+        for (auto const& domain : domains_) {
+            auto names = JsValue::List();
+            for (auto const& name : domain.enumValues)
+                names.push(JsValue(name));
+            auto value = JsValue::Dict({
+                {"valueKind", JsValue(domain.valueKind)}, {"enumValues", names},
+                {"domain", domain.domain}});
+            if (domain.numericMinimum && domain.numericMaximum)
+                value.set("numericRange", JsValue::Dict({
+                    {"min", JsValue(*domain.numericMinimum)}, {"max", JsValue(*domain.numericMaximum)}}));
+            domains.push(value);
+        }
+        auto indices = [](auto const& values) {
+            auto result = JsValue::List();
+            for (auto index : values)
+                result.push(JsValue(static_cast<uint32_t>(index)));
+            return result;
+        };
+        std::vector<Fields::value_type const*> paths;
+        paths.reserve(fields_.size());
+        for (auto const& field : fields_)
+            paths.push_back(&field);
+        std::ranges::sort(paths, [](auto left, auto right) { return left->first < right->first; });
+        auto fields = JsValue::List();
+        for (auto const* path : paths) {
+            for (auto const& meaning : path->second) {
+                fields.push(JsValue::Dict({
+                    {"path", JsValue(path->first)},
+                    {"metadata", JsValue(static_cast<uint32_t>(meaning.domain))},
+                    {"contexts", indices(meaning.contexts)}}));
+            }
+        }
+        auto branches = JsValue::List();
+        for (auto const& [segments, contextIds] : branches_) {
+            auto path = JsValue::List();
+            std::string label;
+            for (auto const& segment : segments) {
+                path.push(segment ? JsValue(*segment) : JsValue::Dict({{"elements", JsValue(true)}}));
+                label = appendStep(label, segment);
+            }
+            branches.push(JsValue::Dict({
+                {"path", path}, {"label", JsValue(label)}, {"contexts", indices(contextIds)}}));
+        }
+        return *JsValue::Dict({
+            {"contexts", contexts}, {"domains", domains}, {"fields", fields}, {"branches", branches},
+            {"complete", JsValue(!recursiveCycle_)},
+            {"incompleteReason", JsValue(recursiveCycle_
+                ? "Recursive schema branches remain available through direct branch exploration." : "")}});
+    }
+
+private:
+    /** Render the established Simfil array traversal without treating it as a field name. */
+    static std::string appendStep(std::string const& prefix, std::optional<std::string> const& step)
+    {
+        return step ? appendFieldPathSegment(prefix, *step) : (prefix.empty() ? "*" : prefix + ".*");
+    }
+
+    /** Alternatives share a value position; they do not add a path segment. */
+    template<typename Visitor>
+    void forEachAlternative(
+        simfil::model_ptr<mapget::LayerSchema> const& registry,
+        simfil::SchemaId root,
+        Visitor const& visitor) const
+    {
+        std::vector<simfil::SchemaId> pending{root};
+        std::set<simfil::SchemaId> seen;
+        auto const owner = registry->mapSchema();
+        while (!pending.empty()) {
+            auto schema = pending.back();
+            pending.pop_back();
+            if (!seen.insert(schema).second)
+                continue;
+            visitor(schema);
+            if (auto domain = owner->domain(schema)) {
+                auto alternatives = domain->alternatives();
+                pending.insert(pending.end(), alternatives.begin(), alternatives.end());
+            }
+        }
+    }
+
+    /** Discover whether a field has declared descendants, including array/union branches. */
+    bool canBrowse(simfil::model_ptr<mapget::LayerSchema> const& registry, simfil::SchemaId schema)
+    {
+        auto const affinities = simfil::Schema::affinities(registry->kind(schema));
+        if (!(affinities & (simfil::valueTypeAffinity(simfil::ValueType::Object) |
+                           simfil::valueTypeAffinity(simfil::ValueType::Array))))
+            return false;
+        auto key = std::make_pair(registry->mapSchema()->schemaId(), schema);
+        if (auto found = browsableDomains_.find(key); found != browsableDomains_.end())
+            return found->second;
+        bool result = false;
+        forEachAlternative(registry, schema, [&](auto alternative) {
+            if (auto domain = registry->mapSchema()->domain(alternative)) {
+                domain->forEachEnumerableField([&](auto, auto) { result = true; });
+                domain->forEachElementSchema([&](auto) { result = true; });
+            }
+        });
+        browsableDomains_.emplace(key, result);
+        return result;
+    }
+
+    /** Map the displayed alias to its declared field without hiding a real attributes member. */
+    std::string_view schemaField(
+        simfil::model_ptr<mapget::LayerSchema> const& registry,
+        simfil::SchemaId schema,
+        std::string_view name,
+        bool featureRoot) const
+    {
+        auto fields = registry->directFields(schema);
+        if ((featureRoot || registry->kind(schema) == mapget::LayerSchema::FeatureKind) && name == "attributes" &&
+            std::ranges::find(fields, "attributes") == fields.end() &&
+            std::ranges::find(fields, "properties") != fields.end())
+            return "properties";
+        return name;
+    }
+
+    /** Export one exact scalar domain, then reference its table index everywhere else. */
+    size_t metadata(simfil::model_ptr<mapget::LayerSchema> const& registry, simfil::SchemaId schema)
+    {
+        auto key = std::make_pair(registry->mapSchema()->schemaId(), schema);
+        auto [it, inserted] = domainIndices_.try_emplace(key, domains_.size());
+        if (inserted) {
+            auto [binding, newOwner] = bindings_.try_emplace(key.first);
+            if (newOwner)
+                binding->second = registry->mapSchema()->binding();
+            domains_.push_back(schemaMetadata(registry, schema, binding->second));
+        }
+        return it->second;
+    }
+
+    /** Group by expression and domain; the context list preserves all differing owners. */
+    void addField(std::string const& path, size_t domain, size_t context)
+    {
+        auto const& kind = domains_[domain].valueKind;
+        if (scalarsOnly_ && (kind == "object" || kind == "array"))
+            return;
+        // Hash the path once per occurrence, then merge its usually singular
+        // meaning. Sorting is deferred until all owners have been grouped.
+        auto& meanings = fields_[path];
+        auto meaning = std::ranges::find(meanings, domain, &FieldMeaning::domain);
+        if (meaning == meanings.end()) {
+            meanings.push_back({domain, {context}});
+            return;
+        }
+        auto& contexts = meaning->contexts;
+        if (contexts.empty() || contexts.back() != context)
+            contexts.push_back(context);
+    }
+
+    /** Walk declared data edges, retaining alternatives instead of picking the first domain. */
+    void walk(
+        simfil::model_ptr<mapget::LayerSchema> const& registry,
+        simfil::SchemaId schema,
+        std::string const& prefix,
+        Path const& segments,
+        size_t context,
+        std::set<simfil::SchemaId>& active,
+        bool featureScope)
+    {
+        if (schema == simfil::NoSchemaId)
+            return;
+        if (!active.insert(schema).second) {
+            recursiveCycle_ = true;
+            return;
+        }
+        auto visitChild = [&](std::optional<std::string> name, simfil::SchemaId child) {
+            auto const path = appendStep(prefix, name);
+            auto childSegments = segments;
+            childSegments.push_back(std::move(name));
+            auto const affinities = simfil::Schema::affinities(registry->kind(child)) &
+                ~simfil::valueTypeAffinity(simfil::ValueType::Null);
+            bool const container = affinities == simfil::valueTypeAffinity(simfil::ValueType::Object) ||
+                affinities == simfil::valueTypeAffinity(simfil::ValueType::Array);
+            // Scalar pickers still receive container branches, but do not pay
+            // to export descriptors for rows that cannot be chosen as scalars.
+            if (!scalarsOnly_ || !container)
+                addField(path, metadata(registry, child), context);
+            bool const hasChildren = canBrowse(registry, child);
+            if (hasChildren && segments.size() == path_.size()) {
+                auto& contexts = branches_[childSegments];
+                if (contexts.empty() || contexts.back() != context)
+                    contexts.push_back(context);
+            }
+            if (hasChildren && recursive_)
+                walk(registry, child, path, childSegments, context, active, featureScope);
+        };
+        auto const owner = registry->mapSchema();
+        auto const* domain = owner->domain(schema);
+        if (!domain) {
+            active.erase(schema);
+            return;
+        }
+        // Enumerate the native packed data edges directly. Asking fieldRole
+        // separately for each name would scan every sibling again on wide
+        // Classic objects. Context links remain available in explicit lookup.
+        domain->forEachEnumerableField([&](auto field, auto children) {
+            auto const name = owner->strings()->resolve(field).value();
+            auto displayName = std::string(name);
+            if ((featureScope && prefix.empty()) || registry->kind(schema) == mapget::LayerSchema::FeatureKind) {
+                if (name == "typeId" && prefix.empty())
+                    return; // The selected layer's enum is supplied once above.
+                if (name == "properties") {
+                    if (schemaField(registry, schema, "attributes", true) != "properties")
+                        return; // A declared attributes member owns that spelling.
+                    displayName = "attributes";
+                }
+            }
+            if (children.empty())
+                visitChild(displayName, simfil::NoSchemaId);
+            for (auto child : children)
+                visitChild(displayName, child);
+        });
+        domain->forEachElementSchema([&](auto child) { visitChild(std::nullopt, child); });
+        for (auto alternative : domain->alternatives())
+            walk(registry, alternative, prefix, segments, context, active, featureScope);
+        active.erase(schema);
+    }
+
+    bool recursive_;
+    bool scalarsOnly_;
+    bool recursiveCycle_ = false;
+    JsValue contextFilter_ = JsValue::Dict();
+    std::set<std::string> featureTypes_;
+    Path path_;
+    std::vector<JsValue> contexts_;
+    std::vector<SearchStyleSchemaMetadata> domains_;
+    std::map<std::string_view, std::shared_ptr<simfil::SchemaBinding const>> bindings_;
+    std::map<std::pair<std::string_view, simfil::SchemaId>, size_t> domainIndices_;
+    std::map<std::pair<std::string_view, simfil::SchemaId>, bool> browsableDomains_;
+    std::map<std::string, size_t> syntheticDomains_;
+    std::map<std::vector<std::string>, size_t> typeIdDomains_;
+    Fields fields_;
+    std::map<Path, std::vector<size_t>> branches_;
+};
 
 TileLayerParser::TileLayerParser()
 {
@@ -1773,149 +2013,35 @@ NativeJsValue TileLayerParser::normalizeSearchQuery(
     return *result;
 }
 
-/** Enumerates result fields available to search-result style rules for the requested scope. */
+/** Discover only the requested semantic scope and share metadata at the JS boundary. */
 NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
     std::string const& query,
     std::string const& scope,
     NativeJsValue const& options_) const
 {
-    auto const selectedLayers = selectedLayerFilterFromOptions(JsValue(options_));
-    auto const discoveredAttributeScopes = resolveAttributeScopesForQuery(info_, query, selectedLayers);
+    auto options = JsValue(options_);
+    auto const selectedLayers = selectedLayerFilterFromOptions(options);
+    // Feature inventories depend on schema context, not on the predicate text.
+    // Attribute discovery still uses the query's actual matched owners.
+    auto attributeScopes = scope == "feature" ? std::vector<AttributeScopeInfo>{}
+        : resolveAttributeScopesForQuery(info_, query, selectedLayers);
     auto const concreteScope = scope == "auto"
-        ? (!discoveredAttributeScopes.empty() ? "attribute" : "feature")
-        : scope;
-
-    std::vector<SearchStyleFieldInfo> fields;
-    std::set<std::string> seen;
-
+        ? (attributeScopes.empty() ? "feature" : "attribute") : scope;
+    StyleFieldDiscovery discovery(options);
     if (concreteScope == "attribute") {
-        // Attribute-scope pickers expose the matched value and cheap overlay
-        // metadata. Feature-level `$feature` expressions remain available as
-        // manually authored expressions without expanding every feature schema.
-        auto const allScopes = collectAttributeScopes(info_, selectedLayers);
-        auto const& scopes = discoveredAttributeScopes.empty() ? allScopes : discoveredAttributeScopes;
-        for (auto const& attrScope : scopes) {
-            std::vector<SearchStyleFieldPath> paths;
-            std::set<simfil::SchemaId> activeSchemas;
-            collectSchemaFieldPaths(
-                paths,
-                attrScope.registry,
-                attrScope.attributeSchema,
-                "",
-                activeSchemas);
-            for (auto const& path : paths) {
-                addSearchStyleField(
-                    fields,
-                    seen,
-                    path.path,
-                    attrScope.mapId,
-                    attrScope.layerId,
-                    attrScope.attrName,
-                    attrScope.attrLayerName,
-                    attrScope.featureType,
-                    {path.valueKind,
-                     path.enumValues,
-                     path.numericMinimum,
-                     path.numericMaximum,
-                     path.domain});
-            }
-
-            for (auto const& overlayField : {"$name", "$layer", "$validityIndex", "$validityCount"}) {
-                addSearchStyleField(
-                    fields,
-                    seen,
-                    overlayField,
-                    attrScope.mapId,
-                    attrScope.layerId,
-                    attrScope.attrName,
-                    attrScope.attrLayerName,
-                    attrScope.featureType,
-                    overlayFieldMetadata(overlayField));
-            }
-        }
+        if (attributeScopes.empty())
+            attributeScopes = collectAttributeScopes(info_, selectedLayers);
+        for (auto const& context : attributeScopes)
+            discovery.collect(context.registry, context.attributeSchema,
+                context.mapId, context.layerId, context.featureType,
+                context.attrName, context.attrLayerName);
     }
     else {
-        // Feature-scope style fields come directly from each advertised feature schema.
-        for (auto const& [_, dataSource] : info_) {
-            for (auto const& [__, layerInfo] : dataSource.layers_) {
-                if (layerInfo && !selectedLayers.contains(dataSource.mapId_, layerInfo->layerId_)) {
-                    continue;
-                }
-                if (!layerInfo || layerInfo->type_ != mapget::LayerType::Features || !hasFeatureModelSchema(*layerInfo)) {
-                    continue;
-                }
-                auto registry = layerInfo->layerSchema();
-                if (!registry) {
-                    continue;
-                }
-                auto const layerTypeIdMetadata = typeIdSchemaMetadata(featureTypeIdsForLayer(*layerInfo));
-                addSearchStyleField(
-                    fields,
-                    seen,
-                    "typeId",
-                    dataSource.mapId_,
-                    layerInfo->layerId_,
-                    "",
-                    "",
-                    "",
-                    layerTypeIdMetadata);
-                for (auto const& featureType : layerInfo->featureTypes()) {
-                    if (!registry->producesFeatureType(featureType.name_))
-                        continue;
-                    auto const featureSchema = registry->featureSchema(featureType.name_);
-                    std::vector<SearchStyleFieldPath> paths;
-                    std::set<simfil::SchemaId> activeSchemas;
-                    collectSchemaFieldPaths(paths, registry, featureSchema, "", activeSchemas);
-                    // Offer the runtime lookup alias in the picker without duplicating
-                    // canonical schema paths. A declared attributes member keeps precedence.
-                    auto const rootFields = registry->directFields(featureSchema);
-                    if (std::ranges::find(rootFields, "attributes") == rootFields.end() &&
-                        std::ranges::find(rootFields, "properties") != rootFields.end())
-                    {
-                        auto const canonicalCount = paths.size();
-                        for (size_t i = 0; i < canonicalCount; ++i) {
-                            if (paths[i].path == "properties" ||
-                                paths[i].path.starts_with("properties.")) {
-                                auto alias = paths[i];
-                                alias.path.replace(
-                                    0,
-                                    std::string_view("properties").size(),
-                                    "attributes");
-                                paths.push_back(std::move(alias));
-                            }
-                        }
-                    }
-                    for (auto const& path : paths) {
-                        auto metadata = SearchStyleSchemaMetadata{
-                            path.valueKind,
-                            path.enumValues,
-                            path.numericMinimum,
-                            path.numericMaximum,
-                            path.domain};
-                        if (path.path == "typeId") {
-                            metadata = layerTypeIdMetadata;
-                        }
-                        addSearchStyleField(
-                            fields,
-                            seen,
-                            path.path,
-                            dataSource.mapId_,
-                            layerInfo->layerId_,
-                            "",
-                            "",
-                            featureType.name_,
-                            std::move(metadata));
-                    }
-                }
-            }
-        }
+        for (auto const& context : collectFeatureSchemaScopes(info_, selectedLayers))
+            discovery.collect(context.registry, context.featureSchema,
+                context.mapId, context.layerId, context.featureType);
     }
-
-    std::ranges::sort(fields, [](auto const& lhs, auto const& rhs) {
-        return std::tie(lhs.path, lhs.mapId, lhs.layerId, lhs.attrName, lhs.attrLayerName, lhs.featureType)
-            < std::tie(rhs.path, rhs.mapId, rhs.layerId, rhs.attrName, rhs.attrLayerName, rhs.featureType);
-    });
-    return searchStyleFieldsToJs(fields);
+    return discovery.result();
 }
 
 JsValue TileLayerParser::FilteredFeatureJumpTarget::toJsValue() const

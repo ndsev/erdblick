@@ -144,29 +144,157 @@ TEST_CASE(
     erdblick::TileLayerParser parser;
     parser.installMapSchema(schemaBytes(*graph), std::string(graph->schemaId()));
     parser.setDataSourceInfo(sourceFixture("StyleDomains", std::string(graph->schemaId())));
-    auto fields = parser.searchStyleFieldsForQuery("true", "feature", nlohmann::json::object());
+    auto inventory = parser.searchStyleFieldsForQuery("true", "feature", nlohmann::json::object());
+    auto const& fields = inventory.at("fields");
+    REQUIRE(inventory.at("complete") == true);
 
-    // Exercise the same native export consumed by the Visualization tab. An
-    // untyped Classic attribute must not invalidate its typed sibling fields.
+    // The picker lists only attributes. Explicit properties expressions keep
+    // their query semantics; they do not create duplicate picker branches.
     for (auto const* name : {"any", "unknown", "value", "flags"}) {
-        for (auto const* prefix : {"properties.", "attributes."}) {
-            auto path = std::string(prefix) + name;
-            INFO(path);
-            auto field = std::ranges::find_if(
-                fields,
-                [&](auto const& candidate) { return candidate.at("path") == path; });
-            REQUIRE(field != fields.end());
-            REQUIRE(field->contains("domain"));
-            if (std::string_view(name) == "flags") {
-                CHECK(field->at("valueKind") == "bitmask");
-                CHECK(field->at("domain").at("bitWidth") == 8);
-            }
-            else {
-                CHECK(field->at("valueKind") == "unknown");
-                CHECK_FALSE(field->at("domain").contains("bitWidth"));
-            }
+        auto const path = std::string("attributes.") + name;
+        INFO(path);
+        auto field = std::ranges::find_if(fields,
+            [&](auto const& candidate) { return candidate.at("path") == path; });
+        REQUIRE(field != fields.end());
+        auto const& metadata = inventory.at("domains").at(field->at("metadata").get<size_t>());
+        REQUIRE(metadata.contains("domain"));
+        if (std::string_view(name) == "flags") {
+            CHECK(metadata.at("valueKind") == "bitmask");
+            CHECK(metadata.at("domain").at("bitWidth") == 8);
+        }
+        else {
+            CHECK(metadata.at("valueKind") == "unknown");
+            CHECK_FALSE(metadata.at("domain").contains("bitWidth"));
         }
     }
+    REQUIRE(std::ranges::none_of(fields, [](auto const& field) {
+        return field.at("path").template get<std::string>().starts_with("properties");
+    }));
+}
+
+TEST_CASE(
+    "Style discovery shares exact domains and explores selected semantic branches without aliases",
+    "[erdblick.schema][erdblick.search]")
+{
+    using Schema = simfil::Schema;
+    auto graph = std::make_shared<mapget::MapSchema>();
+    auto layer = graph->newLayer("Road", mapget::LayerType::Features);
+    auto width = layer->addSchema(Schema::Kind::Int);
+    auto nested = layer->addSchema(Schema::Kind::Object);
+    layer->addFieldSchema(nested, "width", width);
+    for (auto const* type : {"Road", "Building"}) {
+        auto root = layer->addSchema(mapget::LayerSchema::FeatureKind);
+        auto properties = layer->addSchema(Schema::Kind::Object);
+        layer->addFieldSchema(properties, "width", width);
+        layer->addFieldSchema(properties, "nested", nested);
+        layer->addFieldSchema(properties, "meaning", layer->addSchema(
+            std::string_view(type) == "Road" ? Schema::Kind::Int : Schema::Kind::String));
+        layer->addFieldSchema(root, "properties", properties);
+        layer->addFieldSchema(root, "$value", width);
+        layer->addFieldSchema(root, "$feature", root);
+        layer->setFieldRole(root, "$feature", Schema::FieldRole::Context);
+        layer->addFeatureType(mapget::FeatureTypeInfo::fromJson({{"name", type},
+            {"uniqueIdCompositions", {{{{"partId", "id"}, {"datatype", "U32"}}}}}}), root);
+        if (std::string_view(type) == "Road") layer->setRootSchema(root);
+    }
+    graph->finalize();
+    erdblick::TileLayerParser parser;
+    parser.installMapSchema(schemaBytes(*graph), std::string(graph->schemaId()));
+    parser.setDataSourceInfo(sourceFixture("Catalog", std::string(graph->schemaId())));
+    auto const all = parser.searchStyleFieldsForQuery("false", "feature", {{"values", "scalar"}});
+    auto const& fields = all.at("fields");
+    auto find = [&](std::string const& path) {
+        return std::ranges::find_if(fields, [&](auto const& field) { return field.at("path") == path; });
+    };
+    auto direct = find("attributes.width");
+    auto descendant = find("attributes.nested.width");
+    REQUIRE(direct != fields.end());
+    REQUIRE(descendant != fields.end());
+    CHECK(direct->at("metadata") == descendant->at("metadata"));
+    CHECK(direct->at("contexts").size() == 2);
+    CHECK(std::ranges::count_if(fields, [](auto const& field) {
+        return field.at("path") == "attributes.meaning";
+    }) == 2); // Same path, two meanings: neither is silently selected or erased.
+    CHECK(find("$value") != fields.end());
+    CHECK(find("$feature") == fields.end());
+    CHECK(find("properties.width") == fields.end());
+    CHECK(all.at("complete") == true);
+
+    auto options = nlohmann::json{{"selectedFeatureTypes", {"Road"}},
+        {"path", {"attributes"}}, {"recursive", false}, {"values", "scalar"}};
+    auto branch = parser.searchStyleFieldsForQuery("another predicate", "feature", options);
+    REQUIRE(branch.at("contexts").size() == 1);
+    CHECK(branch.at("contexts")[0].at("featureType") == "Road");
+    CHECK(std::ranges::none_of(branch.at("fields"), [](auto const& field) {
+        return field.at("path") == "attributes.nested.width";
+    }));
+    REQUIRE(branch.at("branches").size() == 1);
+    CHECK(branch.at("branches")[0].at("path") == nlohmann::json::array({"attributes", "nested"}));
+    options["path"] = {"attributes", "nested"};
+    auto child = parser.searchStyleFieldsForQuery("true", "feature", options);
+    REQUIRE(child.at("fields").size() == 1);
+    CHECK(child.at("fields")[0].at("path") == "attributes.nested.width");
+
+    // Explicit contextual lookup remains possible even though the recursive
+    // picker does not follow the owner edge on its own.
+    options["path"] = {"$feature", "attributes"};
+    auto contextual = parser.searchStyleFieldsForQuery("true", "feature", options);
+    CHECK(std::ranges::any_of(contextual.at("fields"), [](auto const& field) {
+        return field.at("path") == "$feature.attributes.width";
+    }));
+}
+
+TEST_CASE(
+    "Style discovery retains array elements and every object alternative",
+    "[erdblick.schema][erdblick.search]")
+{
+    using Schema = simfil::Schema;
+    auto graph = std::make_shared<mapget::MapSchema>();
+    auto layer = graph->newLayer("Road", mapget::LayerType::Features);
+    auto root = layer->addSchema(mapget::LayerSchema::FeatureKind);
+    auto properties = layer->addSchema(Schema::Kind::Object);
+    auto samples = layer->addSchema(Schema::Kind::Array);
+    auto alternatives = layer->addSchema(Schema::Kind::Union);
+    auto reading = layer->addSchema(Schema::Kind::Object);
+    auto label = layer->addSchema(Schema::Kind::Object);
+    layer->addFieldSchema(reading, "reading", layer->addSchema(Schema::Kind::Int));
+    layer->addFieldSchema(label, "label", layer->addSchema(Schema::Kind::String));
+    layer->addAlternative(alternatives, reading);
+    layer->addAlternative(alternatives, label);
+    layer->addElementSchema(samples, alternatives);
+    layer->addFieldSchema(properties, "samples", samples);
+    layer->addFieldSchema(root, "properties", properties);
+    layer->addFeatureType(mapget::FeatureTypeInfo::fromJson({{"name", "Road"},
+        {"uniqueIdCompositions", {{{{"partId", "id"}, {"datatype", "U32"}}}}}}), root);
+    layer->setRootSchema(root);
+    graph->finalize();
+
+    erdblick::TileLayerParser parser;
+    parser.installMapSchema(schemaBytes(*graph), std::string(graph->schemaId()));
+    parser.setDataSourceInfo(sourceFixture("Catalog", std::string(graph->schemaId())));
+    auto all = parser.searchStyleFieldsForQuery("false", "feature", {{"values", "scalar"}});
+    for (auto const* path : {"attributes.samples.*.reading", "attributes.samples.*.label"}) {
+        INFO(path);
+        CHECK(std::ranges::any_of(all.at("fields"), [&](auto const& field) {
+            return field.at("path") == path;
+        }));
+    }
+    CHECK(all.at("complete") == true);
+    CHECK(std::ranges::none_of(all.at("domains"), [](auto const& domain) {
+        return domain.at("valueKind") == "object" || domain.at("valueKind") == "array";
+    }));
+
+    auto options = nlohmann::json{{"path", {"attributes", "samples"}},
+        {"recursive", false}, {"values", "scalar"}};
+    auto array = parser.searchStyleFieldsForQuery("true", "feature", options);
+    REQUIRE(array.at("branches").size() == 1);
+    auto elementPath = nlohmann::json::array({"attributes", "samples", {{"elements", true}}});
+    CHECK(array.at("branches")[0].at("path") == elementPath);
+    options["path"] = elementPath;
+    auto elements = parser.searchStyleFieldsForQuery("true", "feature", options);
+    REQUIRE(elements.at("fields").size() == 2);
+    CHECK(elements.at("fields")[0].at("path") == "attributes.samples.*.label");
+    CHECK(elements.at("fields")[1].at("path") == "attributes.samples.*.reading");
 }
 
 TEST_CASE(

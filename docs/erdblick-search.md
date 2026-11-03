@@ -225,6 +225,21 @@ Search style rules are evaluated only for the result layer of the current search
 
 Auto-created rules prefer fields mentioned by the query. Manual edits stop those rules from being replaced by later query changes.
 
+The field browser above the rules follows the selected maps, layers and feature
+types. Feature scope starts at the result root: choose a branch to explore its
+fields, use the parent button to return, or enable **Include descendant fields**
+to list the whole subtree. **Context** narrows a field to one concrete owner when
+the same path has different meanings in different feature types or attributes.
+Browsing changes suggestions; it does not rewrite saved rules.
+
+Feature properties appear once, under `attributes`. Existing expressions using
+`properties` remain valid. Array branches expose **Array elements**, producing
+expressions such as `attributes.samples.*.reading`. Such an expression can return
+several values: a color or label still needs one result, so use an explicit index
+or a suitable aggregation when necessary. Recursive schemas report incomplete
+discovery and remain accessible through direct branch browsing; the picker does
+not silently cap the number of fields.
+
 Numeric domains keep ordinary values separate from named exceptions. For example,
 a speed domain can define `254` as variable and `255` as unlimited; these receive
 editable special colors instead of stretching a gradient. The schema determines

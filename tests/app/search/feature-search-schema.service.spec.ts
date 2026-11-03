@@ -2,6 +2,7 @@ import "@angular/compiler";
 import {afterEach, describe, expect, it, vi} from "vitest";
 import {Subject} from "rxjs";
 import {FeatureSearchSchemaService} from "../../../app/search/feature-search-schema.service";
+import {featureSearchStyleFieldInventorySchema, searchStyleFieldCandidates} from "../../../app/search/search.model";
 import type {MapDataService} from "../../../app/mapdata/mapdata.service";
 import type {
     SearchCompletionWorkerInboundMessage,
@@ -48,12 +49,77 @@ async function finishFields(worker: SchemaWorker, offset = 0): Promise<void> {
     await vi.waitFor(() => expect(worker.messages[offset + 1]?.type).toBe("SearchStyleFieldsRequest"));
     const request = worker.messages[offset + 1];
     if (request.type !== "SearchStyleFieldsRequest") throw new Error("Missing request");
-    worker.reply({type: "SearchStyleFieldsResult", requestId: request.requestId, fields: []});
+    worker.reply({type: "SearchStyleFieldsResult", requestId: request.requestId, inventory: emptyInventory});
 }
+
+const emptyInventory = {contexts: [], domains: [], fields: [], branches: [], complete: true, incompleteReason: ""};
+
+describe("compact style inventory", () => {
+    it("shares exact metadata across paths and retains semantic array branches", () => {
+        const inventory = featureSearchStyleFieldInventorySchema.parse({
+            contexts: [{mapId: "Map", layerId: "Road", featureType: "Road"}],
+            domains: [{valueKind: "integer", enumValues: [],
+                domain: {schemaId: "artifact", domainId: 7, typeName: "Width", namedValues: []}}],
+            fields: [{path: "attributes.width", metadata: 0, contexts: [0]},
+                {path: "attributes.samples.*.width", metadata: 0, contexts: [0]}],
+            branches: [{path: ["attributes", "samples", {elements: true}],
+                label: "attributes.samples.*", contexts: [0]}],
+            complete: true, incompleteReason: ""
+        });
+        const candidates = searchStyleFieldCandidates(inventory);
+        expect(candidates[0].domain).toBe(candidates[1].domain);
+        expect(candidates[0].contexts[0]).toBe(inventory.contexts[0]);
+        expect(inventory.branches[0].path[2]).toEqual({elements: true});
+        expect(featureSearchStyleFieldInventorySchema.safeParse({...inventory,
+            fields: [{path: "bad", metadata: 1, contexts: [0]}]}).success).toBe(false);
+        expect(featureSearchStyleFieldInventorySchema.safeParse({...inventory,
+            branches: [{path: [], label: "bad", contexts: [1]}]}).success).toBe(false);
+    });
+});
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("schema worker admission", () => {
+    it("coalesces feature inventories across predicates while retaining type and branch selection", async () => {
+        const {service} = fixture();
+        const scope = [{mapId: "A", layerId: "Road"}];
+        const options = {selectedFeatureTypes: ["Road"], path: ["attributes"], recursive: false};
+        const first = service.requestSearchStyleFields("false", "feature", scope, options);
+        const second = service.requestSearchStyleFields("speed > 10", "feature", scope, options);
+        expect(second).toBe(first);
+        await vi.waitFor(() => expect(SchemaWorker.instances[0]?.messages).toHaveLength(1));
+        const worker = SchemaWorker.instances[0];
+        await finishFields(worker);
+        expect(worker.messages[1]).toMatchObject({options: {
+            selectedFeatureTypes: ["Road"], path: ["attributes"], recursive: false, values: "scalar"
+        }});
+        await first;
+        expect(await service.requestSearchStyleFields("true", "feature", scope, options)).toBe(emptyInventory);
+        expect(worker.messages).toHaveLength(2);
+        const next = service.requestSearchStyleFields("true", "feature", scope, {...options, selectedFeatureTypes: ["Building"]});
+        await vi.waitFor(() => expect(worker.messages).toHaveLength(3));
+        const request = worker.messages[2];
+        if (request.type !== "SearchStyleFieldsRequest") throw new Error("Missing request");
+        worker.reply({type: "SearchStyleFieldsResult", requestId: request.requestId, inventory: emptyInventory});
+        await next;
+    });
+
+    it("keeps attribute inventories dependent on their predicate's semantic owners", async () => {
+        const {service} = fixture();
+        const first = service.requestSearchStyleFields("speed", "attribute");
+        const second = service.requestSearchStyleFields("height", "attribute");
+        expect(first).not.toBe(second);
+        await vi.waitFor(() => expect(SchemaWorker.instances[0]?.messages).toHaveLength(1));
+        const worker = SchemaWorker.instances[0];
+        await finishFields(worker);
+        await first;
+        await vi.waitFor(() => expect(worker.messages).toHaveLength(3));
+        const request = worker.messages[2];
+        if (request.type !== "SearchStyleFieldsRequest") throw new Error("Missing request");
+        expect(request.query).toBe("height");
+        worker.reply({type: "SearchStyleFieldsResult", requestId: request.requestId, inventory: emptyInventory});
+        await second;
+    });
     it("installs only requested maps and waits for native acknowledgement", async () => {
         const {service} = fixture();
         const fields = service.requestSearchStyleFields("true", "feature", [{mapId: "A", layerId: "Road"}]);
@@ -61,7 +127,7 @@ describe("schema worker admission", () => {
         const worker = SchemaWorker.instances[0];
         expect(worker.messages[0]).toMatchObject({schemas: [{schemaId: "A"}]});
         await finishFields(worker);
-        expect(await fields).toEqual([]);
+        expect(await fields).toEqual(emptyInventory);
     });
 
     it("serializes different source scopes through the complete query", async () => {
@@ -113,7 +179,7 @@ describe("schema worker admission", () => {
         mapInfo.layerStateChanged.next("datasources");
         expect(service.searchScopeAnalysisSignature("true", "feature", scope)).toBe(signature);
         await finishFields(SchemaWorker.instances[0]);
-        expect(await fields).toEqual([]);
+        expect(await fields).toEqual(emptyInventory);
     });
 
     it("rejects an old installation acknowledgement after source replacement", async () => {
@@ -146,11 +212,11 @@ describe("schema worker admission", () => {
         if (query.type !== "SearchStyleFieldsRequest") throw new Error("Missing query");
         mapInfo.generations.set("A", 2);
         mapInfo.layerStateChanged.next("datasources");
-        worker.reply({type: "SearchStyleFieldsResult", requestId: query.requestId, fields: []});
+        worker.reply({type: "SearchStyleFieldsResult", requestId: query.requestId, inventory: emptyInventory});
         await failure;
         const retry = service.requestSearchStyleFields("true", "feature", scope);
         await vi.waitFor(() => expect(worker.messages).toHaveLength(3));
         await finishFields(worker, 2);
-        expect(await retry).toEqual([]);
+        expect(await retry).toEqual(emptyInventory);
     });
 });

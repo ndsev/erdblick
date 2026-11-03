@@ -1443,3 +1443,30 @@ search-style-rule-editor {
   max-width: min(34rem, calc(100vw - 2rem));
   white-space: pre-line;
 }
+
+// The browser controls narrow suggestions; they remain compact above the rule
+// editor and wrap with the dock instead of widening every field dropdown.
+.feature-search-field-browser {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+
+  > p-select {
+    flex: 1 1 12rem;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  > label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  > [role="status"] {
+    flex-basis: 100%;
+    color: var(--p-text-muted-color);
+  }
+}

@@ -1,4 +1,4 @@
-import type { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldCandidate } from "./search.model";
+import type { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldInventory, FeatureSearchStyleFieldOptions } from "./search.model";
 import type {FeatureSearchMapLayerRef, FeatureSearchScope} from "./search-definition.model";
 import type {CompletionCandidate} from "./search.model";
 import type {MapSchemaArtifact} from "../mapdata/source-catalog.model";
@@ -79,13 +79,22 @@ export interface SearchStyleFieldsRequestMessage {
     query: string;
     scope: FeatureSearchScope;
     selectedMapLayers?: FeatureSearchMapLayerRef[];
+    options: FeatureSearchStyleFieldOptions;
 }
 
-/** Result field candidates computed by the schema worker. */
+/** Measured worker phases and send time, allowing actual transfer delay to be measured by the receiver. */
+export interface SearchStyleFieldsTiming {
+    nativeMs: number;
+    normalizationMs: number;
+    postedAt: number;
+}
+
+/** Compact result computed by the schema worker; failure is never an empty inventory. */
 export interface SearchStyleFieldsResultMessage {
     type: "SearchStyleFieldsResult";
     requestId: number;
-    fields: FeatureSearchStyleFieldCandidate[];
+    inventory?: FeatureSearchStyleFieldInventory;
+    timing?: SearchStyleFieldsTiming;
     error?: string;
 }
 

@@ -226,11 +226,33 @@ Search result subsets never hydrate or share a complete source tile.
 
 ## Completion and schema analysis
 
-Style-field discovery traverses the installed native schema domains, including
-compiled aliases. In particular, mapget's feature-root `attributes` alias points to
-`properties`; both paths must expose identical numeric bounds and enum symbols.
-This is a schema-identity check, not a global spelling substitution: nested
-source fields literally named `attributes` retain their own metadata.
+Style-field discovery traverses installed native schema domains and exports a
+compact inventory. Feature properties appear only under `attributes` in the
+picker; explicit queries and existing styles can still use `properties`. This is
+a feature-root alias rule, not a global spelling substitution: nested fields
+literally named `properties` or `attributes` retain their own metadata.
+
+`TileLayerParser.searchStyleFieldsForQuery(query, scope, options)` accepts selected
+map/layers, `selectedFeatureTypes`, an optional exact `context`, a semantic `path`,
+`recursive`, and `values: "scalar" | "all"`. Path steps are field-name strings or
+`{elements: true}` for array traversal. Native code resolves each step, including
+all schema alternatives, and produces the corresponding Simfil expression. The
+UI does not maintain a second schema graph or parse field expressions.
+
+The response contains `contexts`, `domains`, `fields`, `branches`, `complete` and
+`incompleteReason`. A field holds its expression, one domain-table index and all
+context indices in which that meaning applies. Metadata is exported once per
+exact artifact/domain. Two meanings of one path remain separate rows; the UI
+disables automatic semantic assumptions until the user narrows the context.
+Scalar requests omit container descriptors while retaining navigable branches.
+`complete` concerns declared paths in the requested subtree, not whether an open
+schema lists every possible runtime field. Recursive cycles are reported and can
+be explored one branch at a time; fields are never silently truncated.
+
+Implicit discovery skips edges marked `Schema::FieldRole::Context`, including
+the owner-feature overlays. Explicit lookup through `$feature`, `$source` and
+`$target` remains valid. Ordinary data fields beginning with `$` are not excluded
+by spelling.
 
 The completion worker installs binary `MapSchema` artifacts and their source
 metadata into parser-owned state. Installation must succeed before a query runs;
@@ -243,6 +265,20 @@ before installation and after completion. It provides:
 - enum values, ordinary numeric ranges, named numeric specials and flag domains;
 - feature/attribute ownership analysis;
 - candidate label/category/gradient fields.
+
+Feature inventories are cached independently of the predicate, keyed by source
+generation and discovery options. Attribute inventories also retain the query
+because it selects their semantic owners. Concurrent identical requests share
+one result, and the component reuses its dropdown arrays when that inventory is
+unchanged. Failures never become a cached empty inventory.
+
+Performance entries separate native enumeration and validation in the worker
+from delivery, main-thread aggregation and the next animation frame:
+`erdblick.search.style-fields.worker`, `.apply` and `.next-frame`. Worker detail
+contains `nativeMs`, `normalizationMs` and `deliveryMs`. Delivery includes
+structured cloning and queue delay; the next-frame interval is a scheduling
+measurement, not a claim about rendering CPU. Use a browser trace to assess
+layout/paint and retain the selected scope alongside comparative measurements.
 
 This worker is advisory. Backend compilation remains authoritative.
 `rewrite: false` still schema-compiles for correctness and speed; it merely

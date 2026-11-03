@@ -24,7 +24,7 @@ import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, PREFERENCES_DIALOG_LAYOUT_ID } f
 import { LayoutService } from "../layout/layout.service";
 import { DialogStackService } from "../layout/dialog-stack.service";
 import { MapDataService } from "../mapdata/mapdata.service";
-import type { FeatureSearchStyleFieldCandidate } from "../search/search.model";
+import { searchStyleFieldCandidates, type FeatureSearchStyleFieldCandidate } from "../search/search.model";
 import {
     getTileSubsetLayerRenderAutoWorkerCount
 } from "../mapview/deck/tile-subset-layer-render.service";
@@ -932,7 +932,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.searchSchema.requestSearchStyleFields("true", "feature")
             .then(options => {
                 this.hoverLabelSchemaError = "";
-                this.applyHoverLabelFieldOptions(options);
+                this.applyHoverLabelFieldOptions(searchStyleFieldCandidates(options));
             }).catch(error => {
                 this.hoverLabelSchemaError = `Schema fields are unavailable. ${String(error)}`;
             });

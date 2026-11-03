@@ -1,6 +1,6 @@
 import { Injectable } from "@angular/core";
 import { MapDataService } from "../mapdata/mapdata.service";
-import { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldCandidate } from "./search.model";
+import type { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldInventory, FeatureSearchStyleFieldOptions } from "./search.model";
 import type { FeatureSearchMapLayerRef, FeatureSearchScope } from "./search-definition.model";
 import type {
     SearchCompletionDataSourceInfoMessage,
@@ -46,15 +46,16 @@ interface SchemaWorkerState {
  */
 @Injectable({providedIn: "root"})
 export class FeatureSearchSchemaService {
-    private searchStyleFieldsByQueryCache = new Map<string, FeatureSearchStyleFieldCandidate[]>();
+    private readonly styleFieldInventories = new Map<string, Promise<FeatureSearchStyleFieldInventory>>();
     private readonly pendingCompletionHandlers = new Map<string, (message: SearchCompletionResultMessage) => void>();
     private readonly pendingScopeAnalysis = new Map<number, {
         resolve: (value: FeatureSearchScopeAnalysis) => void;
         signature: string;
     }>();
     private readonly pendingStyleFields = new Map<number, {
-        resolve: (value: FeatureSearchStyleFieldCandidate[]) => void;
+        resolve: (value: FeatureSearchStyleFieldInventory) => void;
         reject: (error: Error) => void;
+        startedAt: number;
     }>();
     private scopeAnalysisByQueryCache = new Map<string, Promise<FeatureSearchScopeAnalysis>>();
     private readonly workerStates: Record<SchemaWorkerKind, SchemaWorkerState> = {
@@ -128,24 +129,41 @@ export class FeatureSearchSchemaService {
     requestSearchStyleFields(
         query: string,
         scope: FeatureSearchScope,
-        selectedMapLayers?: FeatureSearchMapLayerRef[]
-    ): Promise<FeatureSearchStyleFieldCandidate[]> {
-        const cacheKey = this.searchScopeAnalysisSignature(query, scope, selectedMapLayers);
-        const cached = this.searchStyleFieldsByQueryCache.get(cacheKey);
-        if (cached) return Promise.resolve(cached);
-        return this.enqueueSchemaRequest("analysis", selectedMapLayers, worker =>
-            new Promise<FeatureSearchStyleFieldCandidate[]>((resolve, reject) => {
+        selectedMapLayers?: FeatureSearchMapLayerRef[],
+        options: FeatureSearchStyleFieldOptions = {values: "scalar"}
+    ): Promise<FeatureSearchStyleFieldInventory> {
+        const normalized = {
+            values: options.values ?? "scalar",
+            recursive: options.recursive ?? true,
+            path: options.path ?? [],
+            selectedFeatureTypes: [...new Set(options.selectedFeatureTypes ?? [])].sort(),
+            ...(options.context ? {context: options.context} : {})
+        };
+        const cacheKey = this.searchScopeAnalysisSignature(scope === "feature" ? "" : query, scope, selectedMapLayers)
+            + "\n" + JSON.stringify(normalized);
+        const cached = this.styleFieldInventories.get(cacheKey);
+        if (cached) return cached;
+        const startedAt = performance.now();
+        const promise = this.enqueueSchemaRequest("analysis", selectedMapLayers, worker =>
+            new Promise<FeatureSearchStyleFieldInventory>((resolve, reject) => {
                 const requestId = ++this.workerRequestSerial;
-                this.pendingStyleFields.set(requestId, {resolve, reject});
+                this.pendingStyleFields.set(requestId, {resolve, reject, startedAt});
                 worker.postMessage({
-                    type: "SearchStyleFieldsRequest", requestId, query, scope,
+                    type: "SearchStyleFieldsRequest", requestId, query, scope, options: normalized,
                     ...(selectedMapLayers !== undefined ? {selectedMapLayers} : {})
                 } satisfies SearchStyleFieldsRequestMessage);
             })
-        ).then(fields => {
-            this.searchStyleFieldsByQueryCache.set(cacheKey, fields);
-            return fields;
+        ).catch(error => {
+            if (this.styleFieldInventories.get(cacheKey) === promise)
+                this.styleFieldInventories.delete(cacheKey);
+            throw error;
         });
+        // Coalesce concurrent consumers, but do not retain every branch visited
+        // during a long session. Eviction does not cancel an active consumer.
+        this.styleFieldInventories.set(cacheKey, promise);
+        if (this.styleFieldInventories.size > 32)
+            this.styleFieldInventories.delete(this.styleFieldInventories.keys().next().value!);
+        return promise;
     }
 
     /** Queues completion behind native installation, superseding older queued input from the same owner. */
@@ -249,7 +267,7 @@ export class FeatureSearchSchemaService {
 
     /** Clears cached schema query results after datasource metadata changes. */
     private clearCaches(): void {
-        this.searchStyleFieldsByQueryCache.clear();
+        this.styleFieldInventories.clear();
         this.scopeAnalysisByQueryCache.clear();
     }
 
@@ -377,10 +395,27 @@ export class FeatureSearchSchemaService {
             return;
         }
         this.pendingStyleFields.delete(message.requestId);
-        if (!message.error) {
-            pending.resolve(message.fields);
+        if (!message.error && message.inventory) {
+            const receivedAt = performance.now();
+            if (message.timing) {
+                performance.clearMeasures("erdblick.search.style-fields.worker");
+                performance.measure("erdblick.search.style-fields.worker", {
+                    start: pending.startedAt, end: receivedAt,
+                    detail: {
+                        ...message.timing,
+                        // Includes structured cloning and event-queue delay;
+                        // this is observed delivery latency, not isolated CPU.
+                        deliveryMs: performance.timeOrigin + receivedAt - message.timing.postedAt,
+                        fields: message.inventory.fields.length,
+                        domains: message.inventory.domains.length,
+                        contexts: message.inventory.contexts.length,
+                        complete: message.inventory.complete
+                    }
+                });
+            }
+            pending.resolve(message.inventory);
         } else {
-            pending.reject(new Error(message.error));
+            pending.reject(new Error(message.error ?? "Schema worker returned no field inventory."));
         }
     }
 

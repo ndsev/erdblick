@@ -1,10 +1,8 @@
-import {schemaScalarDomainSchema} from "../mapdata/schema-domain.model";
+import {featureSearchStyleFieldInventorySchema} from "./search.model";
 import {coreLib, initializeLibrary, uint8ArrayToWasmOrThrow} from "../integrations/wasm.adapter";
 import type {TileLayerParser} from "../../build/libs/core/erdblick-core";
 import type {
-    FeatureSearchAttributeScopeCandidate,
-    FeatureSearchStyleFieldCandidate,
-    FeatureSearchStyleValueKind
+    FeatureSearchAttributeScopeCandidate
 } from "./search.model";
 import type {CompletionCandidate} from "./search.model";
 import type {FeatureSearchMapLayerRef} from "./search-definition.model";
@@ -166,34 +164,6 @@ function normalizeCompletionCandidate(
     };
 }
 
-/** Normalizes a native style-field value kind into the frontend union. */
-function normalizeStyleFieldValueKind(value: unknown): FeatureSearchStyleValueKind {
-    switch (value) {
-        case "number":
-        case "integer":
-        case "string":
-        case "boolean":
-        case "enum":
-        case "bitmask":
-        case "object":
-        case "array":
-            return value;
-        default:
-            return "unknown";
-    }
-}
-
-/** Normalizes optional native numeric range metadata for schema-backed style fields. */
-function normalizeStyleFieldNumericRange(value: unknown): {min: number; max: number} | undefined {
-    const record = recordFromUnknown(value);
-    if (!record) {
-        return undefined;
-    }
-    const min = Number(record["min"]);
-    const max = Number(record["max"]);
-    return Number.isFinite(min) && Number.isFinite(max) ? {min, max} : undefined;
-}
-
 /** Normalizes untyped WASM attribute-scope candidates into the TypeScript-facing shape. */
 function normalizeAttributeScopeCandidates(value: unknown): FeatureSearchAttributeScopeCandidate[] {
     if (!Array.isArray(value)) {
@@ -288,44 +258,6 @@ function normalizeSearchQueryNormalization(
         matchedFeatureTypes: normalizeStringList(raw?.matchedFeatureTypes),
         ...(error ? {error} : {})
     };
-}
-
-/** Normalizes untyped WASM search-style field candidates into the TypeScript-facing shape. */
-function normalizeSearchStyleFieldCandidates(value: unknown): FeatureSearchStyleFieldCandidate[] {
-    if (!Array.isArray(value)) {
-        return [];
-    }
-    return value.flatMap(item => {
-        const raw = recordFromUnknown(item);
-        if (!raw) {
-            return [];
-        }
-        const path = typeof raw["path"] === "string" ? raw["path"] : "";
-        const mapId = typeof raw["mapId"] === "string" ? raw["mapId"] : "";
-        const layerId = typeof raw["layerId"] === "string" ? raw["layerId"] : "";
-        if (!path || !mapId || !layerId) {
-            return [];
-        }
-        const attrName = typeof raw["attrName"] === "string" ? raw["attrName"] : undefined;
-        const attrLayerName = typeof raw["attrLayerName"] === "string" ? raw["attrLayerName"] : undefined;
-        const featureType = typeof raw["featureType"] === "string" ? raw["featureType"] : undefined;
-        const enumValues = Array.isArray(raw["enumValues"])
-            ? raw["enumValues"].filter((item): item is string => typeof item === "string")
-            : [];
-        const numericRange = normalizeStyleFieldNumericRange(raw["numericRange"]);
-        return [{
-            path,
-            mapId,
-            layerId,
-            attrName,
-            attrLayerName,
-            featureType,
-            valueKind: normalizeStyleFieldValueKind(raw["valueKind"]),
-            enumValues,
-            ...(numericRange ? {numericRange} : {}),
-            ...(raw["domain"] ? {domain: schemaScalarDomainSchema.parse(raw["domain"])} : {})
-        }];
-    });
 }
 
 /** Returns completion contexts narrow enough to stream useful batches as they are produced. */
@@ -475,20 +407,26 @@ async function analyzeSearchScope(message: SearchScopeAnalysisRequestMessage): P
     } satisfies SearchScopeAnalysisResultMessage);
 }
 
-/** Enumerates style field candidates in the worker-local parser. */
+/** Discover and validate shared native metadata before transferring it to the UI. */
 async function enumerateSearchStyleFields(message: SearchStyleFieldsRequestMessage): Promise<void> {
     const activeParser = await currentParser();
-    const fields = activeParser
-        ? normalizeSearchStyleFieldCandidates(activeParser.searchStyleFieldsForQuery(
-            message.query,
-            message.scope,
-            schemaOptions(message.selectedMapLayers)
-        ))
-        : [];
+    if (!activeParser) throw new Error("Schema parser is unavailable.");
+    const started = performance.now();
+    const raw = activeParser.searchStyleFieldsForQuery(message.query, message.scope, {
+        ...schemaOptions(message.selectedMapLayers), ...message.options
+    });
+    const nativeDone = performance.now();
+    const inventory = featureSearchStyleFieldInventorySchema.parse(raw);
+    const normalized = performance.now();
     postMessage({
         type: "SearchStyleFieldsResult",
         requestId: message.requestId,
-        fields
+        inventory,
+        timing: {
+            nativeMs: nativeDone - started,
+            normalizationMs: normalized - nativeDone,
+            postedAt: performance.timeOrigin + normalized
+        }
     } satisfies SearchStyleFieldsResultMessage);
 }
 
@@ -549,7 +487,6 @@ async function handleMessage(message: SearchCompletionWorkerInboundMessage): Pro
             postMessage({
                 type: "SearchStyleFieldsResult",
                 requestId: message.requestId,
-                fields: [],
                 error: error instanceof Error ? error.message : String(error)
             } satisfies SearchStyleFieldsResultMessage);
         }
