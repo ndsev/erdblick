@@ -57,10 +57,10 @@ struct JsValue
     /** Convert a tagged native partition without narrowing an object ID. */
     static JsValue fromPartition(mapget::PartitionId const& partition);
 
-    /** Project one exact domain for inspection/style UI without exporting its schema graph. */
+    /** Project one exact type for inspection/style UI without exporting its schema graph. */
     static JsValue fromSchema(simfil::SchemaReference const& reference);
 
-    /** Preserve a mask's raw uint64 bits and exact graph/domain identity at the JS boundary. */
+    /** Preserve a mask's raw uint64 bits and exact schema/type identity at the JS boundary. */
     static JsValue fromBitmask(simfil::Bitmask const& mask);
 
     /**

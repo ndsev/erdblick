@@ -46,24 +46,24 @@ JsValue JsValue::fromFeatureId(mapget::FeatureId const& reference)
 
 JsValue JsValue::fromBitmask(simfil::Bitmask const& mask)
 {
-    if (!mask.domain || !mask.domain.definition())
-        throw std::invalid_argument("Cannot expose a bitmask without its exact domain");
+    if (!mask.type || !mask.type.definition())
+        throw std::invalid_argument("Cannot expose a bitmask without its exact type");
     return Dict(
         {{"_bitmask", JsValue(true)},
          {"bits", JsValue(fmt::format("0x{:016x}", mask.bits))},
-         {"schema", JsValue(std::string(mask.domain.binding->identity()))},
-         {"domain", JsValue(mask.domain.id)}});
+         {"schema", JsValue(std::string(mask.type.binding->identity()))},
+         {"typeId", JsValue(mask.type.id)}});
 }
 
 JsValue JsValue::fromSchema(simfil::SchemaReference const& reference)
 {
-    auto const* domain = reference.definition();
-    if (!domain)
+    auto const* type = reference.definition();
+    if (!type)
         return Undefined();
     auto result = Dict(
         {{"schemaId", JsValue(std::string(reference.binding->identity()))},
-         {"domainId", JsValue(reference.id)},
-         {"typeName", JsValue(std::string(domain->typeName()))}});
+         {"typeId", JsValue(reference.id)},
+         {"typeName", JsValue(std::string(type->typeName()))}});
     // Numeric bounds and named literals may exceed JS's exact integer range.
     // Their type remains explicit; decimal strings preserve those raw encodings.
     auto scalar = [](auto const& value)
@@ -89,7 +89,7 @@ JsValue JsValue::fromSchema(simfil::SchemaReference const& reference)
             },
             value);
     };
-    if (auto numeric = domain->numericDomain()) {
+    if (auto numeric = type->numericDomain()) {
         auto ranges = List();
         for (auto const& range : numeric->ordinaryRanges)
             ranges.push(Dict({{"min", scalar(range.min)}, {"max", scalar(range.max)}}));
@@ -107,7 +107,7 @@ JsValue JsValue::fromSchema(simfil::SchemaReference const& reference)
         result.set("numeric", metadata);
     }
     auto names = List();
-    domain->forEachNamedValue(
+    type->forEachNamedValue(
         [&](simfil::Schema::NamedValue const& named)
         {
             using Named = simfil::Schema::NamedValue;
@@ -149,21 +149,26 @@ JsValue JsValue::fromSchema(simfil::SchemaReference const& reference)
             case Named::Meaning::Unbounded: meaning = "unbounded"; break;
             case Named::Meaning::Saturated: meaning = "saturated"; break;
             }
-            names.push(Dict(
+            auto metadata = Dict(
                 {{"name", JsValue(std::string(named.name))},
                  {"value", raw},
                  {"valueType", JsValue(valueType)},
                  {"role", JsValue(role)},
                  {"meaning", JsValue(meaning)},
                  {"deprecated", JsValue(named.deprecated)},
-                 {"removed", JsValue(named.removed)}}));
+                 {"removed", JsValue(named.removed)}});
+            // Keep the physical ordinal separate from the logical enum value.
+            // Reuse the lossless integer projection for ordinals beyond JS precision.
+            if (named.rawValue)
+                metadata.set("rawValue", scalar(*named.rawValue));
+            names.push(metadata);
         });
     result.set("namedValues", names);
-    // Generic domains such as Any may contain a mask without declaring one.
-    // Only concrete masks have a width; exporting a generic domain's zero
+    // Generic types such as Any may contain a mask without declaring one.
+    // Only concrete masks have a width; exporting a generic type's zero
     // would make the browser reject the entire search-style field catalog.
-    if (domain->isBitmask())
-        result.set("bitWidth", JsValue(domain->bitWidth()));
+    if (type->isBitmask())
+        result.set("bitWidth", JsValue(type->bitWidth()));
     return result;
 }
 

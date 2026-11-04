@@ -179,12 +179,12 @@ public:
      * Discover schema-backed style fields in a selected semantic subtree.
      *
      * `scope` accepts `feature`, `attribute`, or `auto`. Attribute scope is narrowed through
-     * getAttributeScopeForQuery(query), falling back to all attribute contexts if no attribute was inferred.
-     * Options may select feature types, one context, a path of field names and
+     * getAttributeScopeForQuery(query), falling back to all attribute contexts if no attribute was
+     * inferred. Options may select feature types, one context, a path of field names and
      * `{elements:true}` array steps, direct children versus recursive traversal,
      * and scalar versus all values. The
-     * returned inventory shares context/domain tables; paths retain every exact
-     * meaning instead of copying domain metadata into each feature occurrence.
+     * returned inventory shares context/type tables; paths retain every exact
+     * meaning instead of copying type metadata into each feature occurrence.
      */
     NativeJsValue searchStyleFieldsForQuery(std::string const& query, std::string const& scope, NativeJsValue const& options) const;
 

@@ -45,7 +45,7 @@ interface InspectionModelData {
     type: number;
     value: any;
     displayValue?: string;
-    domain?: unknown;
+    scalarType?: unknown;
     info?: string;
     hoverId?: string;
     geoJsonPath?: string;
@@ -584,7 +584,7 @@ export class FeaturePanelComponent implements OnDestroy {
                     key: data?.key ?? "",
                     value: value ?? "",
                     displayValue: data?.displayValue,
-                    domain: data?.domain,
+                    scalarType: data?.scalarType,
                     type: valueType,
                     mapTileKey: data?.mapTileKey ?? context.mapTileKey,
                     incomingLoading: data?.incomingLoading,

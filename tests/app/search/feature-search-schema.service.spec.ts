@@ -52,14 +52,31 @@ async function finishFields(worker: SchemaWorker, offset = 0): Promise<void> {
     worker.reply({type: "SearchStyleFieldsResult", requestId: request.requestId, inventory: emptyInventory});
 }
 
-const emptyInventory = {contexts: [], domains: [], fields: [], branches: [], complete: true, incompleteReason: ""};
+const emptyInventory = {contexts: [], types: [], fields: [], branches: [], complete: true, incompleteReason: ""};
 
 describe("compact style inventory", () => {
+    it("retains exact enum ordinals at the native worker boundary", () => {
+        const inventory = featureSearchStyleFieldInventorySchema.parse({
+            contexts: [{mapId: "Map", layerId: "Road"}],
+            types: [{valueKind: "enum", enumValues: ["UNKNOWN"], schemaType: {
+                schemaId: "artifact", typeId: 7, typeName: "Direction",
+                namedValues: [{name: "UNKNOWN", value: "UNKNOWN", valueType: "string",
+                    rawValue: "18446744073709551615", role: "constant", meaning: "unknown",
+                    deprecated: false, removed: false}]
+            }}],
+            fields: [{path: "attributes.direction", metadata: 0, contexts: [0]}],
+            branches: [], complete: true, incompleteReason: ""
+        });
+        expect(searchStyleFieldCandidates(inventory)[0].schemaType?.namedValues[0]).toMatchObject({
+            value: "UNKNOWN", rawValue: "18446744073709551615"
+        });
+    });
+
     it("shares exact metadata across paths and retains semantic array branches", () => {
         const inventory = featureSearchStyleFieldInventorySchema.parse({
             contexts: [{mapId: "Map", layerId: "Road", featureType: "Road"}],
-            domains: [{valueKind: "integer", enumValues: [],
-                domain: {schemaId: "artifact", domainId: 7, typeName: "Width", namedValues: []}}],
+            types: [{valueKind: "integer", enumValues: [],
+                schemaType: {schemaId: "artifact", typeId: 7, typeName: "Width", namedValues: []}}],
             fields: [{path: "attributes.width", metadata: 0, contexts: [0]},
                 {path: "attributes.samples.*.width", metadata: 0, contexts: [0]}],
             branches: [{path: ["attributes", "samples", {elements: true}],
@@ -67,7 +84,7 @@ describe("compact style inventory", () => {
             complete: true, incompleteReason: ""
         });
         const candidates = searchStyleFieldCandidates(inventory);
-        expect(candidates[0].domain).toBe(candidates[1].domain);
+        expect(candidates[0].schemaType).toBe(candidates[1].schemaType);
         expect(candidates[0].contexts[0]).toBe(inventory.contexts[0]);
         expect(inventory.branches[0].path[2]).toEqual({elements: true});
         expect(featureSearchStyleFieldInventorySchema.safeParse({...inventory,

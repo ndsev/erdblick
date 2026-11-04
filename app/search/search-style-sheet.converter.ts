@@ -9,7 +9,7 @@ import {
     FeatureSearchStyleRule
 } from "./search-definition.model";
 import {searchStyleColorProperties} from "./search-style-color.util";
-import {schemaDomainIdentitySchema} from "../mapdata/schema-domain.model";
+import {legacySchemaTypeIdentitySchema, schemaTypeIdentitySchema} from "../mapdata/schema-type.model";
 
 const SUPPORTED_SEARCH_STYLE_OPERATORS = new Set(["=", "==", "!=", "<", "<=", ">", ">=", "contains"]);
 const ALL_GEOMETRY_TYPES = ["point", "line", "polygon", "mesh", "aabb", "gltf"];
@@ -598,11 +598,15 @@ function colorFromStyle(raw: Record<string, unknown>): FeatureSearchColorMode | 
         if (fallback !== undefined && (typeof fallback !== "string" || !normalizeHexLiteral(fallback))) {
             return undefined;
         }
-        const domain = schemaDomainIdentitySchema.safeParse(scale["domain"]);
-        if (scale["domain"] !== undefined && !domain.success) return undefined;
+        // Read old saved YAML guards once at import; newly generated YAML uses
+        // schemaType/typeId and never publishes both spellings.
+        const hasCurrentType = scale["schemaType"] !== undefined;
+        const storedType = hasCurrentType ? scale["schemaType"] : scale["domain"];
+        const schemaType = (hasCurrentType ? schemaTypeIdentitySchema : legacySchemaTypeIdentitySchema).safeParse(storedType);
+        if (storedType !== undefined && !schemaType.success) return undefined;
         const specials: Array<{value: unknown; color: string}> = [];
         if (scale["specials"] !== undefined) {
-            if (!domain.success || !Array.isArray(scale["specials"])) return undefined;
+            if (!schemaType.success || !Array.isArray(scale["specials"])) return undefined;
             for (const stop of scale["specials"]) {
                 if (!Array.isArray(stop) || stop.length !== 2 || !isFiniteNumber(stop[0]) ||
                     typeof stop[1] !== "string" || !normalizeHexLiteral(stop[1])) return undefined;
@@ -614,7 +618,7 @@ function colorFromStyle(raw: Record<string, unknown>): FeatureSearchColorMode | 
             field: expression,
             customField: true,
             stops: parsedStops,
-            ...(domain.success ? {domain: domain.data} : {}),
+            ...(schemaType.success ? {schemaType: schemaType.data} : {}),
             ...(scale["specials"] !== undefined ? {specials} : {}),
             ...(typeof fallback === "string" ? {fallbackColor: normalizeHexLiteral(fallback)!} : {})
         };

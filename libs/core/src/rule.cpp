@@ -448,9 +448,12 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             ? ColorScale::Mode::Categorical
             : ColorScale::Mode::Linear;
         scale.expression = scaleYaml["expression"].as<std::string>();
-        if (auto domain = scaleYaml["domain"]; domain.IsDefined()) {
-            scale.schemaId = domain["schemaId"].as<std::string>();
-            scale.domainId = domain["domainId"].as<simfil::SchemaId>();
+        // Existing local and server-hosted styles used domain/domainId. Read that
+        // pair at the YAML boundary; runtime state always uses schemaId/typeId.
+        auto const hasCanonicalType = scaleYaml["schemaType"].IsDefined();
+        if (auto type = scaleYaml[hasCanonicalType ? "schemaType" : "domain"]; type.IsDefined()) {
+            scale.schemaId = type["schemaId"].as<std::string>();
+            scale.typeId = type[hasCanonicalType ? "typeId" : "domainId"].as<simfil::TypeId>();
         }
         if (auto specials = scaleYaml["specials"]; specials.IsDefined()) {
             for (auto const& stopYaml : specials) {
@@ -1171,13 +1174,13 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
         };
         auto const evaluated = evalFun.evaluate(colorScale_->expression);
         if (!colorScale_->schemaId.empty()) {
-            auto const domain = evaluated.schemaReference();
-            if (!domain || domain.id != colorScale_->domainId ||
-                domain.binding->identity() != colorScale_->schemaId)
+            auto const type = evaluated.schemaReference();
+            if (!type || type.id != colorScale_->typeId ||
+                type.binding->identity() != colorScale_->schemaId)
                 return fallback();
         }
         // Special overrides precede clamping/interpolation. A computed plain
-        // number has no domain and cannot acquire a sentinel meaning here.
+        // number has no source type and cannot acquire a sentinel meaning here.
         auto const value = colorScaleKey(evaluated);
         if (!value)
             return fallback();
@@ -1190,7 +1193,7 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
         }
         auto input = numericColorScaleKey(*value);
         if (input && !colorScale_->schemaId.empty()) {
-            // Generated domain-bound scales cover ordinary measurements only.
+            // Generated type-bound scales cover ordinary measurements only.
             // Deleting a special override exposes fallback, never a high-end
             // gradient or ordinary category color for an exceptional code.
             auto const* definition = evaluated.schemaReference().definition();

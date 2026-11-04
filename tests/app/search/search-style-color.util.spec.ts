@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import type {SchemaScalarDomain} from "../../../app/mapdata/schema-domain.model";
+import type {SchemaScalarType} from "../../../app/mapdata/schema-type.model";
 import {
     autoInitializeSearchStyleColorDraft,
     categoryStopsForEnumValues,
@@ -20,10 +20,10 @@ import {
     sortedGradientStopDrafts
 } from "../../../app/search/search-style-color.util";
 
-/** Two legitimate source domains deliberately disagree about raw speed zero. */
-function speedDomain(classic = false): SchemaScalarDomain {
+/** Two legitimate source types deliberately disagree about raw speed zero. */
+function speedType(classic = false): SchemaScalarType {
     return {
-        schemaId: classic ? "classic" : "live", domainId: 3, typeName: "Speed",
+        schemaId: classic ? "classic" : "live", typeId: 3, typeName: "Speed",
         numeric: {encoding: "uint8", unit: classic ? "" : "km/h", minimum: 0, maximum: 255,
             ordinaryRanges: [{min: classic ? 0 : 1, max: 253}], scale: 1, offset: 0, complete: true},
         namedValues: [
@@ -37,25 +37,25 @@ function speedDomain(classic = false): SchemaScalarDomain {
 describe("search style color helpers", () => {
     it.each([false, true])("keeps ordinary speed and named special colors separate (Classic: %s)", classic => {
         let id = 0;
-        const domain = speedDomain(classic);
+        const schemaType = speedType(classic);
         const result = autoInitializeSearchStyleColorDraft(defaultSearchStyleColorDraft("speed"), {
-            label: "Speed", value: "speed", valueKind: "integer", domain,
+            label: "Speed", value: "speed", valueKind: "integer", schemaType,
             numericRange: {min: classic ? 0 : 1, max: 253}
         }, () => ++id);
         expect(result.success).toBe(true);
         expect(result.draft.gradientStops.map(stop => stop.value)).toEqual([classic ? 0 : 1, 50, 100, 150, 200, 250, 253]);
         expect(result.draft.specialStops?.map(stop => stop.value)).toEqual(classic ? [254, 255] : [0, 254, 255]);
-        expect(result.draft.domain).toEqual({schemaId: domain.schemaId, domainId: 3});
+        expect(result.draft.schemaType).toEqual({schemaId: schemaType.schemaId, typeId: 3});
         const properties = searchStyleColorProperties({mode: "gradient", field: "speed",
-            stops: serializableGradientStops(result.draft)!, domain: result.draft.domain,
+            stops: serializableGradientStops(result.draft)!, schemaType: result.draft.schemaType,
             specials: result.draft.specialStops!.map(stop => ({value: stop.value, color: stop.color}))});
-        expect(properties["color-scale"]).toMatchObject({domain: result.draft.domain,
+        expect(properties["color-scale"]).toMatchObject({schemaType: result.draft.schemaType,
             specials: result.draft.specialStops!.map(stop => [stop.value, stop.color])});
     });
 
     it("chooses round measurement steps while storing the original encoding", () => {
         let id = 0;
-        const numeric = {...speedDomain().numeric!, unit: "m", scale: 0.1, offset: 0.5};
+        const numeric = {...speedType().numeric!, unit: "m", scale: 0.1, offset: 0.5};
         const stops = gradientStopsForNumericRange({min: 1, max: 100}, () => ++id, numeric);
         expect(stops.map(stop => stop.value)).toEqual([1, 15, 35, 55, 75, 95, 100]);
     });
@@ -64,7 +64,7 @@ describe("search style color helpers", () => {
         const draft = defaultSearchStyleColorDraft("speed");
         draft.gradientStops = [{id: 1, value: 80, color: "#123456"}];
         const result = autoInitializeSearchStyleColorDraft(draft,
-            {label: "Speed", value: "speed", incompatibleDomains: true}, () => 2);
+            {label: "Speed", value: "speed", incompatibleTypes: true}, () => 2);
         expect(result.success).toBe(false);
         expect(result.draft.gradientStops).toEqual(draft.gradientStops);
     });
@@ -76,7 +76,7 @@ describe("search style color helpers", () => {
             {label: "Car", value: draft.field, valueKind: "boolean"}, () => ++id);
         expect(result.success).toBe(true);
         expect(serializableCategoryStops(result.draft).map(stop => stop.value)).toEqual([false, true]);
-        expect(result.draft.domain).toBeUndefined();
+        expect(result.draft.schemaType).toBeUndefined();
     });
     it.each(["gradient", "categories"] as const)("omits a disabled %s fallback from generated YAML properties", mode => {
         const properties = searchStyleColorProperties({mode, field: "speed",
@@ -251,7 +251,7 @@ describe("search style color helpers", () => {
         expect(stops.every(stop => /^#[0-9a-f]{6}$/.test(stop.color))).toBe(true);
     });
 
-    it("generates observed-data gradients across the whole measured domain", () => {
+    it("generates observed-data gradients across the whole measured range", () => {
         let nextId = 1;
         const stops = gradientStopsForObservedNumericRange({min: 20, max: 90}, () => nextId++);
 

@@ -8,13 +8,13 @@ namespace erdblick::test
 
 /**
  * Compact semantic fixture shared by inspection, aggregation and rendered-color
- * tests. Speed domains intentionally disagree about zero; raw width has a 0.1 m
+ * tests. Speed types intentionally disagree about zero; raw width has a 0.1 m
  * encoding and flags include zero, aliases, composite and unknown high bits.
  */
 struct ScalarSchema
 {
     std::shared_ptr<mapget::MapSchema> owner = std::make_shared<mapget::MapSchema>();
-    simfil::SchemaId speed{}, classicSpeed{}, width{}, flags{}, rawRoot{};
+    simfil::TypeId speed{}, classicSpeed{}, width{}, flags{}, rawRoot{};
     mapget::DataSourceInfo source;
 
     ScalarSchema()
@@ -114,9 +114,9 @@ struct ScalarSchema
 
     /** Construct a directly selected primitive; arithmetic tests deliberately omit this qualifier.
      */
-    simfil::Value number(int64_t raw, simfil::SchemaId domain) const
+    simfil::Value number(int64_t raw, simfil::TypeId type) const
     {
-        return simfil::Value(raw).withSchema({owner->binding(), domain});
+        return simfil::Value(raw).withSchema({owner->binding(), type});
     }
 };
 

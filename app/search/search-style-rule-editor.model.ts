@@ -288,8 +288,8 @@ export class SearchStyleRuleDraftCodec {
                 stops: serializableCategoryStops(
                     color,
                     this.fieldOption(color.field)?.valueKind ?? color.categoryValueKind),
-                ...(color.domain ? {domain: {...color.domain}} : {}),
-                ...(color.domain && color.specialStops ? {specials: color.specialStops.flatMap(stop =>
+                ...(color.schemaType ? {schemaType: {...color.schemaType}} : {}),
+                ...(color.schemaType && color.specialStops ? {specials: color.specialStops.flatMap(stop =>
                     stop.value === null ? [] : [{value: stop.value, color: stop.color}])} : {}),
                 ...(color.fallbackEnabled === false ? {} : {fallbackColor})
             };
@@ -308,8 +308,8 @@ export class SearchStyleRuleDraftCodec {
             field: color.field,
             ...(color.customField ? {customField: true} : {}),
             stops: serializableGradientStops(color) ?? [],
-            ...(color.domain ? {domain: {...color.domain}} : {}),
-            ...(color.domain && color.specialStops ? {specials: color.specialStops.flatMap(stop =>
+            ...(color.schemaType ? {schemaType: {...color.schemaType}} : {}),
+            ...(color.schemaType && color.specialStops ? {specials: color.specialStops.flatMap(stop =>
                 stop.value === null ? [] : [{value: stop.value, color: stop.color}])} : {}),
             ...(color.fallbackEnabled === false ? {} : {fallbackColor})
         };
@@ -333,7 +333,7 @@ export class SearchStyleRuleDraftCodec {
                 field,
                 customField: !!color.customField,
                 categoryValueKind: categoryValueKind(color.stops),
-                ...(color.domain ? {domain: {...color.domain}} : {}),
+                ...(color.schemaType ? {schemaType: {...color.schemaType}} : {}),
                 ...(color.specials ? {specialStops: gradientStopsToDraft(color.specials, () => this.nextColorStopId++)} : {}),
                 solidColor: fallbackColor,
                 fallbackEnabled: color.fallbackColor !== undefined,
@@ -349,7 +349,7 @@ export class SearchStyleRuleDraftCodec {
             solidColor: fallbackColor,
             fallbackEnabled: color.fallbackColor !== undefined,
             fallbackColor,
-            ...(color.domain ? {domain: {...color.domain}} : {}),
+            ...(color.schemaType ? {schemaType: {...color.schemaType}} : {}),
             ...(color.specials ? {specialStops: gradientStopsToDraft(color.specials, () => this.nextColorStopId++)} : {}),
             gradientStops: gradientStopsToDraft(color.stops, () => this.nextColorStopId++)
         };

@@ -715,25 +715,30 @@ bool validateColorScale(
             }
         }
     }
-    if (auto domain = scale["domain"]; domain.IsDefined()) {
-        if (!domain.IsMap() || !domain["schemaId"].IsScalar() ||
-            domain["schemaId"].Scalar().empty() || !domain["domainId"].IsScalar())
+    // Validate the same input spelling that FeatureStyleRule reads. An invalid
+    // current guard must not fall back to a different legacy identity.
+    auto const hasCanonicalType = scale["schemaType"].IsDefined();
+    auto const type = scale[hasCanonicalType ? "schemaType" : "domain"];
+    auto const idKey = hasCanonicalType ? "typeId" : "domainId";
+    if (type.IsDefined()) {
+        if (!type.IsMap() || !type["schemaId"].IsScalar() || type["schemaId"].Scalar().empty() ||
+            !type[idKey].IsScalar())
             return fail(
-                "color-scale.domain requires an exact schemaId and a positive domainId.",
-                domain);
+                "color-scale.schemaType requires an exact schemaId and a positive typeId.",
+                type);
         try {
-            auto id = domain["domainId"].as<uint64_t>();
-            if (id == 0 || id > simfil::MaxSchemaId)
-                return fail("color-scale.domain.domainId is out of range.", domain);
+            auto id = type[idKey].as<uint64_t>();
+            if (id == 0 || id > simfil::MaxTypeId)
+                return fail("color-scale.schemaType.typeId is out of range.", type);
         }
         catch (YAML::Exception const&) {
-            return fail("color-scale.domain.domainId must be a positive integer.", domain);
+            return fail("color-scale.schemaType.typeId must be a positive integer.", type);
         }
     }
     if (auto specials = scale["specials"]; specials.IsDefined()) {
-        if (!specials.IsSequence() || !scale["domain"].IsDefined())
+        if (!specials.IsSequence() || !type.IsDefined())
             return fail(
-                "color-scale.specials requires a list and an exact domain guard.",
+                "color-scale.specials requires a list and an exact schema type guard.",
                 specials);
         std::set<double> values;
         for (auto const& stop : specials) {

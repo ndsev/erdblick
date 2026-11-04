@@ -409,7 +409,7 @@ public:
         /** Exact source meaning for generated scales; empty leaves authored raw scales
          * unrestricted. */
         std::string schemaId;
-        simfil::SchemaId domainId = 0;
+        simfil::TypeId typeId = 0;
         /** Named numeric sentinels use exact colors before ordinary interpolation. */
         std::vector<ColorScaleStop> specials;
         std::optional<glm::fvec4> fallback;

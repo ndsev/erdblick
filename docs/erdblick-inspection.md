@@ -274,7 +274,7 @@ Relations section. A group-only association does not apply implicitly to every m
 
 ### Numeric meanings and flags
 
-Feature and SourceData rows show native domain meanings beside their raw values.
+Feature and SourceData rows show native type meanings beside their raw values.
 Named numeric exceptions, such as unknown or unlimited, are identified before unit
 conversion. Ordinary measurements may show their scaled unit value while copying
 or querying still uses the original encoding. Integers outside JavaScript's exact

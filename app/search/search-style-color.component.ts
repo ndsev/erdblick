@@ -30,7 +30,7 @@ import {
     SearchStyleFieldValueKind,
     SearchStyleGradientStopDraft,
     sortedGradientStopDrafts,
-    specialStopsForDomain
+    specialStopsForType
 } from "./search-style-color.util";
 
 @Component({
@@ -344,7 +344,7 @@ export class SearchStyleColorComponent implements OnChanges {
     }
 
     protected get gradientTags() {
-        const numeric = this.selectedFieldOption()?.domain?.numeric;
+        const numeric = this.selectedFieldOption()?.schemaType?.numeric;
         return gradientValueTags(this.viewDraft).map(tag => ({...tag,
             label: numeric?.unit && !this.schemaHasChanged
                 ? `${Number((Number(tag.label) * numeric.scale + numeric.offset).toPrecision(8))} ${numeric.unit}`
@@ -354,20 +354,20 @@ export class SearchStyleColorComponent implements OnChanges {
 
     /** A saved generated scale must be explicitly replanned after a source changes meaning. */
     protected get schemaHasChanged(): boolean {
-        const expected = this.viewDraft.domain;
+        const expected = this.viewDraft.schemaType;
         const option = this.selectedFieldOption();
-        return !!expected && !!option && (option.incompatibleDomains === true ||
-            expected.schemaId !== option.domain?.schemaId || expected.domainId !== option.domain?.domainId);
+        return !!expected && !!option && (option.incompatibleTypes === true ||
+            expected.schemaId !== option.schemaType?.schemaId || expected.typeId !== option.schemaType?.typeId);
     }
 
-    /** Names explain raw codes only when the currently loaded domain still matches the saved one. */
+    /** Names explain raw codes only when the currently loaded type still matches the saved one. */
     protected specialColorLabel(stop: SearchStyleGradientStopDraft): string {
-        const names = this.schemaHasChanged ? [] : this.selectedFieldOption()?.domain?.namedValues
+        const names = this.schemaHasChanged ? [] : this.selectedFieldOption()?.schemaType?.namedValues
             .filter(named => named.role === "special" && named.value === stop.value).map(named => named.name) ?? [];
         return `${stop.value}${names.length ? ` (${names.join(", ")})` : ""}`;
     }
 
-    /** Editing a special color preserves the raw code, exact domain guard and ordinary stops. */
+    /** Editing a special color preserves the raw code, exact schema type guard and ordinary stops. */
     protected setSpecialStopColor(stop: SearchStyleGradientStopDraft, color: string): void {
         this.viewDraft = {...this.viewDraft, specialStops: this.viewDraft.specialStops?.map(candidate =>
             candidate.id === stop.id ? {...candidate, color: normalizeHexColor(color)} : candidate)};
@@ -460,7 +460,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.clearDataWarning();
         this.viewDraft = {
             ...this.viewDraft,
-            ...(field !== this.viewDraft.field ? {domain: undefined, specialStops: undefined} : {}),
+            ...(field !== this.viewDraft.field ? {schemaType: undefined, specialStops: undefined} : {}),
             field: field ?? "",
             customField: this.viewDraft.customField || this.fieldOptions.length > 0,
             categoryValueKind: this.fieldOptions.length > 0
@@ -715,22 +715,22 @@ export class SearchStyleColorComponent implements OnChanges {
         const gradientStops = gradientStopsForObservedNumericRange({
             min: summary.numeric.min,
             max: summary.numeric.max
-        }, () => this.nextStopId++, summary.domain?.numeric);
+        }, () => this.nextStopId++, summary.schemaType?.numeric);
         if (gradientStops.length === 0) {
             this.dataColorWarning = "Observed numeric values do not provide a usable range.";
             this.updateColorWarning();
             return;
         }
 
-        const sameDomain = this.viewDraft.domain?.schemaId === summary.domain?.schemaId &&
-            this.viewDraft.domain?.domainId === summary.domain?.domainId;
+        const sameType = this.viewDraft.schemaType?.schemaId === summary.schemaType?.schemaId &&
+            this.viewDraft.schemaType?.typeId === summary.schemaType?.typeId;
         this.viewDraft = {
             ...this.viewDraft,
             gradientStops,
             categoryStops: [],
-            domain: summary.domain ? {schemaId: summary.domain.schemaId, domainId: summary.domain.domainId} : undefined,
-            specialStops: !summary.domain ? undefined : sameDomain && this.viewDraft.specialStops !== undefined
-                ? this.viewDraft.specialStops : specialStopsForDomain(summary.domain, () => this.nextStopId++)
+            schemaType: summary.schemaType ? {schemaId: summary.schemaType.schemaId, typeId: summary.schemaType.typeId} : undefined,
+            specialStops: !summary.schemaType ? undefined : sameType && this.viewDraft.specialStops !== undefined
+                ? this.viewDraft.specialStops : specialStopsForType(summary.schemaType, () => this.nextStopId++)
         };
         this.dataColorWarning = "";
         this.emitChange();
@@ -744,7 +744,7 @@ export class SearchStyleColorComponent implements OnChanges {
             this.updateColorWarning();
             return;
         }
-        const specialValues = new Set(summary.domain?.namedValues
+        const specialValues = new Set(summary.schemaType?.namedValues
             .filter(named => named.role === "special").map(named => String(named.value)) ?? []);
         const values = summary.histogram
             .map(bucket => bucket.value)
@@ -765,14 +765,14 @@ export class SearchStyleColorComponent implements OnChanges {
         }
         // Refreshing observed categories changes ordinary stops only. Preserve
         // edited or deleted special colors while their exact meaning matches.
-        const sameDomain = this.viewDraft.domain?.schemaId === summary.domain?.schemaId &&
-            this.viewDraft.domain?.domainId === summary.domain?.domainId;
+        const sameType = this.viewDraft.schemaType?.schemaId === summary.schemaType?.schemaId &&
+            this.viewDraft.schemaType?.typeId === summary.schemaType?.typeId;
         this.viewDraft = {
             ...this.viewDraft,
             categoryValueKind: valueKind,
-            domain: summary.domain ? {schemaId: summary.domain.schemaId, domainId: summary.domain.domainId} : undefined,
-            specialStops: !summary.domain ? undefined : sameDomain && this.viewDraft.specialStops !== undefined
-                ? this.viewDraft.specialStops : specialStopsForDomain(summary.domain, () => this.nextStopId++),
+            schemaType: summary.schemaType ? {schemaId: summary.schemaType.schemaId, typeId: summary.schemaType.typeId} : undefined,
+            specialStops: !summary.schemaType ? undefined : sameType && this.viewDraft.specialStops !== undefined
+                ? this.viewDraft.specialStops : specialStopsForType(summary.schemaType, () => this.nextStopId++),
             gradientStops: [],
             categoryStops: categoryStopsForObservedValues(
                 values,
@@ -816,7 +816,7 @@ export class SearchStyleColorComponent implements OnChanges {
             return "Observed value summary failed. See Diagnostics.";
         }
         if (this.dataSummaryStatus === "ready") {
-            return "No single observed value domain is available. Check Diagnostics for missing values or mixed domains.";
+            return "No single observed value type is available. Check Diagnostics for missing values or mixed types.";
         }
         if (this.dataSummaryStatus === "empty") {
             return "No observed values are available for this expression.";
@@ -826,7 +826,7 @@ export class SearchStyleColorComponent implements OnChanges {
 
     private updateColorWarning(): void {
         if (this.schemaHasChanged) {
-            this.colorWarning = "This saved scale belongs to an older or different value domain. Its fallback remains active until you choose Use current schema.";
+            this.colorWarning = "This saved scale belongs to an older or different value type. Its fallback remains active until you choose Use current schema.";
             return;
         }
         if (this.dataColorWarning) {

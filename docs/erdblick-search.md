@@ -225,30 +225,28 @@ Search style rules are evaluated only for the result layer of the current search
 
 Auto-created rules prefer fields mentioned by the query. Manual edits stop those rules from being replaced by later query changes.
 
-The field browser above the rules follows the selected maps, layers and feature
-types. Feature scope starts at the result root: choose a branch to explore its
-fields, use the parent button to return, or enable **Include descendant fields**
-to list the whole subtree. **Context** narrows a field to one concrete owner when
-the same path has different meanings in different feature types or attributes.
-Browsing changes suggestions; it does not rewrite saved rules.
+Field choices follow the search's selected maps, layers and feature types. For
+attribute searches, they use the same resolved attribute owners as query execution.
+Each expression appears once, even when several owners expose it. Automatic rules
+prefer a field explicitly addressed by the query, then the attribute's native
+scalar shorthand (for example, the speed value rather than validity direction).
 
 Feature properties appear once, under `attributes`. Existing expressions using
-`properties` remain valid. Array branches expose **Array elements**, producing
-expressions such as `attributes.samples.*.reading`. Such an expression can return
-several values: a color or label still needs one result, so use an explicit index
-or a suitable aggregation when necessary. Recursive schemas report incomplete
-discovery and remain accessible through direct branch browsing; the picker does
-not silently cap the number of fields.
+`properties` remain valid. Nested array fields use expressions such as
+`attributes.samples.*.reading`. Such an expression can return several values: a
+color or label still needs one result, so use an explicit index or a suitable
+aggregation when necessary. Recursive schema cycles are not expanded indefinitely;
+use the custom expression input and completion for paths beyond a cycle.
 
 Numeric domains keep ordinary values separate from named exceptions. For example,
-a speed domain can define `254` as variable and `255` as unlimited; these receive
+a speed type can define `254` as variable and `255` as unlimited; these receive
 editable special colors instead of stretching a gradient. The schema determines
 whether zero is ordinary or exceptional. Unit labels and round gradient steps use
-the domain's scale and offset, while saved stops retain the original numeric
+the type's scale and offset, while saved stops retain the original numeric
 encoding. A computed plain number does not inherit units or exceptions merely
 because its expression mentions a typed field.
 
-Generated scales remember the exact schema/domain they describe. When that meaning
+Generated scales remember the exact schema/type they describe. When that meaning
 changes, the editor offers **Use current schema** explicitly; saved colors are not
 silently rebound to reused numeric IDs. **Update from data** requires one observed
 domain. Narrow the map/layer scope when Diagnostics shows several incompatible
@@ -301,7 +299,7 @@ The **Diagnostics** tab explains what the current search did and helps tune quer
 
 - **Messages** lists backend or parser diagnostics. When a message offers a fix, click **Fix** to rewrite the query in the input.
 - **Query** shows the active query, effective scope, elapsed time, searched feature count, matched result count, and schema-derived notes when they are available.
-- **Values** summarizes result fields and `trace()` output. Cards include sample counts, missing/null counts, kind counts, ordinary numeric min/max/average values, histograms, and trace call timings. Different source domains appear in separate cards even for the same expression. Named exceptional values stay in histograms and are counted separately from ordinary measurements; bitmasks retain their exact hexadecimal values.
+- **Values** summarizes result fields and `trace()` output. Cards include sample counts, missing/null counts, kind counts, ordinary numeric min/max/average values, histograms, and trace call timings. Different source types appear in separate cards even for the same expression. Named exceptional values stay in histograms and are counted separately from ordinary measurements; bitmasks retain their exact hexadecimal values.
 
 Values are loaded lazily and may wait until result chunks have finished ingress. Use them when you want to understand the distribution behind a search before creating labels, categories, or gradients. Useful trace expressions include `trace(typeId)`, `trace(**.speedLimitKmh)`, and named traces such as `trace(valueKph, name="speed limits")` when several measurements should appear as separate value cards.
 <!-- --8<-- [end:diagnostics] -->

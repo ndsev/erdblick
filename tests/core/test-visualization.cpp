@@ -1764,6 +1764,45 @@ TEST_CASE("Feature search auto-scope accepts one attribute across different attr
     REQUIRE(scopeKeys.contains({"Road", "Road", "RoadRulesLayer"}));
 }
 
+TEST_CASE("Style fields use normalized attribute owners and the native payload scalar", "[erdblick.search]")
+{
+    auto layer = speedLimitLayerInfoJson("Road", "Road", "Rules");
+    auto& definitions = layer["featureModelSchema"]["$defs"];
+    // Two named owners share a physical payload. A shared enum also contains
+    // the requested name: leaf/enum discovery would incorrectly include both.
+    definitions["RulesLayer"]["properties"]["OTHER_SPEED"] = {{"$ref", "#/$defs/SpeedLimitMetric"}};
+    // The shared definition has no single type code; its two container edges
+    // supply the names, as they do in a shared native payload declaration.
+    definitions["SpeedLimitMetric"]["x-mapget"].erase("attributeTypeCode");
+    definitions["SpeedLimitMetric"]["properties"]["conditions"]["properties"]["kind"] = {
+        {"type", "string"}, {"enum", {"SPEED_LIMIT_METRIC", "OTHER_SPEED"}}};
+    TileLayerParser parser;
+    parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({{
+        {"stringPoolId", "StyleOwners"}, {"mapId", "StyleOwners"}, {"layers", {{"Road", layer}}}
+    }}).dump()));
+
+    auto options = nlohmann::json{{"values", "scalar"}};
+    for (auto const* scope : {"auto", "attribute"}) {
+        auto inventory = parser.searchStyleFieldsForQuery("SPEED_LIMIT_METRIC", scope, options);
+        REQUIRE(inventory.at("contexts").size() == 1);
+        auto const& owner = inventory.at("contexts").front();
+        CHECK(owner.at("attrName") == "SPEED_LIMIT_METRIC");
+        CHECK(owner.at("primaryValuePath") == "attributeValue.speedLimitKmh");
+        CHECK(std::ranges::any_of(inventory.at("fields"), [](auto const& field) {
+            return field.at("path") == "attributeValue.speedLimitKmh";
+        }));
+    }
+
+    // A deliberately broad attribute search still exposes both use sites;
+    // sharing a payload must never collapse distinct automatic-rule guards.
+    auto broad = parser.searchStyleFieldsForQuery("true", "attribute", options);
+    REQUIRE(broad.at("contexts").size() == 2);
+    std::set<std::string> names;
+    for (auto const& owner : broad.at("contexts"))
+        names.insert(owner.at("attrName").get<std::string>());
+    CHECK(names == std::set<std::string>{"SPEED_LIMIT_METRIC", "OTHER_SPEED"});
+}
+
 TEST_CASE("Feature search auto-scope accepts Classic direct speed-limit fields", "[erdblick.search]")
 {
     auto datasource = nlohmann::json{
@@ -1804,7 +1843,7 @@ TEST_CASE("Feature search auto-scope accepts Classic direct speed-limit fields",
         return field.at("path") == "speedLimit";
     });
     REQUIRE(speedLimitField != styleFields.end());
-    auto const& metadata = inventory.at("domains").at(speedLimitField->at("metadata").get<size_t>());
+    auto const& metadata = inventory.at("types").at(speedLimitField->at("metadata").get<size_t>());
     REQUIRE(metadata.at("valueKind") == "integer");
     REQUIRE(metadata.at("numericRange").at("min").get<double>() == 0.0);
     REQUIRE(metadata.at("numericRange").at("max").get<double>() == 255.0);
@@ -1856,7 +1895,7 @@ TEST_CASE("Feature styling preserves JSON metadata through the attributes alias"
             return field.at("path") == std::string("attributes.") + suffix;
         });
         REQUIRE(alias != fields.end());
-        auto const& metadata = inventory.at("domains").at(alias->at("metadata").get<size_t>());
+        auto const& metadata = inventory.at("types").at(alias->at("metadata").get<size_t>());
         REQUIRE(metadata.at("valueKind") != "unknown");
     }
     REQUIRE(std::ranges::none_of(fields, [](auto const& field) {
@@ -1892,7 +1931,13 @@ TEST_CASE("Feature search auto-scope keeps all shared enum attribute scopes", "[
     REQUIRE(attrNames.contains("WARNING_SIGN"));
     REQUIRE(attrNames.contains("MOVABLE_WARNING_SIGN"));
 
-    auto inventory = parser.searchStyleFieldsForQuery("SPEED_LIMIT_END", "auto", options);
+    // Enum-term layer suggestions are broader than execution's AST ownership.
+    // Explicit attribute scope exposes both owners; auto discovery must follow
+    // normalization and keep feature-root paths when that is how it executes.
+    auto automatic = parser.searchStyleFieldsForQuery("SPEED_LIMIT_END", "auto", options);
+    CHECK(parser.normalizeSearchQuery("SPEED_LIMIT_END", "auto", options).at("concreteScope") == "feature");
+    CHECK(automatic.at("contexts").front().at("attrName") == "");
+    auto inventory = parser.searchStyleFieldsForQuery("SPEED_LIMIT_END", "attribute", options);
     std::set<std::pair<std::string, std::string>> fieldOwners;
     for (auto const& field : inventory.at("fields")) {
         for (auto const& index : field.at("contexts")) {
@@ -1952,7 +1997,9 @@ TEST_CASE("Feature search completion labels enum-backed constants", "[erdblick.s
     REQUIRE_FALSE(hasCompletionType(speedCompletions, "Hint"));
 }
 
-TEST_CASE("Search completion uses native array domains and attribute overlays without sample nodes", "[erdblick.search]")
+TEST_CASE(
+    "Search completion uses native array types and attribute overlays without sample nodes",
+    "[erdblick.search]")
 {
     auto layer = warningSignLayerInfoJson();
     auto& definitions = layer["featureModelSchema"]["$defs"];

@@ -35,6 +35,26 @@ const option = (partial: Partial<FeatureSearchAutoStyleOption>): FeatureSearchAu
 });
 
 describe("feature search auto-style helpers", () => {
+    it("prefers the native speed scalar over shared validity enums and source addresses", () => {
+        const analysis: FeatureSearchAutoStyleAnalysis = {
+            ...readyAttributeAnalysis,
+            attributeScopes: [{...pedestrianWayScope, attrName: "SPEED_LIMIT_METRIC"}],
+            matchedEnumValues: ["SPEED_LIMIT_METRIC"]
+        };
+        const speed = option({value: "attributeValue.speedLimitKmh", valueKind: "integer",
+            attrName: "SPEED_LIMIT_METRIC", primaryValue: true});
+        const direction = option({value: "validity.*.direction", valueKind: "enum",
+            attrName: "SPEED_LIMIT_METRIC", enumValues: ["POSITIVE", "NEGATIVE"]});
+        const address = option({value: "_sourceData.*.address", valueKind: "integer",
+            attrName: "SPEED_LIMIT_METRIC"});
+
+        expect(preferredSearchAutoStyleField([direction, address, speed], analysis)).toBe(speed);
+        // A user explicitly searching direction still gets direction coloring.
+        expect(preferredSearchAutoStyleField([direction, address, speed], {
+            ...analysis, matchedFieldNames: ["direction"]
+        })).toBe(direction);
+    });
+
     it("generates one ranked scalar field per resolved attribute scope", () => {
         const warningSignField = option({
             value: "warningSign",

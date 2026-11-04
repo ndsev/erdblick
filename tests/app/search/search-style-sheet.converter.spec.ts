@@ -67,16 +67,24 @@ describe("search style sheet codec", () => {
         layerIds: readonly string[] = []
     ) => ({name, defaultEnabled, layerIds});
 
-    it("round-trips domain-bound special overrides through saved YAML and native validation", () => {
+    it.each([false, true])("round-trips type-bound special overrides through saved YAML (legacy guard: %s)", legacy => {
         const rule: FeatureSearchStyleRule = {geometry: ["line"], filter: [], color: {
             mode: "gradient", field: "speed", stops: [{value: 1, color: "#111111"}, {value: 253, color: "#222222"}],
-            domain: {schemaId: "saved-graph", domainId: 7},
+            schemaType: {schemaId: "saved-graph", typeId: 7},
             specials: [{value: 0, color: "#123456"}, {value: 255, color: "#abcdef"}], fallbackColor: "#ffffff"
         }};
         const saved = convertSearchStyleRulesToYaml(saveOptions("Semantic colors"), [rule]);
-        const loaded = projectStyleSourceForSearch(saved.source, "feature");
+        expect(saved.source).toContain("schemaType:");
+        expect(saved.source).not.toContain("domainId:");
+        // Simulate a stylesheet saved before the type terminology change. Both
+        // the editor import and the native runtime must retain its exact guard.
+        const source = legacy ? saved.source.replace("schemaType:", "domain:").replace("typeId:", "domainId:") : saved.source;
+        const loaded = projectStyleSourceForSearch(source, "feature");
         expect(loaded.rules[0].color).toMatchObject(rule.color);
-        const style = uint8ArrayToWasm(data => new coreLib.FeatureLayerStyle(data), new TextEncoder().encode(saved.source))!;
+        const rewritten = convertSearchStyleRulesToYaml(saveOptions("Semantic colors"), loaded.rules);
+        expect(rewritten.source).toContain("schemaType:");
+        expect(rewritten.source).not.toContain("domainId:");
+        const style = uint8ArrayToWasm(data => new coreLib.FeatureLayerStyle(data), new TextEncoder().encode(source))!;
         try {
             expect(style.isValid(), JSON.stringify(style.validationReport())).toBe(true);
         } finally {

@@ -226,7 +226,7 @@ Search result subsets never hydrate or share a complete source tile.
 
 ## Completion and schema analysis
 
-Style-field discovery traverses installed native schema domains and exports a
+Style-field discovery traverses installed native schema types and exports a
 compact inventory. Feature properties appear only under `attributes` in the
 picker; explicit queries and existing styles can still use `properties`. This is
 a feature-root alias rule, not a global spelling substitution: nested fields
@@ -239,15 +239,23 @@ map/layers, `selectedFeatureTypes`, an optional exact `context`, a semantic `pat
 all schema alternatives, and produces the corresponding Simfil expression. The
 UI does not maintain a second schema graph or parse field expressions.
 
-The response contains `contexts`, `domains`, `fields`, `branches`, `complete` and
-`incompleteReason`. A field holds its expression, one domain-table index and all
+The response contains `contexts`, `types`, `fields`, `branches`, `complete` and
+`incompleteReason`. A field holds its expression, one type-table index and all
 context indices in which that meaning applies. Metadata is exported once per
-exact artifact/domain. Two meanings of one path remain separate rows; the UI
-disables automatic semantic assumptions until the user narrows the context.
+exact schema/type. Native rows preserve distinct meanings; the editor offers
+one choice per expression and withholds conflicting type metadata rather than
+silently choosing the first owner. Automatic rules retain separate attribute
+owners for their guards. Each attribute context may supply `primaryValuePath`,
+the unambiguous native scalar shorthand, so common validity/source metadata does
+not displace the attribute value in automatic coloring.
 Scalar requests omit container descriptors while retaining navigable branches.
 `complete` concerns declared paths in the requested subtree, not whether an open
 schema lists every possible runtime field. Recursive cycles are reported and can
-be explored one branch at a time; fields are never silently truncated.
+be explored explicitly through the native API. The rule editor requests recursive
+scalar discovery without a separate branch/context UI; custom expressions and
+completion remain available for deeper recursive paths. Attribute discovery uses
+`LayerSchema.normalizeSearchQuery`, exactly as execution does, rather than the
+broader leaf/enum inference used for layer suggestions.
 
 Implicit discovery skips edges marked `Schema::FieldRole::Context`, including
 the owner-feature overlays. Explicit lookup through `$feature`, `$source` and
@@ -262,7 +270,7 @@ before installation and after completion. It provides:
 
 - syntax diagnostics;
 - direct/nested field completion;
-- enum values, ordinary numeric ranges, named numeric specials and flag domains;
+- enum values, ordinary numeric ranges, named numeric specials and flag types;
 - feature/attribute ownership analysis;
 - candidate label/category/gradient fields.
 
@@ -284,11 +292,11 @@ This worker is advisory. Backend compilation remains authoritative.
 `rewrite: false` still schema-compiles for correctness and speed; it merely
 skips search-query normalization.
 
-Result and trace summaries retain separate groups for each exact graph/domain
+Result and trace summaries retain separate groups for each exact schema/type
 pair, plus a separate unqualified group. Identical expression text does not imply
 identical units or exceptional values. Named sentinels remain in raw histograms
 but do not contribute to ordinary numeric ranges or averages. Trace call counts
-and timings describe the whole trace and are repeated on its domain cards; do not
+and timings describe the whole trace and are repeated on its type cards; do not
 sum those cards to obtain a total trace duration.
 
 ## Diagnostics

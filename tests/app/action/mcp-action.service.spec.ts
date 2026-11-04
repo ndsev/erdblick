@@ -976,6 +976,30 @@ describe("McpActionService", () => {
         expect(stateOwners(state).searchService.state.featureSearches[0].showResultsOnMap).toBe(false);
     });
 
+    it("round-trips schema-generated speed colors through the public search settings", () => {
+        const { service, searches, state } = fixture();
+        const definition = createFeatureSearchStateEntry({id: "speed", query: "SPEED_LIMIT_METRIC",
+            searchStyleRules: [{geometry: ["line"], filter: [], color: {
+                mode: "gradient", field: "attributeValue.speedLimitKmh",
+                schemaType: {schemaId: "speed-schema", typeId: 198},
+                stops: [{value: 1, color: "#0000ff"}, {value: 253, color: "#ff0000"}],
+                specials: [{value: 255, color: "#00ffff"}]
+            }}]});
+        const session: Partial<FeatureSearchSession> = {
+            id: definition.id, definition, runId: "run", refresh: 0, complete: true,
+            schemaAnalysis: readySearchAnalysis(definition.query),
+            paused: false, searchResults: [], errors: new Set<string>(), progressDone: 1, progressTotal: 1
+        };
+        searches.getSession.mockReturnValue(session as FeatureSearchSession);
+        stateOwners(state).searchService.state.featureSearches = [definition];
+        const {settings} = viewerActions.viewer_get_search.outputSchema.parse(
+            service.execute("viewer_get_search", {searchId: definition.id}));
+        expect(settings.searchStyleRules).toEqual(definition.searchStyleRules);
+        service.execute("viewer_set_search", {searchId: definition.id, settings});
+        expect(stateOwners(state).searchService.state.featureSearches[0].searchStyleRules)
+            .toEqual(definition.searchStyleRules);
+    });
+
     it("patches search presentation without replacing omitted settings or automatic layer selection", () => {
         const { service, searches, state, views } = fixture();
         const definition = createFeatureSearchStateEntry({ id: "patch", query: "true", bookmarked: true });

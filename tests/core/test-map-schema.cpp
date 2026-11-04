@@ -112,7 +112,35 @@ TEST_CASE("Invalid metadata replacement preserves the previous bound graph", "[e
 }
 
 TEST_CASE(
-    "Search styling exports widths only for concrete bitmask domains",
+    "Scalar metadata preserves enum ordinals separately from logical labels",
+    "[erdblick.schema]")
+{
+    auto graph = std::make_shared<mapget::MapSchema>();
+    auto layer = graph->newLayer("Raw", mapget::LayerType::SourceData);
+    auto type = layer->addSchema(simfil::Schema::Kind::String);
+    layer->setRootSchema(type);
+    layer->addNamedValue(
+        type,
+        {.name = "LOW", .value = std::string_view{"LOW"}, .rawValue = int64_t{-1}});
+    layer->addNamedValue(
+        type,
+        {.name = "HIGH", .value = std::string_view{"HIGH"}, .rawValue = UINT64_MAX});
+    layer->addNamedValue(type, {.name = "PLAIN", .value = std::string_view{"PLAIN"}});
+    graph->finalize();
+
+    auto metadata = erdblick::JsValue::fromSchema({graph->binding(), type});
+    auto const& values = (*metadata).at("namedValues");
+    REQUIRE(values.size() == 3);
+    CHECK((*metadata).at("typeId") == type);
+    CHECK(values[0].at("value") == "LOW");
+    CHECK(values[0].at("rawValue") == -1);
+    CHECK(values[1].at("value") == "HIGH");
+    CHECK(values[1].at("rawValue") == "18446744073709551615");
+    CHECK_FALSE(values[2].contains("rawValue"));
+}
+
+TEST_CASE(
+    "Search styling exports widths only for concrete bitmask types",
     "[erdblick.schema][erdblick.search]")
 {
     using Schema = simfil::Schema;
@@ -156,15 +184,15 @@ TEST_CASE(
         auto field = std::ranges::find_if(fields,
             [&](auto const& candidate) { return candidate.at("path") == path; });
         REQUIRE(field != fields.end());
-        auto const& metadata = inventory.at("domains").at(field->at("metadata").get<size_t>());
-        REQUIRE(metadata.contains("domain"));
+        auto const& metadata = inventory.at("types").at(field->at("metadata").get<size_t>());
+        REQUIRE(metadata.contains("schemaType"));
         if (std::string_view(name) == "flags") {
             CHECK(metadata.at("valueKind") == "bitmask");
-            CHECK(metadata.at("domain").at("bitWidth") == 8);
+            CHECK(metadata.at("schemaType").at("bitWidth") == 8);
         }
         else {
             CHECK(metadata.at("valueKind") == "unknown");
-            CHECK_FALSE(metadata.at("domain").contains("bitWidth"));
+            CHECK_FALSE(metadata.at("schemaType").contains("bitWidth"));
         }
     }
     REQUIRE(std::ranges::none_of(fields, [](auto const& field) {
@@ -173,7 +201,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "Style discovery shares exact domains and explores selected semantic branches without aliases",
+    "Style discovery shares exact types and explores selected semantic branches without aliases",
     "[erdblick.schema][erdblick.search]")
 {
     using Schema = simfil::Schema;
@@ -280,9 +308,10 @@ TEST_CASE(
         }));
     }
     CHECK(all.at("complete") == true);
-    CHECK(std::ranges::none_of(all.at("domains"), [](auto const& domain) {
-        return domain.at("valueKind") == "object" || domain.at("valueKind") == "array";
-    }));
+    CHECK(std::ranges::none_of(
+        all.at("types"),
+        [](auto const& type)
+        { return type.at("valueKind") == "object" || type.at("valueKind") == "array"; }));
 
     auto options = nlohmann::json{{"path", {"attributes", "samples"}},
         {"recursive", false}, {"values", "scalar"}};
@@ -298,7 +327,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "Inspection labels exact domains while keeping raw numbers and masks",
+    "Inspection labels exact types while keeping raw numbers and masks",
     "[erdblick.schema][erdblick.inspection]")
 {
     erdblick::test::ScalarSchema fixture;
@@ -319,7 +348,7 @@ TEST_CASE(
     Node computed;
     REQUIRE(computed.setScalarValue(simfil::Value(int64_t{255})));
     CHECK(computed.displayValue_.empty());
-    CHECK_FALSE(computed.scalarDomain_);
+    CHECK_FALSE(computed.scalarType_);
     Node flags;
     REQUIRE(flags.setScalarValue(simfil::Value(simfil::Bitmask{
         UINT64_C(0x8000000000000003),
@@ -379,10 +408,10 @@ TEST_CASE(
     REQUIRE(rows.size() == 2);
     CHECK(rows[0]["value"] == 255);
     CHECK(rows[0]["displayValue"].get<std::string>().find("UNLIMITED") != std::string::npos);
-    CHECK(rows[0]["domain"]["domainId"] == fixture.speed);
+    CHECK(rows[0]["scalarType"]["typeId"] == fixture.speed);
     CHECK(rows[1]["value"] == 12);
     CHECK(rows[1]["displayValue"].get<std::string>().find("1.2 m") != std::string::npos);
-    CHECK(rows[1]["domain"]["domainId"] == fixture.width);
+    CHECK(rows[1]["scalarType"]["typeId"] == fixture.width);
 }
 
 TEST_CASE(
@@ -408,7 +437,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "Value summaries separate actual domains and exclude sentinel statistics",
+    "Value summaries separate actual types and exclude sentinel statistics",
     "[erdblick.schema][projection]")
 {
     erdblick::test::ScalarSchema fixture;
@@ -466,7 +495,7 @@ TEST_CASE(
     CHECK(classic["numeric"]["min"] == 0);
     CHECK(classic["numeric"]["average"] == 60);
     auto const& calculated = result["resultFields"][2]["summary"];
-    CHECK_FALSE(calculated.contains("domain"));
+    CHECK_FALSE(calculated.contains("schemaType"));
     CHECK(calculated["numeric"]["min"] == 255);
     auto const& masks = result["resultFields"][3]["summary"];
     CHECK(masks["kinds"]["bitmask"] == 1);

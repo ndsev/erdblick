@@ -407,7 +407,7 @@ export class FeatureSearchSchemaService {
                         // this is observed delivery latency, not isolated CPU.
                         deliveryMs: performance.timeOrigin + receivedAt - message.timing.postedAt,
                         fields: message.inventory.fields.length,
-                        domains: message.inventory.domains.length,
+                        types: message.inventory.types.length,
                         contexts: message.inventory.contexts.length,
                         complete: message.inventory.complete
                     }

@@ -1,4 +1,4 @@
-import type {SchemaDomainIdentity, SchemaScalarDomain} from "../mapdata/schema-domain.model";
+import type {SchemaTypeIdentity, SchemaScalarType} from "../mapdata/schema-type.model";
 import type {
     FeatureSearchColorMode,
     FeatureSearchColorStop
@@ -18,9 +18,9 @@ export interface SearchStyleFieldOption {
     valueKind?: SearchStyleFieldValueKind;
     enumValues?: string[];
     numericRange?: SearchStyleNumericRange;
-    domain?: SchemaScalarDomain;
+    schemaType?: SchemaScalarType;
     /** One expression spans different meanings; auto-coloring requires a narrower source scope. */
-    incompatibleDomains?: boolean;
+    incompatibleTypes?: boolean;
 }
 
 export interface SearchStyleGradientStopDraft {
@@ -46,7 +46,7 @@ export interface SearchStyleColorDraft {
     gradientStops: SearchStyleGradientStopDraft[];
     categoryStops: SearchStyleCategoryStopDraft[];
     /** These are explicit saved rules; loading new metadata must not regenerate them. */
-    domain?: SchemaDomainIdentity;
+    schemaType?: SchemaTypeIdentity;
     specialStops?: SearchStyleGradientStopDraft[];
     fallbackColor: string;
     /** False omits the scale fallback: unmatched values are not rendered. */
@@ -101,7 +101,7 @@ export function searchStyleColorProperties(
             mode: color.mode === "gradient" ? "linear" : "categorical",
             expression,
             stops,
-            ...(color.domain ? {domain: color.domain} : {}),
+            ...(color.schemaType ? {schemaType: color.schemaType} : {}),
             ...(color.specials?.length ? {specials: normalizedCategoricalStyleStops(color.specials, fallback)} : {}),
             ...(color.fallbackColor === undefined ? {} : {fallback})
         }
@@ -191,7 +191,7 @@ export function cloneSearchStyleColorDraft(draft: SearchStyleColorDraft): Search
         field: draft.field,
         customField: !!draft.customField,
         categoryValueKind: draft.categoryValueKind,
-        ...(draft.domain ? {domain: {...draft.domain}} : {}),
+        ...(draft.schemaType ? {schemaType: {...draft.schemaType}} : {}),
         ...(draft.specialStops ? {specialStops: draft.specialStops.map(stop => ({...stop}))} : {}),
         fallbackEnabled: draft.fallbackEnabled !== false,
         solidColor: normalizeHexColor(draft.solidColor),
@@ -419,7 +419,7 @@ export function categoryStopsForObservedValues(
 export function gradientStopsForNumericRange(
     range: SearchStyleNumericRange | undefined,
     nextId: () => number,
-    numeric?: SchemaScalarDomain["numeric"]
+    numeric?: SchemaScalarType["numeric"]
 ): SearchStyleGradientStopDraft[] {
     if (!range || !Number.isFinite(range.min) || !Number.isFinite(range.max) || range.min > range.max) return [];
     if (range.min === range.max) return [{id: nextId(), value: range.min, color: gradientColorAt(0.5)}];
@@ -454,19 +454,19 @@ export function gradientStopsForNumericRange(
 export function gradientStopsForObservedNumericRange(
     range: SearchStyleNumericRange | undefined,
     nextId: () => number,
-    numeric?: SchemaScalarDomain["numeric"]
+    numeric?: SchemaScalarType["numeric"]
 ): SearchStyleGradientStopDraft[] {
     return gradientStopsForNumericRange(range, nextId, numeric);
 }
 
 /** Named sentinel defaults are editable presentation choices, separate from ordinary stops. */
-export function specialStopsForDomain(
-    domain: SchemaScalarDomain | undefined,
+export function specialStopsForType(
+    schemaType: SchemaScalarType | undefined,
     nextId: () => number
 ): SearchStyleGradientStopDraft[] {
     const colors = {unknown: "#71717a", variable: "#a855f7", unbounded: "#06b6d4", saturated: "#f59e0b", ordinary: "#64748b"};
     const seen = new Set<number>();
-    return (domain?.namedValues ?? []).flatMap(named => {
+    return (schemaType?.namedValues ?? []).flatMap(named => {
         if (named.role !== "special" || named.removed || typeof named.value !== "number" ||
             !Number.isFinite(named.value) || (Number.isInteger(named.value) && !Number.isSafeInteger(named.value)) || seen.has(named.value)) return [];
         seen.add(named.value);
@@ -484,7 +484,7 @@ export function autoInitializeSearchStyleColorDraft(
         return {draft: cloneSearchStyleColorDraft(draft), message: "", success: true};
     }
 
-    if (fieldOption?.incompatibleDomains) {
+    if (fieldOption?.incompatibleTypes) {
         return {draft: cloneSearchStyleColorDraft(draft), success: false,
             message: "This field has different schema meanings across the selected sources. Narrow the source selection before generating colors."};
     }
@@ -509,7 +509,7 @@ export function autoInitializeSearchStyleColorDraft(
                     categoryValueKind: fieldOption.valueKind,
                     categoryStops: categoryStopsForEnumValues(enumValues, nextId),
                     gradientStops: [],
-                    domain: undefined,
+                    schemaType: undefined,
                     specialStops: undefined
                 }),
                 message: "",
@@ -538,7 +538,7 @@ export function autoInitializeSearchStyleColorDraft(
         };
     }
 
-    const gradientStops = gradientStopsForNumericRange(fieldOption.numericRange, nextId, fieldOption.domain?.numeric);
+    const gradientStops = gradientStopsForNumericRange(fieldOption.numericRange, nextId, fieldOption.schemaType?.numeric);
     if (gradientStops.length === 0) {
         return {
             draft: cloneSearchStyleColorDraft({...draft, gradientStops: []}),
@@ -549,8 +549,8 @@ export function autoInitializeSearchStyleColorDraft(
     return {
         draft: cloneSearchStyleColorDraft({
             ...draft, gradientStops, categoryStops: [],
-            domain: fieldOption.domain ? {schemaId: fieldOption.domain.schemaId, domainId: fieldOption.domain.domainId} : undefined,
-            specialStops: fieldOption.domain ? specialStopsForDomain(fieldOption.domain, nextId) : undefined
+            schemaType: fieldOption.schemaType ? {schemaId: fieldOption.schemaType.schemaId, typeId: fieldOption.schemaType.typeId} : undefined,
+            specialStops: fieldOption.schemaType ? specialStopsForType(fieldOption.schemaType, nextId) : undefined
         }),
         message: "",
         success: true

@@ -1,8 +1,7 @@
 # Erdblick Developer Guide
 
 Erdblick is MapViewer's Angular/Deck.gl browser client plus a C++ core compiled
-to WebAssembly. This guide describes the S4E2 architecture introduced with
-mapget protocol 4.
+to WebAssembly. This guide describes its subset-based rendering architecture.
 
 File roles, dependency rules and the structural lint check are documented in
 [Source roles and dependencies](erdblick-source-structure.md).
@@ -50,6 +49,13 @@ incremental rebuild script. It rebuilds the bindings and both frontend variants:
 ```bash
 ./ci/20_linux_rebuild.bash
 ```
+
+A tile-protocol or static-dictionary change requires a coordinated rebuild of
+the native server, binary datasource clients and browser WASM from compatible
+mapget/simfil sources. Deploy the matching server and frontend together, then
+reload open tabs. A newly built frontend cannot validate the new protocol
+against a still-running server built for the previous format; integration tests
+must start a matching server.
 
 WASM exception catching is enabled only for the parser, style validation/loading,
 and packet-error reporting sources listed in `libs/core/CMakeLists.txt`. Keep it
@@ -192,20 +198,28 @@ valid searches or rendered scenes. Replaced graphs remain alive while decoded
 values own them; stale bytes cannot silently bind to a replacement graph.
 
 Search completion selects native feature or attribute-query schema IDs from
-mapget's `LayerSchema` and calls simfil's schema-domain completion directly.
+mapget's `LayerSchema` and calls simfil's schema-type completion directly.
 The parser caches one environment/private string namespace per registry, cleared
 when datasource metadata changes. It builds no sample `ModelPool` or frontend
 schema graph. Mapget owns attribute overlay roots such as `$feature` and validity
-metadata; simfil owns array, union and recursive-domain traversal. Candidate
+metadata; simfil owns array, union and recursive-type traversal. Candidate
 merging/type hints remain in erdblick, under one timeout across selected roots.
 
-Scalar domain projections preserve the exact graph/domain identity together with
+Scalar type projections preserve the exact schema/type identity together with
 native numeric ranges, units, named special values and flag definitions. They are
 small presentation records, not a TypeScript schema implementation. Values selected
-from a source retain their domain; computed plain values do not acquire a unit from
+from a source retain their type; computed plain values do not acquire a unit from
 their expression text. Native subset copying preserves these bindings for both
-projected values and traces. Search summaries group actual values by domain; there
+projected values and traces. Search summaries group actual values by type; there
 is no inferred output schema or per-result metadata side table.
+
+The projected identity is `{schemaId, typeId}`: `schemaId` is the exact artifact
+token and `typeId` is its numeric local type ID. Search metadata calls this
+record `schemaType`; inspection rows call it `scalarType`, keeping it distinct
+from the raw source-data tree's existing textual `schemaType` column. Named
+enum values can carry an optional `rawValue` ordinal independently of the
+logical label. The WASM bridge uses decimal strings for integers outside
+JavaScript's exact range, including those ordinals.
 
 Subset projected values have two distinct array levels: the outer array aligns
 with the channel's expressions, and each slot contains that expression's ordered
@@ -740,7 +754,7 @@ actions using the original contract. A byte-identical rebuild leaves tabs alone.
 The browser registers only when `/mcp/info` advertises an exactly matching trusted
 catalog and the existing interactive connection has its UUID. Server controls use
 VTLV `ActionControl` frame type 9; browser controls use text JSON on that same
-socket. Relay envelope version 1 is independent of tile protocol 5.3. Controls
+socket. Relay envelope version 1 is independent of the tile protocol. Controls
 bypass the pausable tile-data queue without advancing tile request IDs or changing
 dictionary/data order. There is no second WebSocket or mutation replay.
 
@@ -1053,8 +1067,15 @@ See [Style System](erdblick-stylesystem.md).
 
 ## Protocol migration
 
+The current tile-stream format is 6.2.0. Adding schema `rawValue` metadata
+extends simfil's static dictionary and shifts mapget's static field IDs. Readers
+reject older major/minor stream versions before interpreting payload fields;
+an older dictionary must not decode new payloads, or vice versa. MapSchema codec
+3 and SchemaPool codec 2 also reject older schema artifacts. Rebuild native
+producers and browser WASM together as described under [Build and test](#build-and-test).
+
 Protocol 6.0.0 requires the exact installed MapSchema for model decoding and
-preserves scalar domains through native subset copying. Fetch schema artifacts
+preserves scalar types through native subset copying. Fetch schema artifacts
 before decoding dependent tiles; older binary frames are incompatible. This does
 not rename persisted AppState, configuration or URL keys.
 

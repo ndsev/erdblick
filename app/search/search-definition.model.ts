@@ -1,5 +1,5 @@
 import { z } from "zod";
-import {schemaDomainIdentitySchema, type SchemaDomainIdentity} from "../mapdata/schema-domain.model";
+import {legacySchemaTypeIdentitySchema, schemaTypeIdentitySchema, type SchemaTypeIdentity} from "../mapdata/schema-type.model";
 
 export type FeatureSearchScope = "attribute" | "feature" | "auto";
 
@@ -32,7 +32,7 @@ export type FeatureSearchColorMode =
         stops: FeatureSearchColorStop[];
         fallbackColor?: string;
         /** Generated scales apply only to this exact source meaning, including after reload. */
-        domain?: SchemaDomainIdentity;
+        schemaType?: SchemaTypeIdentity;
         /** Exact raw overrides are evaluated before gradient interpolation. */
         specials?: FeatureSearchColorStop[];
     };
@@ -349,8 +349,13 @@ function normalizeSearchColorMode(raw: Record<string, unknown>): FeatureSearchCo
             };
         }
         if (mode === "gradient" || mode === "categories") {
-            const domain = schemaDomainIdentitySchema.safeParse(color["domain"]);
-            if ((color["domain"] !== undefined || color["specials"] !== undefined) && !domain.success) {
+            // Existing local searches stored the same exact guard as domain/domainId.
+            // Prefer the current spelling even when invalid, so a malformed guard
+            // cannot silently become an unguarded scale or select a second identity.
+            const hasCurrentType = color["schemaType"] !== undefined;
+            const storedType = hasCurrentType ? color["schemaType"] : color["domain"];
+            const schemaType = (hasCurrentType ? schemaTypeIdentitySchema : legacySchemaTypeIdentitySchema).safeParse(storedType);
+            if ((storedType !== undefined || color["specials"] !== undefined) && !schemaType.success) {
                 return {mode: "solid", color: normalizeHexColor(color["fallbackColor"], DEFAULT_PIN_COLOR)};
             }
             return {
@@ -358,8 +363,8 @@ function normalizeSearchColorMode(raw: Record<string, unknown>): FeatureSearchCo
                 field: normalizeString(color["field"]) ?? "",
                 ...(normalizeBoolean(color["customField"], false) ? { customField: true } : {}),
                 stops: normalizeColorStops(color["stops"]),
-                ...(domain.success ? {domain: domain.data} : {}),
-                ...(domain.success && Array.isArray(color["specials"]) ? {specials: normalizeColorStops(color["specials"])} : {}),
+                ...(schemaType.success ? {schemaType: schemaType.data} : {}),
+                ...(schemaType.success && Array.isArray(color["specials"]) ? {specials: normalizeColorStops(color["specials"])} : {}),
                 ...(normalizeString(color["fallbackColor"])
                     ? { fallbackColor: normalizeHexColor(color["fallbackColor"], DEFAULT_PIN_COLOR) }
                     : {})

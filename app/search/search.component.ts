@@ -26,7 +26,7 @@ import { FeatureSearchSchemaService } from "./feature-search-schema.service";
 import { MapDataService } from "../mapdata/mapdata.service";
 import { searchStyleFieldCandidates, type FeatureSearchAttributeScopeCandidate,
     type FeatureSearchStyleFieldCandidate, type FeatureSearchStyleFieldContext,
-    type FeatureSearchStyleFieldInventory, type FeatureSearchStylePathStep } from "./search.model";
+    type FeatureSearchStyleFieldInventory } from "./search.model";
 import {
     GroupTreeNode,
     LayerTreeNode,
@@ -574,38 +574,6 @@ interface FeatureSearchResultTreeItem {
                                     {{ styleAttributeOptionsError }}
                                 </div>
                             }
-                            <div class="feature-search-field-browser" data-testid="feature-search-field-browser">
-                                <span>Field scope: {{ styleFieldPathLabel }}</span>
-                                @if (styleFieldPath.length) {
-                                    <p-button icon="pi pi-arrow-up" ariaLabel="Parent field scope"
-                                              data-testid="feature-search-field-parent"
-                                              size="small" [text]="true"
-                                              (click)="browseStyleFields(styleFieldPath.slice(0, -1))"></p-button>
-                                }
-                                <p-select [options]="styleFieldBranches" [ngModel]="null"
-                                          data-testid="feature-search-field-branch" ariaLabel="Field branch"
-                                          optionLabel="label" optionValue="path"
-                                          placeholder="Explore a branch" appendTo="body"
-                                          [filter]="true" [loading]="styleAttributeOptionsLoading"
-                                          (onChange)="browseStyleFields($event.value)"></p-select>
-                                <p-select [options]="styleFieldContexts" [(ngModel)]="styleFieldContext"
-                                          data-testid="feature-search-field-context" ariaLabel="Schema context"
-                                          optionLabel="label" optionValue="value"
-                                          placeholder="All schema contexts" [showClear]="true"
-                                          appendTo="body" [filter]="true"
-                                          [virtualScroll]="styleFieldContexts.length > 100"
-                                          [virtualScrollItemSize]="36"
-                                          (onChange)="refreshStyleFieldScope()"></p-select>
-                                <label>
-                                    <p-checkbox [(ngModel)]="styleFieldRecursive" [binary]="true"
-                                                data-testid="feature-search-field-descendants" ariaLabel="Include descendant fields"
-                                                (onChange)="refreshStyleFieldScope()"></p-checkbox>
-                                    Include descendant fields
-                                </label>
-                                @if (styleFieldDiscoveryNotice) {
-                                    <span role="status">{{ styleFieldDiscoveryNotice }}</span>
-                                }
-                            </div>
                             <search-style-rule-editor
                                 [drafts]="styleRuleDrafts"
                                 (draftsChange)="onSharedStyleRuleDraftsChange($event)"
@@ -728,10 +696,10 @@ interface FeatureSearchResultTreeItem {
 
                         <ng-template #valueSummaryTemplate let-summary>
                             <div class="feature-search-value-summary">
-                                @if (summary.domain) {
-                                    <div class="feature-search-value-summary-row" [title]="summary.domain.schemaId + ':' + summary.domain.domainId">
-                                        <span>Value domain</span>
-                                        <strong>{{ summary.domain.typeName || 'Qualified value' }}</strong>
+                                @if (summary.schemaType) {
+                                    <div class="feature-search-value-summary-row" [title]="summary.schemaType.schemaId + ':' + summary.schemaType.typeId">
+                                        <span>Value type</span>
+                                        <strong>{{ summary.schemaType.typeName || 'Qualified value' }}</strong>
                                     </div>
                                 }
                                 <div class="feature-search-value-summary-row">
@@ -838,13 +806,6 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
     styleScalarAttributeOptions: FeatureSearchStyleOption[] = [];
     styleAttributeOptionsLoading = false;
     styleAttributeOptionsError = "";
-    /** Picker scope is ephemeral; browsing suggestions never rewrites saved expressions. */
-    styleFieldPath: FeatureSearchStylePathStep[] = [];
-    styleFieldRecursive = false;
-    styleFieldContext: FeatureSearchStyleFieldContext | null = null;
-    styleFieldBranches: FeatureSearchStyleFieldInventory["branches"] = [];
-    styleFieldContexts: Array<{label: string; value: FeatureSearchStyleFieldContext}> = [];
-    styleFieldDiscoveryNotice = "";
     private appliedStyleFieldInventory: FeatureSearchStyleFieldInventory | null = null;
     mapLayerTreeOptions: TreeNode<FeatureSearchLayerTreeNodeData>[] = [];
     selectedMapLayerTreeNodes: TreeNode<FeatureSearchLayerTreeNodeData>[] = [];
@@ -927,7 +888,6 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         tree: 10
     };
     private styleAttributeOptionsSessionSignature = "";
-    private styleFieldConcreteScope: FeatureSearchScope | null = null;
     private styleAttributeOptionsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
     private styleAttributeOptionsRefreshPatchMissing = false;
     private readonly autoStyleRuleAttemptSignatures = new Set<string>();
@@ -1092,7 +1052,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
             field.expression.trim() === trimmedExpression
         );
         // Choosing the first group would silently pick one unit or format.
-        // Auto-coloring requires one unambiguous observed value domain.
+        // Auto-coloring requires one unambiguous observed value type.
         return matches.length === 1 ? matches[0].summary : undefined;
     }
 
@@ -1120,11 +1080,11 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         if (!summary.numeric) {
             return "";
         }
-        const domain = summary.domain?.numeric;
-        const display = (raw: number) => this.formatSummaryNumber(raw * (domain?.scale ?? 1) + (domain?.offset ?? 0));
+        const numeric = summary.schemaType?.numeric;
+        const display = (raw: number) => this.formatSummaryNumber(raw * (numeric?.scale ?? 1) + (numeric?.offset ?? 0));
         return `min ${display(summary.numeric.min)}, `
             + `max ${display(summary.numeric.max)}, `
-            + `avg ${display(summary.numeric.average)}${domain?.unit ? ` ${domain.unit}` : ""}`;
+            + `avg ${display(summary.numeric.average)}${numeric?.unit ? ` ${numeric.unit}` : ""}`;
     }
 
     /** Returns non-zero kind counters in display order. */
@@ -1345,7 +1305,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
     /** Limits automatic defaults to fields that belong to the resolved query scope. */
     private defaultStyleFieldOptionsForSession(session: FeatureSearchSession | undefined): FeatureSearchStyleOption[] {
         return defaultSearchStyleFieldOptionsForAnalysis(
-            this.styleScalarAttributeOptions,
+            this.styleAttributeOptions.filter(option => this.isScalarStyleField(option)),
             session?.schemaAnalysis);
     }
 
@@ -1359,7 +1319,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
     }
 
     private styleFieldOption(field: string): FeatureSearchStyleOption | undefined {
-        return this.styleAttributeOptions.find(option => option.value === field);
+        return this.styleScalarAttributeOptions.find(option => option.value === field);
     }
 
     private isScalarStyleField(option: FeatureSearchStyleOption): boolean {
@@ -1861,10 +1821,8 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
             session.definition.selectedMapLayers,
             {
                 selectedFeatureTypes: session.definition.selectedFeatureTypes,
-                path: this.styleFieldPath,
-                recursive: this.styleFieldRecursive,
-                values: "scalar",
-                ...(this.styleFieldContext ? {context: this.styleFieldContext} : {})
+                recursive: true,
+                values: "scalar"
             }
         ).then(inventory => {
             if (signature !== this.styleAttributeOptionsSessionSignature) {
@@ -1887,47 +1845,12 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         });
     }
 
-    /** Shows the semantic branch being offered without parsing an expression in the UI. */
-    get styleFieldPathLabel(): string {
-        return this.styleFieldPath.length
-            ? this.styleFieldPath.map(step => typeof step === "string" ? step : "Array elements").join(" › ")
-            : "Result root";
-    }
-
-    /** Explore a native-declared branch; saved rules retain their original field expressions. */
-    browseStyleFields(path: FeatureSearchStylePathStep[]): void {
-        this.styleFieldPath = [...path];
-        this.refreshStyleFieldScope();
-    }
-
-    /** Refresh suggestions after changing the branch, context or recursive discovery mode. */
-    refreshStyleFieldScope(): void {
-        if (!this.session) return;
-        this.styleAttributeOptionsSessionSignature = "";
-        this.refreshStyleAttributeOptionsIfNeeded(this.session, false);
-    }
-
     /** Applies worker-produced schema field candidates to the style-field dropdowns. */
     private applyStyleAttributeOptions(
         session: FeatureSearchSession,
         inventory: FeatureSearchStyleFieldInventory,
         patchMissingFields: boolean
     ): void {
-        const selectedContext = this.styleFieldContext;
-        if (selectedContext && !inventory.contexts.some(context =>
-            context.mapId === selectedContext.mapId && context.layerId === selectedContext.layerId &&
-            (context.featureType ?? "") === (selectedContext.featureType ?? "") &&
-            (context.attrName ?? "") === (selectedContext.attrName ?? "") &&
-            (context.attrLayerName ?? "") === (selectedContext.attrLayerName ?? ""))) {
-            // A new feature-type/layer selection or datasource generation can
-            // remove the chosen context. The inventory retains all available
-            // contexts, so clear an obsolete filter before showing its empty
-            // result as though the newly selected schema had no fields.
-            this.styleFieldContext = null;
-            this.styleAttributeOptionsSessionSignature = "";
-            this.refreshStyleAttributeOptionsIfNeeded(session, patchMissingFields);
-            return;
-        }
         if (this.appliedStyleFieldInventory !== inventory) {
             this.updateStyleFieldOptions(inventory);
             this.appliedStyleFieldInventory = inventory;
@@ -1951,85 +1874,78 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
     /** Aggregate one new inventory; feature-predicate cache hits reuse these dropdown arrays. */
     private updateStyleFieldOptions(inventory: FeatureSearchStyleFieldInventory): void {
         const started = performance.now();
-        this.styleFieldBranches = inventory.branches;
-        this.styleFieldContexts = inventory.contexts.map(context => ({
-            label: [context.mapId, context.layerId, context.featureType,
-                context.attrLayerName, context.attrName].filter(Boolean).join(" / "),
-            value: context
-        }));
-        this.styleFieldDiscoveryNotice = !inventory.complete ? inventory.incompleteReason
-            : !this.styleFieldRecursive && inventory.branches.length
-                ? "Choose a branch or include descendants to see nested fields." : "";
         const sourceOptions = searchStyleFieldCandidates(inventory);
-        const byValue = new Map<string, { option: FeatureSearchStyleOption, contexts: Set<string> }>();
-        for (const option of sourceOptions) {
-          for (const context of option.contexts) {
-            const key = context.attrName ? `${option.path}\n${context.attrName}` : option.path;
-            let entry = byValue.get(key);
-            if (!entry) {
-                entry = {
-                    option: {
-                        label: option.path,
-                        value: option.path,
-                        mapId: context.mapId,
-                        layerId: context.layerId,
-                        attrName: context.attrName || undefined,
-                        attrLayerName: context.attrLayerName || undefined,
-                        featureType: context.featureType || undefined,
-                        valueKind: option.valueKind,
-                        enumValues: option.enumValues,
-                        numericRange: option.numericRange,
-                        domain: option.domain,
-                        mapLayers: [{
-                            mapId: context.mapId,
-                            layerId: context.layerId
-                        }]
-                    },
-                    contexts: new Set<string>()
+        // Automatic rules need an attribute owner for their $name guard. The
+        // editor stores only an expression, so repeating it once per owner
+        // creates indistinguishable choices whose selection has no effect.
+        const byOwner = new Map<string, FeatureSearchStyleOption>();
+        const byExpression = new Map<string, FeatureSearchStyleOption>();
+        const contribute = (
+            target: Map<string, FeatureSearchStyleOption>,
+            key: string,
+            source: FeatureSearchStyleFieldCandidate,
+            context: FeatureSearchStyleFieldContext
+        ): void => {
+            let option = target.get(key);
+            if (!option) {
+                option = {
+                    label: source.path,
+                    value: source.path,
+                    mapId: context.mapId,
+                    layerId: context.layerId,
+                    attrName: context.attrName || undefined,
+                    attrLayerName: context.attrLayerName || undefined,
+                    featureType: context.featureType || undefined,
+                    primaryValue: context.primaryValuePath === source.path,
+                    valueKind: source.valueKind,
+                    enumValues: source.enumValues,
+                    numericRange: source.numericRange,
+                    schemaType: source.schemaType,
+                    mapLayers: []
                 };
-                byValue.set(key, entry);
+                target.set(key, option);
             }
-            this.mergeSearchStyleFieldMetadata(entry.option, option, context);
-            const contextLabel = this.searchStyleFieldContextLabel(context);
-            if (contextLabel) {
-                entry.contexts.add(contextLabel);
+            this.mergeSearchStyleFieldMetadata(option, source, context);
+        };
+        for (const option of sourceOptions) {
+            for (const context of option.contexts) {
+                if (context.attrName) {
+                    contribute(byOwner, `${option.path}\n${context.attrName}`, option, context);
+                }
+                contribute(byExpression, option.path, option, context);
             }
-          }
         }
-        const nextOptions = Array.from(byValue.values())
-            .flatMap(entry => {
-                const option: FeatureSearchStyleOption = {...entry.option,
-                    label: this.searchStyleFieldOptionLabel(entry.option.value, entry.contexts)};
-                // A flag is a boolean question answered by native domain-aware
+        const choices = (options: Iterable<FeatureSearchStyleOption>): FeatureSearchStyleOption[] =>
+            Array.from(options).flatMap(option => {
+                // A flag is a boolean question answered by native type-aware
                 // hasFlag, including zero/composite masks. Never enumerate all
                 // combinations or use a raw numeric mask as an enum category.
-                if (option.valueKind !== "bitmask" || option.incompatibleDomains) return [option];
-                return [option, ...(option.domain?.namedValues ?? [])
+                if (option.valueKind !== "bitmask" || option.incompatibleTypes) return [option];
+                return [option, ...(option.schemaType?.namedValues ?? [])
                     .filter(flag => flag.role === "flag" && !flag.removed && !flag.deprecated)
                     .map(flag => ({...option,
                         label: `${option.label} · ${flag.name}`,
                         value: `hasFlag(${option.value}, ${JSON.stringify(flag.name)})`,
+                        primaryValue: false,
                         valueKind: "boolean" as const,
-                        domain: undefined,
+                        schemaType: undefined,
                         numericRange: undefined,
                         enumValues: ["false", "true"]
                     }))];
-            })
-            .sort((lhs, rhs) =>
+            }).sort((lhs, rhs) =>
                 this.searchStyleFieldSortRank(lhs) - this.searchStyleFieldSortRank(rhs)
                 || lhs.label.localeCompare(rhs.label));
-        this.styleAttributeOptions = nextOptions;
-        if (nextOptions.some(option => option.incompatibleDomains)) {
-            this.styleFieldDiscoveryNotice = [this.styleFieldDiscoveryNotice,
-                "Some fields have several meanings. Choose a schema context to see their value ranges and labels."]
-                .filter(Boolean).join(" ");
-        }
-        const nextScalarOptions = nextOptions.filter(option => this.isScalarStyleField(option));
-        this.styleScalarAttributeOptions = nextScalarOptions;
+        this.styleScalarAttributeOptions = choices(byExpression.values())
+            .filter(option => this.isScalarStyleField(option));
+        // Feature inventories have no separate attribute guards. Reuse their
+        // picker array; wide Classic schemas can contain tens of thousands of
+        // paths even though the native type descriptors are shared.
+        this.styleAttributeOptions = byOwner.size
+            ? choices(byOwner.values()) : this.styleScalarAttributeOptions;
         const applied = performance.now();
         performance.clearMeasures("erdblick.search.style-fields.apply");
         performance.measure("erdblick.search.style-fields.apply", {start: started, end: applied,
-            detail: {fields: inventory.fields.length, choices: nextOptions.length}});
+            detail: {fields: inventory.fields.length, choices: this.styleScalarAttributeOptions.length}});
         requestAnimationFrame(() => {
             performance.clearMeasures("erdblick.search.style-fields.next-frame");
             performance.measure("erdblick.search.style-fields.next-frame", {start: applied, end: performance.now()});
@@ -2042,16 +1958,17 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         source: FeatureSearchStyleFieldCandidate,
         context: FeatureSearchStyleFieldContext
     ): void {
-        const sameDomain = target.domain?.schemaId === source.domain?.schemaId &&
-            target.domain?.domainId === source.domain?.domainId;
-        target.incompatibleDomains ||= !sameDomain;
-        // Identical exact domains already share metadata. Repeatedly unioning
+        const sameType = target.schemaType?.schemaId === source.schemaType?.schemaId &&
+            target.schemaType?.typeId === source.schemaType?.typeId;
+        target.primaryValue &&= context.primaryValuePath === source.path;
+        target.incompatibleTypes ||= !sameType;
+        // Identical exact types already share metadata. Repeatedly unioning
         // their enum names for each feature owner was a substantial UI cost.
-        if (!source.domain && !target.incompatibleDomains && target.enumValues !== source.enumValues) {
+        if (!source.schemaType && !target.incompatibleTypes && target.enumValues !== source.enumValues) {
             target.valueKind = this.mergedStyleFieldValueKind(target.valueKind, source.valueKind);
             target.enumValues = [...new Set([...(target.enumValues ?? []), ...source.enumValues])].sort();
         }
-        if (!source.domain && source.numericRange) {
+        if (!source.schemaType && source.numericRange) {
             target.numericRange = target.numericRange
                 ? {
                     min: Math.min(target.numericRange.min, source.numericRange.min),
@@ -2059,8 +1976,8 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
                 }
                 : { ...source.numericRange };
         }
-        if (target.incompatibleDomains) {
-            target.domain = undefined;
+        if (target.incompatibleTypes) {
+            target.schemaType = undefined;
             target.numericRange = undefined;
             target.enumValues = [];
             target.valueKind = "unknown";
@@ -2072,6 +1989,9 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         }
         if (target.attrLayerName !== (context.attrLayerName || undefined)) {
             target.attrLayerName = undefined;
+        }
+        if (target.attrName !== (context.attrName || undefined)) {
+            target.attrName = undefined;
         }
         const mapLayers = target.mapLayers ?? [];
         if (!mapLayers.some(ref =>
@@ -2102,43 +2022,12 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         return lhs === "unknown" ? rhs : lhs;
     }
 
-    /** Returns the attribute context suffix shown in search-style field pickers. */
-    private searchStyleFieldContextLabel(option: FeatureSearchStyleFieldContext): string {
-        if (!option.attrName) {
-            return "";
-        }
-        const layerPrefix = option.attrLayerName ? `${option.attrLayerName}.` : "";
-        return option.featureType
-            ? `${layerPrefix}${option.attrName}/${option.featureType}`
-            : `${layerPrefix}${option.attrName}`;
-    }
-
-    /** Builds a field-picker label that makes multi-attribute scope explicit. */
-    private searchStyleFieldOptionLabel(path: string, contexts: Set<string>): string {
-        if (contexts.size === 0) {
-            return path;
-        }
-        const sortedContexts = Array.from(contexts).sort();
-        if (sortedContexts.length === 1) {
-            return `${path} (${sortedContexts[0]})`;
-        }
-        return `${path} (${sortedContexts.length} scopes)`;
-    }
-
     /** Refreshes schema-backed fields when the editor or automatic rules need them. */
     private refreshStyleAttributeOptionsIfNeeded(session: FeatureSearchSession, patchMissingFields = true): boolean {
         if (session.schemaAnalysis.status !== "ready") {
             return false;
         }
         const concreteScope = this.styleFieldRequestScope(session);
-        if (this.styleFieldConcreteScope !== concreteScope) {
-            this.styleFieldConcreteScope = concreteScope;
-            this.styleFieldPath = [];
-            this.styleFieldContext = null;
-            // Attribute queries already select semantic owners. Feature scope
-            // starts with direct fields and lets the user explore its branches.
-            this.styleFieldRecursive = concreteScope === "attribute";
-        }
         if (session.schemaAnalysis.rewriteSuppressed) {
             this.styleAttributeOptionsSessionSignature = [
                 session.definition.query,
@@ -2189,7 +2078,6 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
             this.attributeScopeSyncSignature(session.schemaAnalysis.attributeScopes),
             this.selectedSearchMapLayerSignature(session.definition.selectedMapLayers),
             JSON.stringify(session.definition.selectedFeatureTypes),
-            JSON.stringify([this.styleFieldPath, this.styleFieldContext, this.styleFieldRecursive]),
             this.searchSchema.searchScopeAnalysisSignature("", concreteScope, session.definition.selectedMapLayers)
         ].join("\n");
         if (signature === this.styleAttributeOptionsSessionSignature) {
@@ -2366,7 +2254,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
 
     /** Selects all schema fields that should get an automatically generated style rule. */
     private autoStyleFieldOptions(session: FeatureSearchSession): FeatureSearchStyleOption[] {
-        return searchAutoStyleFieldOptions(this.styleScalarAttributeOptions, session.schemaAnalysis);
+        return searchAutoStyleFieldOptions(this.styleAttributeOptions, session.schemaAnalysis);
     }
 
     /** Defers expensive WASM-backed field enumeration until the browser can paint the style tab. */
@@ -3919,12 +3807,6 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         this.appliedStyleFieldInventory = null;
         this.styleAttributeOptionsLoading = false;
         this.styleAttributeOptionsError = "";
-        this.styleFieldConcreteScope = null;
-        this.styleFieldPath = [];
-        this.styleFieldContext = null;
-        this.styleFieldBranches = [];
-        this.styleFieldContexts = [];
-        this.styleFieldDiscoveryNotice = "";
         this.styleAttributeOptionsSessionSignature = "";
         if (this.styleAttributeOptionsRefreshTimer) {
             clearTimeout(this.styleAttributeOptionsRefreshTimer);

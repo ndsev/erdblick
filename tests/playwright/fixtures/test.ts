@@ -40,7 +40,7 @@ declare global {
             mapTileKey: ErdblickDebugApi['mapTileKey'];
             /** Exposes the initialized native core for deterministic coordinate helpers. */
             coreLib: () => any;
-            /** Detached native inspection values, including their exact scalar domains. */
+            /** Detached native inspection values, including their exact scalar types. */
             featureInspectionModel: ErdblickDebugApi['featureInspectionModel'];
             /** Loads one exact feature through the inspection-only restricted tile path. */
             featureInspectionHoverSummary: (

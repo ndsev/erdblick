@@ -175,7 +175,7 @@ struct ValueSummary
 {
     // This is derived aggregate metadata. Individual values retain provenance
     // in the native model pool; there is no parallel per-result schema table.
-    simfil::SchemaReference domain;
+    simfil::SchemaReference schemaType;
     uint64_t count = 0;
     uint64_t missing = 0;
     uint64_t nulls = 0;
@@ -245,21 +245,21 @@ std::string numericHistogramValue(double value)
     return stream.str();
 }
 
-/** Group by the value's actual domain before aggregating its raw representation. */
+/** Group by the value's actual type before aggregating its raw representation. */
 void summarizeNode(
     std::vector<ValueSummary>& groups,
     simfil::ModelNode::Ptr const& node,
     uint32_t distinctLimit)
 {
     auto value = node ? simfil::Value::field(*node) : simfil::Value::undef();
-    auto domain = value.schemaReference();
+    auto schemaType = value.schemaReference();
     auto group = std::ranges::find_if(
         groups,
-        [&](auto const& candidate) { return candidate.domain == domain; });
+        [&](auto const& candidate) { return candidate.schemaType == schemaType; });
     if (group == groups.end()) {
         groups.emplace_back();
         group = std::prev(groups.end());
-        group->domain = domain;
+        group->schemaType = schemaType;
     }
     auto& summary = *group;
     ++summary.count;
@@ -268,7 +268,7 @@ void summarizeNode(
         return;
     }
     bool special = false;
-    if (auto const* definition = domain.definition()) {
+    if (auto const* definition = schemaType.definition()) {
         definition->forEachNamedValue(
             [&](simfil::Schema::NamedValue const& named)
             {
@@ -297,7 +297,7 @@ void summarizeNode(
     {
         if (special)
             return;
-        if (auto const* definition = domain.definition()) {
+        if (auto const* definition = schemaType.definition()) {
             if (auto numeric = definition->numericDomain();
                 numeric && !numeric->ordinaryRanges.empty()) {
                 bool ordinary = std::ranges::any_of(
@@ -411,8 +411,8 @@ auto summaryToJsValue(
         {"otherCount", JsValue(static_cast<double>(summary.histogramDropped))},
         {"distinctLimitReached", JsValue(summary.distinctLimitReached)},
     });
-    if (summary.domain)
-        result.set("domain", JsValue::fromSchema(summary.domain));
+    if (summary.schemaType)
+        result.set("schemaType", JsValue::fromSchema(summary.schemaType));
     if (summary.numericCount > 0) {
         result.set("numeric", JsValue::Dict({
             {"count",
@@ -689,11 +689,11 @@ NativeJsValue TileSourceDataLayer::toObject() const
         return result;
     };
 
-    visit = [&](JsValue key, simfil::ModelNode const& node, simfil::SchemaReference domain)
+    visit = [&](JsValue key, simfil::ModelNode const& node, simfil::SchemaReference schemaType)
     {
         InspectionNode result;
         result.key_ = std::move(key);
-        if (result.setScalarValue(simfil::Value::field(node).withSchema(std::move(domain))))
+        if (result.setScalarValue(simfil::Value::field(node).withSchema(std::move(schemaType))))
             return result;
         switch (node.type()) {
         case simfil::ValueType::Object:

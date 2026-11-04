@@ -113,7 +113,7 @@ export class ErdblickDebugApi {
         ) as string;
     }
 
-    /** Reads the same detached native tree as the panel, including raw values and their domains. */
+    /** Reads the same detached native tree as the panel, including raw values and their types. */
     async featureInspectionModel(
         mapTileKey: string,
         featureId: string

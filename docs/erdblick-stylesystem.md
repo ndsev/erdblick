@@ -537,14 +537,14 @@ Linear keys must be finite, numeric, and strictly increasing. Colors are
 interpolated between adjacent stops. `fallback` handles null, unsupported
 types, and values which cannot be mapped.
 
-Schema-generated numeric scales may additionally bind to an exact value domain
+Schema-generated numeric scales may additionally bind to an exact value type
 and give named exceptional values their own colors:
 
 ```yaml
 color-scale:
   mode: linear
   expression: "properties.speed"
-  domain: {schemaId: "<exact schema token>", domainId: 42}
+  schemaType: {schemaId: "<exact schema token>", typeId: 42}
   stops:
     - [1, blue]
     - [253, red]
@@ -555,14 +555,18 @@ color-scale:
   fallback: white
 ```
 
-This example illustrates a domain whose ordinary range is 1–253; discover the
-actual token, domain ID, field path and meanings from the selected source. Special
+This example illustrates a type whose ordinary range is 1–253; discover the
+actual token, type ID, field path and meanings from the selected source. Special
 colors are checked before gradient interpolation or categorical lookup. Removing
 a special override routes that value to the fallback. Values outside the
-domain's ordinary ranges also use the fallback. A different graph/domain or an
+type's ordinary ranges also use the fallback. A different schema/type or an
 unqualified computed number cannot reuse a bound scale. Existing manual scales
-without `domain` retain their unrestricted behavior. `specials` requires a domain
-and finite numeric keys; saved YAML preserves both the guard and edited colors.
+without `schemaType` retain their unrestricted behavior. `specials` requires an
+exact schema type guard and finite numeric keys; saved YAML preserves both the
+guard and edited colors. Existing `domain: {schemaId, domainId}` guards remain
+accepted when loading local searches or YAML styles, including server-hosted
+styles. Import normalizes them to `schemaType: {schemaId, typeId}`, which is the
+only spelling emitted by newly generated styles.
 
 Stops use raw source numbers. The search editor can label scaled units and choose
 round steps in those units without changing the stored encoding. For flags, prefer

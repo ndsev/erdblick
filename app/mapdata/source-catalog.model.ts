@@ -13,7 +13,7 @@ export type DataSourceCatalogStatus = "initializing" | "ready" | "failed";
  */
 export type MapSchemaStatus = "loading" | "ready" | "failed";
 
-/** Descriptive format metadata; only schemaId identifies an exact domain graph. */
+/** Descriptive format metadata; only schemaId identifies an exact type graph. */
 export interface MapFormat {
     name: string;
     version: string;

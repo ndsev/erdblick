@@ -49,9 +49,9 @@ public:
         JsValue key_;
         JsValue value_;
         /** Raw values stay unchanged; labels/units are presentation derived from their exact
-         * domain. */
+         * type. */
         std::string displayValue_;
-        std::optional<JsValue> scalarDomain_;
+        std::optional<JsValue> scalarType_;
         std::optional<JsValue> mapId_;
         /** Foreign references keep named, typed ID parts until target-map resolution. */
         std::optional<JsValue> featureReference_;
@@ -211,7 +211,7 @@ public:
         JsValue const& fieldName,
         FieldOrIndex const& path,
         simfil::ModelNode::Ptr const& value,
-        simfil::SchemaReference domain = {});
+        simfil::SchemaReference type = {});
 
     /**
      * Store one referenced feature id as inspection node payload.

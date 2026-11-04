@@ -4,7 +4,7 @@
  * opening a filter subscription or retaining rendered result presentations.
  */
 import {z} from "zod";
-import {schemaScalarDomainSchema, type SchemaScalarDomain} from "../mapdata/schema-domain.model";
+import {schemaScalarTypeSchema, type SchemaScalarType} from "../mapdata/schema-type.model";
 import type {FeatureSearchMapLayerRef} from "./search-definition.model";
 
 /** Counts of scalar and placeholder value kinds observed in a search value stream. */
@@ -38,7 +38,7 @@ export interface SearchValueHistogramBucket {
 /** Aggregated value summary for one withFields expression or one trace expression. */
 export interface SearchValueSummary {
     /** Exact source meaning; unqualified calculations remain a separate group. */
-    domain?: SchemaScalarDomain;
+    schemaType?: SchemaScalarType;
     count: number;
     missing: number;
     nulls: number;
@@ -198,14 +198,16 @@ export interface FeatureSearchStyleFieldContext {
     attrName?: string;
     attrLayerName?: string;
     featureType?: string;
+    /** Native scalar shorthand for this attribute, excluding validity/source metadata. */
+    primaryValuePath?: string;
 }
 
-/** Shared metadata for one exact artifact/domain, exported once by the native walker. */
+/** Shared metadata for one exact schema/type, exported once by the native walker. */
 export interface FeatureSearchStyleFieldMetadata {
     valueKind: FeatureSearchStyleValueKind;
     enumValues: string[];
     numericRange?: {min: number; max: number};
-    domain?: SchemaScalarDomain;
+    schemaType?: SchemaScalarType;
 }
 
 /** A path and its distinct meaning; context owners share the same metadata object. */
@@ -234,17 +236,18 @@ export interface FeatureSearchStyleFieldOptions {
     context?: FeatureSearchStyleFieldContext;
 }
 
-/** Validate shared domain descriptors once, then retain compact integer references. */
+/** Validate shared type descriptors once, then retain compact integer references. */
 export const featureSearchStyleFieldInventorySchema = z.object({
     contexts: z.array(z.object({
         mapId: z.string().min(1), layerId: z.string().min(1),
-        featureType: z.string().optional(), attrName: z.string().optional(), attrLayerName: z.string().optional()
+        featureType: z.string().optional(), attrName: z.string().optional(), attrLayerName: z.string().optional(),
+        primaryValuePath: z.string().optional()
     })),
-    domains: z.array(z.object({
+    types: z.array(z.object({
         valueKind: z.enum(["number", "integer", "string", "boolean", "enum", "bitmask", "object", "array", "unknown"]),
         enumValues: z.array(z.string()),
         numericRange: z.object({min: z.number(), max: z.number()}).optional(),
-        domain: schemaScalarDomainSchema.nullish().transform(value => value ?? undefined)
+        schemaType: schemaScalarTypeSchema.nullish().transform(value => value ?? undefined)
     })),
     fields: z.array(z.object({
         path: z.string().min(1), metadata: z.number().int().nonnegative(),
@@ -257,8 +260,8 @@ export const featureSearchStyleFieldInventorySchema = z.object({
     incompleteReason: z.string()
 }).superRefine((inventory, context) => {
     for (const field of inventory.fields) {
-        if (field.metadata >= inventory.domains.length || field.contexts.some(index => index >= inventory.contexts.length)) {
-            context.addIssue({code: "custom", message: "Style field references an unknown domain or context"});
+        if (field.metadata >= inventory.types.length || field.contexts.some(index => index >= inventory.contexts.length)) {
+            context.addIssue({code: "custom", message: "Style field references an unknown type or context"});
             return;
         }
     }
@@ -270,11 +273,11 @@ export const featureSearchStyleFieldInventorySchema = z.object({
 /** Compact worker result; complete refers to the requested semantic scope, never to loaded data. */
 export type FeatureSearchStyleFieldInventory = z.infer<typeof featureSearchStyleFieldInventorySchema>;
 
-/** Resolve table references without cloning shared domain metadata or expanding one row per owner. */
+/** Resolve table references without cloning shared type metadata or expanding one row per owner. */
 export function searchStyleFieldCandidates(inventory: FeatureSearchStyleFieldInventory): FeatureSearchStyleFieldCandidate[] {
     return inventory.fields.map(field => ({
         path: field.path,
-        ...inventory.domains[field.metadata],
+        ...inventory.types[field.metadata],
         contexts: field.contexts.map(index => inventory.contexts[index])
     }));
 }

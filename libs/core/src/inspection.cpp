@@ -1824,7 +1824,7 @@ void InspectionConverter::convertField(
     const JsValue& fieldName,
     FieldOrIndex const& path,
     const simfil::ModelNode::Ptr& value,
-    simfil::SchemaReference domain)
+    simfil::SchemaReference type)
 {
     if (value->addr().column() == TileFeatureLayer::ColumnId::RelationReferences) {
         auto relationRef = tile_->resolve<RelationReference>(*value);
@@ -1850,7 +1850,7 @@ void InspectionConverter::convertField(
         assignFeatureReference(*fieldScope, featureId);
         return;
     }
-    if (fieldScope->setScalarValue(simfil::Value::field(*value).withSchema(std::move(domain))))
+    if (fieldScope->setScalarValue(simfil::Value::field(*value).withSchema(std::move(type))))
         return;
     if (value->type() == simfil::ValueType::Array) {
         isArray = true;
@@ -1970,14 +1970,14 @@ bool InspectionConverter::InspectionNode::setScalarValue(simfil::Value const& va
     default: return false;
     }
     auto reference = value.schemaReference();
-    auto const* domain = reference.definition();
-    if (!domain)
+    auto const* type = reference.definition();
+    if (!type)
         return true;
-    scalarDomain_ = JsValue::fromSchema(reference);
+    scalarType_ = JsValue::fromSchema(reference);
     std::vector<std::string> names;
     uint64_t knownBits = 0;
     bool special = false;
-    domain->forEachNamedValue(
+    type->forEachNamedValue(
         [&](simfil::Schema::NamedValue const& named)
         {
             if (named.removed)
@@ -2023,7 +2023,7 @@ bool InspectionConverter::InspectionNode::setScalarValue(simfil::Value const& va
         if (auto unknown = value.as<NativeType::Bitmask>().bits & ~knownBits)
             names.push_back(fmt::format("unknown bits 0x{:016x}", unknown));
     }
-    if (auto numeric = domain->numericDomain(); numeric && !numeric->unit.empty() && !special &&
+    if (auto numeric = type->numericDomain(); numeric && !numeric->unit.empty() && !special &&
         (value.type == NativeType::Int || value.type == NativeType::Float))
     {
         auto raw = value.type == NativeType::Int ?
@@ -2073,8 +2073,8 @@ JsValue InspectionConverter::InspectionNode::toJsValue(std::string_view const& m
     });
     if (!displayValue_.empty())
         newDict.set("displayValue", JsValue(displayValue_));
-    if (scalarDomain_)
-        newDict.set("domain", *scalarDomain_);
+    if (scalarType_)
+        newDict.set("scalarType", *scalarType_);
     if (!hoverId_.empty())
         newDict.set("hoverId", JsValue(hoverId_));
     if (!info_.empty())

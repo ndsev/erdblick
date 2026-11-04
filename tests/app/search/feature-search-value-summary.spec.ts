@@ -21,29 +21,29 @@ import type {
     SearchTraceValueSummary,
     SearchValueSummary
 } from "../../../app/search/search.model";
-import type {SchemaScalarDomain} from "../../../app/mapdata/schema-domain.model";
+import type {SchemaScalarType} from "../../../app/mapdata/schema-type.model";
 
 void AppModule;
 
 describe("Search observed category values", () => {
     beforeAll(() => initializeLibrary());
 
-    it("merges only identical native domains for both projected values and traces", () => {
+    it("merges only identical native types for both projected values and traces", () => {
         const service = Object.create(SearchService.prototype) as SearchService;
         const resultFields = new Map<string, SearchResultFieldValueSummary>();
         const traces = new Map<string, SearchTraceValueSummary>();
-        const domains: Array<SchemaScalarDomain | undefined> = [
-            {schemaId: "graph-a", domainId: 1, typeName: "Speed", namedValues: []},
-            {schemaId: "graph-a", domainId: 2, typeName: "LaneCount", namedValues: []},
-            {schemaId: "graph-b", domainId: 1, typeName: "Width", namedValues: []},
+        const types: Array<SchemaScalarType | undefined> = [
+            {schemaId: "graph-a", typeId: 1, typeName: "Speed", namedValues: []},
+            {schemaId: "graph-a", typeId: 2, typeName: "LaneCount", namedValues: []},
+            {schemaId: "graph-b", typeId: 1, typeName: "Width", namedValues: []},
             undefined
         ];
         // The expression text is deliberately identical. Only the actual
-        // value's graph/domain identity determines whether ranges may merge.
+        // value's schema/type identity determines whether ranges may merge.
         for (let tile = 0; tile < 2; ++tile) {
-            domains.forEach((domain, index) => {
+            types.forEach((schemaType, index) => {
                 const value = index + 1;
-                const summary = service["emptyValueSummary"](domain);
+                const summary = service["emptyValueSummary"](schemaType);
                 summary.count = 1;
                 summary.kinds.integer = 1;
                 summary.numeric = {count: 1, min: value, max: value, sum: value, average: value};
@@ -58,7 +58,7 @@ describe("Search observed category values", () => {
         expect(traces.size).toBe(4);
         for (const summaries of [resultFields, traces]) {
             [...summaries.values()].forEach(({summary}, index) => {
-                expect(summary.domain).toEqual(domains[index]);
+                expect(summary.schemaType).toEqual(types[index]);
                 expect(summary.count).toBe(2);
                 expect(summary.numeric).toEqual({
                     count: 2, min: index + 1, max: index + 1,
@@ -145,11 +145,11 @@ describe("Search observed category values", () => {
                 otherCount: 0, distinctLimitReached: false
             };
             if (values === "specials") {
-                summary.domain = {schemaId: "sample", domainId: 1, typeName: "Count", namedValues: [{
+                summary.schemaType = {schemaId: "sample", typeId: 1, typeName: "Count", namedValues: [{
                     name: "UNKNOWN", value: 1, valueType: "integer", role: "special", meaning: "unknown",
                     deprecated: false, removed: false
                 }]};
-                component.fieldOptions[0].domain = summary.domain;
+                component.fieldOptions[0].schemaType = summary.schemaType;
                 summary.specials = 2;
                 summary.numeric = {count: 1, min: 2, max: 2, sum: 2, average: 2};
             }

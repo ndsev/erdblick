@@ -886,10 +886,11 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "Rendered domain-bound colors classify sentinels before ordinary stops",
+    "Rendered type-bound colors classify sentinels before ordinary stops",
     "[erdblick.schema][erdblick.subset-renderer]")
 {
     auto categorical = GENERATE(false, true);
+    auto legacyGuard = GENERATE(false, true);
     erdblick::test::ScalarSchema fixture;
     auto selected = fixture.number(255, fixture.speed);
     std::array<uint8_t, 3> expected{0, 255, 255};
@@ -915,7 +916,7 @@ TEST_CASE(
         selected = fixture.number(254, fixture.speed);
         expected = {255, 0, 255};
     }
-    SECTION("same raw code from another domain uses fallback")
+    SECTION("same raw code from another type uses fallback")
     {
         selected = fixture.number(255, fixture.classicSpeed);
         expected = {255, 255, 255};
@@ -969,11 +970,13 @@ rules:
     if (categorical) {
         scale["mode"] = "categorical";
         // Even an explicit ordinary stop cannot reclassify a named sentinel
-        // when its separate override is deleted from a domain-bound scale.
+        // when its separate override is deleted from a type-bound scale.
         scale["stops"].push_back(YAML::Load("[255, '#ff0000']"));
     }
-    scale["domain"]["schemaId"] = std::string(fixture.owner->schemaId());
-    scale["domain"]["domainId"] = fixture.speed;
+    // Saved server/local YAML keeps working, while new styles use schemaType/typeId.
+    auto guard = scale[legacyGuard ? "domain" : "schemaType"];
+    guard["schemaId"] = std::string(fixture.owner->schemaId());
+    guard[legacyGuard ? "domainId" : "typeId"] = fixture.speed;
     if (removeOverride)
         scale.remove("specials");
     auto style = rendererStyle(YAML::Dump(yaml));

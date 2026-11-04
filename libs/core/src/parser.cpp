@@ -103,7 +103,7 @@ std::string completionTypeHint(std::vector<std::string> typeNames)
 simfil::CompletionCandidate enrichCompletionCandidate(
     simfil::CompletionCandidate candidate,
     simfil::model_ptr<mapget::LayerSchema> const& registry,
-    simfil::SchemaId rootSchema)
+    simfil::TypeId rootSchema)
 {
     if (!registry || !candidate.hint.empty() || candidate.type != simfil::CompletionCandidate::Type::CONSTANT) {
         return candidate;
@@ -256,8 +256,8 @@ struct AttributeScopeInfo
     std::string layerId;
     std::shared_ptr<mapget::LayerInfo const> layerInfo;
     simfil::model_ptr<mapget::LayerSchema> registry;
-    simfil::SchemaId attributeSchema = simfil::NoSchemaId;
-    simfil::SchemaId featureSchema = simfil::NoSchemaId;
+    simfil::TypeId attributeSchema = simfil::NoTypeId;
+    simfil::TypeId featureSchema = simfil::NoTypeId;
 };
 
 struct FeatureSchemaInfo
@@ -267,7 +267,7 @@ struct FeatureSchemaInfo
     std::string layerId;
     std::shared_ptr<mapget::LayerInfo const> layerInfo;
     simfil::model_ptr<mapget::LayerSchema> registry;
-    simfil::SchemaId featureSchema = simfil::NoSchemaId;
+    simfil::TypeId featureSchema = simfil::NoTypeId;
 };
 
 struct SearchQueryMapLayerInfo
@@ -387,7 +387,7 @@ std::vector<AttributeScopeInfo> collectAttributeScopes(
                     continue;
                 auto const featureSchema = registry->featureSchema(featureType.name_);
                 auto const layerMapSchema = registry->attributeLayerMapSchema(featureType.name_);
-                if (layerMapSchema == simfil::NoSchemaId) {
+                if (layerMapSchema == simfil::NoTypeId) {
                     continue;
                 }
                 for (auto const& attrLayerName : registry->directFields(layerMapSchema)) {
@@ -395,7 +395,7 @@ std::vector<AttributeScopeInfo> collectAttributeScopes(
                         layerMapSchema,
                         attrLayerName,
                         simfil::Schema::Kind::Object);
-                    if (layerSchema == simfil::NoSchemaId) {
+                    if (layerSchema == simfil::NoTypeId) {
                         continue;
                     }
                     for (auto const& attrName : registry->directFields(layerSchema)) {
@@ -403,7 +403,7 @@ std::vector<AttributeScopeInfo> collectAttributeScopes(
                             layerSchema,
                             attrName,
                             simfil::Schema::Kind::Object);
-                        if (attributeSchema == simfil::NoSchemaId) {
+                        if (attributeSchema == simfil::NoTypeId) {
                             continue;
                         }
                         scopes.push_back(
@@ -446,7 +446,7 @@ std::vector<FeatureSchemaInfo> collectFeatureSchemaScopes(
                 if (!registry->producesFeatureType(featureType.name_))
                     continue;
                 auto const featureSchema = registry->featureSchema(featureType.name_);
-                if (featureSchema == simfil::NoSchemaId) {
+                if (featureSchema == simfil::NoTypeId) {
                     continue;
                 }
                 scopes.push_back({
@@ -499,7 +499,7 @@ std::vector<AttributeScopeInfo> filterScopesByAttributeLiterals(
 
 bool schemaMatchesQueryLayerTerms(
     mapget::LayerSchema const& registry,
-    simfil::SchemaId schemaId,
+    simfil::TypeId typeId,
     QueryLayerTerms const& terms,
     SearchQueryMapLayerInference* inference = nullptr);
 
@@ -561,13 +561,13 @@ std::vector<AttributeScopeInfo> resolveAttributeScopesForQuery(
 /** Return whether a schema can contain a field or enum term collected from the query. */
 bool schemaMatchesQueryLayerTerms(
     mapget::LayerSchema const& registry,
-    simfil::SchemaId schemaId,
+    simfil::TypeId typeId,
     QueryLayerTerms const& terms,
     SearchQueryMapLayerInference* inference)
 {
     bool matched = false;
     for (auto const& fieldName : terms.leafFields) {
-        if (registry.canHaveField(schemaId, fieldName)) {
+        if (registry.canHaveField(typeId, fieldName)) {
             if (inference) {
                 inference->matchedFieldNames.insert(fieldName);
             }
@@ -575,8 +575,9 @@ bool schemaMatchesQueryLayerTerms(
         }
     }
     for (auto const& enumValue : terms.enumValues) {
-        if (registry.canHaveEnumSymbol(schemaId, enumValue)
-            || !registry.constantTypeNames(schemaId, enumValue).empty()) {
+        if (registry.canHaveEnumSymbol(typeId, enumValue) ||
+            !registry.constantTypeNames(typeId, enumValue).empty())
+        {
             if (inference) {
                 inference->matchedEnumValues.insert(enumValue);
             }
@@ -651,11 +652,11 @@ struct SearchStyleSchemaMetadata
     std::vector<std::string> enumValues;
     std::optional<double> numericMinimum;
     std::optional<double> numericMaximum;
-    JsValue domain = JsValue::Undefined();
+    JsValue schemaType = JsValue::Undefined();
 };
 
 /** Builds enum metadata for feature `typeId` values advertised by the selected layer context. */
-SearchStyleSchemaMetadata typeIdSchemaMetadata(std::vector<std::string> typeIds)
+SearchStyleSchemaMetadata featureTypeMetadata(std::vector<std::string> typeIds)
 {
     std::ranges::sort(typeIds);
     auto duplicates = std::ranges::unique(typeIds);
@@ -663,17 +664,16 @@ SearchStyleSchemaMetadata typeIdSchemaMetadata(std::vector<std::string> typeIds)
     return {"enum", std::move(typeIds), std::nullopt, std::nullopt};
 }
 
-/** Classifies one concrete domain directly, retaining the primitive numeric type. */
-SearchStyleSchemaMetadata
-schemaMetadata(
+/** Classifies one concrete type directly, retaining the primitive numeric type. */
+SearchStyleSchemaMetadata schemaMetadata(
     simfil::model_ptr<mapget::LayerSchema> const& registry,
-    simfil::SchemaId schemaId,
+    simfil::TypeId typeId,
     std::shared_ptr<simfil::SchemaBinding const> const& binding)
 {
     SearchStyleSchemaMetadata metadata;
-    if (!registry || schemaId == simfil::NoSchemaId)
+    if (!registry || typeId == simfil::NoTypeId)
         return metadata;
-    auto const affinities = simfil::Schema::affinities(registry->kind(schemaId)) &
+    auto const affinities = simfil::Schema::affinities(registry->kind(typeId)) &
         ~simfil::valueTypeAffinity(simfil::ValueType::Null);
     for (auto const& [type, name] :
          {std::pair{simfil::ValueType::Int, "integer"},
@@ -691,12 +691,12 @@ schemaMetadata(
         (simfil::valueTypeAffinity(simfil::ValueType::Int) |
          simfil::valueTypeAffinity(simfil::ValueType::Float)))
         metadata.valueKind = "number";
-    auto const symbols = registry->directEnumSymbols(schemaId);
+    auto const symbols = registry->directEnumSymbols(typeId);
     metadata.enumValues.assign(symbols.begin(), symbols.end());
     if (metadata.valueKind == "string" && !metadata.enumValues.empty())
         metadata.valueKind = "enum";
-    metadata.domain = JsValue::fromSchema({binding, schemaId});
-    if (auto numeric = registry->numericDomain(schemaId)) {
+    metadata.schemaType = JsValue::fromSchema({binding, typeId});
+    if (auto numeric = registry->numericDomain(typeId)) {
         // Only ordinary measurement intervals seed a gradient. Specials remain
         // separate exact-value rules, even when they lie inside the raw encoding.
         auto number = [](simfil::Schema::NumericValue const& value) -> std::optional<double>
@@ -713,7 +713,7 @@ schemaMetadata(
         else if (numeric->ordinaryRanges.empty()) {
             bool hasSpecials = false;
             registry->forEachNamedValue(
-                schemaId,
+                typeId,
                 [&](auto const& value)
                 { hasSpecials |= value.role == simfil::Schema::NamedValue::Role::Special; });
             if (!hasSpecials) {
@@ -852,8 +852,8 @@ void appendNormalizedAttributeScopes(
 
 /**
  * One native picker request. The graph stays in MapSchema; this object owns only
- * the projected paths and the compact context/domain tables crossing into JS.
- * In particular, a shared Classic domain is exported once, even when several
+ * the projected paths and the compact context/type tables crossing into JS.
+ * In particular, a shared Classic type is exported once, even when several
  * feature types expose it under thousands of paths.
  */
 class TileLayerParser::StyleFieldDiscovery
@@ -862,10 +862,10 @@ class TileLayerParser::StyleFieldDiscovery
     // name. This keeps literal '*' and unusual names unambiguous at the API.
     using Path = std::vector<std::optional<std::string>>;
 
-    /** One distinct domain meaning for a path, shared by all of its owner contexts. */
+    /** One distinct type meaning for a path, shared by all of its owner contexts. */
     struct FieldMeaning
     {
-        size_t domain;
+        size_t metadataIndex;
         std::vector<size_t> contexts;
     };
     using Fields = std::unordered_map<std::string, std::vector<FieldMeaning>>;
@@ -900,7 +900,7 @@ public:
     /** Retain all context choices, then walk only those selected by the user. */
     void collect(
         simfil::model_ptr<mapget::LayerSchema> const& registry,
-        simfil::SchemaId root,
+        simfil::TypeId root,
         std::string const& mapId,
         std::string const& layerId,
         std::string const& featureType,
@@ -913,6 +913,22 @@ public:
             {"mapId", JsValue(mapId)}, {"layerId", JsValue(layerId)},
             {"featureType", JsValue(featureType)}, {"attrName", JsValue(attrName)},
             {"attrLayerName", JsValue(attrLayerName)}});
+        if (!attrName.empty()) {
+            // Use the same payload scalar as SIMFIL's attribute shorthand.
+            // Common fields such as validity.direction and source addresses
+            // describe the attribute, but are not its value. An ambiguous
+            // shorthand deliberately contributes no preferred field.
+            auto paths = registry->scalarFieldPathsForAttribute(root, attrName);
+            if (paths.size() == 1) {
+                std::string valuePath;
+                for (auto const& segment : paths.front()) {
+                    valuePath = appendStep(valuePath,
+                        segment.kind_ == simfil::SchemaPathSegment::Kind::ArrayElement
+                            ? std::nullopt : std::optional(segment.field_));
+                }
+                context.set("primaryValuePath", JsValue(valuePath));
+            }
+        }
         auto const contextIndex = contexts_.size();
         contexts_.push_back(context);
         for (auto const* name : {"mapId", "layerId", "featureType", "attrName", "attrLayerName"}) {
@@ -922,16 +938,16 @@ public:
         }
         if (!attrName.empty()) {
             auto queryRoot = registry->attributeQuerySchema(featureType, root);
-            if (queryRoot != simfil::NoSchemaId)
+            if (queryRoot != simfil::NoTypeId)
                 root = queryRoot;
         }
 
         // Resolve a requested branch by native field lookup. No expanded graph,
         // dotted-path parser or schema traversal is recreated in TypeScript.
-        std::vector<simfil::SchemaId> roots{root};
+        std::vector<simfil::TypeId> roots{root};
         std::string prefix;
         for (auto const& segment : path_) {
-            std::vector<simfil::SchemaId> next;
+            std::vector<simfil::TypeId> next;
             for (auto rootSchema : roots) {
                 forEachAlternative(registry, rootSchema, [&](auto schema) {
                     if (!segment) {
@@ -951,7 +967,7 @@ public:
             prefix = appendStep(prefix, segment);
         }
         for (auto schema : roots) {
-            std::set<simfil::SchemaId> active;
+            std::set<simfil::TypeId> active;
             walk(registry, schema, prefix, path_, contextIndex, active, attrName.empty());
         }
         if (attrName.empty() && path_.empty()) {
@@ -962,39 +978,43 @@ public:
                     (featureTypes_.empty() || featureTypes_.contains(type)))
                     types.push_back(type);
             }
-            auto [it, inserted] = typeIdDomains_.try_emplace(types, domains_.size());
+            auto [it, inserted] = featureTypeMetadata_.try_emplace(types, types_.size());
             if (inserted)
-                domains_.push_back(typeIdSchemaMetadata(std::move(types)));
+                types_.push_back(featureTypeMetadata(std::move(types)));
             addField("typeId", it->second, contextIndex);
         }
         if (!attrName.empty() && path_.empty()) {
             for (auto const* name : {"$name", "$layer", "$validityIndex", "$validityCount"}) {
-                auto [it, inserted] = syntheticDomains_.try_emplace(name, domains_.size());
+                auto [it, inserted] = syntheticTypes_.try_emplace(name, types_.size());
                 if (inserted)
-                    domains_.push_back(overlayFieldMetadata(name));
+                    types_.push_back(overlayFieldMetadata(name));
                 addField(name, it->second, contextIndex);
             }
         }
     }
 
-    /** Sort grouped paths once and export metadata once per exact domain. */
+    /** Sort grouped paths once and export metadata once per exact type. */
     NativeJsValue result()
     {
         auto contexts = JsValue::List();
         for (auto const& context : contexts_)
             contexts.push(context);
-        auto domains = JsValue::List();
-        for (auto const& domain : domains_) {
+        auto types = JsValue::List();
+        for (auto const& type : types_) {
             auto names = JsValue::List();
-            for (auto const& name : domain.enumValues)
+            for (auto const& name : type.enumValues)
                 names.push(JsValue(name));
-            auto value = JsValue::Dict({
-                {"valueKind", JsValue(domain.valueKind)}, {"enumValues", names},
-                {"domain", domain.domain}});
-            if (domain.numericMinimum && domain.numericMaximum)
-                value.set("numericRange", JsValue::Dict({
-                    {"min", JsValue(*domain.numericMinimum)}, {"max", JsValue(*domain.numericMaximum)}}));
-            domains.push(value);
+            auto value = JsValue::Dict(
+                {{"valueKind", JsValue(type.valueKind)},
+                 {"enumValues", names},
+                 {"schemaType", type.schemaType}});
+            if (type.numericMinimum && type.numericMaximum)
+                value.set(
+                    "numericRange",
+                    JsValue::Dict(
+                        {{"min", JsValue(*type.numericMinimum)},
+                         {"max", JsValue(*type.numericMaximum)}}));
+            types.push(value);
         }
         auto indices = [](auto const& values) {
             auto result = JsValue::List();
@@ -1010,10 +1030,10 @@ public:
         auto fields = JsValue::List();
         for (auto const* path : paths) {
             for (auto const& meaning : path->second) {
-                fields.push(JsValue::Dict({
-                    {"path", JsValue(path->first)},
-                    {"metadata", JsValue(static_cast<uint32_t>(meaning.domain))},
-                    {"contexts", indices(meaning.contexts)}}));
+                fields.push(JsValue::Dict(
+                    {{"path", JsValue(path->first)},
+                     {"metadata", JsValue(static_cast<uint32_t>(meaning.metadataIndex))},
+                     {"contexts", indices(meaning.contexts)}}));
             }
         }
         auto branches = JsValue::List();
@@ -1027,11 +1047,18 @@ public:
             branches.push(JsValue::Dict({
                 {"path", path}, {"label", JsValue(label)}, {"contexts", indices(contextIds)}}));
         }
-        return *JsValue::Dict({
-            {"contexts", contexts}, {"domains", domains}, {"fields", fields}, {"branches", branches},
-            {"complete", JsValue(!recursiveCycle_)},
-            {"incompleteReason", JsValue(recursiveCycle_
-                ? "Recursive schema branches remain available through direct branch exploration." : "")}});
+        return *JsValue::Dict(
+            {{"contexts", contexts},
+             {"types", types},
+             {"fields", fields},
+             {"branches", branches},
+             {"complete", JsValue(!recursiveCycle_)},
+             {"incompleteReason",
+              JsValue(
+                  recursiveCycle_ ?
+                      "Recursive schema branches remain available through direct "
+                      "branch exploration." :
+                      "")}});
     }
 
 private:
@@ -1042,14 +1069,14 @@ private:
     }
 
     /** Alternatives share a value position; they do not add a path segment. */
-    template<typename Visitor>
+    template <typename Visitor>
     void forEachAlternative(
         simfil::model_ptr<mapget::LayerSchema> const& registry,
-        simfil::SchemaId root,
+        simfil::TypeId root,
         Visitor const& visitor) const
     {
-        std::vector<simfil::SchemaId> pending{root};
-        std::set<simfil::SchemaId> seen;
+        std::vector<simfil::TypeId> pending{root};
+        std::set<simfil::TypeId> seen;
         auto const owner = registry->mapSchema();
         while (!pending.empty()) {
             auto schema = pending.back();
@@ -1057,38 +1084,42 @@ private:
             if (!seen.insert(schema).second)
                 continue;
             visitor(schema);
-            if (auto domain = owner->domain(schema)) {
-                auto alternatives = domain->alternatives();
+            if (auto type = owner->type(schema)) {
+                auto alternatives = type->alternatives();
                 pending.insert(pending.end(), alternatives.begin(), alternatives.end());
             }
         }
     }
 
     /** Discover whether a field has declared descendants, including array/union branches. */
-    bool canBrowse(simfil::model_ptr<mapget::LayerSchema> const& registry, simfil::SchemaId schema)
+    bool canBrowse(simfil::model_ptr<mapget::LayerSchema> const& registry, simfil::TypeId schema)
     {
         auto const affinities = simfil::Schema::affinities(registry->kind(schema));
         if (!(affinities & (simfil::valueTypeAffinity(simfil::ValueType::Object) |
                            simfil::valueTypeAffinity(simfil::ValueType::Array))))
             return false;
         auto key = std::make_pair(registry->mapSchema()->schemaId(), schema);
-        if (auto found = browsableDomains_.find(key); found != browsableDomains_.end())
+        if (auto found = browsableTypes_.find(key); found != browsableTypes_.end())
             return found->second;
         bool result = false;
-        forEachAlternative(registry, schema, [&](auto alternative) {
-            if (auto domain = registry->mapSchema()->domain(alternative)) {
-                domain->forEachEnumerableField([&](auto, auto) { result = true; });
-                domain->forEachElementSchema([&](auto) { result = true; });
-            }
-        });
-        browsableDomains_.emplace(key, result);
+        forEachAlternative(
+            registry,
+            schema,
+            [&](auto alternative)
+            {
+                if (auto type = registry->mapSchema()->type(alternative)) {
+                    type->forEachEnumerableField([&](auto, auto) { result = true; });
+                    type->forEachElementSchema([&](auto) { result = true; });
+                }
+            });
+        browsableTypes_.emplace(key, result);
         return result;
     }
 
     /** Map the displayed alias to its declared field without hiding a real attributes member. */
     std::string_view schemaField(
         simfil::model_ptr<mapget::LayerSchema> const& registry,
-        simfil::SchemaId schema,
+        simfil::TypeId schema,
         std::string_view name,
         bool featureRoot) const
     {
@@ -1100,32 +1131,32 @@ private:
         return name;
     }
 
-    /** Export one exact scalar domain, then reference its table index everywhere else. */
-    size_t metadata(simfil::model_ptr<mapget::LayerSchema> const& registry, simfil::SchemaId schema)
+    /** Export one exact scalar type, then reference its table index everywhere else. */
+    size_t metadata(simfil::model_ptr<mapget::LayerSchema> const& registry, simfil::TypeId schema)
     {
         auto key = std::make_pair(registry->mapSchema()->schemaId(), schema);
-        auto [it, inserted] = domainIndices_.try_emplace(key, domains_.size());
+        auto [it, inserted] = typeIndices_.try_emplace(key, types_.size());
         if (inserted) {
             auto [binding, newOwner] = bindings_.try_emplace(key.first);
             if (newOwner)
                 binding->second = registry->mapSchema()->binding();
-            domains_.push_back(schemaMetadata(registry, schema, binding->second));
+            types_.push_back(schemaMetadata(registry, schema, binding->second));
         }
         return it->second;
     }
 
-    /** Group by expression and domain; the context list preserves all differing owners. */
-    void addField(std::string const& path, size_t domain, size_t context)
+    /** Group by expression and type; the context list preserves all differing owners. */
+    void addField(std::string const& path, size_t metadataIndex, size_t context)
     {
-        auto const& kind = domains_[domain].valueKind;
+        auto const& kind = types_[metadataIndex].valueKind;
         if (scalarsOnly_ && (kind == "object" || kind == "array"))
             return;
         // Hash the path once per occurrence, then merge its usually singular
         // meaning. Sorting is deferred until all owners have been grouped.
         auto& meanings = fields_[path];
-        auto meaning = std::ranges::find(meanings, domain, &FieldMeaning::domain);
+        auto meaning = std::ranges::find(meanings, metadataIndex, &FieldMeaning::metadataIndex);
         if (meaning == meanings.end()) {
-            meanings.push_back({domain, {context}});
+            meanings.push_back({metadataIndex, {context}});
             return;
         }
         auto& contexts = meaning->contexts;
@@ -1133,23 +1164,24 @@ private:
             contexts.push_back(context);
     }
 
-    /** Walk declared data edges, retaining alternatives instead of picking the first domain. */
+    /** Walk declared data edges, retaining alternatives instead of picking the first type. */
     void walk(
         simfil::model_ptr<mapget::LayerSchema> const& registry,
-        simfil::SchemaId schema,
+        simfil::TypeId schema,
         std::string const& prefix,
         Path const& segments,
         size_t context,
-        std::set<simfil::SchemaId>& active,
+        std::set<simfil::TypeId>& active,
         bool featureScope)
     {
-        if (schema == simfil::NoSchemaId)
+        if (schema == simfil::NoTypeId)
             return;
         if (!active.insert(schema).second) {
             recursiveCycle_ = true;
             return;
         }
-        auto visitChild = [&](std::optional<std::string> name, simfil::SchemaId child) {
+        auto visitChild = [&](std::optional<std::string> name, simfil::TypeId child)
+        {
             auto const path = appendStep(prefix, name);
             auto childSegments = segments;
             childSegments.push_back(std::move(name));
@@ -1171,33 +1203,36 @@ private:
                 walk(registry, child, path, childSegments, context, active, featureScope);
         };
         auto const owner = registry->mapSchema();
-        auto const* domain = owner->domain(schema);
-        if (!domain) {
+        auto const* type = owner->type(schema);
+        if (!type) {
             active.erase(schema);
             return;
         }
         // Enumerate the native packed data edges directly. Asking fieldRole
         // separately for each name would scan every sibling again on wide
         // Classic objects. Context links remain available in explicit lookup.
-        domain->forEachEnumerableField([&](auto field, auto children) {
-            auto const name = owner->strings()->resolve(field).value();
-            auto displayName = std::string(name);
-            if ((featureScope && prefix.empty()) || registry->kind(schema) == mapget::LayerSchema::FeatureKind) {
-                if (name == "typeId" && prefix.empty())
-                    return; // The selected layer's enum is supplied once above.
-                if (name == "properties") {
-                    if (schemaField(registry, schema, "attributes", true) != "properties")
-                        return; // A declared attributes member owns that spelling.
-                    displayName = "attributes";
+        type->forEachEnumerableField(
+            [&](auto field, auto children)
+            {
+                auto const name = owner->strings()->resolve(field).value();
+                auto displayName = std::string(name);
+                if ((featureScope && prefix.empty()) ||
+                    registry->kind(schema) == mapget::LayerSchema::FeatureKind) {
+                    if (name == "typeId" && prefix.empty())
+                        return;  // The selected layer's enum is supplied once above.
+                    if (name == "properties") {
+                        if (schemaField(registry, schema, "attributes", true) != "properties")
+                            return;  // A declared attributes member owns that spelling.
+                        displayName = "attributes";
+                    }
                 }
-            }
-            if (children.empty())
-                visitChild(displayName, simfil::NoSchemaId);
-            for (auto child : children)
-                visitChild(displayName, child);
-        });
-        domain->forEachElementSchema([&](auto child) { visitChild(std::nullopt, child); });
-        for (auto alternative : domain->alternatives())
+                if (children.empty())
+                    visitChild(displayName, simfil::NoTypeId);
+                for (auto child : children)
+                    visitChild(displayName, child);
+            });
+        type->forEachElementSchema([&](auto child) { visitChild(std::nullopt, child); });
+        for (auto alternative : type->alternatives())
             walk(registry, alternative, prefix, segments, context, active, featureScope);
         active.erase(schema);
     }
@@ -1209,12 +1244,12 @@ private:
     std::set<std::string> featureTypes_;
     Path path_;
     std::vector<JsValue> contexts_;
-    std::vector<SearchStyleSchemaMetadata> domains_;
+    std::vector<SearchStyleSchemaMetadata> types_;
     std::map<std::string_view, std::shared_ptr<simfil::SchemaBinding const>> bindings_;
-    std::map<std::pair<std::string_view, simfil::SchemaId>, size_t> domainIndices_;
-    std::map<std::pair<std::string_view, simfil::SchemaId>, bool> browsableDomains_;
-    std::map<std::string, size_t> syntheticDomains_;
-    std::map<std::vector<std::string>, size_t> typeIdDomains_;
+    std::map<std::pair<std::string_view, simfil::TypeId>, size_t> typeIndices_;
+    std::map<std::pair<std::string_view, simfil::TypeId>, bool> browsableTypes_;
+    std::map<std::string, size_t> syntheticTypes_;
+    std::map<std::vector<std::string>, size_t> featureTypeMetadata_;
     Fields fields_;
     std::map<Path, std::vector<size_t>> branches_;
 };
@@ -1783,9 +1818,9 @@ NativeJsValue TileLayerParser::completeSearchQuery(
         return elapsed.count() >= opts.timeoutMs;
     };
     auto addCandidates =
-        [&](simfil::model_ptr<mapget::LayerSchema> const& registry, simfil::SchemaId rootSchema)
+        [&](simfil::model_ptr<mapget::LayerSchema> const& registry, simfil::TypeId rootSchema)
     {
-        if (rootSchema == simfil::NoSchemaId || completionBudgetExhausted()) {
+        if (rootSchema == simfil::NoTypeId || completionBudgetExhausted()) {
             return;
         }
         auto& binding = schemaCompletionBindings_
@@ -1835,7 +1870,7 @@ NativeJsValue TileLayerParser::completeSearchQuery(
                 if (!registry->producesFeatureType(featureType.name_))
                     continue;
                 auto const featureSchema = registry->featureSchema(featureType.name_);
-                if (includeFeatureScope && featureSchema != simfil::NoSchemaId) {
+                if (includeFeatureScope && featureSchema != simfil::NoTypeId) {
                     if (completionBudgetExhausted()) {
                         return completionCandidatesToJs(query, mergedCandidates, opts.limit);
                     }
@@ -1847,7 +1882,7 @@ NativeJsValue TileLayerParser::completeSearchQuery(
                 }
 
                 auto const layerMapSchema = registry->attributeLayerMapSchema(featureType.name_);
-                if (layerMapSchema == simfil::NoSchemaId) {
+                if (layerMapSchema == simfil::NoTypeId) {
                     continue;
                 }
                 for (auto const& layerName : registry->directFields(layerMapSchema)) {
@@ -1855,7 +1890,7 @@ NativeJsValue TileLayerParser::completeSearchQuery(
                         layerMapSchema,
                         layerName,
                         simfil::Schema::Kind::Object);
-                    if (layerSchema == simfil::NoSchemaId) {
+                    if (layerSchema == simfil::NoTypeId) {
                         continue;
                     }
                     for (auto const& attributeName : registry->directFields(layerSchema)) {
@@ -1863,7 +1898,7 @@ NativeJsValue TileLayerParser::completeSearchQuery(
                             layerSchema,
                             attributeName,
                             simfil::Schema::Kind::Object);
-                        if (attributeSchema == simfil::NoSchemaId) {
+                        if (attributeSchema == simfil::NoTypeId) {
                             continue;
                         }
                         if (completionBudgetExhausted()) {
@@ -2021,23 +2056,51 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
 {
     auto options = JsValue(options_);
     auto const selectedLayers = selectedLayerFilterFromOptions(options);
-    // Feature inventories depend on schema context, not on the predicate text.
-    // Attribute discovery still uses the query's actual matched owners.
-    auto attributeScopes = scope == "feature" ? std::vector<AttributeScopeInfo>{}
-        : resolveAttributeScopesForQuery(info_, query, selectedLayers);
-    auto const concreteScope = scope == "auto"
-        ? (attributeScopes.empty() ? "feature" : "attribute") : scope;
     StyleFieldDiscovery discovery(options);
-    if (concreteScope == "attribute") {
-        if (attributeScopes.empty())
-            attributeScopes = collectAttributeScopes(info_, selectedLayers);
-        for (auto const& context : attributeScopes)
-            discovery.collect(context.registry, context.attributeSchema,
-                context.mapId, context.layerId, context.featureType,
-                context.attrName, context.attrLayerName);
+    auto const requestedScope = requestedSearchScopeFromString(scope);
+    bool attributeScope = requestedScope == mapget::LayerSchema::SearchQueryRequestedScope::Attribute;
+    std::vector<FeatureSchemaInfo> featureScopes;
+    for (auto const& [_, source] : info_) {
+        for (auto const& [__, layer] : source.layers_) {
+            if (!layer || layer->type_ != mapget::LayerType::Features ||
+                !selectedLayers.contains(source.mapId_, layer->layerId_))
+                continue;
+            auto registry = layer->layerSchema();
+            if (!registry)
+                continue;
+
+            // Resolve owners exactly as execution does. Leaf/enum matching
+            // also reaches shared metadata and can turn SPEED_LIMIT_METRIC
+            // into every attribute in a layer. Never widen a failed or
+            // ambiguous normalization to an unrelated full-layer inventory.
+            if (requestedScope != mapget::LayerSchema::SearchQueryRequestedScope::Feature) {
+                auto normalized = registry->normalizeSearchQuery(query, requestedScope);
+                if (!normalized)
+                    throw std::invalid_argument(normalized.error().message);
+                if (normalized->rewriteSuppressed_) {
+                    attributeScope |= normalized->concreteScope_ == mapget::LayerSchema::SearchQueryConcreteScope::Attribute;
+                    continue;
+                }
+                if (normalized->concreteScope_ == mapget::LayerSchema::SearchQueryConcreteScope::Attribute) {
+                    attributeScope = true;
+                    for (auto const& owner : normalized->attributeScopes_)
+                        discovery.collect(registry, owner.attributeSchema_, source.mapId_, layer->layerId_,
+                            owner.featureType_, owner.attributeName_, owner.attributeLayerName_);
+                    continue;
+                }
+            }
+            // Auto scope is chosen across all selected layers, like query
+            // normalization. Do not mix feature paths from an unmatched layer
+            // into an attribute inventory resolved by another layer.
+            for (auto const& type : registry->featureTypes()) {
+                if (registry->producesFeatureType(type))
+                    featureScopes.push_back({type, source.mapId_, layer->layerId_, layer,
+                        registry, registry->featureSchema(type)});
+            }
+        }
     }
-    else {
-        for (auto const& context : collectFeatureSchemaScopes(info_, selectedLayers))
+    if (!attributeScope) {
+        for (auto const& context : featureScopes)
             discovery.collect(context.registry, context.featureSchema,
                 context.mapId, context.layerId, context.featureType);
     }
