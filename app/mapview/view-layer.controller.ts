@@ -131,8 +131,6 @@ export class ViewLayerController {
     private nextStyledLayerDispatchIndex = 0;
     private readonly pendingVisualizationRenders =
         new Set<TileSubsetLayerVisualization>();
-    private readonly allocationPausedVisualizations =
-        new Set<TileSubsetLayerVisualization>();
     private readonly unregisterDiagnostics: () => void;
 
     /** Bind one logical view to catalog, style, search, inspection, and worker state. */
@@ -158,8 +156,8 @@ export class ViewLayerController {
         let previousCloudWorkingMiB = this.renderService.pointCloudPolicy.workingMemoryMiB;
         this.subscriptions.push(
             this.mapInfo.maps$.subscribe(() => this.scheduleReconcile()),
-            this.mapInfo.dataSourceInfoChanged.subscribe(() =>
-                this.resetInteractionStyleCaches()),
+            this.mapInfo.dataSourceInfoChanged.subscribe(mapIds =>
+                this.retireDataSources(mapIds)),
             this.mapInfo.layerStateChanged.subscribe(() => this.scheduleReconcile()),
             this.mapInfo.styleOptionsChanged.subscribe(changes => {
                 if (changes.some(change => change.viewIndex === this.viewIndex)) {
@@ -201,8 +199,7 @@ export class ViewLayerController {
             }),
             this.renderService.capacityChanged.subscribe(() =>
                 this.schedulePendingTiles()
-            ),
-            this.renderService.allocationPressure.subscribe(() => this.releaseRegularFallbacksForAllocation())
+            )
         );
         this.scheduleReconcile();
     }
@@ -379,7 +376,6 @@ export class ViewLayerController {
         }
         this.retiringRegularLayers.clear();
         this.pendingVisualizationRenders.clear();
-        this.allocationPausedVisualizations.clear();
         this.localInteractionOverlaysByLayer.clear();
         for (const state of this.objectCoverageByLayer.values()) {
             if (state.timer !== null) {
@@ -828,7 +824,6 @@ export class ViewLayerController {
         }
         for (const visualization of owned.visualizations.values()) {
             this.pendingVisualizationRenders.delete(visualization);
-            this.allocationPausedVisualizations.delete(visualization);
             this.localInteractionVisualizationsWithOverlays.delete(
                 visualization
             );
@@ -839,13 +834,6 @@ export class ViewLayerController {
         if (hadInstalledVisualizations) {
             this.scheduleInteractionPresenceReconcile(owned.layer);
         }
-    }
-
-    /** Break replacement deadlocks by retiring superseded presentations before retrying their successors. */
-    private releaseRegularFallbacksForAllocation(): void {
-        const fallbacks = [...this.retiringRegularLayers.values()];
-        this.retiringRegularLayers.clear();
-        for (const fallback of fallbacks) this.destroyOwnedLayer(fallback.owned);
     }
 
     /** Keeps one fully rendered regular owner as the visual replacement fallback. */
@@ -1404,8 +1392,20 @@ export class ViewLayerController {
         return effect;
     }
 
-    /** Drops schema-derived interaction caches after a datasource catalog replacement. */
-    private resetInteractionStyleCaches(): void {
+    /** Retire changed-map work before its parser metadata is replaced; keep sibling scenes live. */
+    private retireDataSources(mapIds: readonly string[]): void {
+        for (const [key, owned] of this.styledLayers) {
+            if (mapIds.includes(owned.layer.mapgetLayer.mapId)) {
+                this.destroyOwnedLayer(owned);
+                this.styledLayers.delete(key);
+            }
+        }
+        for (const [key, fallback] of this.retiringRegularLayers) {
+            if (mapIds.includes(fallback.owned.layer.mapgetLayer.mapId)) {
+                this.destroyOwnedLayer(fallback.owned);
+                this.retiringRegularLayers.delete(key);
+            }
+        }
         this.interactionLayerAffinityCache = new WeakMap();
         this.interactionFilterPlanCache = new WeakMap();
         this.interactionEffectCache = new WeakMap();
@@ -1790,16 +1790,6 @@ export class ViewLayerController {
         if (!this.sceneHandle) {
             return;
         }
-        // Only failed allocations need reconsideration when worker/GPU capacity changes.
-        // Successful tiles keep their plans and installed presentations untouched.
-        for (const visualization of this.allocationPausedVisualizations) {
-            if (!visualization.waitingForGpuMemory) {
-                this.allocationPausedVisualizations.delete(visualization);
-            } else if (visualization.canRetryGpuAllocation()) {
-                this.allocationPausedVisualizations.delete(visualization);
-                this.pendingVisualizationRenders.add(visualization);
-            }
-        }
         while (this.renderService.availableWorkerSlots() > 0) {
             const rerender = this.pendingVisualizationRenders.values()
                 .next().value as TileSubsetLayerVisualization | undefined;
@@ -1892,7 +1882,6 @@ export class ViewLayerController {
         }
         owned.visualizations.delete(visualizationKey);
         this.pendingVisualizationRenders.delete(visualization);
-        this.allocationPausedVisualizations.delete(visualization);
         this.localInteractionVisualizationsWithOverlays.delete(visualization);
         visualization.destroy(this.sceneHandle);
         this.scheduleInteractionPresenceReconcile(owned.layer, key);
@@ -1919,7 +1908,6 @@ export class ViewLayerController {
             }
             owned.visualizations.delete(key);
             this.pendingVisualizationRenders.delete(visualization);
-            this.allocationPausedVisualizations.delete(visualization);
             this.localInteractionVisualizationsWithOverlays.delete(
                 visualization
             );
@@ -1946,7 +1934,6 @@ export class ViewLayerController {
         }
         owned.visualizations.delete(key);
         this.pendingVisualizationRenders.delete(visualization);
-        this.allocationPausedVisualizations.delete(visualization);
         this.localInteractionVisualizationsWithOverlays.delete(visualization);
         const state = visualization.state;
         if (state && owned.visualizationKeyByPartition.get(
@@ -1992,16 +1979,9 @@ export class ViewLayerController {
         if (!this.sceneHandle) {
             return;
         }
-        this.allocationPausedVisualizations.delete(visualization);
         visualization.render(this.sceneHandle)
             .then(rendered => {
                 if (!rendered) {
-                    if (!this.disposed && visualization.waitingForGpuMemory) {
-                        this.allocationPausedVisualizations.add(visualization);
-                        // Reclamation can finish before this promise continuation runs.
-                        // The visualization's capacity latch prevents self-triggered retries.
-                        this.schedulePendingTiles();
-                    }
                     return;
                 }
                 const owned = [...this.styledLayers.values()].find(

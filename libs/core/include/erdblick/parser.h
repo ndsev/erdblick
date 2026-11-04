@@ -1,13 +1,13 @@
 #pragma once
 
-#include "mapget/model/stream.h"
-#include "mapget/model/featurelayer.h"
-#include "mapget/model/subsetlayer.h"
 #include "buffer.h"
 #include "interop/js-object.h"
-#include "mapget/model/featurelayer.h"
-#include "mapget/model/sourcedatalayer.h"
 #include "layer.h"
+#include "mapget/model/featurelayer.h"
+#include "mapget/model/mapschema.h"
+#include "mapget/model/sourcedatalayer.h"
+#include "mapget/model/stream.h"
+#include "mapget/model/subsetlayer.h"
 
 namespace erdblick
 {
@@ -24,10 +24,26 @@ class FeatureLayerStyle;
 class TileLayerParser
 {
     friend class TestDataProvider;
+    class StyleFieldDiscovery;
 
 public:
     /** Create a parser with empty stream state and metadata caches. */
     explicit TileLayerParser();
+
+    /**
+     * Validate and retain an exact binary schema before publishing its sources.
+     * MapSchema's process-local cache shares immutable owners across parsers;
+     * a separate WASM worker must install its own heap-local owner first.
+     */
+    void installMapSchema(SharedUint8Array const& bytes, std::string const& expectedId);
+
+    /** Enumerate produced types, optionally including reference-only ID definitions. */
+    NativeJsValue
+    featureTypes(std::string const& mapId, std::string const& layerId, bool includeReferenceTypes)
+        const;
+
+    /** Refresh service-derived incoming eligibility without replacing schema/model metadata. */
+    void setIncomingRelationHints(SharedUint8Array const& catalogJson);
 
     /**
      * Update the data source info metadata which the parser uses
@@ -36,10 +52,11 @@ public:
     void setDataSourceInfo(SharedUint8Array const& dataSourceInfoJson);
 
     /**
-     * Append newly ready maps without resetting existing metadata or string pools.
-     * Rejects already registered map ids; replacements must use setDataSourceInfo.
+     * Apply {removedMapIds, addedSources} atomically. Replacement explicitly
+     * removes the old map before adding its new metadata. Unchanged maps keep
+     * their layer-info, schema and dictionary owners, including add-on pools.
      */
-    void addDataSourceInfo(SharedUint8Array const& dataSourceInfoJson);
+    void applyDataSourceChanges(SharedUint8Array const& changesJson);
 
     /**
      * Get the data source info JSON that was set earlier.
@@ -51,7 +68,8 @@ public:
      */
     TileFeatureLayer readTileFeatureLayer(SharedUint8Array const& buffer);
 
-    /** Query explicit deferred relation declarations for a selected feature in the current catalog. */
+    /** Request discovery for a matching family or unknown coverage; only known absence suppresses
+     * it. */
     bool hasIncomingRelations(TileFeatureLayer const& layer, std::string const& featureId) const;
 
     /**
@@ -123,7 +141,7 @@ public:
     void addFieldDict(SharedUint8Array const& buffer);
 
     /**
-     * Complete a SIMFIL search query using only LayerInfo.featureModelSchema metadata.
+     * Complete a SIMFIL search query using the installed immutable MapSchema.
      *
      * Returns an empty list when no schema metadata is available. This deliberately
      * does not fall back to loaded tile blobs.
@@ -158,10 +176,15 @@ public:
     NativeJsValue normalizeSearchQuery(std::string const& query, std::string const& scope, NativeJsValue const& options) const;
 
     /**
-     * Enumerate schema-backed result fields usable by search-result style rules.
+     * Discover schema-backed style fields in a selected semantic subtree.
      *
      * `scope` accepts `feature`, `attribute`, or `auto`. Attribute scope is narrowed through
-     * getAttributeScopeForQuery(query), falling back to all attribute contexts if no attribute was inferred.
+     * getAttributeScopeForQuery(query), falling back to all attribute contexts if no attribute was
+     * inferred. Options may select feature types, one context, a path of field names and
+     * `{elements:true}` array steps, direct children versus recursive traversal,
+     * and scalar versus all values. The
+     * returned inventory shares context/type tables; paths retain every exact
+     * meaning instead of copying type metadata into each feature occurrence.
      */
     NativeJsValue searchStyleFieldsForQuery(std::string const& query, std::string const& scope, NativeJsValue const& options) const;
 
@@ -220,21 +243,36 @@ public:
     std::vector<FilteredFeatureJumpTarget> filterFeatureJumpTargets(std::string const& queryString) const;
 
     std::map<std::string, mapget::DataSourceInfo> info_;
+    /** Exact owners retained for metadata and already captured inspection/subset snapshots. */
+    std::map<std::string, std::shared_ptr<mapget::MapSchema const>, std::less<>> schemas_;
     /** Backend-derived capability hints retained when the shared parser omits full schemas. */
     std::map<std::pair<std::string, std::string>, std::set<std::string>> incomingRelationTargets_;
+    std::set<std::pair<std::string, std::string>> incomingRelationCoverageUnknown_;
     std::unique_ptr<mapget::TileLayerStream::Reader> reader_;
     std::shared_ptr<mapget::TileLayerStream::StringPoolCache> cachedStrings_;
+    /** Serialized subsets can use add-on dictionaries absent from catalog metadata. */
+    std::map<std::string, std::set<std::string>> stringPoolsByMap_;
     std::function<void(mapget::TileFeatureLayer::Ptr)> tileParsedFun_;
     std::shared_ptr<mapget::LayerInfo> fallbackLayerInfo_;
     struct SchemaCompletionBinding;
-    std::map<mapget::LayerSchema const*, std::shared_ptr<SchemaCompletionBinding>> schemaCompletionBindings_;
+    std::map<std::pair<std::string, std::string>, std::shared_ptr<SchemaCompletionBinding>>
+        schemaCompletionBindings_;
+
+    /** Resolve an already installed graph; model decoding never performs network IO. */
+    std::shared_ptr<mapget::MapSchema const> resolveMapSchema(std::string_view schemaId) const;
+
+    /** Validate a complete edit before replacing indexes or releasing any dictionary. */
+    void changeDataSources(nlohmann::json const& removedMapIds, nlohmann::json const& addedSources);
+
+    /** Keep dictionaries needed by lazily decoded retained subsets across unrelated edits. */
+    void trackStringPool(mapget::PartitionLayer const& layer);
 
     /**
      * Resolve layer metadata for a `(mapId, layerId)` pair using loaded datasource info
      * and the optional fallback layer info used by tests.
      */
     std::shared_ptr<mapget::LayerInfo>
-    resolveMapLayerInfo(std::string const& mapId, std::string const& layerId);
+    resolveMapLayerInfo(std::string const& mapId, std::string const& layerId) const;
 
     /** Type info registry. */
     std::map<std::string, FeatureJumpTarget> featureJumpTargets_;

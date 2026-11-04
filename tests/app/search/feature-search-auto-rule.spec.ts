@@ -17,41 +17,87 @@ import {SearchStyleRuleDraftCodec} from "../../../app/search/search-style-rule-e
 void AppModule;
 
 describe("Feature Search automatic rule geometry", () => {
+    it("offers a shared expression once while preserving attribute owners for automatic rules", () => {
+        const component = Object.create(SearchComponent.prototype) as any;
+        const session = {definition: {searchStyleRules: [{}]}};
+        const inventory = {
+            contexts: ["SPEED_LIMIT_METRIC", "SPEED_LIMIT_IMPERIAL"].map(attrName => ({
+                mapId: "Map", layerId: "Lane", featureType: "Lane", attrName,
+                primaryValuePath: "attributeValue.speed"
+            })),
+            types: [{valueKind: "integer", enumValues: [], numericRange: {min: 0, max: 255}}],
+            fields: ["_sourceData.*.address", "attributeValue.speed"].map(path => ({
+                path, metadata: 0, contexts: [0, 1]
+            })),
+            branches: [], complete: true, incompleteReason: ""
+        };
+        component.applyStyleAttributeOptions(session, inventory, false);
+        expect(component.styleScalarAttributeOptions.map((option: {value: string}) => option.value))
+            .toEqual(["_sourceData.*.address", "attributeValue.speed"]);
+        expect(component.styleScalarAttributeOptions.every((option: {attrName?: string}) => !option.attrName)).toBe(true);
+        expect(component.styleAttributeOptions).toHaveLength(4);
+        const selected = searchAutoStyleFieldOptions(component.styleAttributeOptions, {
+            status: "ready", concreteScope: "attribute", attributeScopes: inventory.contexts.map(context => ({
+                ...context, attrLayerName: "Rules"
+            })), matchedFieldNames: [], matchedEnumValues: []
+        });
+        expect(selected.map(option => [option.attrName, option.value])).toEqual([
+            ["SPEED_LIMIT_METRIC", "attributeValue.speed"],
+            ["SPEED_LIMIT_IMPERIAL", "attributeValue.speed"]
+        ]);
+    });
+
+    it("keeps ambiguous meanings explicit and reuses the picker until its context changes", () => {
+        const component = Object.create(SearchComponent.prototype) as any;
+        const session = {definition: {searchStyleRules: [{}]}};
+        const inventory = {
+            contexts: [{mapId: "Map", layerId: "Road", featureType: "Road"},
+                {mapId: "Map", layerId: "Road", featureType: "Building"}],
+            types: [7, 8].map(typeId => ({valueKind: "integer", enumValues: [],
+                numericRange: {min: 1, max: 10},
+                schemaType: {schemaId: "artifact", typeId, typeName: "Width", namedValues: []}})),
+            fields: [{path: "attributes.width", metadata: 0, contexts: [0]},
+                {path: "attributes.width", metadata: 1, contexts: [1]}],
+            branches: [], complete: true, incompleteReason: ""
+        };
+        component.applyStyleAttributeOptions(session, inventory, false);
+        const ambiguous = component.styleScalarAttributeOptions;
+        expect(ambiguous).toHaveLength(1);
+        expect(ambiguous[0]).toMatchObject({incompatibleTypes: true, valueKind: "unknown"});
+        expect(ambiguous[0].schemaType).toBeUndefined();
+        expect(ambiguous[0].numericRange).toBeUndefined();
+        expect(ambiguous[0].label).toBe("attributes.width");
+        component.applyStyleAttributeOptions(session, inventory, false);
+        expect(component.styleScalarAttributeOptions).toBe(ambiguous);
+
+        component.applyStyleAttributeOptions(session, {...inventory, fields: inventory.fields.slice(0, 1)}, false);
+        expect(component.styleScalarAttributeOptions[0].schemaType).toEqual(inventory.types[0].schemaType);
+    });
+
     it("merges a Classic warning-sign field across attribute layers into one portable option", () => {
         const component = Object.create(SearchComponent.prototype) as any;
         component.styleAttributeOptions = [];
         component.styleScalarAttributeOptions = [];
         component.styleAttributeOptionsLoading = true;
-        component.isStyleFieldCandidateActive = () => true;
         component.shouldRefreshAutoStyleRule = () => false;
         const session = {
             definition: {searchStyleRules: [{}]}
         };
 
-        component.applyStyleAttributeOptions(session, [{
-            path: "warningSign",
-            mapId: "Classic",
-            layerId: "NDS.Classic-Routing",
-            attrName: "WARNING_SIGN",
-            attrLayerName: "Guidance",
-            featureType: "Link",
-            valueKind: "enum",
-            enumValues: ["DANGER"]
-        }, {
-            path: "warningSign",
-            mapId: "Classic",
-            layerId: "NDS.Classic-Lane",
-            attrName: "WARNING_SIGN",
-            attrLayerName: "Lane",
-            featureType: "Lane",
-            valueKind: "enum",
-            enumValues: ["OTHER_DANGER"]
-        }], false);
+        component.applyStyleAttributeOptions(session, {
+            contexts: [{mapId: "Classic", layerId: "NDS.Classic-Routing", attrName: "WARNING_SIGN",
+                attrLayerName: "Guidance", featureType: "Link"},
+                {mapId: "Classic", layerId: "NDS.Classic-Lane", attrName: "WARNING_SIGN",
+                    attrLayerName: "Lane", featureType: "Lane"}],
+            types: [{valueKind: "enum", enumValues: ["DANGER", "OTHER_DANGER"]}],
+            fields: [{path: "warningSign", metadata: 0, contexts: [0, 1]}],
+            branches: [], complete: true, incompleteReason: ""
+        }, false);
 
         expect(component.styleScalarAttributeOptions).toHaveLength(1);
         const warningSign = component.styleScalarAttributeOptions[0];
         expect(warningSign).toMatchObject({
-            label: "warningSign (2 scopes)",
+            label: "warningSign",
             value: "warningSign",
             attrName: "WARNING_SIGN",
             attrLayerName: undefined,
@@ -159,7 +205,7 @@ describe("Feature Search automatic rule geometry", () => {
         component.styleAttributeOptionsSessionSignature = "";
         component.attributeScopeSyncSignature = () => "Guidance.WARNING_SIGN";
         component.selectedSearchMapLayerSignature = () => "Classic/Routing";
-        component.visibleMapLayerSignature = () => "Classic/Routing";
+        component.searchSchema = {searchScopeAnalysisSignature: () => "Classic/Routing"};
         component.shouldAttemptAutoStyleRule = () => !fallbackCreated;
         component.shouldRefreshAutoStyleRule = () => fallbackCreated;
         component.tryCreateAutoStyleRule = vi.fn(() => {

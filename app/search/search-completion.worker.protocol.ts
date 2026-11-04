@@ -1,6 +1,7 @@
-import type { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldCandidate } from "./search.model";
+import type { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldInventory, FeatureSearchStyleFieldOptions } from "./search.model";
 import type {FeatureSearchMapLayerRef, FeatureSearchScope} from "./search-definition.model";
 import type {CompletionCandidate} from "./search.model";
+import type {MapSchemaArtifact} from "../mapdata/source-catalog.model";
 
 /** Parser options needed by the schema-completion worker. */
 export interface SearchCompletionWorkerOptions {
@@ -13,7 +14,16 @@ export interface SearchCompletionWorkerOptions {
 /** Refreshes the worker-local parser with the current `/sources` metadata. */
 export interface SearchCompletionDataSourceInfoMessage {
     type: "SearchCompletionDataSourceInfo";
+    requestId: number;
     dataSourceInfoJson: string | null;
+    schemas: MapSchemaArtifact[];
+}
+
+/** Native installation acknowledgement; dependent queries remain queued until this arrives. */
+export interface SearchCompletionDataSourceInfoReady {
+    type: "SearchCompletionDataSourceInfoReady";
+    requestId: number;
+    error?: string;
 }
 
 /** Requests one schema-backed completion pass off the UI thread. */
@@ -69,13 +79,22 @@ export interface SearchStyleFieldsRequestMessage {
     query: string;
     scope: FeatureSearchScope;
     selectedMapLayers?: FeatureSearchMapLayerRef[];
+    options: FeatureSearchStyleFieldOptions;
 }
 
-/** Result field candidates computed by the schema worker. */
+/** Measured worker phases and send time, allowing actual transfer delay to be measured by the receiver. */
+export interface SearchStyleFieldsTiming {
+    nativeMs: number;
+    normalizationMs: number;
+    postedAt: number;
+}
+
+/** Compact result computed by the schema worker; failure is never an empty inventory. */
 export interface SearchStyleFieldsResultMessage {
     type: "SearchStyleFieldsResult";
     requestId: number;
-    fields: FeatureSearchStyleFieldCandidate[];
+    inventory?: FeatureSearchStyleFieldInventory;
+    timing?: SearchStyleFieldsTiming;
     error?: string;
 }
 
@@ -86,6 +105,7 @@ export type SearchCompletionWorkerInboundMessage =
     SearchStyleFieldsRequestMessage;
 
 export type SearchCompletionWorkerOutboundMessage =
+    SearchCompletionDataSourceInfoReady |
     SearchCompletionResultMessage |
     SearchScopeAnalysisResultMessage |
     SearchStyleFieldsResultMessage;

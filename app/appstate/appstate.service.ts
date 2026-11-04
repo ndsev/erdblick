@@ -306,10 +306,14 @@ export class AppStateService implements OnDestroy {
     private readonly RETIRED_URL_PARAM_KEYS = new Set(["s"]);
     /**
      * Old snapshots/config defaults may contain values that are now runtime
-     * metadata or server-owned catalogs. Ignore these keys without rejecting the
-     * user's remaining preferences; never recreate writable states for them.
+     * metadata, removed preferences or server-owned catalogs. Ignore these keys
+     * without rejecting the user's remaining preferences; never recreate
+     * writable states for them.
      */
-    private readonly RETIRED_STATE_KEYS = new Set(["mapPresets", "distributionVersions", "erdblickVersion"]);
+    private readonly RETIRED_STATE_KEYS = new Set([
+        "mapPresets", "distributionVersions", "erdblickVersion",
+        "gpuMemoryManagementEnabled", "pointCloudGpuMemoryMiB"
+    ]);
     private static readonly URL_SYNC_MIN_INTERVAL_MS = 50;
     private configDefaultStateMeta: ConfigDefaultStateMeta = {
         version: 1,

@@ -27,7 +27,7 @@ describe('service-owned rendering preferences', () => {
         const policies: typeof preferences.state.pointCloudPolicy[] = [];
         preferences.state.pointCloudPolicyChanges.subscribe(policy => policies.push(policy));
         const original = { ...policies[0] };
-        const next = { enabled: true, detailPixels: 8, workingMemoryMiB: 128, gpuMemoryMiB: 64 };
+        const next = { enabled: true, detailPixels: 8, workingMemoryMiB: 128 };
         preferences.setPointCloudPolicy(next);
         expect(policies).toEqual([original, next]);
         expect(policies[0]).toEqual(original);
@@ -36,7 +36,7 @@ describe('service-owned rendering preferences', () => {
     it('validates the complete edit before changing any slot', () => {
         const { preferences } = createPreferences();
         const before = preferences.state.pointCloudPolicy;
-        expect(() => preferences.setPointCloudPolicy({ ...before, gpuMemoryMiB: 0 })).toThrow();
+        expect(() => preferences.setPointCloudPolicy({ ...before, workingMemoryMiB: 0 })).toThrow();
         expect(preferences.state.pointCloudPolicy).toEqual(before);
     });
 

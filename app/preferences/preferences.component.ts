@@ -24,7 +24,7 @@ import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, PREFERENCES_DIALOG_LAYOUT_ID } f
 import { LayoutService } from "../layout/layout.service";
 import { DialogStackService } from "../layout/dialog-stack.service";
 import { MapDataService } from "../mapdata/mapdata.service";
-import type { FeatureSearchStyleFieldCandidate } from "../search/search.model";
+import { searchStyleFieldCandidates, type FeatureSearchStyleFieldCandidate } from "../search/search.model";
 import {
     getTileSubsetLayerRenderAutoWorkerCount
 } from "../mapview/deck/tile-subset-layer-render.service";
@@ -359,6 +359,9 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                                                           appendTo="body"
                                                           placeholder="Select field">
                                                 </p-select>
+                                                @if (hoverLabelSchemaError) {
+                                                    <small role="status">{{ hoverLabelSchemaError }}</small>
+                                                }
                                             }
                                             <input class="hover-label-display-key"
                                                    type="text"
@@ -397,27 +400,12 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                     <p-tabpanel value="rendering">
                         <section data-testid="rendering-memory-preferences">
                             <h3>Memory</h3>
-                            <div class="button-container">
-                                <label for="gpu-memory-management">Manage GPU memory</label>
-                                <p-toggleswitch inputId="gpu-memory-management"
-                                               [ngModel]="viewSettings.gpuMemoryManagementEnabledState.getValue()"
-                                               (ngModelChange)="viewSettings.gpuMemoryManagementEnabledState.next($event)" />
-                            </div>
-                            <p>Pause work that exceeds the GPU allowance and resume it when capacity is freed.
-                                Turn this off to render without an application GPU allowance.</p>
-                            <div class="slider-container">
-                                <label for="point-cloud-gpu-memory">GPU allocation allowance (MiB)</label>
-                                <input id="point-cloud-gpu-memory" type="number" pInputText
-                                       min="16" max="8192" [(ngModel)]="pointCloudPolicyDraft.gpuMemoryMiB"
-                                       [disabled]="!viewSettings.gpuMemoryManagementEnabledState.getValue()" />
-                            </div>
                             <div class="slider-container">
                                 <label for="point-cloud-working-memory">Rendering working memory (MiB)</label>
                                 <input id="point-cloud-working-memory" type="number" pInputText
                                        min="32" max="16384" [(ngModel)]="pointCloudPolicyDraft.workingMemoryMiB" />
                             </div>
-                            <small>GPU allowance applies to all map geometry. Working memory applies to point clouds.
-                                Both are shared across views. Apply numeric changes below.</small>
+                            <small>Point-cloud working memory is shared across views. Apply numeric changes below.</small>
                         </section>
                         <p-divider></p-divider>
                         <section data-testid="point-cloud-preferences">
@@ -688,6 +676,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     inspectionValuePresentationSelection: string[] = [];
     sourceDataColumnSelection: string[] = [];
     hoverLabelFields: HoverLabelFieldConfig[] = [];
+    hoverLabelSchemaError = "";
     hoverLabelFieldOptions: Array<{ label: string; value: string }> = [{
         label: "Feature ID",
         value: "id"
@@ -941,7 +930,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Loads unique scalar feature fields from the shared schema worker. */
     private refreshHoverLabelFieldOptions(): void {
         this.searchSchema.requestSearchStyleFields("true", "feature")
-            .then(options => this.applyHoverLabelFieldOptions(options));
+            .then(options => {
+                this.hoverLabelSchemaError = "";
+                this.applyHoverLabelFieldOptions(searchStyleFieldCandidates(options));
+            }).catch(error => {
+                this.hoverLabelSchemaError = `Schema fields are unavailable. ${String(error)}`;
+            });
     }
 
     /** Merges per-layer schema candidates into the concise hover-field picker. */

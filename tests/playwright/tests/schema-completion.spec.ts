@@ -4,7 +4,7 @@ import type {ErdblickCore_} from '../../../app/integrations/wasm.adapter';
 
 test.use({stateSnapshot: null});
 
-test('WASM completes feature and attribute domains without materialized sample features', async ({page}) => {
+test('WASM completes feature and attribute types without materialized sample features', async ({page}) => {
     await page.goto('/?v2=1&n=1&m=1&f=0&lon=10&lat=40&alt=1000&h=0&p=-1&r=0&px=0&py=0&pz=0&m2d=0&bg=~10&l=');
     await waitForAppReady(page);
     await expect.poll(() => page.evaluate(() => !!window.ebDebug)).toBe(true);
@@ -54,7 +54,7 @@ test('WASM completes feature and attribute domains without materialized sample f
         try {
             core.HEAPU8.set(bytes, Number(buffer.getPointer()));
             parser.setDataSourceInfo(buffer);
-            return [
+            const completions = [
                 {query: 'samples[17].spe', scope: 'feature', text: 'speedLimit'},
                 {query: 'samples[-1].spe', scope: 'feature', text: 'speedLimit'},
                 {query: 'samples[0].next.samples[0].next.samples[0].spe', scope: 'feature', text: 'speedLimit'},
@@ -68,12 +68,19 @@ test('WASM completes feature and attribute domains without materialized sample f
                 query, text, candidates: parser.completeSearchQuery(query, query.length,
                     {scope, timeoutMs: 1000, limit: 40})
             }));
+            const fields = parser.searchStyleFieldsForQuery("false", "feature", {
+                values: "scalar", recursive: true, selectedFeatureTypes: ["Road"]
+            });
+            const branch = parser.searchStyleFieldsForQuery("true", "feature", {
+                values: "scalar", recursive: false, path: ["samples", {elements: true}]
+            });
+            return {completions, fields, branch};
         } finally {
             buffer.delete();
             parser.delete();
         }
     });
-    for (const {query, text, candidates} of results) {
+    for (const {query, text, candidates} of results.completions) {
         const suffix = query.match(/\$?[\w]+$/)![0];
         expect(candidates).toContainEqual(expect.objectContaining({
             text, query: query.slice(0, -suffix.length) + text,
@@ -81,4 +88,20 @@ test('WASM completes feature and attribute domains without materialized sample f
             type: text.startsWith('"') ? 'Constant' : 'Field'
         }));
     }
+    const paths = results.fields.fields.map((field: {path: string}) => field.path);
+    expect(paths).toContain('samples.*.speedLimit');
+    expect(paths).toContain('attributes.layer.RoadRulesLayer.WARNING_SIGN.attributeValue.warningSign');
+    expect(paths.some((path: string) => path.startsWith('properties.'))).toBe(false);
+    expect(paths.some((path: string) => path.includes('$feature'))).toBe(false);
+    // The fixture recursively links a sample back to its feature. Discovery
+    // reports that cycle; direct browsing still exposes the requested fields.
+    expect(results.fields.complete).toBe(false);
+    expect(results.fields.incompleteReason).toContain('Recursive');
+    expect(results.branch.fields).toEqual(expect.arrayContaining([
+        expect.objectContaining({path: 'samples.*.speedLimit'})
+    ]));
+    expect(results.branch.branches).toEqual(expect.arrayContaining([
+        expect.objectContaining({path: ['samples', {elements: true}, 'next']})
+    ]));
+
 });

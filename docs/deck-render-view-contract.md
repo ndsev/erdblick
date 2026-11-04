@@ -26,8 +26,16 @@ to commit synchronized cameras atomically. `MapViewService` derives tile coverag
 `AppStateService` coordinates completed notifications, storage and URL persistence.
 
 ### Interaction and picking
-- `pickFeature(screenPos: {x: number; y: number}): unknown[]`
+- `drillPickFeatures(screenPos, radius, maxObjects): Promise<RenderedFeaturePickResult>`
 - `pickCartographic(screenPos: {x: number; y: number}): unknown`
+
+Picking returns canonical tile/feature identities after resolving any structured
+foreign references through the target map's `/locate` endpoint. Raw GPU records
+retain the source subset and named reference until that resolution succeeds.
+Only interacted records gain sparse canonical aliases for highlighting; retiring
+their contribution removes those aliases. Navigation remains synchronous and
+uses local identities or already located references. Click and hover consumers
+recheck their current intent after the asynchronous lookup.
 
 ### UI integration
 - `getCanvasClientRect(): DOMRect`

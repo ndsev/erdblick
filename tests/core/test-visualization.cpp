@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include "erdblick/geo/point-conversion.h"
 #include "erdblick/geometry.h"
 #include "erdblick/inspection.h"
@@ -11,6 +12,7 @@
 #include "mapget/model/sourcedatareference.h"
 #include "mapget/model/sourceinfo.h"
 #include "mapget/model/stringpool.h"
+#include "mapget/model/subsetlayer.h"
 #include "nlohmann/json.hpp"
 
 #include <algorithm>
@@ -471,12 +473,14 @@ std::shared_ptr<mapget::LayerInfo> externalReferenceInspectionLayerInfo()
 /** Create one feature whose relation and validity both point to a detached external-map feature id. */
 std::shared_ptr<mapget::TileFeatureLayer> makeExternalReferenceInspectionTile(mapget::TileId tileId)
 {
+    // Structured mapget fields use its static dictionary entries (id, mapId,
+    // typeId). Match the production parser's pool instead of a bare Simfil pool.
     auto layer = std::make_shared<mapget::TileFeatureLayer>(
         tileId,
         "InspectionReferenceNode",
         "InspectionReferenceMap",
         externalReferenceInspectionLayerInfo(),
-        std::make_shared<simfil::StringPool>());
+        std::make_shared<mapget::StringPool>("InspectionReferenceNode"));
 
     auto const center = mapget::Point(tileId.centerWgs84());
     auto source = layer->newFeature("Way", {{"wayId", 1}});
@@ -487,7 +491,7 @@ std::shared_ptr<mapget::TileFeatureLayer> makeExternalReferenceInspectionTile(ma
 
     source->addRelation(
         "linkedWay",
-        layer->newFeatureId("Way", {{"wayId", 2}}, "ValidationMap"));
+        layer->newFeatureId("UnregisteredTarget", {{"externalPart", INT64_MAX}, {"label", "007"}}, "ValidationMap"));
 
     auto attr = source->attributeLayers()->newLayer("limits")->newAttribute("speed");
     attr->validity()->newFeatureId(
@@ -516,7 +520,7 @@ mapget::model_ptr<mapget::SourceDataReferenceCollection> makeInspectionSourceDat
 /** Recursively collect rendered FeatureId rows from the inspection tree for focused assertions. */
 void collectFeatureReferenceRows(
     nlohmann::json const& node,
-    std::vector<std::pair<std::string, std::string>>& featureRefs)
+    std::vector<nlohmann::json>& featureRefs)
 {
     if (node.is_array()) {
         for (auto const& child : node) {
@@ -530,9 +534,7 @@ void collectFeatureReferenceRows(
     }
 
     if (node.value("type", 0U) == static_cast<uint32_t>(InspectionConverter::ValueType::FeatureId)) {
-        featureRefs.emplace_back(
-            node.value("value", std::string{}),
-            node.value("mapId", std::string{}));
+        featureRefs.push_back(node);
     }
 
     if (node.contains("children")) {
@@ -773,19 +775,21 @@ TEST_CASE("FeatureInspection preserves external feature-reference map ids", "[er
     REQUIRE(feature);
 
     auto inspection = InspectionConverter().convert(feature);
-    std::vector<std::pair<std::string, std::string>> featureRefs;
+    std::vector<nlohmann::json> featureRefs;
     collectFeatureReferenceRows(*inspection, featureRefs);
-
-    REQUIRE(
-        std::find(
-            featureRefs.begin(),
-            featureRefs.end(),
-            std::pair<std::string, std::string>{"Way.2", "ValidationMap"}) != featureRefs.end());
-    REQUIRE(
-        std::find(
-            featureRefs.begin(),
-            featureRefs.end(),
-            std::pair<std::string, std::string>{"Way.3", "ValidationMap"}) != featureRefs.end());
+    for (auto const& expected : {
+        nlohmann::json{{"mapId", "ValidationMap"}, {"typeId", "UnregisteredTarget"},
+            {"id", {{"externalPart", INT64_MAX}, {"label", "007"}}}},
+        nlohmann::json{{"mapId", "ValidationMap"}, {"typeId", "Way"}, {"id", {{"wayId", 3}}}}}) {
+        auto row = std::ranges::find_if(featureRefs, [&](auto const& value) {
+            return value.contains("featureReference") && value.at("featureReference") == expected;
+        });
+        REQUIRE(row != featureRefs.end());
+        CHECK(row->at("mapId") == "ValidationMap");
+        // Display JSON is descriptive only; navigation consumes the typed
+        // reference, preserving named integer/string parts without a schema.
+        CHECK(nlohmann::json::parse(row->at("value").get<std::string>()) == expected);
+    }
 }
 
 TEST_CASE("FeatureInspection exposes traversal-based attribute hover ids", "[erdblick.inspection]")
@@ -1460,10 +1464,18 @@ TEST_CASE("TileLayerParser clears string-pool offsets when datasource info is re
 TEST_CASE("TileLayerParser appends ready maps without invalidating live dictionaries or metadata", "[erdblick.parser]")
 {
     TileLayerParser parser;
+    auto layerInfo = lineTestLayerInfo();
+    auto schema = layerInfo->schemaOwner();
+    std::ostringstream artifact;
+    REQUIRE(schema->write(artifact));
+    parser.installMapSchema(SharedUint8Array(artifact.str()), std::string(schema->schemaId()));
+    // Canonical metadata contains only a graph reference. Feature identities
+    // are supplied by the separately installed artifact, including on append.
     auto first = nlohmann::json{
-        {"mapId", "First"}, {"stringPoolId", "FirstPool"},
-        {"layers", {{"LineLayer", lineTestLayerInfo()->toJson()}}}
-    };
+        {"mapId", "First"},
+        {"stringPoolId", "FirstPool"},
+        {"schemaId", schema->schemaId()},
+        {"layers", {{"LineLayer", layerInfo->toJson()}}}};
     auto second = first;
     second["mapId"] = "Second";
     second["stringPoolId"] = "SecondPool";
@@ -1476,9 +1488,16 @@ TEST_CASE("TileLayerParser appends ready maps without invalidating live dictiona
     SharedUint8Array dictionaryBefore;
     parser.getFieldDict(dictionaryBefore, "FirstPool");
 
+    auto change = [&](nlohmann::json added, nlohmann::json removed = nlohmann::json::array())
+    {
+        parser.applyDataSourceChanges(SharedUint8Array(nlohmann::json{
+            {"removedMapIds", removed},
+            {"addedSources", added}}.dump()));
+    };
+
     SECTION("new maps extend the index while retaining existing dictionary bytes and layer pointers")
     {
-        parser.addDataSourceInfo(SharedUint8Array(nlohmann::json::array({second}).dump()));
+        change(nlohmann::json::array({second}));
         auto updated = parser.filterFeatureJumpTargets("Way.7");
         REQUIRE(updated.size() == 1);
         REQUIRE(updated.front().jumpTarget_.maps_ == std::vector<std::string>{"First", "Second"});
@@ -1489,15 +1508,136 @@ TEST_CASE("TileLayerParser appends ready maps without invalidating live dictiona
         REQUIRE(dictionaryAfter.toString() == dictionaryBefore.toString());
     }
 
+    SECTION("a tile arriving before its map cannot poison subsequent registration")
+    {
+        mapget::TileFeatureLayer earlyTile(
+            mapget::TileId::fromWgs84(11., 48., 13),
+            "SecondPool",
+            "Second",
+            layerInfo,
+            std::make_shared<mapget::StringPool>("SecondPool"));
+        std::ostringstream bytes;
+        REQUIRE(earlyTile.write(bytes));
+        REQUIRE_THROWS(parser.readTileLayerMetadata(SharedUint8Array(bytes.str())));
+
+        REQUIRE_NOTHROW(change(nlohmann::json::array({second})));
+        REQUIRE(parser.readTileLayerMetadata(SharedUint8Array(bytes.str())).mapName == "Second");
+        REQUIRE(parser.getFieldDictOffsets() == offsets);
+    }
+
     SECTION("a rejected replacement does not partially install earlier maps from the same batch")
     {
-        REQUIRE_THROWS(parser.addDataSourceInfo(SharedUint8Array(nlohmann::json::array({second, first}).dump())));
+        REQUIRE_THROWS(change(nlohmann::json::array({second, first})));
         auto unchanged = parser.filterFeatureJumpTargets("Way.7");
         REQUIRE(unchanged.front().jumpTarget_.maps_ == std::vector<std::string>{"First"});
         REQUIRE(parser.getFieldDictOffsets() == offsets);
         // The rejected batch did not install Second, so it can still be added.
-        REQUIRE_NOTHROW(parser.addDataSourceInfo(SharedUint8Array(nlohmann::json::array({second}).dump())));
+        REQUIRE_NOTHROW(change(nlohmann::json::array({second})));
     }
+    SECTION("retiring a sibling preserves the first lazy pick, including an add-on dictionary")
+    {
+        change(nlohmann::json::array({second}));
+        parser.addFieldDict(serializedStringPool("SecondPool", "retired-field"));
+        // Rendering reads metadata and retains bytes; the main-thread model is
+        // only decoded on first hover, potentially after an unrelated edit.
+        auto strings = std::make_shared<mapget::StringPool>("FirstPlusAddon");
+        auto subset = std::make_shared<mapget::TileSubsetLayer>(
+            mapget::TileId::fromWgs84(11., 48., 13),
+            "FirstPlusAddon",
+            "First",
+            layerInfo,
+            strings,
+            "roads",
+            1);
+        auto channel = subset->newChannel("features", mapget::Scope::Feature, 0, {}, {});
+        channel->newFeatureEntry(
+            subset->newFeatureId("Way", {{"wayId", int64_t{7}}}),
+            subset->newGeometryCollection(0),
+            {});
+        std::ostringstream payload;
+        REQUIRE(subset->write(payload));
+        std::ostringstream dictionary;
+        REQUIRE(strings->write(dictionary, 0));
+        TileLayerParser missingDictionaryParser;
+        missingDictionaryParser
+            .installMapSchema(SharedUint8Array(artifact.str()), std::string(schema->schemaId()));
+        missingDictionaryParser
+            .setDataSourceInfo(SharedUint8Array(nlohmann::json::array({first}).dump()));
+        auto withoutDictionary =
+            missingDictionaryParser.readTileSubsetLayer(SharedUint8Array(payload.str()));
+        REQUIRE_THROWS_WITH(
+            withoutDictionary.resolvePick(0, 0, 0),
+            Catch::Matchers::ContainsSubstring(
+                "is missing from dictionary 'FirstPlusAddon' for map 'First' layer 'LineLayer'"));
+        parser.addFieldDict(SharedUint8Array(dictionary.str()));
+        REQUIRE(parser.readTileLayerMetadata(SharedUint8Array(payload.str())).mapName == "First");
+        auto oldSecondPool = parser.cachedStrings_->getStringPool("SecondPool");
+
+        change(nlohmann::json::array(), nlohmann::json::array({"Second"}));
+
+        auto decoded = parser.readTileSubsetLayer(SharedUint8Array(payload.str()));
+        REQUIRE(decoded.resolvePick(0, 0, 0)["featureId"] == "Way.7");
+        REQUIRE(
+            parser.filterFeatureJumpTargets("Way.7").front().jumpTarget_.layerInfo_ ==
+            originalLayerInfo);
+        auto retained = parser.getFieldDictOffsets();
+        REQUIRE(retained.contains("FirstPool"));
+        REQUIRE(retained.contains("FirstPlusAddon"));
+        REQUIRE_FALSE(retained.contains("SecondPool"));
+        // Existing decoded models may still own the retired dictionary. Removing
+        // the cache entry must not erase strings through those shared owners.
+        REQUIRE(oldSecondPool->resolve(oldSecondPool->get("retired-field")) == "retired-field");
+    }
+
+    SECTION("failed replacement leaves the old catalog and dictionary untouched")
+    {
+        auto invalid = second;
+        invalid["schemaId"] = "missing-schema";
+        REQUIRE_THROWS(change(nlohmann::json::array({invalid}), nlohmann::json::array({"First"})));
+        REQUIRE(parser.info_.contains("First"));
+        REQUIRE(parser.getFieldDictOffsets() == offsets);
+        REQUIRE(
+            parser.filterFeatureJumpTargets("Way.7").front().jumpTarget_.layerInfo_ ==
+            originalLayerInfo);
+    }
+
+    SECTION("replacement retires the old namespace and binds the new one")
+    {
+        auto replacement = first;
+        replacement["stringPoolId"] = "NewFirstPool";
+        change(nlohmann::json::array({replacement}), nlohmann::json::array({"First"}));
+        REQUIRE(parser.info_.at("First").stringPoolId_ == "NewFirstPool");
+        REQUIRE_FALSE(parser.getFieldDictOffsets().contains("FirstPool"));
+    }
+}
+
+TEST_CASE(
+    "Invalid dictionary frames propagate without poisoning reconnect offsets",
+    "[erdblick.parser]")
+{
+    TileLayerParser parser;
+    auto const valid = serializedStringPool("Pool", "complete-field").toString();
+    auto truncated = valid.substr(0, valid.size() - 1);
+    // Keep the outer frame valid: the fault is inside the dictionary decoder,
+    // whose error used to be printed and swallowed by TileLayerParser.
+    auto frame = [](std::string const& payload)
+    {
+        std::string result;
+        mapget::TileLayerStream::StringPoolOffsetMap offsets;
+        mapget::TileLayerStream::Writer
+            writer([&](std::string bytes, auto) { result = std::move(bytes); }, offsets);
+        writer.sendStatus(payload);
+        result.at(6) = static_cast<char>(mapget::TileLayerStream::MessageType::StringPool);
+        return SharedUint8Array(result);
+    };
+    auto pool = parser.cachedStrings_->getStringPool("Pool");
+    auto const offsets = parser.getFieldDictOffsets();
+    REQUIRE_THROWS(parser.readFieldDictUpdate(frame(truncated)));
+    REQUIRE(parser.getFieldDictOffsets() == offsets);
+    REQUIRE_THROWS(parser.addFieldDict(SharedUint8Array(truncated)));
+    REQUIRE(parser.getFieldDictOffsets() == offsets);
+    REQUIRE_NOTHROW(parser.readFieldDictUpdate(frame(valid)));
+    REQUIRE(pool->resolve(pool->get("complete-field")) == "complete-field");
 }
 
 TEST_CASE("TileLayerParser exposes the tile lifetime in milliseconds", "[erdblick.parser]")
@@ -1624,6 +1764,45 @@ TEST_CASE("Feature search auto-scope accepts one attribute across different attr
     REQUIRE(scopeKeys.contains({"Road", "Road", "RoadRulesLayer"}));
 }
 
+TEST_CASE("Style fields use normalized attribute owners and the native payload scalar", "[erdblick.search]")
+{
+    auto layer = speedLimitLayerInfoJson("Road", "Road", "Rules");
+    auto& definitions = layer["featureModelSchema"]["$defs"];
+    // Two named owners share a physical payload. A shared enum also contains
+    // the requested name: leaf/enum discovery would incorrectly include both.
+    definitions["RulesLayer"]["properties"]["OTHER_SPEED"] = {{"$ref", "#/$defs/SpeedLimitMetric"}};
+    // The shared definition has no single type code; its two container edges
+    // supply the names, as they do in a shared native payload declaration.
+    definitions["SpeedLimitMetric"]["x-mapget"].erase("attributeTypeCode");
+    definitions["SpeedLimitMetric"]["properties"]["conditions"]["properties"]["kind"] = {
+        {"type", "string"}, {"enum", {"SPEED_LIMIT_METRIC", "OTHER_SPEED"}}};
+    TileLayerParser parser;
+    parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({{
+        {"stringPoolId", "StyleOwners"}, {"mapId", "StyleOwners"}, {"layers", {{"Road", layer}}}
+    }}).dump()));
+
+    auto options = nlohmann::json{{"values", "scalar"}};
+    for (auto const* scope : {"auto", "attribute"}) {
+        auto inventory = parser.searchStyleFieldsForQuery("SPEED_LIMIT_METRIC", scope, options);
+        REQUIRE(inventory.at("contexts").size() == 1);
+        auto const& owner = inventory.at("contexts").front();
+        CHECK(owner.at("attrName") == "SPEED_LIMIT_METRIC");
+        CHECK(owner.at("primaryValuePath") == "attributeValue.speedLimitKmh");
+        CHECK(std::ranges::any_of(inventory.at("fields"), [](auto const& field) {
+            return field.at("path") == "attributeValue.speedLimitKmh";
+        }));
+    }
+
+    // A deliberately broad attribute search still exposes both use sites;
+    // sharing a payload must never collapse distinct automatic-rule guards.
+    auto broad = parser.searchStyleFieldsForQuery("true", "attribute", options);
+    REQUIRE(broad.at("contexts").size() == 2);
+    std::set<std::string> names;
+    for (auto const& owner : broad.at("contexts"))
+        names.insert(owner.at("attrName").get<std::string>());
+    CHECK(names == std::set<std::string>{"SPEED_LIMIT_METRIC", "OTHER_SPEED"});
+}
+
 TEST_CASE("Feature search auto-scope accepts Classic direct speed-limit fields", "[erdblick.search]")
 {
     auto datasource = nlohmann::json{
@@ -1658,16 +1837,18 @@ TEST_CASE("Feature search auto-scope accepts Classic direct speed-limit fields",
     REQUIRE(scopes.front().at("mapId") == "ClassicScopeMap");
     REQUIRE(scopes.front().at("layerId") == "NDS.Classic-Routing");
 
-    auto styleFields = parser.searchStyleFieldsForQuery("**.speedLimit < 80", "auto", options);
-    REQUIRE(styleFields.is_array());
+    auto inventory = parser.searchStyleFieldsForQuery("**.speedLimit < 80", "auto", options);
+    auto const& styleFields = inventory.at("fields");
     auto speedLimitField = std::ranges::find_if(styleFields, [](auto const& field) {
-        return field.at("path") == "speedLimit" && field.at("attrName") == "SPEED_LIMIT";
+        return field.at("path") == "speedLimit";
     });
     REQUIRE(speedLimitField != styleFields.end());
-    REQUIRE(speedLimitField->at("valueKind") == "integer");
-    REQUIRE(speedLimitField->contains("numericRange"));
-    REQUIRE(speedLimitField->at("numericRange").at("min").get<double>() == 0.0);
-    REQUIRE(speedLimitField->at("numericRange").at("max").get<double>() == 255.0);
+    auto const& metadata = inventory.at("types").at(speedLimitField->at("metadata").get<size_t>());
+    REQUIRE(metadata.at("valueKind") == "integer");
+    REQUIRE(metadata.at("numericRange").at("min").get<double>() == 0.0);
+    REQUIRE(metadata.at("numericRange").at("max").get<double>() == 255.0);
+    for (auto const& index : speedLimitField->at("contexts"))
+        REQUIRE(inventory.at("contexts").at(index.get<size_t>()).at("attrName") == "SPEED_LIMIT");
     REQUIRE(std::ranges::none_of(styleFields, [](auto const& field) {
         return field.at("path").template get<std::string>().starts_with("$feature");
     }));
@@ -1704,26 +1885,22 @@ TEST_CASE("Feature styling preserves JSON metadata through the attributes alias"
         {"stringPoolId", "AliasTest"}, {"mapId", "AliasMap"},
         {"layers", {{"NDS.Classic-Routing", layer}}}
     }}).dump()));
-    auto fields = parser.searchStyleFieldsForQuery("true", "feature", nlohmann::json::object());
+    auto inventory = parser.searchStyleFieldsForQuery("true", "feature", nlohmann::json::object());
+    auto const& fields = inventory.at("fields");
     for (auto const& suffix : {
              "layer.Guidance.SPEED_LIMIT.speedLimit", "nested.attributes",
              "nested.properties", "nested.laneGroup.numLaneConnectivityElements"}) {
         INFO(suffix);
-        auto find = [&](std::string const& prefix) {
-            return std::ranges::find_if(fields, [&](auto const& field) {
-                return field.at("path") == prefix + suffix;
-            });
-        };
-        auto canonical = find("properties.");
-        auto alias = find("attributes.");
-        REQUIRE(canonical != fields.end());
+        auto alias = std::ranges::find_if(fields, [&](auto const& field) {
+            return field.at("path") == std::string("attributes.") + suffix;
+        });
         REQUIRE(alias != fields.end());
-        REQUIRE(alias->at("valueKind") == canonical->at("valueKind"));
-        REQUIRE(alias->at("valueKind") != "unknown");
-        for (auto key : {"numericRange", "enumValues"}) {
-            REQUIRE(alias->value(key, nlohmann::json{}) == canonical->value(key, nlohmann::json{}));
-        }
+        auto const& metadata = inventory.at("types").at(alias->at("metadata").get<size_t>());
+        REQUIRE(metadata.at("valueKind") != "unknown");
     }
+    REQUIRE(std::ranges::none_of(fields, [](auto const& field) {
+        return field.at("path").template get<std::string>().starts_with("properties.");
+    }));
 }
 
 TEST_CASE("Feature search auto-scope keeps all shared enum attribute scopes", "[erdblick.search]")
@@ -1754,17 +1931,19 @@ TEST_CASE("Feature search auto-scope keeps all shared enum attribute scopes", "[
     REQUIRE(attrNames.contains("WARNING_SIGN"));
     REQUIRE(attrNames.contains("MOVABLE_WARNING_SIGN"));
 
-    auto styleFields = parser.searchStyleFieldsForQuery("SPEED_LIMIT_END", "auto", options);
-    REQUIRE(styleFields.is_array());
-
+    // Enum-term layer suggestions are broader than execution's AST ownership.
+    // Explicit attribute scope exposes both owners; auto discovery must follow
+    // normalization and keep feature-root paths when that is how it executes.
+    auto automatic = parser.searchStyleFieldsForQuery("SPEED_LIMIT_END", "auto", options);
+    CHECK(parser.normalizeSearchQuery("SPEED_LIMIT_END", "auto", options).at("concreteScope") == "feature");
+    CHECK(automatic.at("contexts").front().at("attrName") == "");
+    auto inventory = parser.searchStyleFieldsForQuery("SPEED_LIMIT_END", "attribute", options);
     std::set<std::pair<std::string, std::string>> fieldOwners;
-    for (auto const& field : styleFields) {
-        if (!field.contains("attrName") || !field.at("attrName").is_string()) {
-            continue;
+    for (auto const& field : inventory.at("fields")) {
+        for (auto const& index : field.at("contexts")) {
+            auto const& context = inventory.at("contexts").at(index.get<size_t>());
+            fieldOwners.emplace(field.at("path").get<std::string>(), context.at("attrName").get<std::string>());
         }
-        fieldOwners.emplace(
-            field.at("path").get<std::string>(),
-            field.at("attrName").get<std::string>());
     }
     REQUIRE(fieldOwners.contains({"attributeValue.warningSign", "WARNING_SIGN"}));
     REQUIRE(fieldOwners.contains({"attributeValue.movableWarningSign", "MOVABLE_WARNING_SIGN"}));
@@ -1818,7 +1997,9 @@ TEST_CASE("Feature search completion labels enum-backed constants", "[erdblick.s
     REQUIRE_FALSE(hasCompletionType(speedCompletions, "Hint"));
 }
 
-TEST_CASE("Search completion uses native array domains and attribute overlays without sample nodes", "[erdblick.search]")
+TEST_CASE(
+    "Search completion uses native array types and attribute overlays without sample nodes",
+    "[erdblick.search]")
 {
     auto layer = warningSignLayerInfoJson();
     auto& definitions = layer["featureModelSchema"]["$defs"];

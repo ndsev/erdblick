@@ -38,6 +38,7 @@ import { environment } from "../../environments/environment";
 import { InspectionPanelService } from "../../inspection/inspection-panel.service";
 import { InspectionSelectionService } from "../../inspection/inspection-selection.service";
 import { TileFeatureId } from "../../inspection/inspection.model";
+import type { FeaturePickTarget } from "../../inspection/feature-identity.model";
 import { type TileLayerProps, WMSLayer } from "../../integrations/deckgl.adapter";
 import {
     Cartographic,
@@ -412,6 +413,7 @@ export abstract class DeckMapView implements IRenderView {
     private hoverDetailPickDueAtMs = 0;
     private hoverPickInFlight = false;
     private hoverPickGeneration = 0;
+    private clickPickSerial = 0;
     private topHoverFeatureIds: TileFeatureId[] = [];
     private topHoverFeatureGeneration = -1;
     private deckCanvasPointerInside = false;
@@ -563,7 +565,9 @@ export abstract class DeckMapView implements IRenderView {
         idSuffix = ""
     ): DeckMercatorView {
         return new ErdblickMapView({
-            id: `deck-view-${this._viewIndex}${idSuffix}`,
+            // The navigation adapter receives this same persistent identity.
+            // Reordering application views must not change Deck's controller ID.
+            id: `${this.viewId}${idSuffix}`,
             repeat: true,
             orthographic: this.useOrthographicProjection,
             controller
@@ -576,7 +580,7 @@ export abstract class DeckMapView implements IRenderView {
         idSuffix = ""
     ): DeckFirstPersonView {
         return new DeckFirstPersonView({
-            id: `deck-view-${this._viewIndex}${idSuffix}`,
+            id: `${this.viewId}${idSuffix}`,
             fovy: FIRST_PERSON_FOV_DEGREES,
             near: FIRST_PERSON_NEAR_METERS,
             far: FIRST_PERSON_FAR_METERS,
@@ -654,7 +658,9 @@ export abstract class DeckMapView implements IRenderView {
                     interactionState
                 ),
             onInteractionStateChange: (interactionState) => this.onInteractionStateChange(interactionState),
-            onClick: (info, event) => this.onClick(info, event),
+            onClick: (info, event) => {
+                void this.onClick(info, event).catch(error => console.error("Feature picking failed.", error));
+            },
             onAfterRender: () => {
                 if (this.locationAreaHighlightTick && this.locationAreaHighlightStartedAt === undefined) {
                     this.locationAreaHighlightStartedAt = performance.now();
@@ -1306,7 +1312,7 @@ export abstract class DeckMapView implements IRenderView {
         const picked = pickNavigationAnchor(
             this.deck,
             [screenPos.x, screenPos.y],
-            pickingInfo => this.featureIdsFromPickingInfo(pickingInfo),
+            pickingInfo => this.knownFeatureIdsFromPickingInfo(pickingInfo),
             (first, second) => first.length > 0 && second.length > 0 &&
                 first.some(firstId => second.some(secondId =>
                     firstId.mapTileKey === secondId.mapTileKey
@@ -1385,11 +1391,11 @@ export abstract class DeckMapView implements IRenderView {
      * Resolves every eligible rendered feature returned by one bounded point drill-pick.
      * Layer filtering happens before the pick so excluded representations cannot consume depth.
      */
-    drillPickFeatures(
+    async drillPickFeatures(
         screenPos: { x: number; y: number },
         radius: number,
         maxObjects: number
-    ): RenderedFeaturePickResult {
+    ): Promise<RenderedFeaturePickResult> {
         if (!this.deck) {
             return { topFeatureIds: [], featureIds: [] };
         }
@@ -1445,10 +1451,10 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /** Orders picks, preserving the first render object's atomic feature group while flattening all hits. */
-    private featurePickResultFromPickingInfos(
+    private async featurePickResultFromPickingInfos(
         pickedObjects: PickingInfo[],
         maxFeatures = Number.POSITIVE_INFINITY
-    ): RenderedFeaturePickResult {
+    ): Promise<RenderedFeaturePickResult> {
         let topFeatureIds: TileFeatureId[] = [];
         const featureIds: TileFeatureId[] = [];
         const seen = new Set<string>();
@@ -1470,7 +1476,7 @@ export abstract class DeckMapView implements IRenderView {
                 : orderedVectorPicks[vectorPickIndex++].picked;
             const groupFeatureIds: TileFeatureId[] = [];
             const groupSeen = new Set<string>();
-            for (const featureId of this.featureIdsFromPickingInfo(picked)) {
+            for (const featureId of await this.resolvePickedFeatures(this.featureIdsFromPickingInfo(picked))) {
                 const identity = `${featureId.mapTileKey}\u0000${featureId.featureId}`;
                 if (!groupSeen.has(identity)) {
                     groupSeen.add(identity);
@@ -1519,7 +1525,7 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /** Resolves feature ids from metadata already returned by a deck picking operation. */
-    private featureIdsFromPickingInfo(picked: PickingInfo): TileFeatureId[] {
+    private featureIdsFromPickingInfo(picked: PickingInfo): FeaturePickTarget[] {
         const globalPickIndex = Number(
             (picked.object as { globalPickIndex?: unknown } | undefined)
                 ?.globalPickIndex ?? picked.index
@@ -2398,8 +2404,11 @@ export abstract class DeckMapView implements IRenderView {
                 return;
             }
             const topFeatureIds = topPick
-                ? this.featureIdsFromPickingInfo(topPick)
+                ? await this.resolvePickedFeatures(this.featureIdsFromPickingInfo(topPick))
                 : [];
+            if (deck !== this.deck || generation !== this.hoverPickGeneration ||
+                !this.deckCanvasPointerInside || this.isCameraInteracting ||
+                !this.isHoverSampleLocal(position, radius)) return;
             this.topHoverFeatureIds = topFeatureIds;
             this.topHoverFeatureGeneration = generation;
             // Do not make the visible highlight wait for the more expensive drill pass.
@@ -2496,10 +2505,13 @@ export abstract class DeckMapView implements IRenderView {
                 !this.isHoverSampleLocal(position, radius)) {
                 return;
             }
-            const featureIds = this.featurePickResultFromPickingInfos(
+            const featureIds = (await this.featurePickResultFromPickingInfos(
                 picked,
                 DeckMapView.HOVER_PICK_MAX_OBJECTS
-            ).featureIds;
+            )).featureIds;
+            if (deck !== this.deck || generation !== this.hoverPickGeneration ||
+                !this.deckCanvasPointerInside || this.isCameraInteracting ||
+                !this.isHoverSampleLocal(position, radius)) return;
             const topFeatureIds = generation === this.topHoverFeatureGeneration
                 ? this.topHoverFeatureIds
                 : [];
@@ -2571,7 +2583,7 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /** Handles primary-click drill inspection, marker placement, and background deselection. */
-    private onClick(info: PickingInfo, event: DeckGestureEventLike): void {
+    private async onClick(info: PickingInfo, event: DeckGestureEventLike): Promise<void> {
         if (environment.visualizationOnly) {
             return;
         }
@@ -2579,6 +2591,8 @@ export abstract class DeckMapView implements IRenderView {
         if (srcEvent && Number.isInteger(srcEvent.button) && srcEvent.button !== 0) {
             return;
         }
+        // A background click also supersedes a foreign locate still in flight.
+        const pickSerial = ++this.clickPickSerial;
         this.viewSettings.focusedView = this._viewIndex;
         if (!info || !Number.isFinite(info.x) || !Number.isFinite(info.y)) {
             this.inspectionState.unsetUnlockedSelections();
@@ -2587,24 +2601,38 @@ export abstract class DeckMapView implements IRenderView {
         }
 
         const screenPosition = { x: info.x, y: info.y };
+        const deck = this.deck;
         const useDesktopDrillPick = this.desktopDrillPickingEnabled
             && (!srcEvent?.pointerType || srcEvent.pointerType === "mouse");
-        let featureIds = useDesktopDrillPick
-            ? this.drillPickFeatures(
-                screenPosition,
-                this.inspectionState.state.drillPickRadius,
-                this.inspectionState.state.inspectionsLimit
-            ).topFeatureIds
-            : this.featurePickResultFromPickingInfos([info]).topFeatureIds;
-        // Deck's speculative pointer-down picker is intentionally disabled. Touch taps therefore
-        // perform their bounded pick here, after the recognizer has ruled out a drag.
-        if (!featureIds.length && !useDesktopDrillPick) {
-            featureIds = this.drillPickFeatures(
-                screenPosition,
-                this.inspectionState.state.drillPickRadius,
-                1
-            ).topFeatureIds;
+        // Selection arrays may be edited in place. Observe notifications rather
+        // than comparing array identity after the asynchronous target lookup.
+        let selectionChanged: boolean;
+        const guard = this.inspectionState.state.selectionState.subscribe(() => {
+            selectionChanged = true;
+        });
+        selectionChanged = false;
+        let featureIds: TileFeatureId[];
+        try {
+            featureIds = useDesktopDrillPick
+                ? (await this.drillPickFeatures(
+                    screenPosition,
+                    this.inspectionState.state.drillPickRadius,
+                    this.inspectionState.state.inspectionsLimit
+                )).topFeatureIds
+                : (await this.featurePickResultFromPickingInfos([info])).topFeatureIds;
+            // Deck's speculative pointer-down picker is intentionally disabled. Touch taps
+            // perform their bounded pick after the recognizer has ruled out a drag.
+            if (!featureIds.length && !useDesktopDrillPick) {
+                featureIds = (await this.drillPickFeatures(
+                    screenPosition,
+                    this.inspectionState.state.drillPickRadius,
+                    1
+                )).topFeatureIds;
+            }
+        } finally {
+            guard.unsubscribe();
         }
+        if (deck !== this.deck || pickSerial !== this.clickPickSerial || selectionChanged) return;
         // Primary click means "the top rendered object". A server-grouped
         // point is one object with several semantic members, all of which
         // belong to the click; unrelated lower objects remain context-menu
@@ -2676,10 +2704,28 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Returns whether one Deck pick resolves to the exact supplied tile-feature identity. */
     private pickingInfoContainsFeature(picked: PickingInfo, target: TileFeatureId): boolean {
-        return this.featureIdsFromPickingInfo(picked).some(featureId =>
+        return this.knownFeatureIdsFromPickingInfo(picked).some(featureId =>
             featureId.mapTileKey === target.mapTileKey
             && featureId.featureId === target.featureId
         );
+    }
+
+    /** Keep canonical-only navigation synchronous; foreign identity becomes available after locate. */
+    private knownFeatureIdsFromPickingInfo(picked: PickingInfo): TileFeatureId[] {
+        const targets = this.featureIdsFromPickingInfo(picked);
+        if (targets.every(target => !target.featureReference)) return targets as TileFeatureId[];
+        return this.tileStream.cachedFeaturePicks(targets);
+    }
+
+    /** Resolve only interacted foreign references, then teach the sparse mask index their canonical aliases. */
+    private async resolvePickedFeatures(targets: FeaturePickTarget[]): Promise<TileFeatureId[]> {
+        if (targets.every(target => !target.featureReference)) return targets as TileFeatureId[];
+        const resolved = await this.tileStream.resolveFeaturePicks(targets);
+        for (const target of targets) {
+            if (target.featureReference)
+                this.gpuScene?.rememberLocatedPick(target, this.tileStream.cachedFeaturePicks([target]));
+        }
+        return resolved;
     }
 
     /** Applies a sanitized camera state to deck and optionally refreshes viewport-dependent overlays. */

@@ -57,7 +57,7 @@ import {
     removeGroupPrefix,
     StyleOptionNode
 } from "./map-tree.controller";
-import { CoverageRectItem, dataSourceCatalogStatus, MapInfoItem } from "./source-catalog.model";
+import { CoverageRectItem, dataSourceReadinessStatus, MapInfoItem } from "./source-catalog.model";
 
 /** One rendered select option in the per-view background-layer dropdown. */
 interface BackgroundLayerOption {
@@ -640,23 +640,27 @@ export class MapPanelComponent {
     );
     private readonly stylePresetProjectionChanges = new BehaviorSubject(0);
     readonly mapTreeView$: Observable<MapPanelTreeView> = combineLatest([
-        this.mapService.maps$,
+        // A catalog refresh replaces the tree after this panel may already be
+        // open. Observe the replacement's completed option updates, rather than
+        // racing its subscriptions to the style and preset catalogs.
+        this.mapService.maps$.pipe(switchMap(tree => tree.styleOptionsChanged.pipe(
+            startWith(undefined),
+            map(() => tree)
+        ))),
         this.appliedMapFilterTextChanges,
-        this.styleService.styleGroups,
         this.stateService.observe(() => ({
             numViews: this.viewSettings.numViews,
             ids: this.viewSettings.viewIds,
             layerPresets: this.layerState.layerPresetSelectionState.appState.value,
             mapPresets: this.layerState.mapPresetSelectionState.appState.value
         }), deepEquals),
-        this.mapPresetService.presets$,
         this.stylePresetProjectionChanges,
         this.mapService.layerStateChanged.pipe(
             filter(reason => reason === "visibility" || reason === "external-state"),
             startWith("visibility")
         )
     ]).pipe(
-        map(([mapTree, filterText, _styleGroups, { numViews }]) => ({
+        map(([mapTree, filterText, { numViews }]) => ({
             size: mapTree.size,
             nodesByView: Array.from(
                 { length: numViews },
@@ -1320,12 +1324,12 @@ export class MapPanelComponent {
 
     /** Returns the catalog startup status for a map tree entry. */
     dataSourceStatus(mapInfo: MapInfoItem) {
-        return dataSourceCatalogStatus(mapInfo);
+        return dataSourceReadinessStatus(mapInfo);
     }
 
     /** Maps datasource startup status to the small connectivity indicator class. */
     dataSourceStatusClass(mapInfo: MapInfoItem): string {
-        return dataSourceCatalogStatus(mapInfo);
+        return dataSourceReadinessStatus(mapInfo);
     }
 
     /** Returns a concise datasource status tooltip for ready, initializing, and failed entries. */

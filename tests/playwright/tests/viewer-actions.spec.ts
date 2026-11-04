@@ -103,6 +103,7 @@ test('browser action adapter reads live views, moves only its target and updates
         await expect(details.getByTestId('viewer-action-copy-codex')).toHaveText('Codex');
         await expect(details.getByTestId('viewer-action-copy-claude')).toHaveText('Claude');
         await expect(details.getByTestId('viewer-action-copy-copilot')).toHaveText('Copilot');
+        await expect(details.getByTestId('viewer-action-copy-cursor')).toHaveText('Cursor');
         await expect(details.getByRole('button', { name: 'Copy MCP URL', exact: true })).toHaveCount(0);
 
         const value = { destination: { lon: 11.5374, lat: 48.1584, alt: 700 }, orientation: { heading: 0, pitch: -1, roll: 0 }, position: [0, 0, 0] };
@@ -203,7 +204,7 @@ for (const darkMode of ['off', 'on'] as const) {
                 expect(overlayBox!.x).toBeGreaterThanOrEqual(0);
                 expect(overlayBox!.x + overlayBox!.width).toBeLessThanOrEqual(width);
                 const buttons = details.getByTestId(/^viewer-action-copy-/).getByRole('button');
-                await expect(buttons).toHaveCount(3);
+                await expect(buttons).toHaveCount(4);
                 await expect(buttons.last()).toBeVisible();
                 const bounds = await buttons.evaluateAll(elements => elements.map(element => {
                     const { top, bottom, left, right } = element.getBoundingClientRect();
@@ -218,11 +219,15 @@ for (const darkMode of ['off', 'on'] as const) {
                 }
                 const label = details.getByText('Copy Add-MCP-Command:', { exact: true });
                 await expect(label).toBeVisible();
-                if (width >= 480) {
-                    const labelBox = await label.boundingBox();
+                const labelBox = await label.boundingBox();
+                // Four client buttons stay together; narrower popovers move the label
+                // above that row instead of squeezing or clipping the copy controls.
+                if (width >= 560) {
                     expect(labelBox!.x + labelBox!.width).toBeLessThan(bounds[0].left);
                     expect(labelBox!.y).toBeGreaterThanOrEqual(bounds[0].top);
                     expect(labelBox!.y + labelBox!.height).toBeLessThanOrEqual(bounds[0].bottom);
+                } else {
+                    expect(labelBox!.y + labelBox!.height).toBeLessThanOrEqual(bounds[0].top);
                 }
                 await page.mouse.move(0, 0);
                 const screenshot = testInfo.outputPath(`mcp-controls-${darkMode}-${width}.png`);

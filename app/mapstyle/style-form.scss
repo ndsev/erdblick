@@ -1,5 +1,10 @@
 :host { display: block; min-width: 0; }
 :host([hidden]) { display: none; }
+/* Native form controls should use the same app font as their labels. Desktop
+   theme defaults otherwise change their text metrics and the height of every row. */
+button, input, select, textarea {
+    font: inherit;
+}
 .style-form { padding: .5rem; }
 .style-form-body { border: 0; margin: 0; padding: 0; min-width: 0; }
 .style-form-field { display: grid; gap: .35rem; margin: .65rem 0; min-width: 0; }

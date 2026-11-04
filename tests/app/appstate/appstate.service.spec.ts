@@ -2493,19 +2493,18 @@ describe('AppStateService', () => {
         stateOwners(service);
         const serviceViews = stateOwners(service).views;
         expect(service.seedConfigDefaultState({
-            pointCloudDetailPixels: 4,
-            pointCloudGpuMemoryMiB: 128
+            pointCloudDetailPixels: 4
         }, 'point-cloud-config')).toEqual([]);
         expect(serviceViews.state.pointCloudPolicy.detailPixels).toBe(4);
         serviceViews.setPointCloudPolicy({ ...serviceViews.state.pointCloudPolicy, enabled: false, workingMemoryMiB: 256 });
         const snapshot = service.exportSnapshot();
         expect(snapshot).toMatchObject({
             pointCloudDownsamplingEnabled: 0,
-            pointCloudDetailPixels: 4, pointCloudWorkingMemoryMiB: 256, pointCloudGpuMemoryMiB: 128
+            pointCloudDetailPixels: 4, pointCloudWorkingMemoryMiB: 256
         });
         expect(serviceViews.state.pointCloudDetailPixelsState.isUrlState()).toBe(false);
-        expect(() => serviceViews.setPointCloudPolicy({ ...serviceViews.state.pointCloudPolicy, gpuMemoryMiB: 0 })).toThrow();
-        expect(serviceViews.state.pointCloudPolicy.gpuMemoryMiB).toBe(128);
+        expect(() => serviceViews.setPointCloudPolicy({ ...serviceViews.state.pointCloudPolicy, workingMemoryMiB: 0 })).toThrow();
+        expect(serviceViews.state.pointCloudPolicy.workingMemoryMiB).toBe(256);
         expect(service.importSnapshot({ pointCloudDetailPixels: 8 })).toEqual([]);
         expect(serviceViews.state.pointCloudPolicy.detailPixels).toBe(8);
         expect(service.importSnapshot({ pointCloudWorkingMemoryMiB: -1 }).length).toBeGreaterThan(0);
@@ -2514,18 +2513,22 @@ describe('AppStateService', () => {
         routerStub.events.complete();
     });
 
-    it('persists GPU memory management separately from downsampling and URL state', () => {
+    it('ignores retired GPU allowance settings without rejecting remaining preferences', () => {
         const routerStub = createRouterStub();
         const service = new AppStateService(routerStub as unknown as Router, messageServiceStub());
-        stateOwners(service);
-        expect(stateOwners(service).viewSettings.gpuMemoryManagementEnabledState.getValue()).toBe(true);
-        expect(stateOwners(service).viewSettings.gpuMemoryManagementEnabledState.isUrlState()).toBe(false);
-        expect(service.seedConfigDefaultState({gpuMemoryManagementEnabled: false}, 'memory-config')).toEqual([]);
-        expect(stateOwners(service).viewSettings.gpuMemoryManagementEnabledState.getValue()).toBe(false);
-        expect(stateOwners(service).viewSettings.pointCloudPolicy.enabled).toBe(true);
-        expect(service.exportSnapshot()).toMatchObject({gpuMemoryManagementEnabled: 0});
-        expect(service.importSnapshot({gpuMemoryManagementEnabled: 1})).toEqual([]);
-        expect(stateOwners(service).viewSettings.gpuMemoryManagementEnabledState.getValue()).toBe(true);
+        const {viewSettings} = stateOwners(service);
+        expect(service.seedConfigDefaultState({
+            gpuMemoryManagementEnabled: false, pointCloudGpuMemoryMiB: 256,
+            pointCloudWorkingMemoryMiB: 128
+        }, 'old-memory-config')).toEqual([]);
+        expect(viewSettings.pointCloudPolicy.workingMemoryMiB).toBe(128);
+        expect(service.importSnapshot({
+            gpuMemoryManagementEnabled: true, pointCloudGpuMemoryMiB: 64,
+            pointCloudWorkingMemoryMiB: 256
+        })).toEqual([]);
+        expect(viewSettings.pointCloudPolicy.workingMemoryMiB).toBe(256);
+        expect(service.exportSnapshot()).not.toHaveProperty('gpuMemoryManagementEnabled');
+        expect(service.exportSnapshot()).not.toHaveProperty('pointCloudGpuMemoryMiB');
         service.ngOnDestroy();
         routerStub.events.complete();
     });

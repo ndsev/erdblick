@@ -211,6 +211,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private pendingContextMenuOpenTimeout?: ReturnType<typeof setTimeout>;
     private rightPressStart: { x: number; y: number } | null = null;
     private rightPressMoved = false;
+    private contextMenuPickSerial = 0;
     private viewerPointerDownCapture?: (event: PointerEvent) => void;
     private viewerPointerMoveCapture?: (event: PointerEvent) => void;
     private viewerPointerUpCapture?: (_event: PointerEvent) => void;
@@ -760,16 +761,25 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /** Prepares source-data context and opens the PrimeNG context menu at the supplied screen position. */
-    private openContextMenu(menu: ContextMenu, event: { clientX: number; clientY: number; pageX: number; pageY: number }) {
+    private async openContextMenu(menu: ContextMenu, event: { clientX: number; clientY: number; pageX: number; pageY: number }) {
         this.menuService.closeAllContextMenus();
         const screenPos = this.contextMenuScreenPosition(event);
-        const featureIds = screenPos && this.mapView
-            ? this.mapView.drillPickFeatures(
-                screenPos,
-                this.inspectionState.state.drillPickRadius,
-                this.inspectionState.state.inspectionsLimit
-            ).featureIds
-            : [];
+        const view = this.mapView;
+        const serial = ++this.contextMenuPickSerial;
+        let featureIds: TileFeatureId[];
+        try {
+            featureIds = screenPos && view
+                ? (await view.drillPickFeatures(
+                    screenPos,
+                    this.inspectionState.state.drillPickRadius,
+                    this.inspectionState.state.inspectionsLimit
+                )).featureIds
+                : [];
+        } catch (error) {
+            console.error("Could not locate context-menu features.", error);
+            return;
+        }
+        if (view !== this.mapView || serial !== this.contextMenuPickSerial) return;
         this.menuService.setPickedFeatures(featureIds);
         let contextPosition: PreparedContextMenuPosition | null = null;
         try {

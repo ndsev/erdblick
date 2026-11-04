@@ -3,12 +3,15 @@
 #include <type_traits>
 #include <variant>
 #include "mapget/model/info.h"
+#include "simfil/model/schema.h"
 
 #ifdef EMSCRIPTEN
 #include <emscripten/bind.h>
 #else
 #include "nlohmann/json.hpp"
 #endif
+
+namespace mapget { class FeatureId; }
 
 namespace erdblick
 {
@@ -53,6 +56,19 @@ struct JsValue
 
     /** Convert a tagged native partition without narrowing an object ID. */
     static JsValue fromPartition(mapget::PartitionId const& partition);
+
+    /** Project one exact type for inspection/style UI without exporting its schema graph. */
+    static JsValue fromSchema(simfil::SchemaReference const& reference);
+
+    /** Preserve a mask's raw uint64 bits and exact schema/type identity at the JS boundary. */
+    static JsValue fromBitmask(simfil::Bitmask const& mask);
+
+    /**
+     * Carry a named reference without consulting the source tile's schema.
+     * Integers outside JavaScript's exact Number range become BigInts so a
+     * subsequent target-map locate preserves both their value and their type.
+     */
+    static JsValue fromFeatureId(mapget::FeatureId const& reference);
 
     /**
      * Construct an Object as a new JS or JSON dictionary with provided initializers.

@@ -3,7 +3,6 @@
  * Allocation ranges, growth and retirement are encapsulated here; scene owners
  * supply records and explicitly release the store when their content retires.
  */
-import {gpuMemoryBudget} from "./gpu-memory-budget.model";
 import {Buffer, type Device} from "@luma.gl/core";
 import {
     GpuRangeAllocator,
@@ -48,7 +47,6 @@ export class GpuPrimitiveStore {
     private uploadedBytes = 0;
     private uploadCount = 0;
     private growthCount = 0;
-    private readonly allocationReleases = new Map<Buffer, () => void>();
 
     /** Create an initially empty material store with a hard allocation ceiling. */
     constructor(
@@ -115,7 +113,7 @@ export class GpuPrimitiveStore {
             buffers.add(this.renderBuffer);
         }
         this.retiredBuffers.forEach(buffer => buffers.add(buffer));
-        buffers.forEach(buffer => this.destroyBuffer(buffer));
+        buffers.forEach(buffer => buffer.destroy());
         this.gpuBuffer = null;
         this.renderBuffer = null;
         this.retiredBuffers.length = 0;
@@ -137,7 +135,7 @@ export class GpuPrimitiveStore {
 
     /** Destroy superseded allocations after every model has rebound to the published buffer. */
     releaseRetiredBuffers(): void {
-        this.retiredBuffers.forEach(buffer => this.destroyBuffer(buffer));
+        this.retiredBuffers.forEach(buffer => buffer.destroy());
         this.retiredBuffers.length = 0;
     }
 
@@ -191,12 +189,6 @@ export class GpuPrimitiveStore {
         };
     }
 
-    private destroyBuffer(buffer: Buffer): void {
-        buffer.destroy();
-        this.allocationReleases.get(buffer)?.();
-        this.allocationReleases.delete(buffer);
-    }
-
     /** Grow geometrically and preserve existing records entirely on the GPU. */
     private ensureCapacity(requiredRecords: number): void {
         if (requiredRecords <= this.capacity) {
@@ -235,12 +227,6 @@ export class GpuPrimitiveStore {
             nextCapacity = Math.max(nextCapacity + 1, nextCapacity * 2);
         }
         nextCapacity = Math.min(nextCapacity, maximumRecords);
-        const tracked = this.device.statsManager?.getStats("GPU Time and Memory").get("GPU Memory");
-        if (tracked !== undefined) gpuMemoryBudget.observeTrackedTotal(tracked);
-        // Optional growth slack must not reject records that fit the remaining allowance.
-        if (nextCapacity * this.recordStride > gpuMemoryBudget.allocationAvailableBytes)
-            nextCapacity = requiredRecords;
-        const releaseAllocation = gpuMemoryBudget.allocate(nextCapacity * this.recordStride);
         let next: Buffer | null = null;
         try {
             next = this.device.createBuffer({
@@ -248,7 +234,6 @@ export class GpuPrimitiveStore {
                 usage: Buffer.VERTEX | Buffer.COPY_SRC | Buffer.COPY_DST,
                 byteLength: nextCapacity * this.recordStride
             });
-            this.allocationReleases.set(next, releaseAllocation);
             if (this.gpuBuffer && this.allocator.highWaterRecord > 0) {
                 const encoder = this.device.createCommandEncoder({
                     id: `grow-erdblick-gpu-material-${this.materialKey.toString(16)}`
@@ -264,8 +249,7 @@ export class GpuPrimitiveStore {
                 this.device.submit(encoder.finish());
             }
         } catch (error) {
-            if (next) this.destroyBuffer(next);
-            else releaseAllocation();
+            next?.destroy();
             throw error;
         }
         if (this.gpuBuffer) {
@@ -274,7 +258,7 @@ export class GpuPrimitiveStore {
             } else {
                 // A staging-only generation was never visible to a model and
                 // can be released as soon as its GPU copy has been submitted.
-                this.destroyBuffer(this.gpuBuffer);
+                this.gpuBuffer.destroy();
             }
         }
         this.gpuBuffer = next;

@@ -51,10 +51,13 @@ test.describe('Snapshot – style component', () => {
         });
 
         await page.mouse.move(0, 0);
+        // Keep header and footer callouts clear of the neighboring controls.
+        // The form's inherited app font can leave less spare vertical space.
         await captureDocsScreenshotWithLabels(page, 'docs/screenshots/style-component-editor-controls.png', [
             {
                 locator: editorDialog.getByTestId('style-editor-enabled'),
-                label: 'Enable or disable style'
+                label: 'Enable or disable style',
+                placement: 'top'
             },
             {
                 locator: editorDialog.getByTestId('style-editor-quick-name'),
@@ -74,19 +77,23 @@ test.describe('Snapshot – style component', () => {
             },
             {
                 locator: editorDialog.getByTestId('style-editor-apply-button'),
-                label: 'Apply changes'
+                label: 'Apply changes',
+                placement: 'left'
             },
             {
                 locator: editorDialog.getByTestId('style-editor-close-button'),
-                label: 'Close editor'
+                label: 'Close editor',
+                placement: 'top'
             },
             {
                 locator: editorDialog.getByTestId('style-editor-export-button'),
-                label: 'Export style'
+                label: 'Export style',
+                placement: 'top'
             },
             {
                 locator: editorDialog.getByTestId('style-editor-help-button'),
-                label: 'Open style help'
+                label: 'Open style help',
+                placement: 'bottom'
             }
         ]);
     });

@@ -48,7 +48,13 @@ public:
     {
         JsValue key_;
         JsValue value_;
+        /** Raw values stay unchanged; labels/units are presentation derived from their exact
+         * type. */
+        std::string displayValue_;
+        std::optional<JsValue> scalarType_;
         std::optional<JsValue> mapId_;
+        /** Foreign references keep named, typed ID parts until target-map resolution. */
+        std::optional<JsValue> featureReference_;
         ValueType type_ = ValueType::Null;
         std::string hoverId_;  // For highlight attribs/relations on hovering.
         std::string info_;
@@ -61,6 +67,9 @@ public:
         std::optional<JsValue> address_;
         bool addressScope_ = false;
         std::string schemaType_;
+
+        /** Convert a primitive and decorate known meanings; returns false for compound values. */
+        bool setScalarValue(simfil::Value const& value);
 
         /** Source-data backlink attached to an inspection node. */
         struct SourceDataReference {
@@ -201,7 +210,8 @@ public:
     void convertField(
         JsValue const& fieldName,
         FieldOrIndex const& path,
-        simfil::ModelNode::Ptr const& value);
+        simfil::ModelNode::Ptr const& value,
+        simfil::SchemaReference type = {});
 
     /**
      * Store one referenced feature id as inspection node payload.

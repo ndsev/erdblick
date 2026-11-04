@@ -67,6 +67,31 @@ describe("search style sheet codec", () => {
         layerIds: readonly string[] = []
     ) => ({name, defaultEnabled, layerIds});
 
+    it.each([false, true])("round-trips type-bound special overrides through saved YAML (legacy guard: %s)", legacy => {
+        const rule: FeatureSearchStyleRule = {geometry: ["line"], filter: [], color: {
+            mode: "gradient", field: "speed", stops: [{value: 1, color: "#111111"}, {value: 253, color: "#222222"}],
+            schemaType: {schemaId: "saved-graph", typeId: 7},
+            specials: [{value: 0, color: "#123456"}, {value: 255, color: "#abcdef"}], fallbackColor: "#ffffff"
+        }};
+        const saved = convertSearchStyleRulesToYaml(saveOptions("Semantic colors"), [rule]);
+        expect(saved.source).toContain("schemaType:");
+        expect(saved.source).not.toContain("domainId:");
+        // Simulate a stylesheet saved before the type terminology change. Both
+        // the editor import and the native runtime must retain its exact guard.
+        const source = legacy ? saved.source.replace("schemaType:", "domain:").replace("typeId:", "domainId:") : saved.source;
+        const loaded = projectStyleSourceForSearch(source, "feature");
+        expect(loaded.rules[0].color).toMatchObject(rule.color);
+        const rewritten = convertSearchStyleRulesToYaml(saveOptions("Semantic colors"), loaded.rules);
+        expect(rewritten.source).toContain("schemaType:");
+        expect(rewritten.source).not.toContain("domainId:");
+        const style = uint8ArrayToWasm(data => new coreLib.FeatureLayerStyle(data), new TextEncoder().encode(source))!;
+        try {
+            expect(style.isValid(), JSON.stringify(style.validationReport())).toBe(true);
+        } finally {
+            style.delete();
+        }
+    });
+
     it.each(["gradient", "categories"] as const)("preserves an omitted %s fallback through YAML", mode => {
         const rule: FeatureSearchStyleRule = {geometry: ["line"], filter: [], width: 2,
             color: {mode, field: "speed", stops: [{value: 10, color: "#123456"}]}};

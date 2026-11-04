@@ -1,4 +1,3 @@
-import {DEFAULT_POINT_CLOUD_POLICY} from "../../../../app/mapview/point-cloud-policy.model";
 import type { Buffer, Device, Texture } from "@luma.gl/core";
 import {
     afterEach,
@@ -7,7 +6,6 @@ import {
     it,
     vi
 } from "vitest";
-import { gpuMemoryBudget } from "../../../../app/mapview/deck/gpu-memory-budget.model";
 
 import {
     GpuScene,
@@ -1370,11 +1368,9 @@ describe("GpuScene contribution lifecycle", () => {
     if (presented) {
       scene.releaseRetiredPresentationResources();
       expect(oldBuffer.destroyed).toBe(false);
-      expect(gpuMemoryBudget.retirement).not.toBeNull();
       scene.publishPresentation();
       scene.releaseRetiredPresentationResources();
       expect(oldBuffer.destroyed).toBe(true);
-      expect(gpuMemoryBudget.retirement).toBeNull();
     }
     expect(newBuffer.bytes[0]).toBe(oldBuffer.bytes[0]);
     expect(store.bufferRevision).toBe(2);
@@ -1422,7 +1418,7 @@ describe("GpuScene contribution lifecycle", () => {
     expect(presented.destroyed).toBe(true);
   });
 
-  it("reuses retired ranges in a nonempty buffer at an unchanged full allowance", () => {
+  it("reuses retired ranges without replacing a nonempty material buffer", () => {
     const {scene, device} = createScene();
     const install = (identity: string) => {
       const reservation = scene.prepareRender("origin", [11, 48, 0], [{
@@ -1435,28 +1431,21 @@ describe("GpuScene contribution lifecycle", () => {
     };
     install("first");
     install("second");
-    const allocated = gpuMemoryBudget.allocatedBytes;
     const buffer = device.buffers[0];
-    const version = gpuMemoryBudget.reclamationVersion;
-    gpuMemoryBudget.setLimit(allocated);
     try {
       scene.removeContribution("first");
       scene.publishPresentation();
       scene.releaseRetiredPresentationResources();
-      expect(gpuMemoryBudget.allocatedBytes).toBe(allocated);
-      expect(gpuMemoryBudget.reclamationVersion).toBe(version + 1);
       expect(buffer.destroyed).toBe(false);
       install("third");
       expect(scene.snapshot().activeContributionCount).toBe(2);
       expect(device.buffers).toHaveLength(1);
-      expect(gpuMemoryBudget.allocatedBytes).toBe(allocated);
     } finally {
       scene.destroy();
-      gpuMemoryBudget.setLimit(DEFAULT_POINT_CLOUD_POLICY.gpuMemoryMiB * 1048576);
     }
   });
 
-  it("reclaims an empty material buffer after removed contributions leave the presentation", async () => {
+  it("reclaims an empty material buffer after removed contributions leave the presentation", () => {
     const {scene, device} = createScene();
     const reservation = scene.prepareRender("origin", [11, 48, 0], [{
       identity: "cloud", mapTileKey: "Features:Map:Cloud:1:0", styleOrder: 0, lod: 7,
@@ -1466,17 +1455,12 @@ describe("GpuScene contribution lifecycle", () => {
     scene.publishPresentation();
     const buffer = device.buffers[0];
     scene.removeContributions(["cloud"]);
-    const retirement = gpuMemoryBudget.retirement;
-    expect(retirement).not.toBeNull();
     expect(buffer.destroyed).toBe(false);
     scene.releaseRetiredPresentationResources();
-    expect(gpuMemoryBudget.retirement).toBe(retirement);
     expect(buffer.destroyed).toBe(false);
     scene.publishPresentation();
     expect(buffer.destroyed).toBe(false);
     scene.releaseRetiredPresentationResources();
-    await retirement;
-    expect(gpuMemoryBudget.retirement).toBeNull();
     expect(buffer.destroyed).toBe(true);
     expect(scene.snapshot().stores).toHaveLength(0);
     scene.destroy();
@@ -1789,6 +1773,44 @@ describe("GpuScene contribution lifecycle", () => {
     scene.removeContribution("tile");
     scene.publishPresentation();
     expect(scene.hasInteractionTarget(identities, target)).toBe(false);
+  });
+
+  it("indexes a located foreign target without replacing the source pick or retaining retired aliases", () => {
+    const { scene } = createScene();
+    const reference = {mapId: "Remote", typeId: "Road", id: {id: 9007199254740993n}};
+    const alias = {...reference, id: {otherComposition: "same-road"}};
+    const sourceKey = "Features:Source:Layer:1:0";
+    const target = {mapTileKey: "Features:Remote:Road:2:0", featureId: "Road.9007199254740993"};
+    const reservation = scene.prepareRender("origin", [11, 48, 0], [{
+      identity: "tile", mapTileKey: sourceKey, styleOrder: 0, lod: 7
+    }]);
+    const packet = pointPacket(reservation, {featureId: "allocate-one-packed-pick"});
+    reservation.contributions[0].resolvePick = () => [
+      {featureReference: reference}, {featureReference: alias}
+    ];
+    scene.applyPacket(packet, reservation);
+    scene.finishRender(reservation);
+    const identities = new Set(["tile"]);
+    const raw = scene.resolvePick(0);
+    expect(raw).toEqual([
+      {mapTileKey: sourceKey, featureReference: reference}, {mapTileKey: sourceKey, featureReference: alias}
+    ]);
+    expect(scene.hasInteractionTarget(identities, target)).toBe(false);
+    scene.rememberLocatedPick(raw[0], [target]);
+    scene.rememberLocatedPick(raw[1], [target]);
+    expect(scene.hasInteractionTarget(identities, target)).toBe(true);
+    expect(scene.interactionPicks(identities, [target])).toHaveLength(1);
+    expect(scene.resolvePick(0)).toEqual(raw);
+
+    const replacement = {...target, mapTileKey: "Features:Remote:Road:3:0"};
+    scene.rememberLocatedPick(raw[0], [replacement]);
+    expect(scene.hasInteractionTarget(identities, target)).toBe(true);
+    scene.rememberLocatedPick(raw[1], []);
+    expect(scene.hasInteractionTarget(identities, target)).toBe(false);
+    expect(scene.hasInteractionTarget(identities, replacement)).toBe(true);
+    scene.removeContribution("tile");
+    scene.publishPresentation();
+    expect(scene.hasInteractionTarget(identities, replacement)).toBe(false);
   });
 
   it("excludes admitted source rows which emitted no primitive", () => {

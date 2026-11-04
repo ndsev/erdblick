@@ -14,8 +14,11 @@ import {
 import { InfoMessageService } from "../diagnostics/info.service";
 import {
     formatFeatureInspectionTarget,
+    namedFeatureReferenceJson,
     parseFeatureInspectionTarget,
-    stripFeatureInspectionTarget
+    stripFeatureInspectionTarget,
+    type FeaturePickTarget,
+    type NamedFeatureReference
 } from "../inspection/feature-identity.model";
 
 import { AppStateService } from "../appstate/appstate.service";
@@ -105,6 +108,8 @@ const MAX_ONE_SHOT_PARTITIONS = 512;
  */
 @Injectable({ providedIn: "root" })
 export class MapTileStreamService implements OnDestroy {
+    /** Only successfully located foreign references enter this bounded generation-qualified cache. */
+    private readonly locatedFeatureReferences = new Map<string, TileFeatureId[]>();
     readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
     readonly actionClientId$ = new BehaviorSubject<string | null>(null);
     readonly actionControlReceived = new Subject<{ payload: unknown; receivedAt: number }>();
@@ -890,6 +895,9 @@ export class MapTileStreamService implements OnDestroy {
             );
         }
 
+        await this.mapInfo.waitForMapLayersReady([...groups.values()], signal);
+        signal?.throwIfAborted();
+
         const transport = new MapTileStreamClientTiles(
             "/tiles",
             this.mapInfo.tileLayerParser
@@ -921,11 +929,23 @@ export class MapTileStreamService implements OnDestroy {
         }));
         let timeout: ReturnType<typeof setTimeout> | undefined;
         let abort: (() => void) | undefined;
+        let catalogSubscription: Subscription | undefined;
         try {
             const cancelled = new Promise<never>((_, reject) => {
-                abort = () => reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+                const cancel = (reason: unknown) => {
+                    // Stop decoding before a catalog edit releases this map's
+                    // dictionaries; promise cleanup alone would run too late.
+                    transport.destroy();
+                    reject(reason);
+                };
+                abort = () => cancel(signal?.reason ?? new DOMException("Aborted", "AbortError"));
                 signal?.addEventListener("abort", abort, { once: true });
                 if (signal?.aborted) abort();
+                catalogSubscription = this.mapInfo.dataSourceInfoChanged.subscribe(mapIds => {
+                    if ([...groups.values()].some(group => mapIds.includes(group.mapId))) {
+                        cancel(new DOMException("Inspection datasource changed.", "AbortError"));
+                    }
+                });
             });
             const timeoutPromise = new Promise<never>((_, reject) => {
                 timeout = setTimeout(
@@ -947,6 +967,7 @@ export class MapTileStreamService implements OnDestroy {
                 );
             }
         } finally {
+            catalogSubscription?.unsubscribe();
             if (abort) signal?.removeEventListener("abort", abort);
             if (timeout) {
                 clearTimeout(timeout);
@@ -1051,10 +1072,83 @@ export class MapTileStreamService implements OnDestroy {
 
     /** Resolves a canonical feature string using the backend schema, preserving ambiguous matches for callers. */
     async locateFeature(mapId: string, featureId: string, layerId?: string, signal?: AbortSignal): Promise<TileFeatureId[]> {
+        const canonicalId = stripFeatureInspectionTarget(featureId);
+        return this.locateFeatureRequest(JSON.stringify({ requests: [{
+            mapId, ...(layerId ? {layerId} : {}), featureId: canonicalId
+        }] }), canonicalId, signal);
+    }
+
+    /** Resolve named foreign parts only against the target map, without importing its schema into the source. */
+    async locateFeatureReference(reference: NamedFeatureReference, signal?: AbortSignal): Promise<TileFeatureId[]> {
+        signal?.throwIfAborted();
+        const referenceJson = namedFeatureReferenceJson(reference);
+        const key = this.mapInfo.schemaScopeSignature([reference.mapId]) + "\n" + referenceJson;
+        const cached = this.locatedFeatureReferences.get(key);
+        if (cached) return cached;
+        const located = await this.locateFeatureRequest(`{"requests":[${referenceJson}]}`, undefined, signal);
+        if (key !== this.mapInfo.schemaScopeSignature([reference.mapId]) + "\n" + referenceJson)
+            throw new Error("Target datasource changed while locating the reference. Please retry.");
+        if (located.length) {
+            this.locatedFeatureReferences.set(key, located);
+            if (this.locatedFeatureReferences.size > 256)
+                this.locatedFeatureReferences.delete(this.locatedFeatureReferences.keys().next().value!);
+        }
+        return located;
+    }
+
+    /** Convert render picks to persistent canonical identities before inspection or hover publication. */
+    async resolveFeaturePicks(picks: FeaturePickTarget[], signal?: AbortSignal): Promise<TileFeatureId[]> {
+        const sourceMaps = [...new Set(picks.flatMap(pick => {
+            const source = this.parseMapPartitionKeySafe(pick.mapTileKey);
+            return source ? [source[0]] : [];
+        }))];
+        const sourceGeneration = this.mapInfo.schemaScopeSignature(sourceMaps);
+        const groups = await Promise.all(picks.map(async pick => {
+            if (!pick.featureReference) return [pick];
+            const located = await this.locateFeatureReference(pick.featureReference, signal);
+            if (!located.length)
+                throw new Error(`Referenced ${pick.featureReference.typeId} is unavailable in ${pick.featureReference.mapId}.`);
+            return located.map(target => this.applyPickedFeatureSelectors(target, pick));
+        }));
+        signal?.throwIfAborted();
+        if (sourceGeneration !== this.mapInfo.schemaScopeSignature(sourceMaps)) {
+            throw new Error("Picked datasource changed while locating the reference. Please retry.");
+        }
+        const unique = new Map(groups.flat().map(target => [`${target.mapTileKey}\n${target.featureId}`, target]));
+        return [...unique.values()];
+    }
+
+    /** Synchronous navigation/mask checks may use resolved references, never guess unresolved IDs. */
+    cachedFeaturePicks(picks: FeaturePickTarget[]): TileFeatureId[] {
+        return picks.flatMap(pick => {
+            if (!pick.featureReference) return [pick];
+            const key = this.mapInfo.schemaScopeSignature([pick.featureReference.mapId]) + "\n"
+                + namedFeatureReferenceJson(pick.featureReference);
+            return (this.locatedFeatureReferences.get(key) ?? [])
+                .map(target => this.applyPickedFeatureSelectors(target, pick));
+        });
+    }
+
+    /** Row ordinals remain separate from the named reference until its base ID is canonical. */
+    private applyPickedFeatureSelectors(target: TileFeatureId, pick: FeaturePickTarget): TileFeatureId {
+        if (!pick.featureReference) return target;
+        const baseFeatureId = target.featureId;
+        const featureId = pick.attributeIndex !== undefined
+            ? formatFeatureInspectionTarget({scope: "attribute", baseFeatureId,
+                attributeIndex: pick.attributeIndex, validityIndex: pick.validityIndex})
+            : pick.relationIndex !== undefined
+                ? formatFeatureInspectionTarget({scope: "relation", baseFeatureId,
+                    relationIndex: pick.relationIndex, validityIndex: pick.validityIndex})
+                : baseFeatureId;
+        return {...target, featureId};
+    }
+
+    /** Shared bounded locate response path; a foreign request has no canonical fallback string. */
+    private async locateFeatureRequest(body: string, fallbackId?: string, signal?: AbortSignal): Promise<TileFeatureId[]> {
         signal?.throwIfAborted();
         const response = await fetch("/locate", {
             method: "POST", headers: { "Content-Type": "application/json" }, signal,
-            body: JSON.stringify({ requests: [{ mapId, ...(layerId ? { layerId } : {}), featureId: stripFeatureInspectionTarget(featureId) }] })
+            body
         });
         if (!response.ok) throw new Error(`Feature locate failed: HTTP ${response.status}`);
         const content = await response.text();
@@ -1065,8 +1159,9 @@ export class MapTileStreamService implements OnDestroy {
         if (candidates.length > 100) throw new Error("Feature locate is ambiguous; provide a layer or partition");
         return candidates.flatMap(candidate => {
             const mapTileKey = candidate.partitionKey ?? candidate.tileId;
-            return mapTileKey && this.parseMapPartitionKeySafe(mapTileKey)
-                ? [{ mapTileKey, featureId: candidate.canonicalFeatureId ?? stripFeatureInspectionTarget(featureId) }] : [];
+            const featureId = candidate.canonicalFeatureId ?? fallbackId;
+            return mapTileKey && typeof featureId === "string" && featureId && this.parseMapPartitionKeySafe(mapTileKey)
+                ? [{ mapTileKey, featureId }] : [];
         });
     }
 
@@ -1763,7 +1858,9 @@ export class MapTileStreamService implements OnDestroy {
                 const matches = await this.locateFeature(feature.mapId, featureId, feature.layerId, signal);
                 signal?.throwIfAborted();
                 if (matches.length !== 1) rejectAction(matches.length ? "Feature identity is ambiguous; supply its partition" :
-                    "Feature was not found. For a relation target, discover its owning layer using mapget_list_sources/schemaFeatureTypes; featureTypes may be reference-only. Do not bypass this failure by copying the source feature's mapTileKey into a new inspection.");
+                    "Feature was not found. For a relation target, use viewer_list_layers to find a layer whose " +
+                    "featureTypes includes the target type; referenceTypes does not establish ownership. " +
+                    "Do not bypass this failure by copying the source feature's mapTileKey into a new inspection.");
                 const target = parseFeatureInspectionTarget(featureId);
                 result.push({ ...matches[0], featureId: formatFeatureInspectionTarget({ ...target, baseFeatureId: matches[0].featureId }) });
             }

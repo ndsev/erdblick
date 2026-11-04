@@ -20,9 +20,19 @@ def add_base_example_feature(tile: mapget.TileFeatureLayer, featureId = 0) -> No
     geom.append(41.0, 11.0)
     geom.append(Pt(x=42.0, y=12.0, z=506))
 
-    # Assign geometry (high-level)
-    feature.add_point(Pt(42.5, 11.6))
-    feature.add_points([Pt(42.5, 11.6), Pt(42.5, 11.8)])
+    # Point grouping consumes a one-tile halo, so each point must belong to
+    # its source partition. Keep IDs/attributes available in the inspection
+    # anchor tile, but do not duplicate these absolute points into every tile.
+    tile_id = tile.tile_id()
+    point = Pt(42.5, 11.6)
+    if mapget.TileId.from_wgs84(point.x, point.y, tile_id.level()) == tile_id:
+        feature.add_point(point)
+    points = [point for point in [Pt(42.5, 11.6), Pt(42.5, 11.8)]
+              if mapget.TileId.from_wgs84(point.x, point.y, tile_id.level()) == tile_id]
+    if points:
+        feature.add_points(points)
+
+    # Assign the remaining geometry (high-level).
     feature.add_line([Pt(42.5, 11.6), Pt(42.5, 11.7)])
     feature.add_mesh([Pt(42.5, 11.6), Pt(42.5, 11.7), Pt(42.2, 11.7)])
     feature.add_poly([Pt(42.5, 11.6), Pt(42.5, 11.7), Pt(42.2, 11.7), Pt(42.2, 11.3)])

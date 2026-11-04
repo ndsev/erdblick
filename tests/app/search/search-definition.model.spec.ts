@@ -7,6 +7,40 @@ import {
 } from "../../../app/search/search-definition.model";
 
 describe("FeatureSearchState", () => {
+    it("migrates saved scalar guards without dropping their special colors", () => {
+        const [entry] = normalizeFeatureSearchState([{
+            query: "true",
+            searchStyleRules: [{
+                geometry: ["line"], filter: [],
+                color: {
+                    mode: "gradient", field: "speed",
+                    stops: [{value: 1, color: "#0000ff"}, {value: 253, color: "#ff0000"}],
+                    domain: {schemaId: "saved-graph", domainId: 7},
+                    specials: [{value: 255, color: "#00ffff"}]
+                }
+            }]
+        }]);
+        expect(entry.searchStyleRules[0].color).toMatchObject({
+            schemaType: {schemaId: "saved-graph", typeId: 7},
+            specials: [{value: 255, color: "#00ffff"}]
+        });
+        expect(entry.searchStyleRules[0].color).not.toHaveProperty("domain");
+        expect(normalizeFeatureSearchState([entry])[0].searchStyleRules).toEqual(entry.searchStyleRules);
+    });
+
+    it("uses fallback instead of reviving a legacy guard when the current guard is invalid", () => {
+        const [entry] = normalizeFeatureSearchState([{
+            query: "true",
+            searchStyleRules: [{geometry: ["line"], filter: [], color: {
+                mode: "gradient", field: "speed", stops: [], fallbackColor: "#abcdef",
+                schemaType: {schemaId: "current", typeId: 0},
+                domain: {schemaId: "legacy", domainId: 7},
+                specials: [{value: 255, color: "#00ffff"}]
+            }}]
+        }]);
+        expect(entry.searchStyleRules[0].color).toEqual({mode: "solid", color: "#abcdef"});
+    });
+
     it("normalizes Simfil equality into the GUI operator without dropping the comparison", () => {
         const entry = createFeatureSearchStateEntry({query: "true", searchStyleRules: [{
             geometry: ["line"], filter: [{field: "_.id", op: "==", value: "Lane.1"}],

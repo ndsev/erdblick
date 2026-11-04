@@ -6,6 +6,7 @@
 import type { Deck, PickingInfo } from "@deck.gl/core";
 import { addMetersToLngLat } from "@math.gl/web-mercator";
 import type { TileFeatureId } from "../../../inspection/inspection.model";
+import type { FeaturePickTarget } from "../../../inspection/feature-identity.model";
 import type {
     NavigationAnchor,
     NavigationScreenPosition,
@@ -25,7 +26,7 @@ export interface DeckFeaturePickLayerProps {
     searchResultFeatureIds?: string[];
     featureAddresses?: ArrayLike<number | null>;
     featureAddressesByPath?: ArrayLike<number | null>;
-    subsetPickResolver?: (pickIndex: number) => TileFeatureId[];
+    subsetPickResolver?: (pickIndex: number) => FeaturePickTarget[];
     navigationAnchorEligible?: boolean;
     navigationAltitudeResolver?: (globalPickIndex: number) => number | undefined;
     markerAnchorEligible?: boolean;

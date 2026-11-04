@@ -1,4 +1,5 @@
 import { z } from "zod";
+import {legacySchemaTypeIdentitySchema, schemaTypeIdentitySchema, type SchemaTypeIdentity} from "../mapdata/schema-type.model";
 
 export type FeatureSearchScope = "attribute" | "feature" | "auto";
 
@@ -24,8 +25,17 @@ export type FeatureSearchGeometryKind = "any" | "point" | "line" | "surface" | "
 
 export type FeatureSearchColorMode =
     | { mode: "solid"; color: string }
-    | { mode: "gradient"; field: string; customField?: boolean; stops: FeatureSearchColorStop[]; fallbackColor?: string }
-    | { mode: "categories"; field: string; customField?: boolean; stops: FeatureSearchColorStop[]; fallbackColor?: string };
+    | {
+        mode: "gradient" | "categories";
+        field: string;
+        customField?: boolean;
+        stops: FeatureSearchColorStop[];
+        fallbackColor?: string;
+        /** Generated scales apply only to this exact source meaning, including after reload. */
+        schemaType?: SchemaTypeIdentity;
+        /** Exact raw overrides are evaluated before gradient interpolation. */
+        specials?: FeatureSearchColorStop[];
+    };
 
 export interface FeatureSearchStyleRule {
     name?: string;
@@ -339,11 +349,22 @@ function normalizeSearchColorMode(raw: Record<string, unknown>): FeatureSearchCo
             };
         }
         if (mode === "gradient" || mode === "categories") {
+            // Existing local searches stored the same exact guard as domain/domainId.
+            // Prefer the current spelling even when invalid, so a malformed guard
+            // cannot silently become an unguarded scale or select a second identity.
+            const hasCurrentType = color["schemaType"] !== undefined;
+            const storedType = hasCurrentType ? color["schemaType"] : color["domain"];
+            const schemaType = (hasCurrentType ? schemaTypeIdentitySchema : legacySchemaTypeIdentitySchema).safeParse(storedType);
+            if ((storedType !== undefined || color["specials"] !== undefined) && !schemaType.success) {
+                return {mode: "solid", color: normalizeHexColor(color["fallbackColor"], DEFAULT_PIN_COLOR)};
+            }
             return {
                 mode,
                 field: normalizeString(color["field"]) ?? "",
                 ...(normalizeBoolean(color["customField"], false) ? { customField: true } : {}),
                 stops: normalizeColorStops(color["stops"]),
+                ...(schemaType.success ? {schemaType: schemaType.data} : {}),
+                ...(schemaType.success && Array.isArray(color["specials"]) ? {specials: normalizeColorStops(color["specials"])} : {}),
                 ...(normalizeString(color["fallbackColor"])
                     ? { fallbackColor: normalizeHexColor(color["fallbackColor"], DEFAULT_PIN_COLOR) }
                     : {})

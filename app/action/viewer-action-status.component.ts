@@ -38,9 +38,12 @@ import {Popover} from "primeng/popover";
                                       data-testid="viewer-action-copy-claude"/>
                             <p-button label="Copilot" ariaLabel="Copy Copilot MCP-Add Command" size="small" (onClick)="copy('copilot')"
                                       data-testid="viewer-action-copy-copilot"/>
+                            <p-button label="Cursor" ariaLabel="Copy Cursor MCP-Add Command" size="small" (onClick)="copy('cursor')"
+                                      data-testid="viewer-action-copy-cursor"/>
                             </div>
                         </div>
                         <small>Commands use POSIX-shell quoting. OAuth sign-in happens in your client.</small>
+                        <small>Cursor opens an installation confirmation in the editor.</small>
                         @let connection = actions.connectionInfo;
                         @if (connection.enabled && connection.authentication === 'oauth') {
                             <small>Copilot's OAuth command starts a session-only configuration.
@@ -98,7 +101,7 @@ export class ViewerActionStatusComponent {
     }
 
     /** Builds client setup commands from fixed syntax and quoted metadata, never a server command template. */
-    connectionText(kind: "codex" | "claude" | "copilot"): string {
+    connectionText(kind: "codex" | "claude" | "copilot" | "cursor"): string {
         const info = this.actions.connectionInfo;
         if (!info.enabled) return "";
         let endpoint: URL;
@@ -107,6 +110,25 @@ export class ViewerActionStatusComponent {
         const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
         const serverName = "mapviewer";
         const oauth = info.authentication === "oauth" ? info : undefined;
+        if (kind === "cursor") {
+            // Cursor's installation link targets its own MCP configuration. Its inherited
+            // --add-mcp flag instead writes the separate VS Code configuration store.
+            // Static OAuth requires a client ID; otherwise Cursor uses server discovery.
+            const config = {
+                url: endpoint.href,
+                auth: oauth?.oauthClientId ? {
+                    CLIENT_ID: oauth.oauthClientId,
+                    scopes: oauth.scopes.length ? oauth.scopes : undefined
+                } : undefined
+            };
+            // The link carries base64-encoded UTF-8 JSON, including non-ASCII client IDs.
+            const bytes = new TextEncoder().encode(JSON.stringify(config));
+            const encodedConfig = btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join(""));
+            const installUrl = new URL("cursor://anysphere.cursor-deeplink/mcp/install");
+            installUrl.searchParams.set("name", serverName);
+            installUrl.searchParams.set("config", encodedConfig);
+            return `cursor --open-url ${quote(installUrl.href)}`;
+        }
         if (kind === "copilot") {
             if (!oauth) return `copilot mcp add --transport http ${serverName} ${quote(endpoint.href)}`;
             // Copilot's add subcommand has no OAuth options. Its session config supports
@@ -142,7 +164,7 @@ export class ViewerActionStatusComponent {
     }
 
     /** Uses the existing clipboard/manual-copy fallback, without invoking any client command. */
-    copy(kind: "codex" | "claude" | "copilot"): void {
+    copy(kind: "codex" | "claude" | "copilot" | "cursor"): void {
         const text = this.connectionText(kind);
         if (text) this.clipboard.copyToClipboard(text);
     }

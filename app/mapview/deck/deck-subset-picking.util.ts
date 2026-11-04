@@ -3,14 +3,14 @@
  * Presentations keep their own native/feature resolvers; these operations
  * preserve contributor-local addresses when proxy geometry is combined.
  */
-import type { TileFeatureId } from "../../inspection/inspection.model";
+import type { FeaturePickTarget } from "../../inspection/feature-identity.model";
 import { SceneMode } from "../../integrations/geo.adapter";
 import type { PresentationKind } from "../../mapdata/styled-mapget-layer.model";
 import type {
     DeckGltfPickProxyStyleContribution
 } from "./deck-gltf-node.layer";
 
-export type SubsetPickResolver = (pickIndex: number) => TileFeatureId[];
+export type SubsetPickResolver = (pickIndex: number) => FeaturePickTarget[];
 
 /** Picking metadata shared by binary Deck layers built from subset results. */
 export interface DeckSubsetPickProps {

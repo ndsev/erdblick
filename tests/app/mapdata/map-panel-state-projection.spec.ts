@@ -82,10 +82,38 @@ function fixture() {
         const option = projectedLayer.children!.find(node => node.id === "details")!;
         return { ...projectedLayer.viewConfig![index], details: option.value![index] };
     });
-    return { persistence, owners, maps, panel, tree, projections, layer, values };
+    return { persistence, owners, maps, panel, tree, projections, layer, values, metadata, styles, presets };
 }
 
 describe("map panel owner projections", () => {
+    it("publishes imported style options after a catalog replaces the tree beneath an open panel", () => {
+        const test = fixture();
+        // Catalog loading can replace the tree after the panel has subscribed.
+        // A style imported afterwards must appear without closing the panel or
+        // changing unrelated view state to provoke another projection.
+        const replacement = new MapLayerTree(
+            [test.metadata], test.persistence, test.styles, test.presets,
+            test.owners.viewSettings, test.owners.layerState
+        );
+        test.maps.maps.destroy();
+        test.maps.maps$.next(replacement);
+        cleanup.push(() => replacement.destroy());
+        const imported = {
+            ...test.styles.styles.get("roads")!,
+            id: "saved-search", shortId: "saved-search",
+            options: [{
+                id: "showSearchStyle", label: "Show saved search", description: "Show saved search",
+                type: "Bool", defaultValue: true, internal: false
+            }]
+        } as ErdblickStyle;
+        test.styles.styles.set(imported.id, imported);
+
+        test.styles.styleGroups.next([...test.styles.styles.values()]);
+
+        const options = test.layer(test.projections.at(-1)![0]).children!;
+        expect(options.find(node => node.id === "showSearchStyle")?.value).toEqual([true]);
+    });
+
     it("publishes configured layer and style values for every newly added view", () => {
         const test = fixture();
         expect(test.values()).toEqual([{ visible: false, level: 8, autoLevel: false, details: true }]);

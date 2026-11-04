@@ -60,6 +60,28 @@ describe("expandPathToFirstHighlightedRow", () => {
 });
 
 describe("inspection map-hover ownership", () => {
+    it("routes named references separately from display text and aborts superseded requests", () => {
+        const component = Object.create(InspectionTreeComponent.prototype) as any;
+        const reference = {mapId: "Remote", typeId: "Road", id: {id: 9007199254740993n}};
+        component.jumpService = {
+            highlightFeatureReference: vi.fn(() => Promise.resolve()),
+            highlightByJumpTargetFilter: vi.fn(() => Promise.resolve())
+        };
+        component.onValueClick({stopPropagation: vi.fn()}, {featureReference: reference, value: "display only"});
+        const first = component.jumpService.highlightFeatureReference.mock.calls[0];
+        expect(first[0]).toBe(reference);
+        expect(first[2].aborted).toBe(false);
+        component.onValueClick({stopPropagation: vi.fn()}, {mapId: "Local", value: "Road.1"});
+        expect(first[2].aborted).toBe(true);
+        expect(component.jumpService.highlightByJumpTargetFilter).toHaveBeenCalledWith("Local", "Road.1");
+
+        component.highlightVisibleFeatureReference({featureReference: reference});
+        const hover = component.jumpService.highlightFeatureReference.mock.calls[1];
+        expect(hover[0]).toBe(reference);
+        component.claimMapHover("another row");
+        expect(hover[2].aborted).toBe(true);
+    });
+
     it("does not let a delayed leave clear a re-entered target", async () => {
         const component = Object.create(InspectionTreeComponent.prototype) as any;
         component.destroyed = false;

@@ -226,24 +226,78 @@ Search result subsets never hydrate or share a complete source tile.
 
 ## Completion and schema analysis
 
-Style-field discovery must follow compiled schema aliases when reading JSON
-metadata. In particular, mapget's feature-root `attributes` alias points to
-`properties`; both paths must expose identical numeric bounds and enum symbols.
-This is a schema-identity check, not a global spelling substitution: nested
-source fields literally named `attributes` retain their own metadata.
+Style-field discovery traverses installed native schema types and exports a
+compact inventory. Feature properties appear only under `attributes` in the
+picker; explicit queries and existing styles can still use `properties`. This is
+a feature-root alias rule, not a global spelling substitution: nested fields
+literally named `properties` or `attributes` retain their own metadata.
 
-The completion worker uses datasource `featureModelSchema` plus parser-owned
-string/schema state. It provides:
+`TileLayerParser.searchStyleFieldsForQuery(query, scope, options)` accepts selected
+map/layers, `selectedFeatureTypes`, an optional exact `context`, a semantic `path`,
+`recursive`, and `values: "scalar" | "all"`. Path steps are field-name strings or
+`{elements: true}` for array traversal. Native code resolves each step, including
+all schema alternatives, and produces the corresponding Simfil expression. The
+UI does not maintain a second schema graph or parse field expressions.
+
+The response contains `contexts`, `types`, `fields`, `branches`, `complete` and
+`incompleteReason`. A field holds its expression, one type-table index and all
+context indices in which that meaning applies. Metadata is exported once per
+exact schema/type. Native rows preserve distinct meanings; the editor offers
+one choice per expression and withholds conflicting type metadata rather than
+silently choosing the first owner. Automatic rules retain separate attribute
+owners for their guards. Each attribute context may supply `primaryValuePath`,
+the unambiguous native scalar shorthand, so common validity/source metadata does
+not displace the attribute value in automatic coloring.
+Scalar requests omit container descriptors while retaining navigable branches.
+`complete` concerns declared paths in the requested subtree, not whether an open
+schema lists every possible runtime field. Recursive cycles are reported and can
+be explored explicitly through the native API. The rule editor requests recursive
+scalar discovery without a separate branch/context UI; custom expressions and
+completion remain available for deeper recursive paths. Attribute discovery uses
+`LayerSchema.normalizeSearchQuery`, exactly as execution does, rather than the
+broader leaf/enum inference used for layer suggestions.
+
+Implicit discovery skips edges marked `Schema::FieldRole::Context`, including
+the owner-feature overlays. Explicit lookup through `$feature`, `$source` and
+`$target` remains valid. Ordinary data fields beginning with `$` are not excluded
+by spelling.
+
+The completion worker installs binary `MapSchema` artifacts and their source
+metadata into parser-owned state. Installation must succeed before a query runs;
+failure is explicit rather than an empty completion result. Requests are serialized
+within a worker lane and checked against their selected maps' model generations
+before installation and after completion. It provides:
 
 - syntax diagnostics;
 - direct/nested field completion;
-- enum values and numeric ranges;
+- enum values, ordinary numeric ranges, named numeric specials and flag types;
 - feature/attribute ownership analysis;
 - candidate label/category/gradient fields.
+
+Feature inventories are cached independently of the predicate, keyed by source
+generation and discovery options. Attribute inventories also retain the query
+because it selects their semantic owners. Concurrent identical requests share
+one result, and the component reuses its dropdown arrays when that inventory is
+unchanged. Failures never become a cached empty inventory.
+
+Performance entries separate native enumeration and validation in the worker
+from delivery, main-thread aggregation and the next animation frame:
+`erdblick.search.style-fields.worker`, `.apply` and `.next-frame`. Worker detail
+contains `nativeMs`, `normalizationMs` and `deliveryMs`. Delivery includes
+structured cloning and queue delay; the next-frame interval is a scheduling
+measurement, not a claim about rendering CPU. Use a browser trace to assess
+layout/paint and retain the selected scope alongside comparative measurements.
 
 This worker is advisory. Backend compilation remains authoritative.
 `rewrite: false` still schema-compiles for correctness and speed; it merely
 skips search-query normalization.
+
+Result and trace summaries retain separate groups for each exact schema/type
+pair, plus a separate unqualified group. Identical expression text does not imply
+identical units or exceptional values. Named sentinels remain in raw histograms
+but do not contribute to ordinary numeric ranges or averages. Trace call counts
+and timings describe the whole trace and are repeated on its type cards; do not
+sum those cards to obtain a total trace duration.
 
 ## Diagnostics
 

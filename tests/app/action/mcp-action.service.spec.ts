@@ -120,7 +120,7 @@ function setup() {
         {} as never, owners.viewSettings, stream as never, inspections, zone as never);
     const ui = new UiAutomationService(views, owners.viewSettings);
     const jumps = new JumpTargetService(maps, inspections, {} as never, {} as never, config,
-        owners.coordinates, owners.inspectionState, owners.viewSettings, views);
+        owners.coordinates, owners.inspectionState, owners.viewSettings, views, stream as never);
     const external = new ExternalViewerService(config, owners.coordinates.state, owners.viewSettings);
     const actions = new AppActionRegistry(state);
     actions.registerContributors([jumps, external, views, maps, searches, inspections, styles, diagnostics, navigation, ui,
@@ -612,29 +612,49 @@ describe("McpActionService", () => {
         expect(stateOwners(state).viewSettings.getBackgroundState(0)).toEqual(previous);
     });
 
-    it("pages the default layer catalog and includes advertised levels and feature types", () => {
+    it("pages advertised layers and reads produced/reference types from the ready native graph", () => {
         const { service, maps } = fixture();
+        const featureTypes = vi.fn((mapId: string, layerId: string, references: boolean) => {
+            expect(mapId).toBe("map");
+            return layerId === "Raw" ? [] : references ? [layerId, "ReferenceOnly"] : [layerId];
+        });
+        Object.defineProperty(maps, "tileLayerParser", {value: {featureTypes}});
         const layers = new Map(["Road", "Lane", "POI"].map(id => [id, {
             id, type: "Features", viewConfig: [{ visible: true }],
-            info: { zoomLevels: [11, 13], featureTypes: [{ name: id }, { name: "ReferenceOnly" }], schemaFeatureTypes: [id], partitionKind: "tile" }
+            info: { zoomLevels: [11, 13], partitionKind: "tile" }
         }]));
         layers.set("Raw", {
             id: "Raw", type: "SourceData", viewConfig: [{ visible: false }],
-            info: { zoomLevels: [], featureTypes: [], schemaFeatureTypes: [], partitionKind: "tile" }
+            info: { zoomLevels: [], partitionKind: "tile" }
         });
-        maps.maps.maps.set("map", { id: "map", layers } as never);
+        const info = {schemaId: "schema-1", schemaStatus: "ready"};
+        maps.maps.maps.set("map", { id: "map", layers, info } as never);
         expect(service.execute("viewer_list_layers", { layerType: "SourceData" }))
             .toMatchObject({ complete: true, items: [{ id: "Raw" }] });
         expect(viewerActions.viewer_list_layers.outputSchema.parse(service.execute("viewer_list_layers", { layerType: "all" })).items).toHaveLength(4);
         const first = viewerActions.viewer_list_layers.outputSchema.parse(service.execute("viewer_list_layers", { limit: 2 }));
         expect(first).toMatchObject({
             complete: false, nextOffset: 2,
-            items: [{ id: "Road", zoomLevels: [11, 13], featureTypes: ["Road", "ReferenceOnly"], schemaFeatureTypes: ["Road"], partitionKind: "tile" }, { id: "Lane" }]
+            items: [{ id: "Road", zoomLevels: [11, 13], featureTypes: ["Road"],
+                referenceTypes: ["ReferenceOnly"], schemaStatus: "ready", schemaId: "schema-1",
+                partitionKind: "tile" }, { id: "Lane" }]
         });
         expect(service.execute("viewer_list_layers", { offset: first.nextOffset, limit: 2 }))
             .toMatchObject({ complete: true, items: [{ id: "POI" }] });
         expect(service.execute("viewer_list_maps", {}))
             .toMatchObject({ complete: true, items: [{ id: "map", available: true }] });
+
+        // A catalog can list a source before its graph reaches this browser.
+        // Discovery must retain the layer but must not fabricate empty types.
+        vi.mocked(maps.isMapReady).mockReturnValue(false);
+        info.schemaStatus = "loading";
+        featureTypes.mockClear();
+        const pending = viewerActions.viewer_list_layers.outputSchema.parse(
+            service.execute("viewer_list_layers", {}));
+        expect(pending.items[0]).toMatchObject({id: "Road", available: false, schemaStatus: "loading"});
+        expect(pending.items[0]).not.toHaveProperty("featureTypes");
+        expect(pending.items[0]).not.toHaveProperty("referenceTypes");
+        expect(featureTypes).not.toHaveBeenCalled();
     });
 
     it("returns selection provenance without narrowing object partition identities", () => {
@@ -954,6 +974,30 @@ describe("McpActionService", () => {
         expect(service.execute("viewer_set_search", { searchId: "s", settings: { ...settings, showResultsOnMap: false } }))
             .toMatchObject({ changed: true });
         expect(stateOwners(state).searchService.state.featureSearches[0].showResultsOnMap).toBe(false);
+    });
+
+    it("round-trips schema-generated speed colors through the public search settings", () => {
+        const { service, searches, state } = fixture();
+        const definition = createFeatureSearchStateEntry({id: "speed", query: "SPEED_LIMIT_METRIC",
+            searchStyleRules: [{geometry: ["line"], filter: [], color: {
+                mode: "gradient", field: "attributeValue.speedLimitKmh",
+                schemaType: {schemaId: "speed-schema", typeId: 198},
+                stops: [{value: 1, color: "#0000ff"}, {value: 253, color: "#ff0000"}],
+                specials: [{value: 255, color: "#00ffff"}]
+            }}]});
+        const session: Partial<FeatureSearchSession> = {
+            id: definition.id, definition, runId: "run", refresh: 0, complete: true,
+            schemaAnalysis: readySearchAnalysis(definition.query),
+            paused: false, searchResults: [], errors: new Set<string>(), progressDone: 1, progressTotal: 1
+        };
+        searches.getSession.mockReturnValue(session as FeatureSearchSession);
+        stateOwners(state).searchService.state.featureSearches = [definition];
+        const {settings} = viewerActions.viewer_get_search.outputSchema.parse(
+            service.execute("viewer_get_search", {searchId: definition.id}));
+        expect(settings.searchStyleRules).toEqual(definition.searchStyleRules);
+        service.execute("viewer_set_search", {searchId: definition.id, settings});
+        expect(stateOwners(state).searchService.state.featureSearches[0].searchStyleRules)
+            .toEqual(definition.searchStyleRules);
     });
 
     it("patches search presentation without replacing omitted settings or automatic layer selection", () => {

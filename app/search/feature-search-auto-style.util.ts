@@ -9,6 +9,8 @@ export interface FeatureSearchAutoStyleOption extends SearchStyleFieldOption {
     attrLayerName?: string;
     featureType?: string;
     mapLayers?: FeatureSearchMapLayerRef[];
+    /** This expression is the scalar selected by the owner's native attribute shorthand. */
+    primaryValue?: boolean;
 }
 
 export interface FeatureSearchAutoStyleAnalysis {
@@ -66,7 +68,7 @@ export function searchAutoStyleFieldOptions(
             if (rank !== bestRank) {
                 break;
             }
-            if (bestRank > 1 && index !== ranked[0].index) {
+            if (bestRank > 3 && index !== ranked[0].index) {
                 continue;
             }
             const key = searchAutoStyleFieldOptionKey(option);
@@ -174,14 +176,17 @@ export function searchAutoStyleFieldOptionKey(option: FeatureSearchAutoStyleOpti
 
 /** Automatic attribute styling only consumes real scalar attribute fields. */
 function isNativeAttributeScalar(option: FeatureSearchAutoStyleOption): boolean {
-    return !!option.attrName && !option.value.startsWith("$") && option.valueKind !== "object" && option.valueKind !== "array";
+    return !!option.attrName && !option.incompatibleTypes && !option.value.startsWith("$")
+        && option.valueKind !== "object" && option.valueKind !== "array";
 }
 
 /**
  * Prefer the field named by the query/schema before falling back to useful
  * schema types. Attribute names such as WARNING_SIGN naturally map to leaf
- * fields such as warningSign; an enum field then gives the editor a populated
- * categorical scale instead of an arbitrary solid rule.
+ * fields such as warningSign. Otherwise use the native attribute scalar before
+ * choosing a type-based fallback: validity enums and source addresses must not
+ * displace the speed value of a SPEED_LIMIT_METRIC attribute. Explicit query
+ * fields and enum values still take precedence over that default.
  */
 function searchAutoStyleFieldRank(
     option: FeatureSearchAutoStyleOption,
@@ -202,13 +207,16 @@ function searchAutoStyleFieldRank(
     if (option.enumValues?.some(value => matchedEnums.has(value))) {
         return 2;
     }
-    if (option.valueKind === "enum") {
+    if (option.primaryValue) {
         return 3;
     }
-    if (option.valueKind === "number" || option.valueKind === "integer") {
+    if (option.valueKind === "enum") {
         return 4;
     }
-    return 5;
+    if (option.valueKind === "number" || option.valueKind === "integer") {
+        return 5;
+    }
+    return 6;
 }
 
 function normalizedSemanticName(value: string): string {
