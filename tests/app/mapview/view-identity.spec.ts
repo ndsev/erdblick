@@ -30,6 +30,31 @@ function setup(params: Record<string, unknown> = {}) {
 beforeEach(() => { localStorage.clear(); window.history.replaceState({}, '', '/'); });
 
 describe('logical view identity', () => {
+    it('allocates compact IDs and reuses the smallest gap independently of presentation order', () => {
+        const { registry, owners: { viewSettings: views } } = setup();
+        expect(views.viewIds).toEqual(['0']);
+        views.numViews = 4;
+        expect(views.viewIds).toEqual(['0', '1', '2', '3']);
+        views.retainViews([3, 1], new Map());
+        expect(views.addView('3')).toBe('0');
+        views.numViews = 5;
+        expect(views.viewIds).toEqual(['3', '1', '0', '2', '4']);
+        expect(views.prepareImportedViews(3, undefined, true)).toEqual(['0', '1', '2']);
+        expect(views.resizeStoredViews(['2', 'legacy-view'], 4)).toEqual(['2', 'legacy-view', '0', '1']);
+        registry.ngOnDestroy();
+    });
+
+    it('round-trips compact URL identities without confusing identity zero with index zero', () => {
+        const { registry, owners: { viewSettings: views, url } } = setup();
+        registry.transaction(() => url.hydrate({v2: '1', vid: '2,0', lon: '12,34'}));
+        expect(views.viewIds).toEqual(['2', '0']);
+        expect(views.cameraViewDataState.getValue('0').destination.lon).toBe(34);
+        expect(views.cameraViewDataState.getValue(0).destination.lon).toBe(12);
+        expect(views.addView('0')).toBe('1');
+        expect(views.viewIdsState.serialize(true)).toEqual({vid: '2,0,1'});
+        registry.ngOnDestroy();
+    });
+
     it('registers every deployed preference key once, retiring only runtime version metadata', () => {
         const { registry } = setup();
         const retained = APPLICATION_STORAGE_KEYS.filter(key =>
@@ -243,9 +268,11 @@ describe('logical view identity', () => {
         const removed = views.viewIdAt(1);
         expect(searches.state.featureSearches[0].selectedViewIndices).toEqual(selected ? [0, 1] : []);
         views.retainViews([0], new Map());
-        views.numViews = 2;
-        expect(views.viewIdAt(1)).not.toBe(removed);
         expect(searches.state.featureSearchState.value[0].selectedViewIds).not.toContain(removed);
+        views.numViews = 2;
+        expect(views.viewIdAt(1)).toBe(removed);
+        // Reusing the ID must seed fresh membership from the surviving source.
+        expect(searches.state.featureSearchState.value[0].selectedViewIds.includes(removed)).toBe(selected);
         expect(searches.state.featureSearches[0].selectedViewIndices).toEqual(selected ? [0, 1] : []);
     });
 
