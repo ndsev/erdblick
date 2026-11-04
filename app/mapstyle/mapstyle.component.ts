@@ -434,17 +434,17 @@ interface QuickPresetOption {
                                         <label for="style-editor-quick-layers">Layer affinity</label>
                                         @if (quickLayerAffinityKind === 'custom' && !quickReplacingCustomAffinity) {
                                             <div class="style-editor-custom-affinity" data-testid="style-editor-custom-affinity">
-                                                <span [pTooltip]="quickCustomLayerAffinity">
-                                                    Custom affinity (regular expression)
-                                                </span>
                                                 <input aria-label="Custom layer affinity" pInputText
                                                     [ngModel]="quickCustomLayerAffinity"
                                                     (ngModelChange)="onQuickCustomAffinityChange($event)"
                                                     [disabled]="quickProjectionStale">
+                                                <span [pTooltip]="quickCustomLayerAffinity">
+                                                    Custom affinity (regular expression)
+                                                </span>
                                                 <p-button label="Choose exact layers"
                                                           size="small"
                                                           severity="secondary"
-                                                          [outlined]="true"
+                                                          [text]="true"
                                                           [disabled]="quickProjectionStale"
                                                           (click)="beginReplacingQuickAffinity()"/>
                                                 <p-button label="Any layer"
@@ -503,18 +503,20 @@ interface QuickPresetOption {
                         [pTooltip]="canSaveCurrentStyleToSource() ? styleSourceSaveTooltip() : ''"></p-button>
                     <p-button data-testid="style-editor-close-button" (click)="closeEditorDialog($event)"
                               [label]='sourceWasModified ? "Discard" : "Close"'
+                              severity="secondary" [text]="true"
                               icon="pi pi-times"></p-button>
                     <div class="editor-shortcuts">
-                        <div>Press <span style="color: grey">Ctrl-S/Cmd-S</span> to {{ canSaveCurrentStyleToSource() ? 'save to source' : 'apply changes' }}</div>
-                        <div>Press <span style="color: grey">Esc</span> to quit</div>
+                        <span><kbd>Ctrl/Cmd+S</kbd> to {{ canSaveCurrentStyleToSource() ? 'save' : 'apply' }}</span>
+                        <span><kbd>Esc</kbd> to close</span>
                     </div>
                 </div>
                 <div class="editor-actions-right">
                     <p-button data-testid="style-editor-export-button" (click)="exportStyle(styleService.state.styleEditorTargetId ?? '')"
                               [disabled]="sourceWasModified || !styleService.state.styleEditorTargetId"
-                              label="Export" icon="pi pi-file-export">
+                              label="Export" icon="pi pi-file-export" severity="secondary" [text]="true">
                     </p-button>
-                    <p-button data-testid="style-editor-help-button" (click)="openStyleHelp()" label="Help" icon="pi pi-book"></p-button>
+                    <p-button data-testid="style-editor-help-button" (click)="openStyleHelp()" label="Help" icon="pi pi-book"
+                              severity="secondary" [text]="true"></p-button>
                 </div>
             </div>
         </app-dialog>

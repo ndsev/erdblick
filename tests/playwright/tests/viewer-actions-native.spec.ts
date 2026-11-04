@@ -1,7 +1,7 @@
 import {waitForAppReady} from "../utils/ui-helpers";
 import type { Page } from '@playwright/test';
 import { expect, test } from '../fixtures/test';
-import { mcpClient } from '../utils/mcp-client';
+import { mcpClient, mcpToolError } from '../utils/mcp-client';
 import { TEST_LAYER_NAMES, TEST_MAP_NAMES } from '../utils/test-params';
 import { enableMapLayer } from '../utils/ui-helpers';
 import {
@@ -112,8 +112,7 @@ test('native MCP controls the selected live tab/view, retires stale UUIDs, and p
         const duringGesture = await mcp.call('viewer_set_control', {
             clientId: replacement.clientId, target: targets[0], value
         });
-        expect(duringGesture.isError).toBe(true);
-        expect(duringGesture.structuredContent.error).toMatchObject({ code: 'busy', outcome: 'not_applied' });
+        expect(mcpToolError(duringGesture)).toMatchObject({ code: 'busy', outcome: 'not_applied' });
         await page.mouse.up();
         await expect.poll(async () => (await read(replacement.clientId)).values[0]).not.toEqual(cameraBefore.values[0]);
 
@@ -156,8 +155,7 @@ test('native MCP reads and operates UI controls and resizes sidebar, dock and sp
     await expect.poll(async () => (await mcp.sessions()).some(tab => tab.label === 'ui-actions-renamed')).toBe(true);
     ui = await snapshot();
     const stale = await mcp.call('viewer_fill', { clientId, uid: label.uid, value: 'must-not-apply' });
-    expect(stale.isError).toBe(true);
-    expect(JSON.stringify(stale.structuredContent)).toContain('stale_element');
+    expect(mcpToolError(stale)).toMatchObject({ code: 'not_available', reason: 'stale_element' });
 
     const statusHost = ui.elements.find(element => element.testId === 'viewer-action-status')!;
     const statusButton = ui.elements.find(element => element.parentUid === statusHost.uid && element.tag === 'button')!;
@@ -219,11 +217,8 @@ test('native local MCP rejects untrusted origins/hosts and requires an explicit 
     }
     const missingTarget = await mcp.rpc('tools/call', { name: 'viewer_get_controls', arguments: {} });
     expect(missingTarget.response.status()).toBe(200);
-    expect(missingTarget.message.result).toMatchObject({
-        isError: true,
-        structuredContent: {
-            error: { code: 'invalid_arguments', message: 'A clientId UUID is required.' }
-        }
+    expect(mcpToolError(missingTarget.message.result)).toMatchObject({
+        code: 'invalid_arguments', message: 'A clientId UUID is required.'
     });
 });
 
@@ -299,14 +294,12 @@ rules:
         clientId, operation: 'patch', styleId: patchStyle.styleId,
         edits: [{ find: 'width: 2', replace: 'width: banana' }]
     });
-    expect(invalidPatch.isError).toBe(true);
-    expect(invalidPatch.structuredContent).toMatchObject({
-        error: {
-            code: 'invalid_arguments', reason: 'style_validation_failed', outcome: 'not_applied', message: expect.stringContaining('bad conversion')
-        }
+    const patchError = mcpToolError(invalidPatch);
+    expect(patchError).toMatchObject({
+        code: 'invalid_arguments', reason: 'style_validation_failed', outcome: 'not_applied', message: expect.stringContaining('bad conversion')
     });
-    expect(invalidPatch.structuredContent.error.message).toContain('"rulePath":"rules[0]"');
-    expect(invalidPatch.structuredContent.error.message).toContain('line 6, column 12');
+    expect(patchError.message).toContain('"rulePath":"rules[0]"');
+    expect(patchError.message).toContain('line 6, column 12');
     expect(await call('viewer_get_style', { styleId: patchStyle.styleId })).toMatchObject({ source: patchSource });
     expect(await call('viewer_edit_style', {
         operation: 'patch', styleId: patchStyle.styleId,

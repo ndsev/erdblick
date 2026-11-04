@@ -54,7 +54,8 @@ test.describe('Snapshot – style component', () => {
         await captureDocsScreenshotWithLabels(page, 'docs/screenshots/style-component-editor-controls.png', [
             {
                 locator: editorDialog.getByTestId('style-editor-enabled'),
-                label: 'Enable or disable style'
+                label: 'Enable or disable style',
+                placement: 'left'
             },
             {
                 locator: editorDialog.getByTestId('style-editor-quick-name'),
@@ -66,27 +67,27 @@ test.describe('Snapshot – style component', () => {
             },
             {
                 locator: editorDialog.locator('[data-style-path="rules.0.geometry"]'),
-                label: 'Choose geometry'
+                label: 'Choose geometry',
+                placement: 'left'
             },
             {
                 locator: editorDialog.locator('[data-style-path="rules.0.attribute-filter"]'),
-                label: 'Edit attribute predicate'
+                label: 'Edit attribute predicate',
+                placement: 'left'
+            },
+            {
+                locator: editorDialog.locator('.style-optional-fields > summary').first(),
+                label: 'Add optional properties',
+                placement: 'left'
             },
             {
                 locator: editorDialog.getByTestId('style-editor-apply-button'),
                 label: 'Apply changes'
             },
             {
-                locator: editorDialog.getByTestId('style-editor-close-button'),
-                label: 'Close editor'
-            },
-            {
-                locator: editorDialog.getByTestId('style-editor-export-button'),
-                label: 'Export style'
-            },
-            {
                 locator: editorDialog.getByTestId('style-editor-help-button'),
-                label: 'Open style help'
+                label: 'Open style help',
+                placement: 'top'
             }
         ]);
     });

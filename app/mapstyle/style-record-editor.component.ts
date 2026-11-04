@@ -1,28 +1,40 @@
 import {CommonModule} from "@angular/common";
 import {Component, EventEmitter, Input, OnChanges, Output} from "@angular/core";
+import {TooltipModule} from "primeng/tooltip";
 import {StyleAuthoringSchema, StyleField} from "./style-authoring-schema.adapter";
 import {StyleDocumentEdit, StyleDocumentModel, StylePath} from "./style-document.model";
 import {StyleFieldInputComponent, StyleInputProblem} from "./style-field-input.component";
 
-interface FormField {key: string; definition: StyleField;}
-interface FormGroup {name: string; fields: FormField[];}
+interface FormField {key: string; label: string; wide: boolean; present: boolean; definition: StyleField;}
+interface FormGroup {name: string; fields: FormField[]; presentFields: FormField[]; optionalFields: FormField[];}
 
 @Component({
     selector: "style-record-editor",
     standalone: true,
-    imports: [CommonModule, StyleFieldInputComponent],
-    styleUrl: "./style-form.scss",
+    imports: [CommonModule, StyleFieldInputComponent, TooltipModule],
     template: `
         @if (record === 'rule' && path.length > 2) {
-            <small>Unset fields inherit from the parent. Inherited scales and expressions retain native precedence over child literals.</small>
+            <small class="style-inheritance-note"><i class="pi pi-arrow-up-left" aria-hidden="true"></i>
+                Unset fields inherit from the parent. Inherited scales and expressions retain native precedence over child literals.</small>
         }
         @for (group of groups; track group.name) {
             @if (group.name === 'Common') {
-                <ng-container *ngTemplateOutlet="fields; context: {$implicit: group.fields}"/>
+                <ng-container *ngTemplateOutlet="fields; context: {$implicit: group.presentFields}"/>
+                @if (group.optionalFields.length) {
+                    <details class="style-form-group style-optional-fields" [open]="expandedGroups.has('Common optional')"
+                        (toggle)="toggleGroup('Common optional', $event)">
+                        <summary><i class="pi pi-chevron-right" aria-hidden="true"></i>Add properties
+                            <span class="style-optional-count">{{ group.optionalFields.length }}</span>
+                        </summary>
+                        @if (visitedGroups.has('Common optional')) {
+                            <ng-container *ngTemplateOutlet="fields; context: {$implicit: group.optionalFields}"/>
+                        }
+                    </details>
+                }
             } @else {
                 <details class="style-form-group" [open]="expandedGroups.has(group.name)"
                     (toggle)="toggleGroup(group.name, $event)">
-                    <summary>{{ group.name }}</summary>
+                    <summary><i class="pi pi-chevron-right" aria-hidden="true"></i>{{ group.name }}</summary>
                     @if (visitedGroups.has(group.name)) {
                         <ng-container *ngTemplateOutlet="fields; context: {$implicit: group.fields}"/>
                     }
@@ -34,18 +46,31 @@ interface FormGroup {name: string; fields: FormField[];}
         }
         <ng-template #fields let-items>
             @for (item of items; track item.key) {
-                <div class="style-form-field" [attr.data-style-path]="fieldPath(item.key).join('.')">
+                <div class="style-form-field" [class.style-field-wide]="item.wide && item.present"
+                     [class.style-field-unset]="!item.present"
+                     [attr.data-style-path]="fieldPath(item.key).join('.')">
                     <div class="style-field-heading">
-                        <label>{{ item.definition.label ?? item.key }}</label>
-                        @if (model.has(fieldPath(item.key))) {
-                            <button type="button" [attr.aria-label]="'Unset ' + item.key" title="Remove this field; use inheritance or native default"
-                                (click)="edit.emit({op: 'remove', path: fieldPath(item.key)})">Unset</button>
+                        <span class="style-field-label" [title]="item.key">{{ item.label }}
+                            @if (item.definition.help) {
+                                <button type="button" class="style-field-help" title="" [attr.aria-label]="'About ' + item.label"
+                                    [pTooltip]="item.definition.help" tooltipEvent="both" tooltipPosition="top">
+                                    <i class="pi pi-info-circle" aria-hidden="true"></i>
+                                </button>
+                            }
+                        </span>
+                        @if (item.present) {
+                            <button type="button" class="style-field-reset" [attr.aria-label]="'Unset ' + item.key"
+                                title="Remove this value; use inheritance or the default"
+                                (click)="edit.emit({op: 'remove', path: fieldPath(item.key)})">
+                                <i class="pi pi-undo" aria-hidden="true"></i>
+                            </button>
                         } @else {
-                            <span class="style-unset">Unset</span>
-                            <button type="button" [attr.aria-label]="'Set ' + item.key" (click)="addField(item)">Set</button>
+                            <button type="button" class="style-field-add" [attr.aria-label]="'Add ' + item.label" (click)="addField(item)">
+                                <i class="pi pi-plus" aria-hidden="true"></i>Add
+                            </button>
                         }
                     </div>
-                    @if (model.has(fieldPath(item.key))) {
+                    @if (item.present) {
                         @if (item.definition.kind === 'record') {
                             @if (model.isRecord(fieldPath(item.key))) {
                                 <style-record-editor class="style-nested-record" [model]="model" [catalog]="catalog"
@@ -57,18 +82,22 @@ interface FormGroup {name: string; fields: FormField[];}
                             }
                         } @else if (item.definition.kind === 'list') {
                             @for (index of indices(item.key); track index) {
-                                <div class="style-list-item">
+                                <div class="style-list-item" [class.is-expanded]="itemOpen(item.key, index)">
                                     <div class="style-item-heading">
                                         <button type="button" class="style-item-title" [attr.aria-expanded]="itemOpen(item.key, index)"
-                                            (click)="toggleItem(item.key, index)">{{ itemOpen(item.key, index) ? '▾' : '▸' }} {{ itemTitle(item, index) }}</button>
-                                        <button type="button" aria-label="Move item up" [disabled]="index === 0"
-                                            (click)="move(item.key, index, index - 1)">↑</button>
-                                        <button type="button" aria-label="Move item down" [disabled]="index === indices(item.key).length - 1"
-                                            (click)="move(item.key, index, index + 1)">↓</button>
-                                        <button type="button" aria-label="Duplicate item"
-                                            (click)="edit.emit({op: 'duplicate', path: fieldPath(item.key), index})">Duplicate</button>
-                                        <button type="button" aria-label="Remove item"
-                                            (click)="edit.emit({op: 'remove', path: itemPath(item.key, index)})">Remove</button>
+                                            (click)="toggleItem(item.key, index)">
+                                            <i class="pi pi-chevron-right" aria-hidden="true"></i><span>{{ itemTitle(item, index) }}</span>
+                                        </button>
+                                        <div class="style-item-actions">
+                                            <button type="button" aria-label="Move item up" title="Move up" [disabled]="index === 0"
+                                                (click)="move(item.key, index, index - 1)"><i class="pi pi-arrow-up" aria-hidden="true"></i></button>
+                                            <button type="button" aria-label="Move item down" title="Move down" [disabled]="index === indices(item.key).length - 1"
+                                                (click)="move(item.key, index, index + 1)"><i class="pi pi-arrow-down" aria-hidden="true"></i></button>
+                                            <button type="button" aria-label="Duplicate item" title="Duplicate"
+                                                (click)="edit.emit({op: 'duplicate', path: fieldPath(item.key), index})"><i class="pi pi-copy" aria-hidden="true"></i></button>
+                                            <button type="button" class="style-item-remove" aria-label="Remove item" title="Remove"
+                                                (click)="edit.emit({op: 'remove', path: itemPath(item.key, index)})"><i class="pi pi-trash" aria-hidden="true"></i></button>
+                                        </div>
                                     </div>
                                     @if (itemOpen(item.key, index) || visitedItems.has(item.key + ':' + index)) {
                                         @if (model.isRecord(itemPath(item.key, index))) {
@@ -82,7 +111,9 @@ interface FormGroup {name: string; fields: FormField[];}
                                 </div>
                             }
                             @if (model.isList(fieldPath(item.key))) {
-                                <button type="button" (click)="append(item)">Add {{ item.definition.record }}</button>
+                                <button type="button" class="style-list-add" (click)="append(item)">
+                                    <i class="pi pi-plus" aria-hidden="true"></i>Add {{ item.definition.record }}
+                                </button>
                             } @else {
                                 <small class="style-form-error">Expected a list.</small>
                                 <button type="button" (click)="addField(item)">Replace with editable list</button>
@@ -92,7 +123,6 @@ interface FormGroup {name: string; fields: FormField[];}
                                 (edit)="edit.emit($event)" (problem)="problem.emit($event)"/>
                         }
                     }
-                    @if (item.definition.help) { <small>{{ item.definition.help }}</small> }
                 </div>
             }
         </ng-template>
@@ -138,10 +168,13 @@ export class StyleRecordEditorComponent implements OnChanges {
                 && this.model.value(this.fieldPath("scope")) === "relation"
                 && (key === "all-of" || key === "first-of")) continue;
             const group = groups.get(definition.group) ?? [];
-            group.push({key, definition});
+            const label = definition.label ?? key.replaceAll('-', ' ');
+            group.push({key, definition, present, label: label.charAt(0).toUpperCase() + label.slice(1),
+                wide: ["record", "list", "stops"].includes(definition.kind)});
             groups.set(definition.group, group);
         }
-        this.groups = [...groups].map(([name, fields]) => ({name, fields}));
+        this.groups = [...groups].map(([name, fields]) => ({name, fields,
+            presentFields: fields.filter(field => field.present), optionalFields: fields.filter(field => !field.present)}));
         this.unknownKeys = this.model.keys(this.path).filter(key => !fields[key]);
     }
     /** Locates a field relative to this record. */
@@ -155,7 +188,8 @@ export class StyleRecordEditorComponent implements OnChanges {
         const path = this.itemPath(item.key, index);
         const label = this.model.value([...path, "name"]) ?? this.model.value([...path, "label"])
             ?? this.model.value([...path, "id"]) ?? this.model.value([...path, "scope"]);
-        return `${item.definition.record} ${index + 1}${label ? ': ' + label : ''}`;
+        const record = item.definition.record ?? "item";
+        return `${record.charAt(0).toUpperCase() + record.slice(1)} ${index + 1}${label ? ': ' + label : ''}`;
     }
     /** Opens the first rule initially and retains the user's expansion choices across edits. */
     itemOpen(key: string, index: number): boolean { return this.expandedItems.get(`${key}:${index}`) ?? index === 0; }

@@ -233,12 +233,17 @@ retains the child rules. Relation endpoints use the same nested rule controls.
 Document groups expose options of all three native types (Boolean, color, string),
 local presets, LOD thresholds, and hover/selection effects. Maps & Layers also provides
 runtime controls for all non-internal option types. Color text accepts native named
-colors and RGB hex forms; the picker is a convenience. Scale rows retain numeric,
-string, and Boolean category keys and optional fallbacks. Numeric entry uses native
+colors and RGB hex forms. Click the color swatch to open the picker; choosing a
+color writes RGB hex, while opening or dismissing it preserves the authored value.
+Scale rows retain numeric, string, and Boolean category keys and optional fallbacks.
+Numeric entry uses native
 validation rather than search-editor slider limits.
 
-**Unset** removes a field, retaining inheritance or native defaults; opening the
-form does not materialize defaults. Inherited scales/expressions retain their native
+Each rule has a collapsible header with reorder, duplicate, and remove controls.
+**Add properties** reveals unconfigured common fields. **Add** sets an optional
+field; the reset-arrow button removes its value, retaining
+inheritance or native defaults. Hover or focus a field's information button for
+its explanation. Opening the form does not materialize defaults. Inherited scales/expressions retain their native
 precedence over child literals. Compatibility fields are explicitly labeled when
 they have no rendering effect. Edits patch individual YAML nodes, preserving
 unrelated content and comments. Editing an alias makes a local copy without changing

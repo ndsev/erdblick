@@ -99,6 +99,9 @@ jobs:
           source ./venv/bin/activate
           ./ci/run-integration-with-venv-mapget.sh -- \
             tests/playwright/tests/viewer-actions-native.spec.ts \
+            tests/playwright/tests/state-owner-actions.spec.ts \
+            tests/playwright/tests/screenshot-lifecycle.spec.ts \
+            tests/playwright/snap-tests/mcp-setup.snap.spec.ts \
             tests/playwright/tests/schema-completion.spec.ts tests/playwright/tests/tile-request.spec.ts \
             --project='' --workers=1
 

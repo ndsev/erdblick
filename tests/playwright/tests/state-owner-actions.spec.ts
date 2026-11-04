@@ -1,6 +1,6 @@
 import type {Page} from '@playwright/test';
 import {expect, test} from '../fixtures/test';
-import {mcpClient} from '../utils/mcp-client';
+import {mcpClient, mcpToolError} from '../utils/mcp-client';
 import {enableMapLayer, waitForAppReady} from '../utils/ui-helpers';
 import {TEST_LAYER_NAMES, TEST_MAP_NAMES} from '../utils/test-params';
 
@@ -177,8 +177,7 @@ test('owner controls preserve view identity, tab isolation, retained cameras and
         const staleWrite = await mcp.call('viewer_set_control', {
             clientId: firstClient, target: {control: 'view.camera', viewId: firstIds[0]}, value: camera
         });
-        expect(staleWrite.isError).toBe(true);
-        expect(staleWrite.structuredContent.error).toMatchObject({code: 'not_available', outcome: 'not_applied'});
+        expect(mcpToolError(staleWrite)).toMatchObject({code: 'not_available', outcome: 'not_applied'});
 
         await call(firstClient, 'viewer_manage_view', {operation: 'create', viewId: firstIds[1]});
         const currentIds = (await views(firstClient)).views.map(view => view.viewId);
