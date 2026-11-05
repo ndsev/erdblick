@@ -354,7 +354,7 @@ void validateLogicalOwnership(GpuRenderPacketData const& packet)
     for (auto const& stream : packet.streams) {
         auto const stride = recordStride(stream.kind, stream.flags);
         if (stride == 0U || stream.recordStride != stride ||
-            (stream.records.size() % stride) != 0U ||
+            (stream.recordBytes().size() % stride) != 0U ||
             !std::isfinite(stream.glowRadius) || stream.glowRadius < 0.0F)
         {
             throw std::invalid_argument(
@@ -382,7 +382,7 @@ void validateLogicalOwnership(GpuRenderPacketData const& packet)
             }
             auto const& stream = packet.streams[span.streamIndex];
             auto const streamCount = static_cast<uint32_t>(
-                stream.records.size() / stream.recordStride);
+                stream.recordBytes().size() / stream.recordStride);
             if (span.firstRecord > streamCount ||
                 span.recordCount > streamCount - span.firstRecord)
             {
@@ -410,7 +410,7 @@ void validateLogicalOwnership(GpuRenderPacketData const& packet)
         }
         auto const& stream = packet.streams[streamIndex];
         auto const streamCount = static_cast<uint32_t>(
-            stream.records.size() / stream.recordStride);
+            stream.recordBytes().size() / stream.recordStride);
         if (cursor != streamCount) {
             throw std::invalid_argument(
                 "GpuRenderPacket stream records are not fully owned.");
@@ -569,7 +569,7 @@ uint64_t GpuRenderPacketCodec::encodedSize(
     size = alignedTableEnd(size, packet.issues.size(), kRuntimeIssueBytes);
     size = alignedTableEnd(size, encodedStringBytes(packet), 1U);
     for (auto const& stream : packet.streams) {
-        size = alignedTableEnd(size, stream.records.size(), 1U);
+        size = alignedTableEnd(size, stream.recordBytes().size(), 1U);
     }
     return size;
 }
@@ -713,7 +713,7 @@ std::vector<std::byte> GpuRenderPacketCodec::encode(
             auto const& stream = packet.streams[span.streamIndex];
             auto const streamCount = stream.recordStride == 0U
                 ? 0U
-                : static_cast<uint32_t>(stream.records.size() / stream.recordStride);
+                : static_cast<uint32_t>(stream.recordBytes().size() / stream.recordStride);
             if (span.firstRecord > streamCount ||
                 span.recordCount > streamCount - span.firstRecord)
             {
@@ -851,14 +851,14 @@ std::vector<std::byte> GpuRenderPacketCodec::encode(
     for (uint32_t index = 0U; index < packet.streams.size(); ++index) {
         auto const& stream = packet.streams[index];
         if (stream.recordStride != recordStride(stream.kind, stream.flags) ||
-            (stream.records.size() % stream.recordStride) != 0U ||
+            (stream.recordBytes().size() % stream.recordStride) != 0U ||
             !std::isfinite(stream.glowRadius) || stream.glowRadius < 0.0F)
         {
             throw std::invalid_argument(
                 "GpuRenderPacket stream has an invalid record stride.");
         }
         writer.align();
-        auto const dataOffset = writer.append(stream.records);
+        auto const dataOffset = writer.append(stream.recordBytes());
         auto const descriptor = streamTable + index * kStreamDescriptorBytes;
         writer.put(descriptor, static_cast<uint16_t>(stream.kind));
         writer.put(descriptor + 2U, stream.flags);
@@ -866,11 +866,11 @@ std::vector<std::byte> GpuRenderPacketCodec::encode(
         writer.put(descriptor + 12U, stream.recordStride);
         writer.put(
             descriptor + 16U,
-            static_cast<uint32_t>(stream.records.size() / stream.recordStride));
+            static_cast<uint32_t>(stream.recordBytes().size() / stream.recordStride));
         writer.put(descriptor + 20U, dataOffset);
         writer.put(
             descriptor + 24U,
-            static_cast<uint32_t>(stream.records.size()));
+            static_cast<uint32_t>(stream.recordBytes().size()));
         for (uint32_t component = 0U; component < stream.glowColor.size();
              ++component)
         {

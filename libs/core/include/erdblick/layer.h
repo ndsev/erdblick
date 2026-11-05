@@ -6,6 +6,7 @@
 #include "interop/js-object.h"
 #include "buffer.h"
 #include "mapget/model/sourcedata.h"
+#include "mapget/model/incoming-relations.h"
 
 namespace erdblick
 {
@@ -95,6 +96,22 @@ struct TileFeatureLayer
 
     /** Shared pointer to the underlying `mapget::TileFeatureLayer`. */
     mapget::TileFeatureLayer::Ptr model_;
+};
+
+/** Request-local native builder that validates incoming ownership before producing tree rows. */
+class IncomingInspection
+{
+public:
+    /** Decode the backend manifest and verify the selected target identity. */
+    IncomingInspection(std::string const& manifest, std::string const& targetKey,
+                       std::string const& featureId);
+    /** Retain an immutable feature snapshot independently of its temporary WASM wrapper. */
+    void addSnapshot(TileFeatureLayer const& layer);
+    /** Validate the complete bundle and render source-owned incoming rows. */
+    NativeJsValue inspectionModel() const;
+private:
+    mapget::IncomingRelationCollection collection_;
+    std::vector<mapget::PartitionFeatureLayer::Ptr> snapshots_;
 };
 
 /** Wrapper class around the mapget `TileSourceDataLayer` smart pointer. */

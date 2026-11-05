@@ -223,9 +223,11 @@ void assignInspectionNodeIds(InspectionNode& node, std::string_view parentPath =
     uint32_t index = 0;
     for (auto& child : node.children_) {
         auto const key = inspectionKeyString(child);
-        child.nodeId_ = parentPath.empty()
-            ? fmt::format("{}:{}", index, key)
-            : fmt::format("{}/{}:{}", parentPath, index, key);
+        if (child.nodeId_.empty()) {
+            child.nodeId_ = parentPath.empty()
+                ? fmt::format("{}:{}", index, key)
+                : fmt::format("{}/{}:{}", parentPath, index, key);
+        }
         assignInspectionNodeIds(child, child.nodeId_);
         ++index;
     }
@@ -1235,6 +1237,43 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     return root_.childrenToJsValue(tile_->mapId());
 }
 
+JsValue InspectionConverter::convertIncoming(mapget::FeatureInspectionView const& view)
+{
+    auto section = push("Incoming Relations", RawPath{""}, ValueType::Section);
+    section->nodeId_ = "incoming-relations";
+    section->info_ = "Relations stored on other features in this partition.";
+    std::optional<std::pair<mapget::MapPartitionKey, std::string>> owner;
+    InspectionNode* ownerNode = nullptr;
+    for (auto const& incoming : view.incoming()) {
+        auto identity = std::make_pair(incoming.sourceKey_, incoming.source_->id()->toString());
+        stringPool_ = incoming.source_->model().strings();
+        tile_ = &incoming.source_->model();
+        featureId_ = identity.second;
+        if (!owner || *owner != identity) {
+            owner = identity;
+            auto source = push(JsValue(featureId_), RawPath{""}, ValueType::FeatureId);
+            assignFeatureReference(*source, incoming.source_->id());
+            source->mapTileKey_ = incoming.sourceKey_.toString();
+            source->nodeId_ = "incoming-source:" + nlohmann::json::array(
+                {incoming.sourceKey_.toString(), featureId_}).dump();
+            source->hoverId_ = featureId_;
+            source->info_ = incoming.sourceKey_.layerId_;
+            ownerNode = source.node_;
+        }
+        auto sourceScope = push(ownerNode);
+        uint32_t localIndex = 0;
+        for (uint32_t index = 0; index < incoming.ordinal_; ++index)
+            if (incoming.source_->getRelation(index)->name() == incoming.relation_->name()) ++localIndex;
+        auto path = fmt::format("select(relations.*{{name = {}}}, {})",
+            simfilStringLiteral(incoming.relation_->name()), localIndex);
+        convertRelation(JsValue(std::string(incoming.relation_->name())), AbsolutePath{path},
+                        incoming.relation_, incoming.ordinal_);
+        ownerNode->children_.back().nodeId_ = fmt::format("{}:relation#{}", ownerNode->nodeId_, incoming.ordinal_);
+    }
+    finalizeTree(root_);
+    return root_.childrenToJsValue(view.target()->model().mapId());
+}
+
 void InspectionConverter::finalizeTree(InspectionNode& root)
 {
     assignInspectionNodeIds(root);
@@ -1907,6 +1946,8 @@ JsValue InspectionConverter::InspectionNode::toJsValue(std::string_view const& m
         newDict.set("children", childrenToJsValue(mapId));
     if (!geoJsonPath_.empty())
         newDict.set("geoJsonPath", JsValue(geoJsonPath_));
+    if (!mapTileKey_.empty())
+        newDict.set("mapTileKey", JsValue(mapTileKey_));
     if (!nodeId_.empty())
         newDict.set("nodeId", JsValue(nodeId_));
     if (mapId_)

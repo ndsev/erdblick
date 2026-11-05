@@ -1,0 +1,1064 @@
+import {
+    describe,
+    expect,
+    it,
+    vi
+} from 'vitest';
+import {coreLib} from '../../../app/integrations/wasm.adapter';
+import { MapTileStreamClient, MapTileStreamClientTiles } from "../../../app/mapdata/map-tile-stream.client";
+import {
+    MAP_TILE_STREAM_HEADER_SIZE,
+    MAP_TILE_STREAM_TYPE_FIELDS,
+    MAP_TILE_STREAM_TYPE_ACTION_CONTROL,
+    MAP_TILE_STREAM_TYPE_END_OF_STREAM,
+    MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT,
+    MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE,
+    MAP_TILE_STREAM_TYPE_STATUS,
+    MAP_TILE_STREAM_TYPE_SUBSETS
+} from "../../../app/mapdata/map-tile-stream.protocol";
+
+function currentProtocolVersion() {
+    return {
+        major: coreLib.tileLayerStreamProtocolMajor(),
+        minor: coreLib.tileLayerStreamProtocolMinor(),
+        patch: 0
+    };
+}
+
+function jsonFrame(type: number, payload: object, version = {
+    ...currentProtocolVersion()
+}): Uint8Array {
+    const payloadBytes = new TextEncoder().encode(JSON.stringify(payload));
+    const frame = new Uint8Array(MAP_TILE_STREAM_HEADER_SIZE + payloadBytes.length);
+    const header = new DataView(frame.buffer, 0, MAP_TILE_STREAM_HEADER_SIZE);
+    header.setUint16(0, version.major, true);
+    header.setUint16(2, version.minor, true);
+    header.setUint16(4, version.patch, true);
+    frame[6] = type;
+    new DataView(frame.buffer, 7, 4).setUint32(0, payloadBytes.length, true);
+    frame.set(payloadBytes, MAP_TILE_STREAM_HEADER_SIZE);
+    return frame;
+}
+
+function packedFrames(...frames: Uint8Array[]): ArrayBuffer {
+    const result = new Uint8Array(
+        frames.reduce((size, frame) => size + frame.byteLength, 0)
+    );
+    let offset = 0;
+    for (const frame of frames) {
+        result.set(frame, offset);
+        offset += frame.byteLength;
+    }
+    return result.buffer;
+}
+
+describe('MapTileStreamClient', () => {
+    it('aborts pending payload requests before the websocket close event', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const signals: AbortSignal[] = [];
+        const close = vi.fn();
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.stubGlobal('fetch', vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+            new Promise<Response>((_resolve, reject) => {
+                const signal = init!.signal!;
+                signals.push(signal);
+                signal.addEventListener('abort', () => reject(
+                    new DOMException('The request was aborted.', 'AbortError')
+                ), {once: true});
+            })
+        ));
+        try {
+            client['socket'] = {readyState: WebSocket.OPEN, close} as unknown as WebSocket;
+            client['handleFrame'](jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context', requestId: 1,
+                clientId: 'b3e68f32-3b51-472d-8cab-14b597f7de91'
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+            expect(signals).toHaveLength(2);
+
+            client.close(1000, 'page hidden');
+
+            // Native close notifications are asynchronous. Cancellation must not wait for one.
+            expect(signals.every(signal => signal.aborted)).toBe(true);
+            await Promise.resolve();
+            expect(close).toHaveBeenCalledExactlyOnceWith(1000, 'page hidden');
+            expect(error).not.toHaveBeenCalled();
+        } finally {
+            client['socket'] = null;
+            client.destroy();
+            vi.unstubAllGlobals();
+            error.mockRestore();
+        }
+    });
+
+    it('does not report a cancelled payload body as a transport failure', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const controller = new AbortController();
+        let rejectBody!: (error: Error) => void;
+        const body = new Promise<ArrayBuffer>((_resolve, reject) => {rejectBody = reject;});
+        const response = new Response();
+        const readBody = vi.spyOn(response, 'arrayBuffer').mockReturnValue(body);
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+        try {
+            client['pullClientId'] = 'b3e68f32-3b51-472d-8cab-14b597f7de91';
+            client['pullControllers'] = [controller];
+            const pending = client['runPullLoop'](controller);
+            await vi.waitFor(() => expect(readBody).toHaveBeenCalledOnce());
+
+            client.close(1000, 'page hidden');
+            rejectBody(new TypeError('Load failed'));
+            await pending;
+
+            expect(controller.signal.aborted).toBe(true);
+            expect(error).not.toHaveBeenCalled();
+        } finally {
+            client.destroy();
+            vi.unstubAllGlobals();
+            error.mockRestore();
+        }
+    });
+
+    it('still reports genuine payload failures and closes the connection', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const controller = new AbortController();
+        const failure = new TypeError('Network unavailable');
+        const close = vi.fn();
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(failure));
+        try {
+            client['socket'] = {readyState: WebSocket.OPEN, close} as unknown as WebSocket;
+            client['pullClientId'] = 'b3e68f32-3b51-472d-8cab-14b597f7de91';
+            client['pullControllers'] = [controller];
+
+            await client['runPullLoop'](controller);
+
+            expect(error).toHaveBeenCalledExactlyOnceWith('Interactive payload fetch failed.', failure);
+            expect(close).toHaveBeenCalledExactlyOnceWith(1011, 'interactive transport failure');
+            expect(controller.signal.aborted).toBe(true);
+        } finally {
+            client['socket'] = null;
+            client.destroy();
+            vi.unstubAllGlobals();
+            error.mockRestore();
+        }
+    });
+
+    it('does not retry a fallback endpoint after closing a connection attempt', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        let rejectOpen!: (error: Error) => void;
+        const opening = new Promise<void>((_resolve, reject) => {rejectOpen = reject;});
+        const openSocket = vi.fn().mockReturnValueOnce(opening).mockResolvedValue(undefined);
+        client['openSocket'] = openSocket;
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const request = client.updateRequest([]);
+            expect(openSocket).toHaveBeenCalledExactlyOnceWith('/interactive');
+
+            client.close(1000, 'page hidden');
+            rejectOpen(new DOMException('Connection closed.', 'AbortError'));
+            expect(await request).toBe('failed');
+            expect(openSocket).toHaveBeenCalledOnce();
+            expect(error).not.toHaveBeenCalled();
+            expect(warning).not.toHaveBeenCalled();
+
+            // A restored page can start a fresh attempt; cancellation is not a permanent failure.
+            await client.connect();
+            expect(openSocket).toHaveBeenCalledTimes(2);
+            expect(openSocket).toHaveBeenLastCalledWith('/interactive');
+        } finally {
+            client.destroy();
+            error.mockRestore();
+            warning.mockRestore();
+        }
+    });
+
+    it('does not send queued controls after an explicit close', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const send = vi.fn();
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+            client['socket'] = {readyState: WebSocket.OPEN, close: vi.fn(), send} as unknown as WebSocket;
+            const pending = client.updateRequest([]);
+            client.close(1000, 'page hidden');
+
+            expect(await pending).toBe('failed');
+            expect(send).not.toHaveBeenCalled();
+            expect(error).not.toHaveBeenCalled();
+        } finally {
+            client['socket'] = null;
+            client.destroy();
+            error.mockRestore();
+        }
+    });
+
+    it('dispatches identity and action controls while tile frames are paused, preserving tile FIFO', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const clientId = 'b3e68f32-3b51-472d-8cab-14b597f7de91';
+        const socket = {readyState: WebSocket.OPEN, close: vi.fn(), send: vi.fn()};
+        const controls: unknown[] = [];
+        const data: unknown[] = [];
+        tileStream.socket = socket;
+        tileStream.startPullLoops = vi.fn();
+        tileStream.latestRequestedRequestId = 3;
+        client.onClientId = id => {
+            if (id) expect(client.sendActionControl(id, {type: 'test-register'})).toBe(true);
+        };
+        client.onActionControl = payload => controls.push(payload);
+        client.onFrame = (_bytes, type) => data.push([type, tileStream.incomingRequestId]);
+        client.onStatus = vi.fn();
+        client.setFrameProcessingPaused(true);
+        vi.useFakeTimers();
+        try {
+            const invoke = {type: 'mapget.actions.invoke', version: 1, callId: '1', action: 'viewer_get_app_state', arguments: {}, timeoutMs: 30000};
+            const cancel = {type: 'mapget.actions.cancel', version: 1, callId: '1', reason: 'timeout'};
+            tileStream.enqueueFrame(packedFrames(
+                jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {type: 'mapget.tiles.request-context', requestId: 2, clientId}),
+                jsonFrame(41, {}),
+                jsonFrame(MAP_TILE_STREAM_TYPE_ACTION_CONTROL, invoke),
+                jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {type: 'mapget.tiles.request-context', requestId: 3, clientId}),
+                jsonFrame(MAP_TILE_STREAM_TYPE_ACTION_CONTROL, cancel),
+                jsonFrame(42, {})
+            ));
+            await tileStream.frameMessageChain;
+            expect(controls).toEqual([invoke, cancel]);
+            expect(socket.send).toHaveBeenCalledExactlyOnceWith('{"type":"test-register"}');
+            expect(tileStream.incomingRequestId).toBeNull();
+            expect(tileStream.latestRequestedRequestId).toBe(3);
+            expect(client.getPendingFrameQueueSize()).toBe(4);
+            expect(tileStream.startPullLoops).not.toHaveBeenCalled();
+            expect(client.onStatus).not.toHaveBeenCalled();
+            expect(data).toEqual([]);
+
+            client.setFrameProcessingPaused(false);
+            await vi.runAllTimersAsync();
+            expect(data).toEqual([[41, 2], [42, 3]]);
+            expect(tileStream.incomingRequestId).toBe(3);
+        } finally {
+            client.destroy();
+            vi.useRealTimers();
+        }
+    });
+
+    it('isolates malformed or oversized action content from the tile stream', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const controls: unknown[] = [];
+        client.onActionControl = payload => controls.push(payload);
+        const failure = vi.spyOn(client, 'failInteractiveConnection');
+        const data = vi.fn();
+        client.onFrame = data;
+        try {
+            const malformed = jsonFrame(MAP_TILE_STREAM_TYPE_ACTION_CONTROL, {});
+            malformed[MAP_TILE_STREAM_HEADER_SIZE] = 0xff;
+            await (client as any).handleMessage(packedFrames(
+                malformed,
+                jsonFrame(MAP_TILE_STREAM_TYPE_ACTION_CONTROL, {excess: 'x'.repeat(65536)}),
+                jsonFrame(41, {})
+            ));
+            expect(controls).toEqual([undefined, undefined]);
+            expect(failure).not.toHaveBeenCalled();
+            expect(data).toHaveBeenCalledOnce();
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('does not dispatch controls following a protocol mismatch', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const control = vi.fn();
+        client.onActionControl = control;
+        client.onProtocolMismatch = vi.fn();
+        try {
+            (client as any).enqueueFrame(packedFrames(
+                jsonFrame(41, {}, {...currentProtocolVersion(), major: 99}),
+                jsonFrame(MAP_TILE_STREAM_TYPE_ACTION_CONTROL, {type: 'mapget.actions.cancel'})
+            ));
+            await (client as any).frameMessageChain;
+            expect(client.onProtocolMismatch).toHaveBeenCalledOnce();
+            expect(control).not.toHaveBeenCalled();
+            expect(client.getPendingFrameQueueSize()).toBe(0);
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('ignores a retired asynchronous frame failure instead of closing a replacement connection', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const failure = vi.spyOn(client, 'failInteractiveConnection');
+        let rejectDecode!: (reason: Error) => void;
+        tileStream.decodeMessage = vi.fn().mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectDecode = reject; }));
+        try {
+            tileStream.enqueueFrame(new ArrayBuffer(0));
+            await Promise.resolve();
+            client.close();
+            rejectDecode(new Error('Retired Blob decode failed'));
+            await tileStream.frameMessageChain;
+            expect(failure).not.toHaveBeenCalled();
+            expect(client.getPendingFrameQueueSize()).toBe(0);
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('never opens or replays action sends and retains the UUID in payload URLs', () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const clientId = 'b3e68f32-3b51-472d-8cab-14b597f7de91';
+        const socket = {readyState: WebSocket.OPEN, close: vi.fn(), send: vi.fn()};
+        try {
+            expect(client.sendActionControl(clientId, {})).toBe(false);
+            tileStream.socket = socket;
+            tileStream.pullClientId = clientId;
+            expect(new URL(tileStream.resolvePullUrl(clientId)).searchParams.get('clientId')).toBe(clientId);
+            expect(client.sendActionControl('retired', {})).toBe(false);
+            expect(client.sendActionControl(clientId, {oversize: 'x'.repeat(256 * 1024)})).toBe(false);
+            expect(client.sendActionControl(clientId, {type: 'test'})).toBe(true);
+            expect(socket.send).toHaveBeenCalledExactlyOnceWith('{"type":"test"}');
+            client.close();
+            expect(client.sendActionControl(clientId, {})).toBe(false);
+            expect(socket.send).toHaveBeenCalledOnce();
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('streams POST /tiles across arbitrary HTTP chunk boundaries without opening a websocket', async () => {
+        const payload = new Uint8Array(packedFrames(
+            jsonFrame(41, {ordinal: 1}),
+            jsonFrame(42, {ordinal: 2}),
+            jsonFrame(MAP_TILE_STREAM_TYPE_END_OF_STREAM, {})
+        ));
+        const chunks = [
+            payload.slice(0, 3),
+            payload.slice(3, 17),
+            payload.slice(17, payload.length - 5),
+            payload.slice(payload.length - 5)
+        ];
+        const fetchMock = vi.fn().mockResolvedValue(new Response(
+            new ReadableStream({
+                start(controller) {
+                    for (const chunk of chunks) {
+                        controller.enqueue(chunk);
+                    }
+                    controller.close();
+                }
+            }),
+            {status: 200, headers: {"Content-Type": "application/binary"}}
+        ));
+        vi.stubGlobal("fetch", fetchMock);
+        const client = new MapTileStreamClientTiles("/tiles");
+        const observedTypes: number[] = [];
+        client.onFrame = (_frame, type) => observedTypes.push(type);
+        try {
+            await client.request([{
+                mapId: "Map",
+                layerId: "Layer",
+                tileIds: [7]
+            }]);
+
+            expect(observedTypes).toEqual([41, 42]);
+            expect(fetchMock).toHaveBeenCalledOnce();
+            const [url, init] = fetchMock.mock.calls[0];
+            expect(new URL(url).pathname).toBe("/tiles");
+            expect(init.method).toBe("POST");
+            expect(JSON.parse(init.body)).toMatchObject({
+                responseType: "binary",
+                requests: [{mapId: "Map", layerId: "Layer", tileIds: [7]}]
+            });
+        } finally {
+            client.destroy();
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('rejects an incoming HTTP bundle that continues after EndOfStream', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(packedFrames(
+            jsonFrame(MAP_TILE_STREAM_TYPE_END_OF_STREAM, {}),
+            jsonFrame(MAP_TILE_STREAM_TYPE_STATUS, {type: 'mapget.filter.status', state: 'Success'})
+        ))));
+        const client = new MapTileStreamClientTiles('/filter');
+        try {
+            await expect(client.request([{mapId: 'Map', layerId: 'Layer', tileIds: [7]}],
+                {channels: [{channelId: 'incoming', scope: 'relation', relation: {traversal: 'incoming'}}]}))
+                .rejects.toThrow('after EndOfStream');
+        } finally {
+            client.destroy();
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it('chunks one logical pending snapshot with aligned tile-indexed fields', () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        try {
+            const tileIds = Array.from({length: 250_000}, (_, index) => index + 1);
+            const request = {
+                mapId: "Map",
+                layerId: "Layer",
+                filterId: "large",
+                generation: 1,
+                channels: [{channelId: "all", scope: "feature"}],
+                tileIds,
+                priorityTileIds: tileIds.slice(0, 200),
+                roots: tileIds.slice(0, 200).map(tileId => ({
+                    tileId,
+                    featureId: `root-${tileId}`
+                }))
+            };
+
+            const payloads = tileStream.buildRequestPayloads([request], {}, 17);
+            const decoded = payloads.map((payload: string) => JSON.parse(payload));
+            const pieces = decoded.flatMap((payload: any) => payload.requests);
+
+            expect(payloads.length).toBeGreaterThan(1);
+            expect(payloads.every((payload: string) =>
+                new TextEncoder().encode(payload).byteLength <= 9 * 1024 * 1024
+            )).toBe(true);
+            expect(decoded.map((payload: any) => payload.chunk.index)).toEqual(
+                decoded.map((_: any, index: number) => index)
+            );
+            expect(decoded.at(-1).chunk.isLast).toBe(true);
+            expect(pieces.flatMap((piece: any) => piece.tileIds)).toEqual(tileIds);
+            for (const piece of pieces) {
+                const membership = new Set(piece.tileIds);
+                expect(piece.roots.every((root: any) =>
+                    membership.has(root.tileId)
+                )).toBe(true);
+                expect(piece.priorityTileIds.every((tileId: number) =>
+                    membership.has(tileId)
+                )).toBe(true);
+            }
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('keeps tagged object partitions aligned while chunking', () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        try {
+            const partitions = [
+                {kind: "object", id: "9007199254740993"},
+                {kind: "object", id: "18446744073709551615"},
+                {kind: "tile", id: -1}
+            ];
+            const pieces = tileStream.partitionRequestGroup({
+                mapId: "Map",
+                layerId: "Layer",
+                partitions,
+                priorityPartitions: [...partitions].reverse(),
+                roots: partitions.map(partition => ({
+                    partition,
+                    featureId: `${partition.kind}-${partition.id}`
+                })),
+                featureIds: partitions.map(partition => ({
+                    partition,
+                    ids: [`feature-${partition.id}`]
+                }))
+            }, 2);
+
+            expect(pieces.flatMap((piece: any) => piece.partitions))
+                .toEqual(partitions);
+            for (const piece of pieces) {
+                const membership = new Set(
+                    piece.partitions.map((partition: unknown) =>
+                        JSON.stringify(partition))
+                );
+                for (const field of [
+                    "priorityPartitions",
+                    "roots",
+                    "featureIds"
+                ]) {
+                    expect(piece[field].every((value: any) => membership.has(
+                        JSON.stringify(value.partition ?? value)
+                    ))).toBe(true);
+                }
+            }
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('can force an otherwise identical ordinary pending snapshot', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        try {
+            const request = {
+                mapId: "Map",
+                layerId: "Layer",
+                filterId: "styled",
+                generation: 1,
+                channels: [],
+                tileIds: [7]
+            };
+            tileStream.sendSerializedRequests = vi.fn();
+            tileStream.waitForSend = vi.fn().mockResolvedValue(undefined);
+
+            expect(await client.updateRequest([request])).toBe("sent");
+            expect(await client.updateRequest([request])).toBe("unchanged");
+            expect(await client.updateRequest([request], true)).toBe("sent");
+
+            expect(tileStream.sendSerializedRequests).toHaveBeenCalledTimes(2);
+            const sentPayloads = tileStream.sendSerializedRequests.mock.calls
+                .map((call: [string[]]) => JSON.parse(call[0][0]));
+            expect(sentPayloads.map((payload: any) => payload.requests)).toEqual([
+                [request],
+                [request]
+            ]);
+            expect(sentPayloads[1].requestId).toBeGreaterThan(
+                sentPayloads[0].requestId
+            );
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('budgets packed payloads at ordered VTLV frame boundaries', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const observedTypes: number[] = [];
+        vi.useFakeTimers();
+        const now = vi.spyOn(performance, "now");
+        try {
+            client.onFrame = (_frame, type) => observedTypes.push(type);
+            tileStream.enqueueFrame(packedFrames(
+                jsonFrame(41, {ordinal: 1}),
+                jsonFrame(42, {ordinal: 2}),
+                jsonFrame(43, {ordinal: 3})
+            ));
+            while (tileStream.pendingFrameMessages > 0) {
+                await Promise.resolve();
+            }
+
+            expect(client.getPendingFrameQueueSize()).toBe(3);
+            expect(vi.getTimerCount()).toBe(1);
+
+            now
+                .mockReturnValueOnce(0)
+                .mockReturnValueOnce(0)
+                .mockReturnValueOnce(5);
+            vi.runOnlyPendingTimers();
+            expect(observedTypes).toEqual([41]);
+            expect(client.getPendingFrameQueueSize()).toBe(2);
+
+            now.mockReturnValue(0);
+            vi.runOnlyPendingTimers();
+            expect(observedTypes).toEqual([41, 42, 43]);
+            expect(client.getPendingFrameQueueSize()).toBe(0);
+        } finally {
+            client.destroy();
+            now.mockRestore();
+            vi.useRealTimers();
+        }
+    });
+
+    it('grows the /interactive/payload batch budget without shrinking it on slow samples', () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        try {
+            expect(tileStream.currentPullMaxBytes()).toBe(512 * 1024);
+
+            tileStream.recordDownstreamSample(1024, 1000);
+            expect(tileStream.currentPullMaxBytes()).toBe(512 * 1024);
+
+            tileStream.recordDownstreamSample(100 * 1024 * 1024, 1000);
+            const grownBudget = tileStream.currentPullMaxBytes();
+            expect(grownBudget).toBeGreaterThan(512 * 1024);
+
+            tileStream.recordDownstreamSample(1024, 1000);
+            expect(tileStream.currentPullMaxBytes()).toBe(grownBudget);
+
+            tileStream.recordDownstreamSample(512 * 1024 * 1024, 1000);
+            expect(tileStream.currentPullMaxBytes()).toBe(64 * 1024 * 1024);
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('uses /interactive/payload for pull batches', () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        try {
+            const url = new URL(tileStream.resolvePullUrl(7));
+            expect(url.pathname).toBe('/interactive/payload');
+            expect(url.searchParams.get('clientId')).toBe('7');
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('falls back from /interactive to /tiles when the websocket fails before opening', async () => {
+        const originalWebSocket = globalThis.WebSocket;
+        const openedUrls: string[] = [];
+
+        class MockWebSocket {
+            static readonly CONNECTING = 0;
+            static readonly OPEN = 1;
+            static readonly CLOSING = 2;
+            static readonly CLOSED = 3;
+            readyState = MockWebSocket.CONNECTING;
+            binaryType = "";
+            onopen: ((event: Event) => void) | null = null;
+            onerror: ((event: Event) => void) | null = null;
+            onclose: ((event: CloseEvent) => void) | null = null;
+            onmessage: ((event: MessageEvent) => void) | null = null;
+            send = vi.fn();
+
+            constructor(url: string) {
+                openedUrls.push(url);
+                queueMicrotask(() => {
+                    if (new URL(url).pathname === "/interactive") {
+                        this.onerror?.(new Event("error"));
+                        return;
+                    }
+                    this.readyState = MockWebSocket.OPEN;
+                    this.onopen?.(new Event("open"));
+                });
+            }
+
+            close() {
+                this.readyState = MockWebSocket.CLOSED;
+            }
+        }
+
+        globalThis.WebSocket = MockWebSocket as any;
+        const client = new MapTileStreamClient('/interactive');
+        try {
+            await client.connect();
+
+            expect(openedUrls.map(url => new URL(url).pathname)).toEqual([
+                "/interactive",
+                "/tiles"
+            ]);
+            expect(client.isOpen()).toBe(true);
+            expect(client.getDebugState()).toMatchObject({
+                activeWebSocketPath: "/tiles",
+                activePullPath: "/tiles/next",
+                usingLegacyWebSocketFallback: true,
+                usingLegacyPullFallback: true
+            });
+        } finally {
+            client.destroy();
+            globalThis.WebSocket = originalWebSocket;
+        }
+    });
+
+    it('falls back from /interactive/payload to /tiles/next when the payload route is missing', () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        try {
+            expect(new URL(tileStream.resolvePullUrl(7)).pathname).toBe('/interactive/payload');
+
+            expect(tileStream.activateLegacyPullFallbackForStatus(404)).toBe(true);
+            expect(tileStream.activateLegacyPullFallbackForStatus(
+                404,
+                new URL('/interactive/payload', document.baseURI).toString()
+            )).toBe(true);
+
+            const url = new URL(tileStream.resolvePullUrl(7));
+            expect(url.pathname).toBe('/tiles/next');
+            expect(url.searchParams.get('clientId')).toBe('7');
+            expect(client.getDebugState()).toMatchObject({
+                activeWebSocketPath: "/interactive",
+                activePullPath: "/tiles/next",
+                usingLegacyWebSocketFallback: false,
+                usingLegacyPullFallback: true
+            });
+            expect(tileStream.activateLegacyPullFallbackForStatus(
+                404,
+                url.toString()
+            )).toBe(false);
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('delivers generation-scoped filter errors after request-context negotiation', () => {
+        const client = new MapTileStreamClient('/interactive');
+        const filterStatus = vi.fn();
+        const requestStatus = vi.fn();
+        try {
+            client.withFilterStatusCallback(filterStatus);
+            client.withStatusCallback(requestStatus);
+            client['latestRequestedRequestId'] = 3;
+            client['handleFrame'](jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context', requestId: 3
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+            const status = {
+                type: 'mapget.filter.status', filterId: 'roads', generation: 7,
+                state: 'Failed', error: 'source unavailable'
+            };
+            client['handleFrame'](jsonFrame(MAP_TILE_STREAM_TYPE_STATUS, status), MAP_TILE_STREAM_TYPE_STATUS);
+            expect(filterStatus).toHaveBeenCalledWith(status);
+            expect(requestStatus).not.toHaveBeenCalled();
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('stores sourcesRevision from request-context frames', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const observedRevisions: number[] = [];
+        try {
+            client.withSourcesRevisionChangedCallback(revision => {
+                observedRevisions.push(revision);
+            });
+
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 3,
+                sourcesRevision: 43
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+
+            expect(client.getSourcesRevision()).toBe(43);
+            expect(observedRevisions).toEqual([43]);
+
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 4,
+                sourcesRevision: 43
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+
+            expect(observedRevisions).toEqual([43]);
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('reports a repeated revision after reconnecting to a restarted backend', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const observedRevisions: Array<{revision: number; reconnected: boolean}> = [];
+        try {
+            client.withSourcesRevisionChangedCallback((revision, reconnected) => {
+                observedRevisions.push({revision, reconnected});
+            });
+
+            tileStream.prepareForOpenedSocket();
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 3,
+                sourcesRevision: 49
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+
+            tileStream.prepareForOpenedSocket();
+            expect(client.getSourcesRevision()).toBeNull();
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 4,
+                sourcesRevision: 49
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+
+            expect(observedRevisions).toEqual([
+                {revision: 49, reconnected: false},
+                {revision: 49, reconnected: true}
+            ]);
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('rejects stale payload frames after datasource metadata changes', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        try {
+            tileStream.latestRequestedRequestId = 3;
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 3
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+            expect(tileStream.acceptsCurrentPayloadFrame()).toBe(true);
+
+            tileStream.resetAfterDataSourceInfoChange();
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 3
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+
+            expect(tileStream.acceptsCurrentPayloadFrame()).toBe(false);
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('accepts field dictionaries after request supersession', async () => {
+        const parser = {
+            readFieldDictUpdate: vi.fn(),
+        };
+        const client = new MapTileStreamClient('/interactive', parser as any);
+        const tileStream = client as any;
+        const fieldsCallback = vi.fn();
+        try {
+            client.withFieldsCallback(fieldsCallback);
+            tileStream.latestRequestedRequestId = 5;
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 4
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+
+            expect(tileStream.acceptsCurrentPayloadFrame()).toBe(false);
+
+            const frame = jsonFrame(MAP_TILE_STREAM_TYPE_FIELDS, {stringPoolId: "stale-but-required"});
+            await tileStream.handleFrame(frame, MAP_TILE_STREAM_TYPE_FIELDS);
+
+            expect(parser.readFieldDictUpdate).toHaveBeenCalledOnce();
+            expect(fieldsCallback).toHaveBeenCalledWith(frame);
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('accepts self-identifying subset frames across request-context supersession', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const subsetsCallback = vi.fn();
+        try {
+            client.withSubsetsCallback(subsetsCallback);
+            tileStream.latestRequestedRequestId = 5;
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 4
+            }), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+
+            expect(tileStream.acceptsCurrentPayloadFrame()).toBe(false);
+
+            const frame = jsonFrame(MAP_TILE_STREAM_TYPE_SUBSETS, {
+                filterId: "styled:0/map/layer",
+                generation: 1,
+                tileId: 42
+            });
+            await tileStream.handleFrame(frame, MAP_TILE_STREAM_TYPE_SUBSETS);
+
+            expect(subsetsCallback).toHaveBeenCalledOnce();
+            expect(subsetsCallback).toHaveBeenCalledWith(
+                frame.slice(MAP_TILE_STREAM_HEADER_SIZE)
+            );
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('rejects untagged statuses after observing versioned request contexts', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const statusCallback = vi.fn();
+        try {
+            client.withStatusCallback(statusCallback);
+            tileStream.latestRequestedRequestId = 3;
+            await tileStream.handleFrame(jsonFrame(
+                MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT,
+                {
+                    type: 'mapget.tiles.request-context',
+                    requestId: 3
+                }
+            ), MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT);
+
+            await tileStream.handleFrame(jsonFrame(
+                MAP_TILE_STREAM_TYPE_STATUS,
+                {
+                    type: 'mapget.tiles.status',
+                    allDone: true,
+                    requests: [],
+                    message: 'untagged control frame'
+                }
+            ), MAP_TILE_STREAM_TYPE_STATUS);
+
+            expect(statusCallback).not.toHaveBeenCalled();
+            expect(client.getDebugState().lastStatusPayload).toBeNull();
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('dispatches source catalog change control frames', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        let change: unknown = null;
+        const observedRevisions: number[] = [];
+        try {
+            client.withSourceCatalogChangedCallback(payload => {
+                change = payload;
+            });
+            client.withSourcesRevisionChangedCallback(revision => {
+                observedRevisions.push(revision);
+            });
+
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE, {
+                type: 'mapget.sources.changed',
+                revision: 44,
+                reason: 'status',
+                source: {
+                    configIndex: 7,
+                    status: 'initializing',
+                    statusMessage: 'Loading layers',
+                    progress: 0.5
+                }
+            }), MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE);
+
+            expect(change).toEqual({
+                type: 'mapget.sources.changed',
+                revision: 44,
+                reason: 'status',
+                source: {
+                    configIndex: 7,
+                    status: 'initializing',
+                    statusMessage: 'Loading layers',
+                    retrying: false,
+                    progress: 0.5
+                }
+            });
+            expect(client.getSourcesRevision()).toBe(44);
+            expect(observedRevisions).toEqual([]);
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('treats missing source progress as unavailable', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        let change: unknown = null;
+        try {
+            client.withSourceCatalogChangedCallback(payload => {
+                change = payload;
+            });
+
+            await tileStream.handleFrame(jsonFrame(MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE, {
+                type: 'mapget.sources.changed',
+                revision: 45,
+                reason: 'status',
+                source: {
+                    configIndex: 7,
+                    status: 'initializing'
+                }
+            }), MAP_TILE_STREAM_TYPE_SOURCE_CATALOG_CHANGE);
+
+            expect(change).toEqual({
+                type: 'mapget.sources.changed',
+                revision: 45,
+                reason: 'status',
+                source: {
+                    configIndex: 7,
+                    status: 'initializing',
+                    statusMessage: undefined,
+                    retrying: false,
+                    progress: null
+                }
+            });
+        } finally {
+            client.destroy();
+        }
+    });
+
+    it('closes the connection after an undecodable VTLV message', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        const close = vi.fn();
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            tileStream.socket = {readyState: 1, close};
+
+            tileStream.enqueueFrame(new ArrayBuffer(3));
+            await tileStream.frameMessageChain;
+
+            expect(close).toHaveBeenCalledWith(
+                1011,
+                "interactive transport failure"
+            );
+            expect(client.getPendingFrameQueueSize()).toBe(0);
+        } finally {
+            tileStream.socket = null;
+            client.destroy();
+            error.mockRestore();
+        }
+    });
+
+    it('closes on current subset admission failure but not benign rejection', () => {
+        const failingClient = new MapTileStreamClient('/interactive');
+        const failingStream = failingClient as any;
+        const failingClose = vi.fn();
+        const error = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            failingStream.socket = {readyState: 1, close: failingClose};
+            failingClient.withSubsetsCallback(() => {
+                throw new Error("current subset could not be installed");
+            });
+
+            failingStream.handleFrame(
+                jsonFrame(MAP_TILE_STREAM_TYPE_SUBSETS, {tileId: 42}),
+                MAP_TILE_STREAM_TYPE_SUBSETS
+            );
+
+            expect(failingClose).toHaveBeenCalledWith(
+                1011,
+                "interactive transport failure"
+            );
+        } finally {
+            failingStream.socket = null;
+            failingClient.destroy();
+        }
+
+        const benignClient = new MapTileStreamClient('/interactive');
+        const benignStream = benignClient as any;
+        const benignClose = vi.fn();
+        try {
+            benignStream.socket = {readyState: 1, close: benignClose};
+            benignClient.withSubsetsCallback(() => {});
+
+            benignStream.handleFrame(
+                jsonFrame(MAP_TILE_STREAM_TYPE_SUBSETS, {tileId: 42}),
+                MAP_TILE_STREAM_TYPE_SUBSETS
+            );
+
+            expect(benignClose).not.toHaveBeenCalled();
+        } finally {
+            benignStream.socket = null;
+            benignClient.destroy();
+            error.mockRestore();
+        }
+    });
+
+    it('reports incompatible VTLV frame versions before dispatching payloads', async () => {
+        const client = new MapTileStreamClient('/interactive');
+        const tileStream = client as any;
+        let mismatch: unknown = null;
+        let statusReceived = false;
+        const close = vi.fn();
+        try {
+            tileStream.socket = {readyState: 1, close};
+            client.withProtocolMismatchCallback(payload => {
+                mismatch = payload;
+            });
+            client.withStatusCallback(() => {
+                statusReceived = true;
+            });
+
+            await tileStream.handleMessage(jsonFrame(MAP_TILE_STREAM_TYPE_REQUEST_CONTEXT, {
+                type: 'mapget.tiles.request-context',
+                requestId: 3
+            }, {major: 1, minor: 9, patch: 0}).buffer);
+
+            expect(mismatch).toEqual({
+                actual: {major: 1, minor: 9, patch: 0},
+                expected: {
+                    major: currentProtocolVersion().major,
+                    minor: currentProtocolVersion().minor
+                }
+            });
+            expect(statusReceived).toBe(false);
+            expect(close).toHaveBeenCalledWith(
+                1002,
+                "unsupported mapget tile-stream protocol"
+            );
+            await expect(client.connect()).rejects.toThrow(
+                "incompatible tile-stream protocol"
+            );
+        } finally {
+            tileStream.socket = null;
+            client.destroy();
+        }
+    });
+});

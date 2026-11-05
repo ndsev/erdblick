@@ -1,3 +1,8 @@
+/**
+ * Editable search-style drafts and their conversion to persisted rule values.
+ * The editor components own interaction; validation and draft identity remain
+ * usable without constructing those components or the search service.
+ */
 import {
     DEFAULT_FEATURE_SEARCH_LABEL_BACKGROUND_COLOR,
     FeatureSearchColorMode,
@@ -5,7 +10,7 @@ import {
     FeatureSearchRuleFilter,
     FeatureSearchStyleRule,
     normalizeFeatureSearchGeometry
-} from "../shared/feature-search-state";
+} from "./search-definition.model";
 import {
     defaultSearchStyleColorDraft,
     DEFAULT_SEARCH_STYLE_SOLID_COLOR,

@@ -1,31 +1,31 @@
-import {Injectable, OnDestroy} from "@angular/core";
-import {debounceTime, skip, Subject, Subscription} from "rxjs";
-import type {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
-import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
+import { Injectable, OnDestroy } from "@angular/core";
 import {
-    AppStateService,
+    debounceTime,
+    skip,
+    Subject,
+    Subscription
+} from "rxjs";
+import type { FeatureLayerStyle } from "../../build/libs/core/erdblick-core";
+import {
     defaultHoverLabelFieldKey,
     type HoverLabelFieldConfig,
     type TileFeatureId
-} from "../shared/appstate.service";
-import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
-import type {ErdblickStyle} from "../styledata/style.service";
-import type {SearchResultTileEntry} from "./map-runtime.model";
-import {MapInfoService} from "./map-info.service";
-import {MapTileStreamService} from "./map-tile-stream.service";
-import type {MapgetLayer} from "./mapget-layer.model";
-import {
-    StyledMapgetLayer,
-    type StyleFilterPlan,
-    type StyledMapgetLayerEvent
-} from "./styled-mapget-layer.model";
-import {MAX_STYLE_LOD} from "../shared/lod-policy";
-import {
-    partitionKey,
-    type PartitionId
-} from "./partition.model";
+} from "../inspection/inspection.model";
+import { InspectionState } from "../inspection/inspection.state";
+import { coreLib, uint8ArrayToWasm } from "../integrations/wasm.adapter";
+import { MAX_STYLE_LOD } from "../mapstyle/style-lod.model";
+import { stripFeatureInspectionTarget } from "../inspection/feature-identity.model";
+import { AppStateService } from "../appstate/appstate.service";
+import type { ErdblickStyle } from "../mapstyle/mapstyle.model";
+import { MapDataService } from "./mapdata.service";
+import type { SearchResultTileEntry } from "../search/search.model";
+import { MapTileStreamService } from "./map-tile-stream.service";
+import type { MapgetLayer } from "./mapget-layer.model";
+import { partitionKey, type PartitionId } from "./partition.model";
+import { StyledMapgetLayer } from "./styled-mapget-layer.presentation";
+import { type StyledMapgetLayerEvent, type StyleFilterPlan } from "./styled-mapget-layer.model";
 
-export type HoverDetailField = {key: string; value: string; colorKey: string};
+export type HoverDetailField = { key: string; value: string; colorKey: string };
 export type HoverFeatureDetails = {
     featureId: string;
     showFeatureId: boolean;
@@ -39,7 +39,7 @@ const DECODED_TILE_CACHE_LIMIT = 16;
  * Keeps scalar hover fields resident for visible feature tiles without adding
  * geometry or issuing requests in response to pointer movement.
  */
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class HoverDetailService implements OnDestroy {
     readonly valuesChanged = new Subject<string | null>();
 
@@ -64,19 +64,20 @@ export class HoverDetailService implements OnDestroy {
     /** Connects persisted field configuration to the proactive filter owners. */
     constructor(
         private readonly state: AppStateService,
-        private readonly mapInfo: MapInfoService,
-        private readonly tileStream: MapTileStreamService
+        private readonly mapInfo: MapDataService,
+        private readonly tileStream: MapTileStreamService,
+        public readonly inspectionState: InspectionState
     ) {
-        this.enabled = this.state.hoverLabelsEnabled;
-        this.activeFields = this.normalizeFields(this.state.hoverLabelFields);
-        this.subscriptions.add(this.state.hoverLabelsEnabledState.pipe(
+        this.enabled = this.inspectionState.hoverLabelsEnabled;
+        this.activeFields = this.normalizeFields(this.inspectionState.hoverLabelFields);
+        this.subscriptions.add(this.inspectionState.hoverLabelsEnabledState.pipe(
             skip(1)
         ).subscribe(enabled => {
             this.enabled = enabled;
             this.rebuildLayers();
             this.valuesChanged.next(null);
         }));
-        this.subscriptions.add(this.state.hoverLabelFieldsState.pipe(
+        this.subscriptions.add(this.inspectionState.hoverLabelFieldsState.pipe(
             skip(1),
             debounceTime(200)
         ).subscribe(fields => {
@@ -86,7 +87,7 @@ export class HoverDetailService implements OnDestroy {
         }));
     }
 
-    /** Reconciles visible coverage for one view while retaining scalar-only subset values. */
+    /** Reconciles visible coverage for one view while retaining geometry-free projected values. */
     reconcileView(
         viewIndex: number,
         coverage: ReadonlyArray<{
@@ -101,7 +102,7 @@ export class HoverDetailService implements OnDestroy {
                 entry.mapgetLayer === coverage[index].mapgetLayer &&
                 entry.partitions === coverage[index].partitions &&
                 entry.priorityPartitions ===
-                    coverage[index].priorityPartitions)) {
+                coverage[index].priorityPartitions)) {
             return;
         }
         this.desiredCoverageByView.set(viewIndex, coverage.map(entry => ({
@@ -178,7 +179,7 @@ export class HoverDetailService implements OnDestroy {
                 field.expression === FEATURE_ID_EXPRESSION
             );
             if (showFeatureId || displayedFields.length) {
-                result.push({featureId: baseFeatureId, showFeatureId, fields: displayedFields});
+                result.push({ featureId: baseFeatureId, showFeatureId, fields: displayedFields });
             }
         }
         return result;
@@ -248,7 +249,7 @@ export class HoverDetailService implements OnDestroy {
         viewIndex: number,
         mapgetLayer: MapgetLayer,
         expressions: readonly string[]
-    ): {layer: StyledMapgetLayer; subscription: Subscription} {
+    ): { layer: StyledMapgetLayer; subscription: Subscription } {
         const plan: StyleFilterPlan = {
             valid: true,
             channels: [{
@@ -339,7 +340,7 @@ export class HoverDetailService implements OnDestroy {
             if (!valuesByFeatureId) {
                 return undefined;
             }
-            cached = {valueVersion: state.valueVersion, valuesByFeatureId};
+            cached = { valueVersion: state.valueVersion, valuesByFeatureId };
             this.decodedTiles.delete(cacheKey);
             this.decodedTiles.set(cacheKey, cached);
             while (this.decodedTiles.size > DECODED_TILE_CACHE_LIMIT) {
@@ -353,7 +354,7 @@ export class HoverDetailService implements OnDestroy {
         return cached.valuesByFeatureId.get(featureId);
     }
 
-    /** Converts one immutable TileSubsetLayer into feature-id keyed scalar values. */
+    /** Converts singleton expression results into feature-id keyed hover values. */
     private decodeTile(
         blob: Uint8Array,
         expressions: readonly string[]
@@ -386,8 +387,9 @@ export class HoverDetailService implements OnDestroy {
                     const byExpression = new Map<string, unknown>();
                     expressions.forEach((expression, index) => {
                         const fieldIndex = fieldIndices[index];
-                        if (fieldIndex >= 0 && fieldIndex < values.length) {
-                            byExpression.set(expression, values[fieldIndex]);
+                        const results = values[fieldIndex];
+                        if (Array.isArray(results) && results.length === 1) {
+                            byExpression.set(expression, results[0]);
                         }
                     });
                     valuesByFeatureId.set(entry.featureId, byExpression);
@@ -427,7 +429,7 @@ export class HoverDetailService implements OnDestroy {
         const source = JSON.stringify({
             name: "Internal/Hover Details",
             version: 2,
-            rules: [{scope: "feature", geometry: ["point"], color: "#000000"}]
+            rules: [{ scope: "feature", geometry: ["point"], color: "#000000" }]
         });
         const featureLayerStyle = uint8ArrayToWasm(
             data => new coreLib.FeatureLayerStyle(data),
@@ -453,7 +455,7 @@ export class HoverDetailService implements OnDestroy {
             shortId: "hover-details",
             visible: false,
             url: "",
-            sourceRef: {styleName: "Internal/Hover Details", sourceKind: "editor"}
+            sourceRef: { styleName: "Internal/Hover Details", sourceKind: "editor" }
         };
         this.syntheticStyle = syntheticStyle;
         return syntheticStyle;

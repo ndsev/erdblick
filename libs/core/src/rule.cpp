@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include "simfil/value.h"
 #include "search.h"
 
@@ -540,6 +541,13 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         else if (role == "overlay") {
             zIndexRole_ = ZIndexRole::Overlay;
         }
+    }
+    if (yaml["point-cloud"].IsDefined()) pointCloud_ = yaml["point-cloud"].as<bool>();
+    if (yaml["point-cloud-max-points"].IsDefined()) {
+        auto const quota = yaml["point-cloud-max-points"].as<int64_t>();
+        if (quota < 0 || quota > std::numeric_limits<uint32_t>::max())
+            throw std::invalid_argument("point-cloud-max-points must be an unsigned 32-bit integer");
+        pointCloudMaxPoints_ = static_cast<uint32_t>(quota);
     }
     if (yaml["billboard"].IsDefined()) {
         // Parse whether the rendered primitive should face the camera.
@@ -1777,6 +1785,10 @@ std::string FeatureStyleRule::labelText(BoundEvalFun const& evalFun) const
 {
     if (!labelTextExpression_.empty()) {
         auto resultVal = evalFun.evaluate(labelTextExpression_);
+        // Missing data and failed projections use the configured fallback, rather
+        // than displaying the evaluator's literal "null" or "undefined" marker.
+        if (resultVal.type == simfil::ValueType::Null || resultVal.type == simfil::ValueType::Undef)
+            return labelText_;
         auto resultText = resultVal.toString();
         if (!resultText.empty()) {
             return resultText;

@@ -1,4 +1,9 @@
-import type {MapTileStreamFilterStatusPayload} from "./tilestream";
+/**
+ * Filter demand, delivery values and retained attachment references.
+ * These contracts describe a presentation subscription independently of its
+ * network client; the transport service supplies delivery and release callbacks.
+ */
+import type { MapTileStreamFilterStatusPayload } from "./map-tile-stream.protocol";
 import {
     partitionJson,
     partitionKey,
@@ -19,6 +24,7 @@ export interface FilterChannelDefinition {
     entryFields: string[];
     geometryTypes: number;
     geometryName?: string;
+    pointCloudMaxPoints?: number;
     featureFilter?: string;
     entryFilter?: string;
     group?: {

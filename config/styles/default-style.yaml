@@ -58,7 +58,9 @@ rules:
       fallback: moccasin
     label-text-expression: "$mergeCount > 1 and ($mergeCount as string) or ''"
     label-color: black
-    label-font: "12px Helvetica"
+    label-font-family: Helvetica
+    label-font-weight: 400
+    label-size: 12
     opacity: 1.0
     width: 15.0
     offset: [0, 0, -0.01]

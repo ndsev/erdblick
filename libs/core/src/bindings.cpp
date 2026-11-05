@@ -38,6 +38,7 @@ const char *__asan_default_options() {
 #include "visualization.h"
 #include "parser.h"
 #include "style.h"
+#include "style-authoring.h"
 #include "testdataprovider.h"
 #include "inspection.h"
 #include "geometry.h"
@@ -594,6 +595,7 @@ uint16_t tileLayerStreamProtocolMinor()
 
 EMSCRIPTEN_BINDINGS(erdblick)
 {
+    em::function("styleAuthoringSchemaJson", &styleAuthoringSchemaJson);
     // Activate this to see a lot more output from the WASM lib.
     // mapget::log().set_level(spdlog::level::debug);
 
@@ -691,6 +693,11 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::enum_<mapget::TileSourceDataLayer::SourceDataAddressFormat>("SourceDataAddressFormat")
         .value("UNKNOWN", mapget::TileSourceDataLayer::SourceDataAddressFormat::Unknown)
         .value("BIT_RANGE", mapget::TileSourceDataLayer::SourceDataAddressFormat::BitRange);
+
+    em::class_<IncomingInspection>("IncomingInspection")
+        .constructor<std::string const&, std::string const&, std::string const&>()
+        .function("addSnapshot", &IncomingInspection::addSnapshot)
+        .function("inspectionModel", &IncomingInspection::inspectionModel);
 
     ////////// TileSourceDataLayer
     em::class_<TileSourceDataLayer>("TileSourceDataLayer")
@@ -807,6 +814,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function(
             "setLineSimplificationTolerance",
             &TileSubsetLayerRenderer::setLineSimplificationTolerance)
+        .function("setPointCloudPolicy", &TileSubsetLayerRenderer::setPointCloudPolicy)
+        .function("pointCloudDeliveredCount", &TileSubsetLayerRenderer::pointCloudDeliveredCount)
+        .function("pointCloudRenderedCount", &TileSubsetLayerRenderer::pointCloudRenderedCount)
         .function(
             "configureGpuPacket",
             &TileSubsetLayerRenderer::configureGpuPacket)
@@ -879,12 +889,14 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::class_<TileLayerParser>("TileLayerParser")
         .constructor<>()
         .function("setDataSourceInfo", &TileLayerParser::setDataSourceInfo)
+        .function("addDataSourceInfo", &TileLayerParser::addDataSourceInfo)
         .function("getDataSourceInfo", &TileLayerParser::getDataSourceInfo)
         .function("getFieldDictOffsets", &TileLayerParser::getFieldDictOffsets)
         .function("getFieldDict", &TileLayerParser::getFieldDict)
         .function("addFieldDict", &TileLayerParser::addFieldDict)
         .function("readFieldDictUpdate", &TileLayerParser::readFieldDictUpdate)
         .function("readTileFeatureLayer", &TileLayerParser::readTileFeatureLayer)
+        .function("hasIncomingRelations", &TileLayerParser::hasIncomingRelations)
         .function("readTileSourceDataLayer", &TileLayerParser::readTileSourceDataLayer)
         .function("readTileSubsetLayer", &TileLayerParser::readTileSubsetLayer)
         .function("readTileLayerMetadata", &TileLayerParser::readTileLayerMetadata)

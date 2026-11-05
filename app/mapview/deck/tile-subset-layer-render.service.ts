@@ -1,22 +1,21 @@
-import {Injectable, Optional} from "@angular/core";
-import {skip, Subject} from "rxjs";
-import {AppStateService} from "../../shared/appstate.service";
-import {AUTO_TILE_SUBSET_RENDER_WORKER_COUNT} from
-    "../../shared/tile-render-policy";
+import { Injectable, Optional } from "@angular/core";
+import { auditTime, skip, Subject } from "rxjs";
+import {
+    DEFAULT_POINT_CLOUD_POLICY,
+    type PointCloudRenderPolicy
+} from "../point-cloud-policy.model";
+import { AUTO_TILE_SUBSET_RENDER_WORKER_COUNT } from "../tile-render-policy.model";
+import { MapViewState } from "../mapview.state";
+import { gpuIconAtlas } from "./gpu-icon-atlas.visualization";
+import { GPU_RENDER_PACKET_MAX_BYTES } from "./gpu-render-packet.model";
+import type { GpuSceneSnapshot } from "./gpu-scene.visualization";
 import type {
+    TileSubsetGpuContribution,
     TileSubsetLayerRenderBuffers,
     TileSubsetLayerRenderResult,
     TileSubsetLayerRenderTask,
-    TileSubsetGpuContribution,
     TileSubsetLayerRenderWorkerOutbound
 } from "./tile-subset-layer-render.worker.protocol";
-import type {
-    GpuSceneSnapshot
-} from "./gpu-scene";
-import {gpuIconAtlasService} from "./gpu-icon-atlas.service";
-import {
-    GPU_RENDER_PACKET_MAX_BYTES
-} from "./gpu-render-packet";
 
 const AUTO_WORKER_MIN = 2;
 const AUTO_WORKER_FALLBACK_CPU_COUNT = 4;
@@ -75,6 +74,7 @@ export interface TileSubsetLayerRenderRequest {
     highlightModeValue: number;
     lod: number;
     lineSimplificationToleranceMeters: number;
+    pointCloud?: PointCloudRenderPolicy;
 }
 
 interface PendingRender {
@@ -97,6 +97,7 @@ interface ReadyRender {
 }
 
 export interface TileSubsetLayerRenderDebugSnapshot {
+    workerHeapBytes: number;
     workers: number;
     allocatedWorkers: number;
     idleWorkers: number;
@@ -208,14 +209,44 @@ export class TileSubsetLayerRenderService {
     private latestGeometryVertices = 0;
     private maxGeometryVertices = 0;
 
+    /** Notify views when the requested point-cloud sampling changes. */
+    readonly pointCloudPolicyChanged = new Subject<void>();
+    private readonly workerHeapBytes: number[] = [];
+    private readonly workerInputKeys: Array<string | undefined> = [];
+    private readonly pointCloudWorkerByVisualization = new Map<string, number>();
+    private readonly pointCloudOwners = new Set<string>();
+
+    /** Current sampling preferences, also usable by isolated renderer tests. */
+    get pointCloudPolicy() { return this.appState?.pointCloudPolicy ?? DEFAULT_POINT_CLOUD_POLICY; }
+
+    /** Retain a cloud owner while its worker may cache the immutable input. */
+    registerPointCloud(id: string): void {
+        this.pointCloudOwners.add(id);
+    }
+    /** Retire input ownership and reclaim the worker when its cloud is no longer visible. */
+    unregisterPointCloud(id: string): void {
+        const worker = this.pointCloudWorkerByVisualization.get(id);
+        this.pointCloudWorkerByVisualization.delete(id);
+        if (worker !== undefined && !this.runningTaskIdByWorker[worker]) this.retireWorker(worker);
+        this.pointCloudOwners.delete(id);
+    }
+    /** Apply the per-object point limit independently of other visible clouds. */
+    pointCloudPolicyFor(id: string, _metersPerPixel: number | null, _previousSpacing = 0): PointCloudRenderPolicy {
+        return {enabled: this.pointCloudPolicy.enabled, maxPoints: this.pointCloudPolicy.maxPoints,
+            spacingMeters: 0, cacheKey: id};
+    }
+
     /** Track runtime worker-count changes when application state is available. */
     constructor(
         @Optional()
-        private readonly appState: AppStateService | null = null
+        private readonly appState: MapViewState | null = null
     ) {
         if (!appState) {
             return;
         }
+        appState.pointCloudPolicyChanges.pipe(auditTime(0)).subscribe(() => {
+            this.pointCloudPolicyChanged.next();
+        });
         appState.tileSubsetRenderWorkerCountState.pipe(skip(1)).subscribe(() => {
             this.ensureWorkers()
                 .then(() => {
@@ -266,10 +297,10 @@ export class TileSubsetLayerRenderService {
     }
 
     /** Return the worst per-view rolling p90 frame interval used by diagnostics. */
-    currentFrameTimeMs(): number {
+    currentFrameTimeMs(viewIndex?: number): number {
         return Math.max(
             0,
-            ...[...this.deckFrameIntervalsMsByView.values()]
+            ...(viewIndex === undefined ? [...this.deckFrameIntervalsMsByView.values()] : [this.deckFrameIntervalsMsByView.get(viewIndex) ?? []])
                 .map(samples => {
                     if (!samples.length) {
                         return 0;
@@ -372,6 +403,13 @@ export class TileSubsetLayerRenderService {
         return result;
     }
 
+    /** Constant-size control-plane metrics; unlike debugSnapshot, never walks queued packets or tiles. */
+    queueSummary() {
+        return {workers: this.activeWorkerCount(), queued: this.queue.length, inFlight: this.inFlight.size,
+            ready: this.ready.length, completed: this.completedTaskCount, failed: this.failedTaskCount,
+            stale: this.staleTaskCount, latestRoundTripMs: this.latestRoundTripMs, latestNativeMs: this.latestNativeRenderMs};
+    }
+
     /** Capture queue, worker, packet, and timing state for diagnostics. */
     debugSnapshot(): TileSubsetLayerRenderDebugSnapshot {
         const now = performance.now();
@@ -379,6 +417,7 @@ export class TileSubsetLayerRenderService {
             .map(pending => pending.dispatchedAt)
             .filter((value): value is number => value !== undefined);
         return {
+            workerHeapBytes: this.workerHeapBytes.reduce((sum, value) => sum + value, 0),
             workers: this.activeWorkerCount(),
             allocatedWorkers: this.workers.length,
             idleWorkers: this.idleWorkers.filter(
@@ -498,7 +537,8 @@ export class TileSubsetLayerRenderService {
         const activeLimit = this.activeWorkerCount();
         while (this.queue.length &&
             this.inFlight.size < activeLimit) {
-            const workerIndex = this.takeIdleWorker(activeLimit);
+            const preferred = this.pointCloudWorkerByVisualization.get(this.queue[0].task.visualizationId);
+            const workerIndex = this.takeIdleWorker(activeLimit, preferred);
             if (workerIndex === undefined) {
                 break;
             }
@@ -508,6 +548,9 @@ export class TileSubsetLayerRenderService {
                 pending.reject(new StaleSubsetRenderError());
                 this.idleWorkers.push(workerIndex);
                 continue;
+            }
+            if (pending.task.pointCloud) {
+                this.pointCloudWorkerByVisualization.set(pending.task.visualizationId, workerIndex);
             }
             pending.dispatchedAt = performance.now();
             this.inFlight.set(pending.task.taskId, pending);
@@ -537,7 +580,9 @@ export class TileSubsetLayerRenderService {
             // context recovery. Structured clone performs the unavoidable
             // worker copy natively; an explicit JS slice here only added a
             // second geometry-sized allocation on the interaction thread.
-            const subsetBlob = pending.task.subsetBlob;
+            const reusePointCloudInput = !!pending.task.pointCloud &&
+                this.workerInputKeys[workerIndex] === pending.task.pointCloud.cacheKey;
+            const subsetBlob = reusePointCloudInput ? new Uint8Array(0) : pending.task.subsetBlob;
             const dataSourceInfoBlob = needsCatalog
                 ? pending.task.dataSourceInfoBlob?.slice()
                 : undefined;
@@ -550,11 +595,12 @@ export class TileSubsetLayerRenderService {
             const outbound: TileSubsetLayerRenderTask = {
                 ...pending.task,
                 subsetBlob,
+                reusePointCloudInput,
                 dataSourceInfoBlob,
                 fieldDictBlob,
                 styleSource,
                 iconCatalogEntries: needsIconCatalog
-                    ? gpuIconAtlasService.catalogEntries().map(entry => ({
+                    ? gpuIconAtlas.catalogEntries().map(entry => ({
                         uri: entry.uri,
                         atlasPage: entry.atlasPage,
                         uv: entry.uv,
@@ -686,7 +732,10 @@ export class TileSubsetLayerRenderService {
     }
 
     /** Takes one idle worker which is inside the current active prefix. */
-    private takeIdleWorker(activeLimit: number): number | undefined {
+    private takeIdleWorker(activeLimit: number, preferred?: number): number | undefined {
+        if (preferred !== undefined && this.runningTaskIdByWorker[preferred]) return undefined;
+        const preferredIndex = preferred === undefined ? -1 : this.idleWorkers.indexOf(preferred);
+        if (preferredIndex >= 0 && preferred! < activeLimit) return this.idleWorkers.splice(preferredIndex, 1)[0];
         const idleIndex = this.idleWorkers.findIndex(
             workerIndex => workerIndex < activeLimit
         );
@@ -718,6 +767,8 @@ export class TileSubsetLayerRenderService {
             this.releaseWorker(workerIndex, runningTaskId);
             return;
         }
+        this.workerHeapBytes[workerIndex] = Number(result.wasmMemoryBytes ?? 0);
+        this.workerInputKeys[workerIndex] = result.error ? undefined : pending.task.pointCloud?.cacheKey;
         const nativeMs = Number(result.timings?.totalMs ?? 0);
         const roundTripMs = pending.dispatchedAt === undefined
             ? nativeMs
@@ -734,6 +785,8 @@ export class TileSubsetLayerRenderService {
         if (result.error) {
             this.failedTaskCount += 1;
             pending.reject(new Error(result.error));
+            // Failed initialization or native allocation can leave an unusable/high-water heap.
+            this.retireWorker(workerIndex);
             this.releaseWorker(workerIndex, pending.task.taskId);
             return;
         }
@@ -757,6 +810,9 @@ export class TileSubsetLayerRenderService {
             packets: result.packets,
             bridge: result.bridge,
             vertexCount: result.vertexCount,
+            pointCloudDeliveredCount: result.pointCloudDeliveredCount,
+            pointCloudRenderedCount: result.pointCloudRenderedCount,
+            wasmMemoryBytes: result.wasmMemoryBytes,
             timings: result.timings
         };
         try {
@@ -881,11 +937,12 @@ export class TileSubsetLayerRenderService {
 
     /** Release one worker only after its transferred packet is admitted or rejected. */
     private releaseWorker(workerIndex: number, taskId: string): void {
+        const pending = this.inFlight.get(taskId);
         this.inFlight.delete(taskId);
         this.runningTaskIdByWorker[workerIndex] = null;
-        if (this.workers[workerIndex]) {
-            this.idleWorkers.push(workerIndex);
-        }
+        if (pending?.task.pointCloud && !this.pointCloudOwners.has(pending.task.visualizationId))
+            this.retireWorker(workerIndex);
+        else if (this.workers[workerIndex]) this.idleWorkers.push(workerIndex);
         this.pump()
             .then(() => this.capacityChanged.next())
             .catch(error => console.error("Subset render queue failed.", error));
@@ -982,8 +1039,35 @@ export class TileSubsetLayerRenderService {
         this.capacityChanged.next();
     }
 
+    /** Termination is the only way to return a WASM high-water heap to the browser. */
+    private retireWorker(index: number): void {
+        const taskId = this.runningTaskIdByWorker[index];
+        const pending = taskId ? this.inFlight.get(taskId) : undefined;
+        if (pending) {
+            this.inFlight.delete(pending.task.taskId);
+            this.staleTaskCount += 1;
+            pending.reject(new StaleSubsetRenderError());
+        }
+        for (let readyIndex = this.ready.length - 1; readyIndex >= 0; --readyIndex) {
+            if (this.ready[readyIndex].workerIndex === index) this.ready.splice(readyIndex, 1);
+        }
+        const worker = this.workers[index];
+        if (worker) {
+            worker.onmessage = null;
+            worker.onerror = null;
+            worker.terminate();
+        }
+        this.workers[index] = null;
+        this.removeIdleWorker(index);
+        this.resetWorkerState(index);
+        for (const [id, worker] of this.pointCloudWorkerByVisualization)
+            if (worker === index) this.pointCloudWorkerByVisualization.delete(id);
+    }
+
     /** Clears all state which describes the private memory of one worker. */
     private resetWorkerState(workerIndex: number): void {
+        this.workerHeapBytes[workerIndex] = 0;
+        this.workerInputKeys[workerIndex] = undefined;
         this.runningTaskIdByWorker[workerIndex] = null;
         this.catalogKeysByWorker[workerIndex] = new Set<string>();
         this.fieldDictSizesByWorker[workerIndex] = new Map<string, number>();

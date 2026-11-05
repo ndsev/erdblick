@@ -1,7 +1,12 @@
 # URL Guide
 
-Erdblick encodes the full UI state inside the browser URL. That makes it easy to bookmark views, send links to colleagues, or preconfigure visualization-only deployments.
+Erdblick encodes shareable view state in the browser URL. That makes it easy to bookmark views, send links to colleagues, or preconfigure visualization-only deployments.
 
+<!-- mcp:
+title: "Viewer startup state precedence"
+keywords: ["URL", "local storage", "default", "startup", "reload", "state"]
+hint: "For the running tab, inspect viewer_get_controls rather than reconstructing state from the URL alone. MCP state assignments use canonical runtime objects, not flattened URL encodings."
+-->
 ## Startup State Precedence
 
 Erdblick combines several possible state sources during startup:
@@ -32,13 +37,20 @@ The URL is pruned automatically so stale maps, styles, panels, and view entries 
 
 Browser-imported stylesheet sources—including styles saved from Feature Search—are local to the browser profile and are not embedded in the URL. Sharing a viewer URL therefore does not transfer those YAML sources; export and import the style when it needs to move between profiles.
 
+A legacy URL without `vid` preserves the current or saved identity mapping and
+creates IDs only for new views. On a fresh profile, IDs are generated once for the
+effective view count. An explicit full replacement without IDs creates a new
+mapping. Partial URLs preserve omitted per-view values. Duplicate or malformed
+explicit IDs are rejected before the current state or URL is replaced.
+
 ## URL Parameters Reference
 
 The table below lists all query parameters used by erdblick when encoding or restoring UI state.
 
 | Parameter | Scope | Description |
 | --- | --- | --- |
-| `n` | Global | Number of active map views (1 for single view, 2 for split view). |
+| `n` | Global | Number of active map views (1–32). The ordinary split-view UI opens two. |
+| `vid` | Global | Ordered, comma-separated logical view IDs. Each ID has 1–64 ASCII letters, digits, underscores or hyphens; Object.prototype names are reserved. IDs must be unique and match `n` if it is supplied; otherwise the ID list determines the count. |
 | `lon`, `lat`, `alt` | Per view | Camera destination (degrees and meters). Values are encoded per view; with multiple views they are stored as colon-separated lists. |
 | `h`, `p`, `r` | Per view | Camera orientation in radians (heading, pitch, roll), encoded in the same way as `lon`/`lat`/`alt`. |
 | `px`, `py`, `pz` | Per view | Optional local map-centre offset in metres accepted for backward-compatible/exact input. Active target navigation may transiently use a nonzero offset, but ordinary settled state is re-expressed as an equivalent ground-centred camera with zero offset. Legacy links that omit these fields also use zero. |
@@ -90,6 +102,7 @@ When you enable split view, erdblick still encodes the full layout into the quer
 You do not need to set these parameters manually for normal usage, but they make generated URLs stable even for complex multi-view layouts.
 
 Legacy `osm` links from older releases are still accepted during startup and are migrated to the new `bg` state automatically.
+Migration uses the active view count and ignores trailing positional entries.
 
 ## Presentation Embedding
 
@@ -106,6 +119,26 @@ deleting their saved definitions. Those definitions reopen when edited or after 
 viewer reload, rather than on an unrelated catalog refresh. Imported local styles are
 retained for editing but disabled unless the submitted state explicitly enables
 them. Their YAML sources are not deleted or rewritten by a scene transition.
+
+Viewers supporting authored search scenes announce `capabilities: {searches: true}`
+in `erdblick:presentation:ready`. The parent must check this capability before
+including an optional `searches` array in `erdblick:presentation:apply-url-state`;
+older viewers may otherwise ignore the field. Each item uses the existing search
+JSON configuration export format, either directly or wrapped in `configuration`.
+It supports the query, scope, selected map/layers and views, rendering strategy,
+and visualization rules. Up to 50 configurations are accepted and validated before
+the scene changes; invalid configurations produce `invalid-searches`.
+
+After applying the URL state, erdblick dismisses previous searches, waits for live
+renderers to publish the new camera's tile coverage, and imports the supplied
+configurations as fresh, enabled, unpaused sessions. The acknowledgement
+means those sessions have started, not that results have finished loading.
+`searches: []` explicitly clears runtime searches even with `reset: false`.
+Omitting `searches` with `reset: false` preserves existing sessions; omitting it
+with the default full reset dismisses them. Bridge-created definitions are removed
+when replaced or dismissed so revisiting scenes does not accumulate saved searches.
+User-authored saved definitions remain intact. Searches are not part of native
+application snapshots or URL query parameters; use this explicit field to author them.
 
 The same version-2 bridge accepts `erdblick:presentation:start-camera-flight`
 and `erdblick:presentation:stop-camera-flight`. A flight carries `durationMs`
@@ -149,13 +182,21 @@ Here:
 
 All option values are stored as `0`/`1` numbers (booleans) or plain numbers/strings, depending on the option type. Unknown layers or styles are ignored when a URL is replayed, so links remain reasonably robust across configuration changes.
 
+<!-- mcp:
+title: "Sharing viewer links"
+keywords: ["share", "link", "URL", "inspection", "style", "persistence"]
+hint: "A shared URL is not a copy of backend data or browser-local imported/modified stylesheet source. Verify which state this guide says is encoded before promising reproducibility on another browser. Use viewer_get_share_link to read a share URL for the current view and its localStyleIds/localSearchIds dependencies; localOnly identifies a loopback address."
+-->
 ## Sharing Links
 
 To share a particular map configuration with others, first get the view into the desired state and then capture the URL:
 
 1. Configure the map exactly as needed (activate sources, zoom, tweak styles).
 2. Copy the browser URL directly once the view is in the desired state.
-3. Send the link. Recipients load the same camera, layer, and style state.
+3. Share the link with someone who can access the same configured viewer. The
+   URL carries cameras, layers, selections and style-option values. Browser-local
+   stylesheet source and search overlays are not embedded; export any required
+   definitions separately. A loopback address only works on the originating machine.
 
 The browser’s Back and Forward buttons move between previously visited URL states. Erdblick treats these as full state transitions and hydrates the matching cameras, layer visibility, selections, and style options accordingly.
 

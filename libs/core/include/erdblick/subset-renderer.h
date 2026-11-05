@@ -3,6 +3,7 @@
 #include "layer.h"
 #include "style.h"
 #include "gpu-render-records.h"
+#include "mapget/model/pointcloud-geometry.h"
 
 #include <cstdint>
 #include <functional>
@@ -46,6 +47,10 @@ public:
         double altitude);
     /** Set the world-space error allowed when simplifying plain line paths. */
     void setLineSimplificationTolerance(double toleranceMeters);
+    /** Immutable input identity and admitted point-instance quota; spacing uses metres. */
+    void setPointCloudPolicy(bool enabled, uint32_t maxPoints, double spacingMeters, std::string const& cacheKey);
+    [[nodiscard]] double pointCloudDeliveredCount() const { return pointCloudDeliveredCount_; }
+    [[nodiscard]] double pointCloudRenderedCount() const { return pointCloudRenderedCount_; }
     /** Store scene-owned packet slots and sequencing before rendering starts. */
     void configureGpuPacket(
         uint32_t sceneGeneration,
@@ -83,8 +88,8 @@ public:
     /** Build all individually bounded packet fragments for native callers and tests. */
     [[nodiscard]] std::vector<std::vector<std::byte>>
     renderPacketFragmentsBytes() const;
-    /** Return the complete packet sequence as individually bounded JavaScript arrays. */
-    [[nodiscard]] NativeJsValue renderPackets() const;
+    /** Consume record blocks into individually bounded JavaScript packet arrays. */
+    [[nodiscard]] NativeJsValue renderPackets();
     /** Return the number of source geometry vertices inspected by this run. */
     [[nodiscard]] uint32_t vertexCount() const;
 
@@ -406,8 +411,8 @@ private:
         uint32_t ruleRenderIndex) const;
     /** Serialize the exact double-precision coordinate origin for the GLTF bridge. */
     [[nodiscard]] JsValue coordinateOriginToJs() const;
-    /** Serialize temporary GLTF-local semantic pick results for TypeScript. */
-    [[nodiscard]] JsValue pickResultsToJs() const;
+    /** Serialize entry identities, optionally including compact GPU references for clouds. */
+    [[nodiscard]] JsValue pickResultsToJs(bool includeReferences = false) const;
 
     /** Append one point instance after local-coordinate projection. */
     void appendPoint(
@@ -569,6 +574,11 @@ private:
     uint32_t gpuOriginSlot_ = 0U;
     uint64_t gpuOriginKey_ = 0U;
     double lineSimplificationToleranceMeters_ = 0.0;
+    bool pointCloudEnabled_ = true;
+    bool hasPointCloudRules_ = false;
+    uint32_t pointCloudMaxPoints_ = mapget::DefaultPointCloudMaxPoints;
+    uint64_t pointCloudDeliveredCount_ = 0;
+    uint64_t pointCloudRenderedCount_ = 0;
     bool hasRun_ = false;
 };
 

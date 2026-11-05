@@ -2,8 +2,8 @@ import {
     type FeatureSearchMapLayerRef,
     type FeatureSearchStateEntry,
     normalizeFeatureSearchStateEntry
-} from "../shared/feature-search-state";
-import type {FeatureSearchResultEntry} from "./feature.search.service";
+} from "./search-definition.model";
+import type { FeatureSearchResultEntry } from "./search.model";
 
 export interface FeatureSearchGroupingExportOption {
     id: number;

@@ -18,8 +18,8 @@ import {
     GpuLabelFlag,
     GpuLabelSizeUnit,
     GpuLabelWordBreak
-} from "./gpu-render-packet";
-import type {GpuScene, GpuSceneLabel} from "./gpu-scene";
+} from "./gpu-render-packet.model";
+import type {GpuScene, GpuSceneLabel} from "./gpu-scene.visualization";
 
 const NO_DEPTH_PARAMETERS = {
     depthCompare: "always",
