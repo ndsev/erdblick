@@ -17,6 +17,7 @@ import { combineLatest, Subscription } from "rxjs";
 import { filter } from "rxjs/operators";
 import { CoordinatesService } from "../coordinates/coordinates.service";
 import { environment } from "../environments/environment";
+import { InfoMessageService } from "../diagnostics/info.service";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
 import { type TileFeatureId } from "../inspection/inspection.model";
 import { InspectionPanelService } from "../inspection/inspection-panel.service";
@@ -255,6 +256,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         private hoverDetails: HoverDetailService,
         private viewLayerDiagnostics: ViewLayerDiagnosticsService,
         private styleValidationReports: StyleValidationReportService,
+        private infoMessages: InfoMessageService,
         private cdr: ChangeDetectorRef,
         private ngZone: NgZone,
         public readonly viewSettings: MapViewState,
@@ -291,7 +293,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 this.hoverDetails,
                 this.viewLayerDiagnostics,
                 this.styleValidationReports,
-                this.ngZone
+                this.ngZone,
+                this.infoMessages
             )
         );
         this.cacheResetSubscription =

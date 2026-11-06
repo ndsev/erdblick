@@ -221,37 +221,56 @@ The Style Editor has **Quick** and **Advanced** tabs for every loaded base or
 search style. Its header switch controls current visibility without changing YAML
 `default`. Both tabs edit the same source; Apply updates the stylesheet.
 
-Quick exposes the name and exact layer affinity at the top. No selected layer means
+Quick groups the name, layer affinity, version, category, enabled-by-default setting,
+and LOD thresholds in the metadata area at the top. No selected layer means
 Any, and a custom regular expression can be edited directly or replaced with exact
-IDs. Common controls include exact native geometry choices, feature and attribute
-filters, literal/expression/scaled colors, width or point diameter, opacity, and
-label text. Expand the named groups for matching, LOD, attributes, offsets, lines,
-points, surfaces, drawing order, labels, relations, and branch trees. Rule lists can
-be added to, duplicated, reordered, and removed. Switching `first-of`/`all-of`
-retains the child rules. Relation endpoints use the same nested rule controls.
+IDs. Each rule shows configured properties as compact **value bubbles**, sorted
+by category and property rather than insertion order. Category colors stay the same
+across rules, making their settings easy to compare. Unset defaults and inherited
+values do not create bubbles; explicit false, zero, and empty values remain visible.
 
-Document groups expose options of all three native types (Boolean, color, string),
-local presets, LOD thresholds, and hover/selection effects. Maps & Layers also provides
+Click a bubble to open its inline editing panel below that rule. The Material icons
+**close**, **save**, and **delete** dismiss the field draft, accept it into the editor,
+or remove that property. The rule's **+** opens a popup menu with category submenus
+for unconfigured properties. Escape closes the menu and returns to the **+** button.
+A newly added property's panel has only dismiss and save. Composite
+properties such as scales and glow use their existing detailed controls. Deleting a
+bubble removes that named property, not its category or the rule. Unsetting a value
+can reveal inheritance or a native default.
+
+**Branches** form a subsection under their parent, with a first-matching/all-matching
+choice and child rules displayed as their own bubble rows. Rule lists support add,
+duplicate, reorder, and removal. Switching `first-of`/`all-of` retains child rules and
+comments. Relation **Source style**, **Target style**, and **End markers** appear as
+named subsections. A top-level relation rule cannot have branches; its source/target
+styles can. Only one property panel is open at a time, at any depth. Child edits save
+directly to the document buffer without an additional parent Save.
+
+Save or dismiss a dirty property panel before editing another property or Advanced,
+changing metadata, or modifying rule structure. Other rules stay visible for
+comparison. Escape first closes an active input popup, then dismisses the property
+panel; Ctrl/Cmd+S saves the property while its panel is open. The existing editor
+Apply/Save to Source action remains responsible for applying the document. Semantically
+invalid drafts can be staged to reconcile related fields, but full native validation
+still prevents applying an invalid stylesheet. Incomplete numeric text must be fixed
+or dismissed, and cannot silently save the previous numeric value.
+
+**Options and presets** and **Interaction** expose options of all three native types
+(Boolean, color, string), local presets, and hover/selection effects. Maps & Layers provides
 runtime controls for all non-internal option types. Color text accepts native named
-colors and RGB hex forms. Click the color swatch to open the picker; choosing a
-color writes RGB hex, while opening or dismissing it preserves the authored value.
-Scale rows retain numeric, string, and Boolean category keys and optional fallbacks.
-Numeric entry uses native
-validation rather than search-editor slider limits.
+colors and RGB hex forms. Opening or dismissing a color picker preserves authored
+text; choosing a color stages RGB hex. Scale rows retain numeric, string, and Boolean
+category keys and optional fallbacks. Numeric controls use native validation rather
+than search-editor slider limits.
 
-Each rule has a collapsible header with reorder, duplicate, and remove controls.
-**Add properties** reveals unconfigured common fields. **Add** sets an optional
-field; the reset-arrow button removes its value, retaining
-inheritance or native defaults. Hover or focus a field's information button for
-its explanation. Opening the form does not materialize defaults. Inherited scales/expressions retain their native
-precedence over child literals. Compatibility fields are explicitly labeled when
-they have no rendering effect. Edits patch individual YAML nodes, preserving
-unrelated content and comments. Editing an alias makes a local copy without changing
-other uses. Unknown fields remain preserved. Native validation messages identify
-invalid fields in the form; invalid YAML syntax temporarily disables form editing
-until corrected in Advanced.
+Property help remains available by hover or keyboard focus. Inherited scales and
+expressions retain native precedence over child literals. Compatibility properties
+keep their legacy/no-effect guidance. Edits patch YAML nodes, retaining unrelated
+content, comments, exact numeric types, and unknown fields. Editing an alias makes a
+local copy without changing other uses. Invalid YAML syntax temporarily disables
+form editing until corrected in Advanced.
 
-![Quick Style Editor with attribute scope and matching controls](screenshots/style-component-editor-controls.png)
+![Quick Style Editor with property bubbles and an inline edit panel](screenshots/style-component-editor-controls.png)
 
 <!-- mcp:
 title: "Style document shape"

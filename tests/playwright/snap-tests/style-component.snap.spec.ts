@@ -20,6 +20,8 @@ test.describe('Snapshot – style component', () => {
         await installStyleSupportFixture(page);
         await navigateToStateSnapshotRoot(page);
         await enableMapLayer(page, TEST_MAP_NAMES[MAP_INDEX], TEST_LAYER_NAMES[LAYER_INDEX]);
+        await expect.poll(() => page.evaluate(() =>
+            window.ebDebug?.subsetRenderPresentation().activeContributions ?? 0)).toBeGreaterThan(0);
 
         const stylesDialog = await openStylesDialog(page);
         // Wait for the configured style bundle to replace the transient empty
@@ -50,6 +52,14 @@ test.describe('Snapshot – style component', () => {
             maxDiffPixelRatio: 0.01
         });
 
+        await editorDialog.locator('[data-style-bubble="rules.0.width"]').click();
+        await expect(editorDialog.getByTestId('style-property-panel')).toBeVisible();
+        await editorDialog.locator('[data-style-path="rules.0.width"] input').focus();
+        await page.mouse.move(0, 0);
+        await expect(page).toHaveScreenshot('style-component-property-panel.png', {
+            maxDiffPixelRatio: 0.01
+        });
+
         await page.mouse.move(0, 0);
         // Keep header and footer callouts clear of the neighboring controls.
         // The form's inherited app font can leave less spare vertical space.
@@ -60,37 +70,37 @@ test.describe('Snapshot – style component', () => {
                 placement: 'left'
             },
             {
-                locator: editorDialog.getByTestId('style-editor-quick-name'),
-                label: 'Edit style name'
-            },
-            {
-                locator: editorDialog.getByTestId('style-editor-quick-layers'),
-                label: 'Set layer affinity'
-            },
-            {
-                locator: editorDialog.locator('[data-style-path="rules.0.geometry"]'),
-                label: 'Choose geometry',
+                locator: editorDialog.getByTestId('style-editor-metadata'),
+                label: 'Style metadata',
                 placement: 'left'
             },
             {
-                locator: editorDialog.locator('[data-style-path="rules.0.attribute-filter"]'),
-                label: 'Edit attribute predicate',
+                locator: editorDialog.locator('[data-style-bubble="rules.0.scope"]'),
+                through: editorDialog.locator('[data-style-bubble="rules.0.width"]'),
+                label: 'Click a property to edit',
                 placement: 'left'
             },
             {
-                locator: editorDialog.locator('.style-optional-fields > summary').first(),
-                label: 'Add optional properties',
+                locator: editorDialog.getByTestId('style-add-property-rules.0'),
+                label: 'Add a property',
+                placement: 'top'
+            },
+            {
+                locator: editorDialog.getByTestId('style-property-dismiss'),
+                through: editorDialog.getByTestId('style-property-delete'),
+                label: 'Dismiss / Save / Delete',
+                placement: 'left'
+            },
+            {
+                locator: editorDialog.locator('[data-style-bubble="rules.0.all-of.0.filter"]'),
+                through: editorDialog.locator('[data-style-bubble="rules.0.all-of.0.label-text-expression"]'),
+                label: 'Branch properties',
                 placement: 'left'
             },
             {
                 locator: editorDialog.getByTestId('style-editor-apply-button'),
-                label: 'Apply changes',
+                label: 'Apply document changes',
                 placement: 'left'
-            },
-            {
-                locator: editorDialog.getByTestId('style-editor-help-button'),
-                label: 'Open style help',
-                placement: 'top'
             }
         ]);
     });

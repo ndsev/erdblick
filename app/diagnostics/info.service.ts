@@ -84,6 +84,17 @@ export class InfoMessageService {
         this.messageService.add({ key: 'tc', severity: 'warn', summary: 'Warning', detail: message });
     }
 
+    /** Keeps the GPU capacity warning and its Rendering preferences shortcut available until dismissed. */
+    showGpuBufferExhausted() {
+        this.messageService.add({
+            key: "gpu-buffer-exhausted",
+            severity: "warn",
+            summary: "GPU material buffer exhausted",
+            detail: "Some features could not be rendered because a GPU material buffer reached its capacity.",
+            sticky: true
+        });
+    }
+
     /** Emits a success toast through PrimeNG's global message service. */
     showSuccess(message: string) {
         this.messageService.add({ key: 'tc', severity: 'success', summary: 'Success', detail: message });

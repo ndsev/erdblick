@@ -1,5 +1,5 @@
-import {describe, expect, it} from "vitest";
-import {parseDocument} from "yaml";
+import {describe, expect, it, vi} from "vitest";
+import {Alias, parseDocument} from "yaml";
 import {parseStyleNumber, StyleDocumentModel} from "../../../app/mapstyle/style-document.model";
 
 describe("source-backed style form edits", () => {
@@ -104,10 +104,31 @@ rules:
 
     it("retains a scalar anchor when its numeric value is replaced", () => {
         const model = new StyleDocumentModel("name: Anchored\nrules: [{width: &size 3}, {width: *size}]\n");
+        expect(model.value(["rules", 1, "width"])).toBe(3n);
         const source = model.edit({op: "set", path: ["rules", 0, "width"], value: 7.5});
         const result = new StyleDocumentModel(source);
         expect(source).toContain("&size");
         expect(result.value(["rules", 1, "width"])).toBe(7.5);
+        expect(model.value(["rules", 1, "width"])).toBe(3n);
+    });
+
+    it("resolves each alias once across form reads while respecting anchor order", () => {
+        const model = new StyleDocumentModel("name: Anchored\nrules: [{width: &size 3}, {width: *size}, {width: &size 7}, {width: *size}]\n");
+        const resolve = vi.spyOn(Alias.prototype, 'resolve');
+        try {
+            for (let read = 0; read < 10; ++read) {
+                expect(model.has(['rules', 1, 'width'])).toBe(true);
+                expect(model.value(['rules', 1, 'width'])).toBe(3n);
+                expect(model.value(['rules', 3, 'width'])).toBe(7n);
+            }
+            expect(resolve).toHaveBeenCalledTimes(2);
+        } finally { resolve.mockRestore(); }
+    });
+
+    it("still rejects cyclic alias traversal after caching a resolved alias", () => {
+        const model = new StyleDocumentModel('name: Cyclic\nrules: [&loop {all-of: [*loop]}]');
+        expect(model.isRecord(['rules', 0, 'all-of', 0])).toBe(true);
+        expect(() => model.value(['rules', 0, 'all-of', 0, 'all-of', 0, 'width'])).toThrow('Cyclic aliases');
     });
 
     it("switches same-node color modes without removing inherited modes", () => {

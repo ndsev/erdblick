@@ -17,8 +17,23 @@ test('Quick edits nested native fields, options and effects without losing sourc
     const editor = page.getByTestId('style-editor-dialog').locator('.p-dialog').first();
     const form = editor.getByTestId('style-document-editor');
     const apply = editor.getByTestId('style-editor-apply-button').locator('button');
-    const width = form.locator('[data-style-path="rules.0.width"] input');
-    await expect(width).toHaveValue('0.25');
+    const bubble = (path: string) => form.locator(`[data-style-bubble="${path}"]`);
+    const saveProperty = form.getByTestId('style-property-save');
+    const dismissProperty = form.getByTestId('style-property-dismiss');
+    const metadata = editor.getByTestId('style-editor-metadata');
+    await expect(editor.locator('editor .cm-editor')).toHaveCount(0);
+    await expect(metadata.getByTestId('style-editor-quick-name')).toBeVisible();
+    await expect(metadata.getByTestId('style-editor-quick-layers')).toBeVisible();
+    await expect(metadata.locator('[data-style-path="version"] input')).toHaveValue('2');
+    await expect(metadata.locator('[data-style-path="default"] select')).toBeVisible();
+    await expect(metadata.getByRole('button', {name: 'Add Category', exact: true})).toBeVisible();
+    await expect(metadata.getByRole('button', {name: 'Add Lod thresholds', exact: true})).toBeVisible();
+    await expect(form.locator('summary').filter({hasText: /^Document$/})).toHaveCount(0);
+    await expect(form.locator('.style-field-label').filter({hasText: /^Rules$/})).toHaveCount(0);
+    await expect(bubble('rules.0.width')).toHaveText('Width: 0.25');
+    await expect(form.getByTestId('style-property-panel')).toHaveCount(0);
+    await expect(apply).toBeDisabled();
+    await bubble('rules.0.color').click();
     const colorField = form.locator('[data-style-path="rules.0.color"]');
     const colorPicker = colorField.getByRole('textbox', {name: 'Color picker for color', exact: true});
     const colorText = colorField.getByRole('textbox', {name: 'color', exact: true});
@@ -27,39 +42,63 @@ test('Quick edits nested native fields, options and effects without losing sourc
     await expect(page.locator('.p-colorpicker-panel')).toBeVisible();
     await colorPicker.press('Escape');
     await expect(page.locator('.p-colorpicker-panel')).toBeHidden();
-    await expect(editor).toBeVisible();
-    await expect(colorText).toHaveValue('red');
-    await expect(apply).toBeDisabled();
+    await expect(form.getByTestId('style-property-panel')).toBeVisible();
     await colorText.fill('0x1A2B3C');
     await expect(colorPicker).toHaveCSS('background-color', 'rgb(26, 43, 60)');
-    await colorPicker.click();
-    await expect(page.locator('.p-colorpicker-panel')).toBeVisible();
-    await colorPicker.press('Escape');
-    await expect(colorText).toHaveValue('0x1A2B3C');
-    await colorText.fill('red');
-    await form.getByRole('button', {name: 'About Filter', exact: true}).first().focus();
+    await expect(bubble('rules.0.color')).toHaveText('Color: red');
+    await dismissProperty.click();
+    await expect(bubble('rules.0.color')).toBeFocused();
+    await expect(apply).toBeDisabled();
+    await bubble('rules.0.filter').click();
+    await form.getByRole('button', {name: 'About filter', exact: true}).focus();
     await expect(page.getByRole('tooltip')).toContainText('Feature predicate');
-    const optional = form.locator('.style-optional-fields').first();
-    await optional.locator('summary').click();
-    await optional.getByRole('button', {name: 'Add Opacity', exact: true}).click();
-    const opacity = form.locator('[data-style-path="rules.0.opacity"]');
-    await expect(opacity.locator('input')).toHaveValue('1');
-    await opacity.getByRole('button', {name: 'Unset opacity', exact: true}).click();
-    await expect(optional.getByRole('button', {name: 'Add Opacity', exact: true})).toBeVisible();
-    await expect(opacity.locator('input')).toHaveCount(0);
+    await dismissProperty.click();
+
+    await bubble('rules.0.width').click();
+    await expect(metadata.locator('[data-style-path="version"] input')).toBeDisabled();
+    const width = form.locator('[data-style-path="rules.0.width"] input');
     await width.fill('1e');
+    await expect(saveProperty).toBeDisabled();
     await expect(apply).toBeDisabled();
-    await form.locator('summary').filter({hasText: /^Branches$/}).first().click();
-    const branchWidth = form.locator('[data-style-path="rules.0.all-of.0.width"] input');
-    await expect(branchWidth).toHaveValue('48');
-    await branchWidth.fill('96');
-    await branchWidth.press('Tab');
+    await bubble('rules.0.all-of.0.width').click();
     await expect(width).toHaveValue('1e');
+    await expect(form.getByRole('status')).toContainText('Save or dismiss');
+    await expect(editor.getByRole('tab', {name: 'Advanced', exact: true})).toHaveAttribute('aria-disabled', 'true');
+    await width.press('Escape');
+    await expect(form.getByTestId('style-property-panel')).toHaveCount(0);
+    await expect(bubble('rules.0.width')).toBeFocused();
     await expect(apply).toBeDisabled();
+
+    await form.getByTestId('style-add-property-rules.0').click();
+    const menu = page.getByRole('menu', {name: 'Add style property', exact: true});
+    await expect(menu).toBeVisible();
+    await menu.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(editor).toBeVisible();
+    await expect(form.getByTestId('style-add-property-rules.0')).toBeFocused();
+    await form.getByTestId('style-add-property-rules.0').click();
+    await menu.getByRole('menuitem', {name: 'Appearance', exact: true}).click();
+    await menu.getByRole('menuitem', {name: 'Opacity', exact: true}).click();
+    await expect(form.getByTestId('style-property-delete')).toHaveCount(0);
+    await expect(form.locator('[data-style-path="rules.0.opacity"] input')).toHaveValue('1');
+    await saveProperty.click();
+    await expect(bubble('rules.0.opacity')).toBeVisible();
+    await bubble('rules.0.opacity').click();
+    await form.getByTestId('style-property-delete').click();
+    await expect(bubble('rules.0.opacity')).toHaveCount(0);
+    await expect(bubble('rules.0.color')).toHaveText('Color: red');
+
+    await bubble('rules.0.width').click();
     await width.fill('128');
-    await width.press('Tab');
-    await form.locator('[data-style-path="rules.0.first-of"]').getByRole('button', {name: 'Add First of', exact: true}).click();
-    await expect(form.locator('[data-style-path="rules.0.first-of.0.width"] input')).toHaveValue('96');
+    await width.press('ControlOrMeta+s');
+    await expect(form.getByTestId('style-property-panel')).toHaveCount(0);
+    await expect(apply).toBeEnabled();
+    await bubble('rules.0.all-of.0.width').click();
+    const branchWidth = form.locator('[data-style-path="rules.0.all-of.0.width"] input');
+    await branchWidth.fill('96');
+    await saveProperty.click();
+    await form.getByRole('button', {name: 'Switch to first matching', exact: true}).click();
+    await expect(bubble('rules.0.first-of.0.width')).toHaveText('Width: 96');
 
     await form.locator('summary').filter({hasText: /^Options and presets$/}).click();
     const optionList = form.locator('[data-style-path="options"]');
@@ -96,6 +135,7 @@ test('Quick edits nested native fields, options and effects without losing sourc
     await expect(source).toContainText(/default: "?orange"?/);
     await expect(source).toContainText('radius: 6');
     await editor.getByRole('tab', {name: 'Quick', exact: true}).click();
+    await expect(editor.locator('editor .cm-editor')).toHaveCount(1);
     const savedBounds = await editor.boundingBox();
     if (!savedBounds) throw new Error('Expected a visible style editor');
     // Shrinking the viewport must clamp the open window, without replacing its saved desktop layout.
@@ -128,6 +168,17 @@ test('Quick edits nested native fields, options and effects without losing sourc
     await page.mouse.move(0, 0);
     await page.screenshot({path: test.info().outputPath('quick-style-editor.png')});
     await page.setViewportSize({width: 1600, height: 900});
+    // A draft alone is unsaved work, even after the document buffer has been applied.
+    await bubble('rules.0.first-of.0.width').click();
+    await form.locator('[data-style-path="rules.0.first-of.0.width"] input').fill('1e');
+    await editor.getByTestId('style-editor-close-button').click();
+    const warning = page.getByRole('dialog', {name: 'Warning!', exact: true});
+    await expect(warning.getByRole('button', {name: 'Save', exact: true})).toBeDisabled();
+    await warning.getByRole('button', {name: 'Discard', exact: true}).click();
+    await expect(editor).toBeHidden();
+    await styles.getByTestId('style-edit-button-style-support').click();
+    await expect(bubble('rules.0.first-of.0.width')).toHaveText('Width: 96');
+    await expect(form.getByTestId('style-property-panel')).toHaveCount(0);
     await editor.getByTestId('style-editor-close-button').click();
     await styles.getByTestId('styles-close-button').click();
     await openLayerDialog(page);
@@ -142,6 +193,87 @@ test('Quick edits nested native fields, options and effects without losing sourc
     await caption.press('Tab');
     await expect(tint).toHaveValue('#abcdef');
     await expect(caption).toHaveValue('Edited caption');
+});
+
+test('defers collapsed branches and Advanced while retaining edits and expansion state', async ({page}) => {
+    await installStyleSupportFixture(page);
+    await page.route('**/static-config/styles/style-support.yaml', route => route.fulfill({
+        contentType: 'text/yaml',
+        body: 'name: Style Support\nversion: 2\nrules: [{geometry: line, width: 2, all-of: [{all-of: [{all-of: [{width: 5}]}]}]}]\n'
+    }));
+    await navigateToStateSnapshotRoot(page);
+    const styles = await openStylesDialog(page);
+    await styles.getByTestId('style-edit-button-style-support').click();
+    const editor = page.getByTestId('style-editor-dialog').locator('.p-dialog').first();
+    const form = editor.getByTestId('style-document-editor');
+    const section = form.locator('[data-rule-path="rules.0.all-of.0"] > details');
+    const nested = form.locator('[data-rule-path="rules.0.all-of.0.all-of.0"] > details');
+    const bubble = form.locator('[data-style-bubble="rules.0.all-of.0.all-of.0.all-of.0.width"]');
+    await expect(editor.locator('editor')).toHaveCount(0);
+    await expect(nested).toHaveCount(0);
+    await section.locator(':scope > summary').click();
+    await expect(nested).toBeVisible();
+    await expect(bubble).toHaveCount(0);
+    await nested.locator(':scope > summary').click();
+    await expect(bubble).toHaveText('Width: 5');
+    await section.locator(':scope > summary').click();
+    await expect(bubble).toBeAttached();
+    // WebKit's visibility check misses closed ancestors of nested open details.
+    await expect(section).toHaveJSProperty('open', false);
+    await expect(nested).toHaveJSProperty('open', true);
+    await section.locator(':scope > summary').click();
+    await expect(bubble).toBeVisible();
+    await bubble.click();
+    await form.locator('[data-style-path="rules.0.all-of.0.all-of.0.all-of.0.width"] input').fill('6');
+    await form.getByTestId('style-property-save').click();
+    await editor.getByRole('tab', {name: 'Advanced', exact: true}).click();
+    const source = editor.locator('editor .cm-content');
+    await expect(source).toContainText('width: 6');
+    await source.click();
+    await source.press('ControlOrMeta+End');
+    await page.keyboard.insertText('\n# retained undo history');
+    await editor.getByRole('tab', {name: 'Quick', exact: true}).click();
+    await expect(bubble).toHaveText('Width: 6');
+    await editor.getByRole('tab', {name: 'Advanced', exact: true}).click();
+    await source.click();
+    await source.press('ControlOrMeta+z');
+    await expect(source).not.toContainText('retained undo history');
+
+    // Invalid YAML and its correction still flow through the debounced Quick projection.
+    await source.press('ControlOrMeta+a');
+    await page.keyboard.insertText('name: Style Support\nrules: [');
+    await editor.getByRole('tab', {name: 'Quick', exact: true}).click();
+    await expect(editor.locator('.style-editor-quick-stale')).toBeVisible();
+    await editor.getByRole('tab', {name: 'Advanced', exact: true}).click();
+    await source.click();
+    await source.press('ControlOrMeta+a');
+    await page.keyboard.insertText('name: Style Support\nversion: 2\nrules: [{width: 7}]\n');
+    await editor.getByRole('tab', {name: 'Quick', exact: true}).click();
+    await expect(editor.locator('.style-editor-quick-stale')).toHaveCount(0);
+    await expect(form.locator('[data-style-bubble="rules.0.width"]')).toHaveText('Width: 7');
+    await editor.getByTestId('style-editor-close-button').click();
+    await page.getByRole('dialog', {name: 'Warning!', exact: true}).getByRole('button', {name: 'Discard', exact: true}).click();
+    await expect(editor).toBeHidden();
+    await styles.getByTestId('style-edit-button-style-support').click();
+    await expect(editor.locator('editor')).toHaveCount(0);
+    await expect(form.locator('[data-style-bubble="rules.0.width"]')).toHaveText('Width: 2');
+    await expect(nested).toHaveCount(0);
+});
+
+test('a validation issue opens the deferred Advanced editor at its source location', async ({page}) => {
+    await installStyleSupportFixture(page);
+    await page.route('**/static-config/styles/style-support.yaml', route => route.fulfill({
+        contentType: 'text/yaml',
+        body: "name: Style Support\nversion: 2\nrules:\n  - geometry: line\n  - scope: attribute\n    attribute-type: '*SPEED*'\n    geometry: line\n"
+    }));
+    await navigateToStateSnapshotRoot(page);
+    const styles = await openStylesDialog(page);
+    await styles.getByTestId('style-validation-error-button-style-support').click();
+    await styles.getByTestId('style-errors-table').locator('.style-error-row').filter({hasText: 'attribute-type'}).first().click();
+    const editor = page.getByTestId('style-editor-dialog').locator('.p-dialog').first();
+    await expect(editor.getByRole('tab', {name: 'Advanced', exact: true})).toHaveAttribute('aria-selected', 'true');
+    await expect(editor.locator('editor .editor-line-highlight')).toContainText('attribute-type:');
+    await expect(editor.locator('editor .cm-content')).toBeFocused({timeout: 5000});
 });
 
 test('attribute search Save and Open produces an active independently editable attribute style', async ({page, request}) => {
@@ -163,8 +295,8 @@ test('attribute search Save and Open produces an active independently editable a
     const editor = page.getByTestId('style-editor-dialog').locator('.p-dialog').first();
     await expect(editor).toBeVisible();
     await expect(editor.getByTestId('style-editor-enabled').locator('input')).toBeChecked();
-    await expect(editor.locator('[data-style-path="rules.0.scope"] option:checked')).toHaveText('attribute');
-    await expect(editor.locator('[data-style-path="rules.0.attribute-filter"]')).toContainText('speedLimitKmh');
+    await expect(editor.locator('[data-style-bubble="rules.0.scope"]')).toHaveText('Scope: attribute');
+    await expect(editor.locator('[data-style-bubble="rules.0.attribute-filter"]')).toContainText('speedLimitKmh');
     const saved = await page.evaluate(() => {
         const data = JSON.parse(localStorage.getItem('importedStyleData') ?? '{"sources":[]}');
         return data.sources.find((source: string) => source.includes('name: Attribute saved')) as string;
@@ -191,4 +323,39 @@ test('attribute search Save and Open produces an active independently editable a
     await expect.poll(async () => page.evaluate(() => window.ebDebug?.subsetRenderPresentation().activeContributions ?? 0)).toBe(0);
     await savedVisibility.check();
     await expect.poll(async () => page.evaluate(() => window.ebDebug?.subsetRenderPresentation().activeContributions ?? 0)).toBeGreaterThan(0);
+});
+
+test.describe('Light theme', () => {
+    test.use({darkMode: 'off'});
+
+    test('keeps bubble panels and the add menu usable in a narrow light-theme window', async ({page, request}) => {
+        await requireMapSource(request, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0]);
+        await installStyleSupportFixture(page);
+        await navigateToStateSnapshotRoot(page);
+        const styles = await openStylesDialog(page);
+        await styles.getByTestId('style-edit-button-style-support').click();
+        const editor = page.getByTestId('style-editor-dialog').locator('.p-dialog').first();
+        const form = editor.getByTestId('style-document-editor');
+        await page.setViewportSize({width: 480, height: 600});
+        await form.locator('[data-style-bubble="rules.0.width"]').click();
+        await form.getByTestId('style-property-save').scrollIntoViewIfNeeded();
+        await expect(form.getByTestId('style-property-save')).toBeInViewport();
+        await expect(form.getByTestId('style-property-delete')).toBeInViewport();
+        expect(await form.evaluate(element => element.scrollWidth > element.clientWidth + 2)).toBe(false);
+        await form.getByTestId('style-property-dismiss').click();
+        await form.getByTestId('style-add-property-rules.0').click();
+        const menu = page.getByRole('menu', {name: 'Add style property', exact: true});
+        await expect(menu).toBeInViewport();
+        await menu.getByRole('menuitem', {name: 'Appearance', exact: true}).click();
+        await page.screenshot({path: test.info().outputPath('light-style-property-menu.png')});
+        await menu.getByRole('menuitem', {name: 'Opacity', exact: true}).click();
+        await expect(form.getByTestId('style-property-delete')).toHaveCount(0);
+        await form.getByTestId('style-property-save').scrollIntoViewIfNeeded();
+        await expect(form.getByTestId('style-property-save')).toBeInViewport();
+        await expect(form.locator('.style-form-error')).toHaveCount(0);
+        await page.mouse.move(0, 0);
+        await page.screenshot({path: test.info().outputPath('light-style-property-panel.png'), fullPage: true});
+        await form.getByTestId('style-property-dismiss').click();
+        await editor.getByTestId('style-editor-close-button').click();
+    });
 });

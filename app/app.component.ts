@@ -62,11 +62,24 @@ declare let window: DebugWindow;
                 <feature-search-export-dialog></feature-search-export-dialog>
             }
             <keyboard-dialog></keyboard-dialog>
-            <preferences></preferences>
+            <preferences #preferences></preferences>
             <coordinates-legal-terms-dialog></coordinates-legal-terms-dialog>
             <location-terms-dialog></location-terms-dialog>
             <survey></survey>
             <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
+            <p-toast position="top-right" key="gpu-buffer-exhausted" [baseZIndex]="9500">
+                <ng-template #message let-message>
+                    <i class="pi pi-exclamation-triangle p-toast-message-icon" aria-hidden="true"></i>
+                    <div class="p-toast-message-text" data-testid="gpu-buffer-warning">
+                        <div class="p-toast-summary">{{ message.summary }}</div>
+                        <div class="p-toast-detail">{{ message.detail }}</div>
+                        <button type="button" class="gpu-buffer-action"
+                                (click)="preferences.openRendering()">
+                            Adjust downsampling to reduce GPU load
+                        </button>
+                    </div>
+                </ng-template>
+            </p-toast>
             <p-toast position="top-center" key="backend-connection" [baseZIndex]="9600"></p-toast>
             <p-toast position="top-center" key="backend-protocol" [baseZIndex]="9700"></p-toast>
             <p-toast position="top-center" key="configuration-editing" [baseZIndex]="9800"></p-toast>
@@ -75,7 +88,21 @@ declare let window: DebugWindow;
         <about-dialog></about-dialog>
         <router-outlet></router-outlet>
     `,
-    standalone: false
+    standalone: false,
+    styles: [`
+        .gpu-buffer-action {
+            display: block;
+            margin-top: .5rem;
+            padding: 0;
+            border: 0;
+            background: none;
+            color: inherit;
+            font: inherit;
+            text-align: left;
+            text-decoration: underline;
+            cursor: pointer;
+        }
+    `]
 })
 /**
  * Root application component.

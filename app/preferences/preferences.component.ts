@@ -77,7 +77,7 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                     [resizable]="false" [modal]="false" [draggable]="true" #pref class="pref-dialog"
                     [persistLayout]="true" [layoutId]="dialogLayoutId"
                     (onShow)="onDialogShow()">
-            <p-tabs value="general" class="preferences-tabs" data-testid="preferences-tabs" scrollable>
+            <p-tabs [(value)]="activeTab" class="preferences-tabs" data-testid="preferences-tabs" scrollable>
                 <p-tablist>
                     <p-tab value="general" data-testid="preferences-tab-general">General</p-tab>
                     <p-tab value="inspection" data-testid="preferences-tab-inspection">Inspect & Search</p-tab>
@@ -642,6 +642,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     @ViewChild('pref') preferencesDialog?: AppDialogComponent;
 
+    activeTab: string | number = "general";
     tilesToLoadInput: number | string = 0;
     limitSimultaneousInspectionsInput: number | string = 0;
     drillPickRadiusInput: number | string = DEFAULT_DRILL_PICK_RADIUS;
@@ -811,6 +812,13 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     set dialogVisible(visible: boolean) {
         this.layout.setDialogOpen(this.dialogLayoutId, visible);
+    }
+
+    /** Opens the rendering controls, including when Preferences is already on another tab. */
+    openRendering(): void {
+        this.activeTab = "rendering";
+        this.dialogVisible = true;
+        this.dialogStack.bringToFront(this.preferencesDialog);
     }
 
     get renderWorkerCountDescription(): string {

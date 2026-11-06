@@ -14,6 +14,15 @@ const INITIAL_CAPACITY_HEADROOM_FACTOR = 8;
 const MAX_INITIAL_CAPACITY_HEADROOM_BYTES = 4 * 1024 * 1024;
 export const MAX_GPU_PRIMITIVE_STORE_BYTES = 1024 * 1024 * 1024;
 
+/** Identifies capacity exhaustion separately from device and rendering failures. */
+export class GpuMaterialBufferExhaustedError extends Error {
+    /** Keep the material and capacity in the diagnostic message for debugging. */
+    constructor(materialKey: bigint, maxBytes: number) {
+        super(`GPU material ${materialKey.toString(16)} exceeds its ${maxBytes} byte store cap.`);
+        this.name = "GpuMaterialBufferExhaustedError";
+    }
+}
+
 /** Diagnostic counters for one physical material buffer in a persistent GPU scene. */
 export interface GpuPrimitiveStoreSnapshot {
     materialKey: bigint;
@@ -212,10 +221,7 @@ export class GpuPrimitiveStore {
         }
         const maximumRecords = Math.floor(this.maxBytes / this.recordStride);
         if (requiredRecords > maximumRecords) {
-            throw new Error(
-                `GPU material ${this.materialKey.toString(16)} exceeds its ` +
-                `${this.maxBytes} byte store cap.`
-            );
+            throw new GpuMaterialBufferExhaustedError(this.materialKey, this.maxBytes);
         }
         let nextCapacity = Math.max(MINIMUM_CAPACITY_RECORDS, this.capacity);
         if (this.capacity === 0) {

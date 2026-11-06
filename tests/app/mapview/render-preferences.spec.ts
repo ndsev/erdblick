@@ -10,6 +10,8 @@ import { Subject } from "rxjs";
 import { Router } from "@angular/router";
 import { AppStateService } from "../../../app/appstate/appstate.service";
 import { MessageService } from "primeng/api";
+import { PreferencesComponent } from "../../../app/preferences/preferences.component";
+import { PREFERENCES_DIALOG_LAYOUT_ID } from "../../../app/layout/layout.model";
 
 /** Creates persistence without starting URL hydration or a rendering worker. */
 function createPreferences() {
@@ -22,6 +24,22 @@ function createPreferences() {
 }
 
 describe('service-owned rendering preferences', () => {
+    it('opens Rendering from another tab without applying or discarding a pending sampling edit', () => {
+        const component = Object.create(PreferencesComponent.prototype);
+        component.dialogLayoutId = PREFERENCES_DIALOG_LAYOUT_ID;
+        component.activeTab = 'general';
+        component.layout = {setDialogOpen: vi.fn()};
+        component.dialogStack = {bringToFront: vi.fn()};
+        const draft = {enabled: true, maxPoints: 500_000, detailPixels: 8};
+        component.pointCloudPolicyDraft = draft;
+
+        component.openRendering();
+
+        expect(component.activeTab).toBe('rendering');
+        expect(component.layout.setDialogOpen).toHaveBeenCalledExactlyOnceWith(PREFERENCES_DIALOG_LAYOUT_ID, true);
+        expect(component.pointCloudPolicyDraft).toBe(draft);
+    });
+
     it('publishes a complete sampling edit once and retains historical snapshots', () => {
         const { preferences } = createPreferences();
         const policies: typeof preferences.state.pointCloudPolicy[] = [];

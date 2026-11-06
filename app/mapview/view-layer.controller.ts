@@ -1,5 +1,6 @@
 import { NgZone } from "@angular/core";
 import { Subject, Subscription } from "rxjs";
+import type { InfoMessageService } from "../diagnostics/info.service";
 import type {
     InspectionSelectionService
 } from "../inspection/inspection-selection.service";
@@ -32,6 +33,7 @@ import {
     type DeckInteractionEffect
 } from "./deck/deck-interaction-effect.util";
 import type { GpuSceneSnapshot } from "./deck/gpu-scene.visualization";
+import { GpuMaterialBufferExhaustedError } from "./deck/gpu-primitive-store.util";
 import { tileCoordinateOrigin } from "./deck/tile-coordinate-origin.util";
 import { INTERACTION_STYLE_ORDER_BASE } from "./deck/tile-subset-interaction.model";
 import {
@@ -146,7 +148,8 @@ export class ViewLayerController {
         private readonly hoverDetails: HoverDetailService,
         private readonly diagnostics: ViewLayerDiagnosticsService,
         private readonly styleValidationReports: StyleValidationReportService,
-        private readonly ngZone: NgZone
+        private readonly ngZone: NgZone,
+        private readonly infoMessages: InfoMessageService
     ) {
         this.unregisterDiagnostics = diagnostics.register(
             viewIndex,
@@ -2030,9 +2033,15 @@ export class ViewLayerController {
                 );
                 this.diagnostics.notifyChanged();
             })
-            .catch(error =>
-                console.error("TileSubsetLayer visualization failed.", error)
-            );
+            .catch(error => {
+                if (error instanceof GpuMaterialBufferExhaustedError) {
+                    // Allocation rollback and failed-signature tracking have already
+                    // run. Only presentation enters Angular; rendering stays outside it.
+                    this.ngZone.run(() => this.infoMessages.showGpuBufferExhausted());
+                } else {
+                    console.error("TileSubsetLayer visualization failed.", error);
+                }
+            });
     }
 
     /** Resolve continuous GPU LOD independently of an owner's integer filter plan. */

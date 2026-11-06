@@ -1,6 +1,9 @@
 import {describe, expect, it, vi} from "vitest";
 import type {Buffer, Device} from "@luma.gl/core";
-import {GpuPrimitiveStore} from "../../../../app/mapview/deck/gpu-primitive-store.util";
+import {
+    GpuMaterialBufferExhaustedError,
+    GpuPrimitiveStore
+} from "../../../../app/mapview/deck/gpu-primitive-store.util";
 
 class FakeBuffer {
     readonly bytes: Uint8Array;
@@ -194,7 +197,7 @@ describe("GpuPrimitiveStore", () => {
         );
         const retained = store.allocate(32);
 
-        expect(() => store.allocate(40)).toThrow(/store cap/);
+        expect(() => store.allocate(40)).toThrow(GpuMaterialBufferExhaustedError);
         expect(store.snapshot()).toMatchObject({
             highWaterRecords: 32,
             fragmentedRecords: 0,
@@ -202,5 +205,7 @@ describe("GpuPrimitiveStore", () => {
         });
         store.release(retained);
         expect(store.highWaterRecord).toBe(0);
+        // A failed request must not prevent a smaller replacement from rendering.
+        expect(store.allocate(64)).toEqual({firstRecord: 0, recordCount: 64});
     });
 });

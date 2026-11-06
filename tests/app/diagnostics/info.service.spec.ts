@@ -8,6 +8,25 @@ import {
 
 import {InfoMessageService} from "../../../app/diagnostics/info.service";
 
+describe("GPU buffer warnings", () => {
+    it("keeps each warning until dismissed without replacing or suppressing previous messages", () => {
+        const messages = {clear: vi.fn(), add: vi.fn()};
+        const service = new InfoMessageService(messages as never, {} as never);
+
+        service.showGpuBufferExhausted();
+        service.showGpuBufferExhausted();
+
+        expect(messages.clear).not.toHaveBeenCalled();
+        expect(messages.add).toHaveBeenCalledTimes(2);
+        expect(messages.add).toHaveBeenCalledWith(expect.objectContaining({
+            key: "gpu-buffer-exhausted",
+            severity: "warn",
+            summary: "GPU material buffer exhausted",
+            sticky: true
+        }));
+    });
+});
+
 describe("InfoMessageService configuration-editing notices", () => {
     it("stacks source-style and writable map-preset notices in one host", () => {
         const messages = {clear: vi.fn(), add: vi.fn()};

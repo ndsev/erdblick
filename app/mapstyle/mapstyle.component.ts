@@ -21,7 +21,7 @@ import { MenuItem } from "primeng/api";
 import { FileUpload } from "primeng/fileupload";
 import { Menu } from "primeng/menu";
 import { Subscription } from "rxjs";
-import { filter } from "rxjs/operators";
+import { filter, skip } from "rxjs/operators";
 import { MapDataService } from "../mapdata/mapdata.service";
 import { layerPresetNode, removeGroupPrefix } from "../mapdata/map-tree.controller";
 import { MapViewService, ViewRecalculationReason } from "../mapview/mapview.service";
@@ -46,6 +46,7 @@ import { StyleValidationReportService } from "./style-validation-report.service"
 import { StyleValidationIssue, StyleValidationReport } from "./style-validation.model";
 import { MapStyleService } from "./mapstyle.service";
 import { ErdblickStyle, ErdblickStyleGroup, UpdatedModifiedStyleEntry } from "./mapstyle.model";
+import {StyleDocumentEditorComponent} from './style-document-editor.component';
 
 interface QuickPresetOption {
     key: string;
@@ -375,6 +376,7 @@ interface QuickPresetOption {
         <app-dialog [(visible)]="styleEditorVisible" [modal]="false" #editorDialog
                   data-testid="style-editor-dialog" class="editor-dialog"
                   [closable]="false" [closeOnEscape]="false"
+                  [focusOnShow]="styleEditorFocusOnShow"
                   [persistLayout]="true" [layoutId]="styleEditorDialogLayoutId"
                   (onShow)="onEditorDialogShow()" (onHide)="onEditorDialogHide()">
             <ng-template #header>
@@ -399,12 +401,12 @@ interface QuickPresetOption {
                     }
                 </app-surface-header>
             </ng-template>
-            <p-tabs [(value)]="styleEditorTab" class="style-editor-tabs" data-testid="style-editor-tabs">
+            <p-tabs [value]="styleEditorTab" (valueChange)="onStyleEditorTabChange($event)" class="style-editor-tabs" data-testid="style-editor-tabs">
                 <p-tablist>
                     @if (styleEditorQuickAvailable) {
                         <p-tab value="quick">Quick</p-tab>
                     }
-                    <p-tab value="advanced">Advanced</p-tab>
+                    <p-tab value="advanced" [disabled]="propertyPanelDirty">Advanced</p-tab>
                 </p-tablist>
                 <p-tabpanels>
                     @if (styleEditorQuickAvailable) {
@@ -416,7 +418,7 @@ interface QuickPresetOption {
                                         Quick is read-only until Advanced contains valid YAML: {{ quickProjectionError }}
                                     </div>
                                 }
-                                <div class="style-editor-quick-metadata">
+                                <ng-template #metadataHeader>
                                     <div class="style-editor-quick-field">
                                         <label for="style-editor-quick-name">Name</label>
                                         <input id="style-editor-quick-name"
@@ -425,7 +427,7 @@ interface QuickPresetOption {
                                                autocomplete="off"
                                                [ngModel]="quickStyleName"
                                                (ngModelChange)="onQuickStyleNameChange($event)"
-                                               [disabled]="quickProjectionStale">
+                                               [disabled]="quickProjectionStale || propertyPanelOpen">
                                         @if (quickStyleNameIssue(); as issue) {
                                             <small class="style-editor-quick-error" role="alert">{{ issue }}</small>
                                         }
@@ -437,7 +439,7 @@ interface QuickPresetOption {
                                                 <input aria-label="Custom layer affinity" pInputText
                                                     [ngModel]="quickCustomLayerAffinity"
                                                     (ngModelChange)="onQuickCustomAffinityChange($event)"
-                                                    [disabled]="quickProjectionStale">
+                                                    [disabled]="quickProjectionStale || propertyPanelOpen">
                                                 <span [pTooltip]="quickCustomLayerAffinity">
                                                     Custom affinity (regular expression)
                                                 </span>
@@ -445,13 +447,13 @@ interface QuickPresetOption {
                                                           size="small"
                                                           severity="secondary"
                                                           [text]="true"
-                                                          [disabled]="quickProjectionStale"
+                                                          [disabled]="quickProjectionStale || propertyPanelOpen"
                                                           (click)="beginReplacingQuickAffinity()"/>
                                                 <p-button label="Any layer"
                                                           size="small"
                                                           severity="secondary"
                                                           [text]="true"
-                                                          [disabled]="quickProjectionStale"
+                                                          [disabled]="quickProjectionStale || propertyPanelOpen"
                                                           (click)="setQuickAffinityAny()"/>
                                             </div>
                                         } @else {
@@ -466,7 +468,7 @@ interface QuickPresetOption {
                                                            [filter]="true"
                                                            [showToggleAll]="true"
                                                            [maxSelectedLabels]="3"
-                                                           [disabled]="quickProjectionStale"
+                                                           [disabled]="quickProjectionStale || propertyPanelOpen"
                                                            appendTo="body">
                                             </p-multiSelect>
                                             <small>No selection means any layer.</small>
@@ -479,16 +481,18 @@ interface QuickPresetOption {
                                             }
                                         }
                                     </div>
-                                </div>
-                                <style-document-editor [source]="quickSource" [skipMetadata]="true"
+                                </ng-template>
+                                <style-document-editor [source]="quickSource" [skipMetadata]="true" [metadataHeader]="metadataHeader"
                                     (sourceChange)="commitQuickSource($event)"
-                                    (invalidChange)="quickFormInvalid = $event"/>
+                                    (invalidChange)="quickFormInvalid = $event" (panelChange)="onPropertyPanelChange($event)"/>
 
                             </div>
                         </p-tabpanel>
                     }
                     <p-tabpanel value="advanced" class="style-editor-advanced-panel">
-                        <editor [sessionId]="styleEditorSessionId"></editor>
+                        @if (styleEditorAdvancedVisited) {
+                            <editor [sessionId]="styleEditorSessionId"></editor>
+                        }
                     </p-tabpanel>
                 </p-tabpanels>
             </p-tabs>
@@ -506,13 +510,13 @@ interface QuickPresetOption {
                               severity="secondary" [text]="true"
                               icon="pi pi-times"></p-button>
                     <div class="editor-shortcuts">
-                        <span><kbd>Ctrl/Cmd+S</kbd> to {{ canSaveCurrentStyleToSource() ? 'save' : 'apply' }}</span>
+                        <span><kbd>Ctrl/Cmd+S</kbd> to {{ propertyPanelOpen ? 'save property' : canSaveCurrentStyleToSource() ? 'save' : 'apply' }}</span>
                         <span><kbd>Esc</kbd> to close</span>
                     </div>
                 </div>
                 <div class="editor-actions-right">
                     <p-button data-testid="style-editor-export-button" (click)="exportStyle(styleService.state.styleEditorTargetId ?? '')"
-                              [disabled]="sourceWasModified || !styleService.state.styleEditorTargetId"
+                              [disabled]="propertyPanelOpen || sourceWasModified || !styleService.state.styleEditorTargetId"
                               label="Export" icon="pi pi-file-export" severity="secondary" [text]="true">
                     </p-button>
                     <p-button data-testid="style-editor-help-button" (click)="openStyleHelp()" label="Help" icon="pi pi-book"
@@ -554,7 +558,7 @@ interface QuickPresetOption {
                   [closeOnEscape]="false" (onShow)="onWarningShow()">
             <p>You have already edited the style data. Do you want to save the changes?</p>
             <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                <p-button (click)="saveOrApplyEditedStyle(); warningDialog.close($event)" label="Save"></p-button>
+                <p-button [disabled]="propertyPanelOpen || quickFormInvalid" (click)="saveOrApplyEditedStyle(); warningDialog.close($event)" label="Save"></p-button>
                 <p-button (click)="warningDialog.close($event)" label="Cancel"></p-button>
                 <p-button (click)="discardStyleEdits(); closeEditorDialog($event)" label="Discard"></p-button>
             </div>
@@ -654,9 +658,15 @@ export class StyleComponent implements OnDestroy {
     sourceWasModified: boolean = false;
     private styleEditorOriginalSource: string = '';
     styleEditorTab: "quick" | "advanced" = "quick";
+    styleEditorAdvancedVisited = false;
+    styleEditorFocusOnShow = true;
+    private styleEditorShown = false;
+    private pendingStyleIssue?: StyleValidationIssue;
     styleEditorQuickAvailable = false;
     quickSource = "";
     quickFormInvalid = false;
+    propertyPanelOpen = false;
+    propertyPanelDirty = false;
     quickStyleName = "";
     quickLayerAffinityKind: "any" | "exact" | "custom" = "any";
     quickLayerAffinityIds: string[] = [];
@@ -699,6 +709,7 @@ export class StyleComponent implements OnDestroy {
     private presetEditorSaveSubscription = new Subscription();
     private readonly presetMapSubscription: Subscription;
 
+    @ViewChild(StyleDocumentEditorComponent) styleDocumentEditor?: StyleDocumentEditorComponent;
     @ViewChild('styleMenu') toggleMenu!: Menu;
     toggleMenuItems: MenuItem[] | undefined;
 
@@ -765,14 +776,13 @@ export class StyleComponent implements OnDestroy {
 
     /** Releases the compare view and its theme observer. */
     ngOnDestroy() {
+        this.pendingStyleIssue = undefined;
         this.compareModeObserver?.disconnect();
         this.styleCompareView?.destroy();
         this.styleEditorSourceSubscription.unsubscribe();
         this.styleEditorSaveSubscription.unsubscribe();
         this.styleEditorRequestSubscription.unsubscribe();
-        if (this.quickProjectionRefreshTimer) {
-            clearTimeout(this.quickProjectionRefreshTimer);
-        }
+        this.cancelQuickProjectionRefresh();
         this.presetEditorSourceSubscription.unsubscribe();
         this.presetEditorSaveSubscription.unsubscribe();
         this.presetMapSubscription.unsubscribe();
@@ -789,6 +799,8 @@ export class StyleComponent implements OnDestroy {
     onEditorDialogShow() {
         this.ensureStyleEditorSession();
         this.dialogStack.bringToFront(this.editorDialog);
+        this.styleEditorShown = true;
+        if (this.pendingStyleIssue) this.revealStyleIssueLocation(this.pendingStyleIssue);
     }
 
     /** Promotes the raw preset editor above the styles dialog when shown. */
@@ -1072,6 +1084,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Exports one style as YAML. */
     exportStyle(styleId: string) {
+        if (this.propertyPanelOpen && styleId === this.styleService.state.styleEditorTargetId) return;
         if (!this.styleService.exportStyleYamlFile(styleId)) {
             this.messageService.showError(`Error occurred while trying to export style: ${styleId}`);
         }
@@ -1123,7 +1136,7 @@ export class StyleComponent implements OnDestroy {
             return true;
         }
         if (this.styleEditorVisible
-            && this.sourceWasModified
+            && (this.sourceWasModified || this.propertyPanelDirty)
             && currentTargetId !== styleId) {
             this.messageService.showWarning('Discard or apply the current style edits before opening another style.');
             return false;
@@ -1138,6 +1151,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Applies the current editor contents to the selected style. */
     applyEditedStyle(): string | undefined {
+        if (this.propertyPanelOpen) return undefined;
         const styleId = this.styleService.state.styleEditorTargetId;
         const styleData = this.editorService.getSessionSource(this.styleEditorSessionId).replace(/\n+$/, '');
         if (!styleId) {
@@ -1174,6 +1188,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Applies pending editor text and persists the resulting style through the writable source mount. */
     async saveEditedStyleToSource(): Promise<void> {
+        if (this.propertyPanelOpen) return;
         let styleId = this.styleService.state.styleEditorTargetId ?? undefined;
         if (this.sourceWasModified) {
             const appliedStyleId = this.applyEditedStyle();
@@ -1203,6 +1218,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Applies editor changes locally or writes them to source when source editing is enabled. */
     saveOrApplyEditedStyle(): void {
+        if (this.propertyPanelOpen) return this.styleDocumentEditor?.savePanel();
         if (this.quickFormInvalid) {
             this.messageService.showError("Correct the highlighted style fields before applying changes.");
             return;
@@ -1232,13 +1248,30 @@ export class StyleComponent implements OnDestroy {
         return directory ? `Overwrite the YAML file below ${directory}` : "Overwrite the source YAML file";
     }
 
+    /** Keeps field drafts local while exposing their lifecycle to the dialog shell. */
+    onPropertyPanelChange(state: {open: boolean; dirty: boolean}): void {
+        this.propertyPanelOpen = state.open;
+        this.propertyPanelDirty = state.dirty;
+    }
+
+    /** Switching to YAML first resolves any unfinished property edit. */
+    onStyleEditorTabChange(value: string | number | undefined): void {
+        if (value !== 'quick' && value !== 'advanced') return;
+        if (value === 'advanced' && this.propertyPanelDirty) return;
+        if (this.propertyPanelOpen) this.styleDocumentEditor?.dismissPanel(false);
+        this.styleEditorTab = value;
+        // Keep CodeMirror and its undo/selection state after the first visit.
+        if (value === 'advanced') this.styleEditorAdvancedVisited = true;
+    }
+
     /** Closes the editor or opens the discard-warning dialog when unsaved edits exist. */
     closeEditorDialog(event: any) {
         event.stopPropagation();
-        if (this.sourceWasModified) {
+        if (this.sourceWasModified || this.propertyPanelDirty) {
             this.warningDialogVisible = true;
             return;
         }
+        this.styleDocumentEditor?.dismissPanel(false);
         if (this.editorDialog !== undefined) {
             this.warningDialogVisible = false;
             this.editorDialog.close(event);
@@ -1247,6 +1280,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Discards pending edits in the style editor. */
     discardStyleEdits() {
+        this.styleDocumentEditor?.dismissPanel(false);
         this.editorService.updateSessionSource(this.styleEditorSessionId, this.styleEditorOriginalSource);
         this.sourceWasModified = false;
         this.warningDialogVisible = false;
@@ -1255,15 +1289,20 @@ export class StyleComponent implements OnDestroy {
     /** Uses Escape to close the warning or editor dialog while the style editor is active. */
     @HostListener('window:keydown', ['$event'])
     onWindowKeydown(event: KeyboardEvent) {
-        if (event.key !== 'Escape' || !this.styleEditorVisible) {
-            return;
+        if (!this.styleEditorVisible || event.defaultPrevented) return;
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && this.propertyPanelOpen) {
+            event.preventDefault();
+            event.stopPropagation();
+            return this.styleDocumentEditor?.savePanel();
         }
+        if (event.key !== 'Escape') return;
         event.preventDefault();
         event.stopPropagation();
         if (this.warningDialogVisible) {
             this.warningDialogVisible = false;
             return;
         }
+        if (this.propertyPanelOpen) return this.styleDocumentEditor?.dismissPanel();
         this.closeEditorDialog(event);
     }
 
@@ -1272,11 +1311,17 @@ export class StyleComponent implements OnDestroy {
      * closing the shared editor session; discard transient quick-form state.
      */
     onEditorDialogHide() {
+        this.styleEditorShown = false;
+        this.pendingStyleIssue = undefined;
+        this.styleDocumentEditor?.dismissPanel(false);
+        this.propertyPanelOpen = false;
+        this.propertyPanelDirty = false;
         this.styleEditorVisible = false;
         this.warningDialogVisible = false;
         this.sourceWasModified = false;
         this.styleService.state.styleEditorTargetId = null;
         this.styleEditorQuickAvailable = false;
+        this.styleEditorAdvancedVisited = false;
         this.quickSource = "";
         this.quickFormInvalid = false;
         this.quickStyleName = "";
@@ -1287,6 +1332,7 @@ export class StyleComponent implements OnDestroy {
         this.quickLayerOptions = [];
         this.styleEditorSourceSubscription.unsubscribe();
         this.styleEditorSaveSubscription.unsubscribe();
+        this.cancelQuickProjectionRefresh();
         this.editorService.closeSession(this.styleEditorSessionId);
     }
 
@@ -1319,6 +1365,10 @@ export class StyleComponent implements OnDestroy {
 
     /** Creates a fresh editor session and installs common dirty/save tracking. */
     private prepareStyleEditorSource(source: string): boolean {
+        this.styleDocumentEditor?.dismissPanel(false);
+        this.cancelQuickProjectionRefresh();
+        this.styleEditorFocusOnShow = true;
+        this.pendingStyleIssue = undefined;
         this.styleEditorOriginalSource = source.replace(/\n+$/, '');
         this.editorService.createSession({
             id: this.styleEditorSessionId,
@@ -1327,15 +1377,15 @@ export class StyleComponent implements OnDestroy {
             readOnly: false
         });
         this.styleEditorSourceSubscription.unsubscribe();
-        this.styleEditorSourceSubscription = this.editorService.getSession(this.styleEditorSessionId)!.source$.subscribe(
+        // The initial source is projected synchronously below. Replaying it here
+        // reparsed and rebuilt the whole form again after the first paint.
+        this.styleEditorSourceSubscription = this.editorService.getSession(this.styleEditorSessionId)!.source$.pipe(skip(1)).subscribe(
             editedStyleSource => {
                 this.sourceWasModified = editedStyleSource.replace(/\n+$/, '') !== this.styleEditorOriginalSource;
                 if (this.updatingSourceFromQuick) {
                     return;
                 }
-                if (this.quickProjectionRefreshTimer) {
-                    clearTimeout(this.quickProjectionRefreshTimer);
-                }
+                this.cancelQuickProjectionRefresh();
                 this.ngZone.runOutsideAngular(() => {
                     this.quickProjectionRefreshTimer = setTimeout(() => {
                         this.quickProjectionRefreshTimer = undefined;
@@ -1352,8 +1402,15 @@ export class StyleComponent implements OnDestroy {
         this.sourceWasModified = false;
         this.styleEditorQuickAvailable = !!this.styleService.state.styleEditorTargetId;
         this.styleEditorTab = this.styleEditorQuickAvailable ? "quick" : "advanced";
+        this.styleEditorAdvancedVisited = this.styleEditorTab === 'advanced';
         this.refreshQuickProjection(source);
         return true;
+    }
+
+    /** Retires pending source work before replacing or closing an editor session. */
+    private cancelQuickProjectionRefresh(): void {
+        if (this.quickProjectionRefreshTimer !== undefined) clearTimeout(this.quickProjectionRefreshTimer);
+        this.quickProjectionRefreshTimer = undefined;
     }
 
     /** Reprojects the authoritative Advanced YAML without replacing the last good view on parse errors. */
@@ -1756,7 +1813,6 @@ export class StyleComponent implements OnDestroy {
             this.messageService.showError(`Could not find loaded style for ${this.issueSourceLabel(issue)}.`);
             return;
         }
-
         if (!this.openStyleEditor(style.id)) {
             return;
         }
@@ -1776,14 +1832,23 @@ export class StyleComponent implements OnDestroy {
             this.messageService.showInfo('This style issue has no source location.');
             return;
         }
-
+        this.onStyleEditorTabChange('advanced');
+        // The dialog's later autofocus must not steal focus from the revealed line.
+        this.styleEditorFocusOnShow = false;
+        this.pendingStyleIssue = issue;
+        // AppDialog applies and reveals persisted layout over two frames after
+        // onShow. Focusing earlier silently fails while visibility is still hidden.
+        if (!this.styleEditorShown) return;
         /** Moves the editor cursor to the requested validation issue. */
-        const reveal = () => this.editorService.revealLocation(this.styleEditorSessionId, {
-            line: issue.location!.line!,
-            column: issue.location!.column,
-            length: issue.location!.length
-        });
-        window.requestAnimationFrame(reveal);
+        const reveal = () => {
+            if (this.pendingStyleIssue !== issue || !this.styleEditorVisible) return;
+            this.editorService.revealLocation(this.styleEditorSessionId, {
+                line: issue.location!.line!,
+                column: issue.location!.column,
+                length: issue.location!.length
+            });
+        };
+        window.requestAnimationFrame(() => window.requestAnimationFrame(reveal));
     }
 
     /** Finds the style entry associated with a validation issue. */

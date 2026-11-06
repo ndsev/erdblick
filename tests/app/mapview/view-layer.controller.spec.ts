@@ -8,6 +8,8 @@ import {
     vi
 } from "vitest";
 import {ViewLayerController} from "../../../app/mapview/view-layer.controller";
+import {GpuMaterialBufferExhaustedError} from
+    "../../../app/mapview/deck/gpu-primitive-store.util";
 import {TileSubsetLayerVisualization} from
     "../../../app/mapview/deck/tile-subset-layer.visualization";
 import {coreLib} from "../../../app/integrations/wasm.adapter";
@@ -53,7 +55,7 @@ describe("ViewLayerController", () => {
                     capacityChanged: capacity} as any,
                 {searchPresentationsChanged: idle} as any,
                 {selectionIdsTopic: idle, hoverIdsTopic: idle} as any,
-                {} as any, {register: () => () => {}} as any, {} as any, {} as any);
+                {} as any, {register: () => () => {}} as any, {} as any, {} as any, {} as any);
             reconcile.mockClear();
             for (let i = 0; i < 100; ++i) capacity.next();
             expect(dispatch).toHaveBeenCalledTimes(100);
@@ -548,6 +550,32 @@ describe("ViewLayerController", () => {
         expect(controller.scheduleInteractionPresenceReconcile)
             .toHaveBeenCalledWith(visualization.owner, tileKey(7));
         expect(controller.diagnostics.notifyChanged).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+        new GpuMaterialBufferExhaustedError(11n, 256),
+        new Error("Device upload failed")
+    ])("reports a rejected render according to its failure type: %s", async error => {
+        const controller = Object.create(ViewLayerController.prototype);
+        controller.sceneHandle = {scene: {}};
+        controller.infoMessages = {showGpuBufferExhausted: vi.fn()};
+        controller.ngZone = {run: vi.fn(callback => callback())};
+        const logError = vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+            controller.startVisualizationRender({render: vi.fn().mockRejectedValue(error)});
+            await vi.waitFor(() => {
+                if (error instanceof GpuMaterialBufferExhaustedError) {
+                    expect(controller.infoMessages.showGpuBufferExhausted).toHaveBeenCalledOnce();
+                    expect(controller.ngZone.run).toHaveBeenCalledOnce();
+                    expect(logError).not.toHaveBeenCalled();
+                } else {
+                    expect(logError).toHaveBeenCalledExactlyOnceWith("TileSubsetLayer visualization failed.", error);
+                    expect(controller.infoMessages.showGpuBufferExhausted).not.toHaveBeenCalled();
+                }
+            });
+        } finally {
+            logError.mockRestore();
+        }
     });
 
     it("reconciles authored fallback demand after local geometry is removed", () => {

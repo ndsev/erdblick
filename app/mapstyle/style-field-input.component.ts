@@ -46,7 +46,7 @@ export interface StyleInputProblem {path: string; message: string;}
             @case ('vector') {
                 <div class="style-vector">
                     @if (field.sizes.length > 1) {
-                        <select aria-label="Vector shape" [ngModel]="vectorLength()" (ngModelChange)="resize($event)">
+                        <select aria-label="Vector shape" [disabled]="!!error" [ngModel]="vectorLength()" (ngModelChange)="resize($event)">
                             @for (size of field.sizes; track size) {
                                 <option [ngValue]="size">{{ size === 0 ? 'Scalar' : size + ' components' }}</option>
                             }
@@ -84,8 +84,8 @@ export interface StyleInputProblem {path: string; message: string;}
                             }
                             <input [attr.aria-label]="field.valueKind === 'color' ? 'Stop color' : 'Stop width'"
                                 [value]="text(child(index, 1))" (input)="stopValue(index, $event)">
-                            <button type="button" aria-label="Move stop up" [disabled]="index === 0" (click)="move(index, index - 1)">↑</button>
-                            <button type="button" aria-label="Move stop down" [disabled]="index === indices().length - 1" (click)="move(index, index + 1)">↓</button>
+                            <button type="button" aria-label="Move stop up" [disabled]="!!error || index === 0" (click)="move(index, index - 1)">↑</button>
+                            <button type="button" aria-label="Move stop down" [disabled]="!!error || index === indices().length - 1" (click)="move(index, index + 1)">↓</button>
                             <button type="button" aria-label="Remove stop" (click)="remove(index)">×</button>
                         </div>
                     }
@@ -202,6 +202,7 @@ export class StyleFieldInputComponent implements OnChanges, OnDestroy {
 
     /** Changes a vector's explicit shape, preserving existing components where possible. */
     resize(size: number): void {
+        if (this.error) return;
         const values = Array.isArray(this.value) ? this.value : [this.value];
         this.set(size === 0 ? values[0] ?? 0 : Array.from({length: size}, (_, i) => values[i] ?? 0));
     }
@@ -234,11 +235,22 @@ export class StyleFieldInputComponent implements OnChanges, OnDestroy {
     addStop(): void { this.edit.emit({op: "append", path: this.path, value: [0, this.field.valueKind === "color" ? "#000000" : 1]}); }
 
     /** Reorders stops without regenerating their AST nodes. */
-    move(index: number, to: number): void { this.edit.emit({op: "move", path: this.path, index, to}); }
-
-    /** Removes precisely the chosen stop. */
-    remove(index: number): void { this.edit.emit({op: "remove", path: [...this.path, index]}); }
-
+    move(index: number, to: number): void {
+        if (!this.error) this.edit.emit({op: "move", path: this.path, index, to});
+    }
+    /** Removes one stop and keeps unfinished cells attached to their remaining rows. */
+    remove(index: number): void {
+        const inputs = [...this.numericInputs.values()];
+        this.numericInputs.clear();
+        for (const input of inputs) {
+            const row = Number(input.path[this.path.length]);
+            if (row === index) continue;
+            input.path = [...this.path, row > index ? row - 1 : row, ...input.path.slice(this.path.length + 1)];
+            this.numericInputs.set(input.path.join('.'), input);
+        }
+        this.report();
+        this.edit.emit({op: "remove", path: [...this.path, index]});
+    }
     /**
      * Shows an RGB picker as a convenience while retaining native color syntax
      * in the text field. Preview normalization never edits the authored source;
