@@ -612,11 +612,11 @@ describe("McpActionService", () => {
         expect(stateOwners(state).viewSettings.getBackgroundState(0)).toEqual(previous);
     });
 
-    it("pages advertised layers and reads produced/reference types from the ready native graph", () => {
+    it("pages advertised layers and reads produced types from the ready native graph", () => {
         const { service, maps } = fixture();
-        const featureTypes = vi.fn((mapId: string, layerId: string, references: boolean) => {
+        const featureTypes = vi.fn((mapId: string, layerId: string) => {
             expect(mapId).toBe("map");
-            return layerId === "Raw" ? [] : references ? [layerId, "ReferenceOnly"] : [layerId];
+            return layerId === "Raw" ? [] : [layerId];
         });
         Object.defineProperty(maps, "tileLayerParser", {value: {featureTypes}});
         const layers = new Map(["Road", "Lane", "POI"].map(id => [id, {
@@ -636,7 +636,7 @@ describe("McpActionService", () => {
         expect(first).toMatchObject({
             complete: false, nextOffset: 2,
             items: [{ id: "Road", zoomLevels: [11, 13], featureTypes: ["Road"],
-                referenceTypes: ["ReferenceOnly"], schemaStatus: "ready", schemaId: "schema-1",
+                schemaStatus: "ready", schemaId: "schema-1",
                 partitionKind: "tile" }, { id: "Lane" }]
         });
         expect(service.execute("viewer_list_layers", { offset: first.nextOffset, limit: 2 }))
@@ -653,7 +653,6 @@ describe("McpActionService", () => {
             service.execute("viewer_list_layers", {}));
         expect(pending.items[0]).toMatchObject({id: "Road", available: false, schemaStatus: "loading"});
         expect(pending.items[0]).not.toHaveProperty("featureTypes");
-        expect(pending.items[0]).not.toHaveProperty("referenceTypes");
         expect(featureTypes).not.toHaveBeenCalled();
     });
 

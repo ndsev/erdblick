@@ -949,7 +949,7 @@ TEST_CASE(
         "centerline",
         std::vector<std::string>{"speed"});
     channel->newFeatureEntry(
-        subset->newFeatureId("Road", {{"id", int64_t{1}}}),
+        subset->newFeatureId("Road", {{"roadId", int64_t{1}}}),
         lineGeometry(*subset, "centerline"),
         std::vector<simfil::ModelNode::Ptr>{*values});
     auto yaml = YAML::Load(R"yaml(

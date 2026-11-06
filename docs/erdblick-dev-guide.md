@@ -184,9 +184,13 @@ and `schemaId`, coalesces equal artifacts and limits concurrent downloads to two
 `TileLayerParser.installMapSchema` validates the artifact before that source can
 become locally ready. Backend readiness and browser schema readiness are separate:
 one failed or slow download leaves other ready maps usable, and incomplete catalogs
-must not prune saved layer, style or inspection selections. Produced feature types
-and reference-only targets come from the installed native graph, not duplicate
-catalog arrays. Legacy inline metadata remains an import format.
+must not prune saved layer, style or inspection selections. Each layer lists only
+the feature types it produces. Identity definitions, including reference-only
+targets, belong to the enclosing map schema and are available to every layer for
+decoding IDs. They do not imply that a layer produces or references those targets.
+MCP layer discovery reports produced types; relation declarations describe actual
+relations. Both come from the installed native graph, not duplicate catalog arrays.
+Legacy inline metadata remains an import format.
 
 Each worker has its own WASM heap. Completion installs only the selected scope;
 render workers install only the map required by a task. Both acknowledge successful
@@ -1067,12 +1071,17 @@ See [Style System](erdblick-stylesystem.md).
 
 ## Protocol migration
 
-The current tile-stream format is 6.2.0. Adding schema `rawValue` metadata
+The current tile-stream format is 6.3.0. Canonical schema field multiplicity
 extends simfil's static dictionary and shifts mapget's static field IDs. Readers
 reject older major/minor stream versions before interpreting payload fields;
 an older dictionary must not decode new payloads, or vice versa. MapSchema codec
-3 and SchemaPool codec 2 also reject older schema artifacts. Rebuild native
+7 and SchemaPool codec 4 use canonical columns and arenas and reject older schema
+artifacts. Rebuild native
 producers and browser WASM together as described under [Build and test](#build-and-test).
+
+Protocol 6.2.0 introduced schema `rawValue` metadata and its corresponding static
+dictionary shift. It is a historical format, not a compatible reader for 6.3
+payloads.
 
 Protocol 6.0.0 requires the exact installed MapSchema for model decoding and
 preserves scalar types through native subset copying. Fetch schema artifacts

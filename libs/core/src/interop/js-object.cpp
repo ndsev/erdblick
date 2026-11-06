@@ -1,7 +1,8 @@
 #include "interop/js-object.h"
-#include "mapget/model/featureid.h"
 #include <stdexcept>
 #include "fmt/core.h"
+#include "mapget/model/featureid.h"
+#include "simfil/model/schema-pool.h"
 
 #if !defined(EMSCRIPTEN)
     #include <stdexcept>
@@ -46,24 +47,23 @@ JsValue JsValue::fromFeatureId(mapget::FeatureId const& reference)
 
 JsValue JsValue::fromBitmask(simfil::Bitmask const& mask)
 {
-    if (!mask.type || !mask.type.definition())
+    if (!mask.type)
         throw std::invalid_argument("Cannot expose a bitmask without its exact type");
     return Dict(
         {{"_bitmask", JsValue(true)},
          {"bits", JsValue(fmt::format("0x{:016x}", mask.bits))},
-         {"schema", JsValue(std::string(mask.type.binding->identity()))},
-         {"typeId", JsValue(mask.type.id)}});
+         {"schema", JsValue(std::string(mask.type.pool()->identity()))},
+         {"typeId", JsValue(mask.type.id())}});
 }
 
-JsValue JsValue::fromSchema(simfil::SchemaReference const& reference)
+JsValue JsValue::fromSchema(simfil::SchemaType const& type)
 {
-    auto const* type = reference.definition();
     if (!type)
         return Undefined();
     auto result = Dict(
-        {{"schemaId", JsValue(std::string(reference.binding->identity()))},
-         {"typeId", JsValue(reference.id)},
-         {"typeName", JsValue(std::string(type->typeName()))}});
+        {{"schemaId", JsValue(std::string(type.pool()->identity()))},
+         {"typeId", JsValue(type.id())},
+         {"typeName", JsValue(std::string(type.typeName()))}});
     // Numeric bounds and named literals may exceed JS's exact integer range.
     // Their type remains explicit; decimal strings preserve those raw encodings.
     auto scalar = [](auto const& value)
@@ -89,7 +89,7 @@ JsValue JsValue::fromSchema(simfil::SchemaReference const& reference)
             },
             value);
     };
-    if (auto numeric = type->numericDomain()) {
+    if (auto numeric = type.numericDomain()) {
         auto ranges = List();
         for (auto const& range : numeric->ordinaryRanges)
             ranges.push(Dict({{"min", scalar(range.min)}, {"max", scalar(range.max)}}));
@@ -107,10 +107,10 @@ JsValue JsValue::fromSchema(simfil::SchemaReference const& reference)
         result.set("numeric", metadata);
     }
     auto names = List();
-    type->forEachNamedValue(
-        [&](simfil::Schema::NamedValue const& named)
+    type.forEachNamedValue(
+        [&](simfil::SchemaType::NamedValue const& named)
         {
-            using Named = simfil::Schema::NamedValue;
+            using Named = simfil::SchemaType::NamedValue;
             auto valueType = std::visit(
                 [](auto const& value) -> std::string
                 {
@@ -167,8 +167,8 @@ JsValue JsValue::fromSchema(simfil::SchemaReference const& reference)
     // Generic types such as Any may contain a mask without declaring one.
     // Only concrete masks have a width; exporting a generic type's zero
     // would make the browser reject the entire search-style field catalog.
-    if (type->isBitmask())
-        result.set("bitWidth", JsValue(type->bitWidth()));
+    if (type.isBitmask())
+        result.set("bitWidth", JsValue(type.bitWidth()));
     return result;
 }
 

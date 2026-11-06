@@ -1,5 +1,6 @@
 #pragma once
 
+#include <span>
 #include "mapget/model/mapschema.h"
 #include "simfil/value.h"
 
@@ -19,85 +20,76 @@ struct ScalarSchema
 
     ScalarSchema()
     {
-        using Schema = simfil::Schema;
+        using Type = simfil::SchemaType;
         auto layer = owner->newLayer("Road", mapget::LayerType::Features);
-        auto root = layer->addSchema(
-            mapget::LayerSchema::FeatureKind,
-            mapget::LayerSchema::featureKey("Road"));
-        auto properties = layer->addSchema(
-            Schema::Kind::Object,
-            mapget::LayerSchema::featurePropertiesKey("Road"));
-        speed = layer->addSchema(Schema::Kind::Int);
-        classicSpeed = layer->addSchema(Schema::Kind::Int);
-        width = layer->addSchema(Schema::Kind::Int);
-        flags = layer->addSchema(Schema::Kind::Bitmask);
-        layer->setTypeName(speed, "Live.Speed");
-        layer->setTypeName(classicSpeed, "Classic.Speed");
-        layer->setTypeName(width, "Metric.Width");
-        layer->setTypeName(flags, "Access.Flags");
-        for (auto id : {speed, classicSpeed}) {
-            Schema::NumericRange ordinary{int64_t{id == speed ? 1 : 0}, int64_t{253}};
-            layer->setNumericDomain(
-                id,
+        auto properties = owner->newObjectType();
+        auto speedType = owner->newScalarType(Type::Kind::Int);
+        auto classicSpeedType = owner->newScalarType(Type::Kind::Int);
+        auto widthType = owner->newScalarType(Type::Kind::Int);
+        auto flagsType = owner->newBitmaskType(64);
+        speed = speedType.id();
+        classicSpeed = classicSpeedType.id();
+        width = widthType.id();
+        flags = flagsType.id();
+        speedType.setTypeName("Live.Speed");
+        classicSpeedType.setTypeName("Classic.Speed");
+        widthType.setTypeName("Metric.Width");
+        flagsType.setTypeName("Access.Flags");
+        for (auto type : {speedType, classicSpeedType}) {
+            Type::NumericRange ordinary{int64_t{type.id() == speed ? 1 : 0}, int64_t{253}};
+            type.setNumericDomain(
                 {.encoding = "uint8",
-                 .unit = id == speed ? "km/h" : "",
+                 .unit = type.id() == speed ? "km/h" : "",
                  .minimum = int64_t{0},
                  .maximum = int64_t{255},
-                 .ordinaryRanges = {&ordinary, 1},
+                 .ordinaryRanges = std::span<Type::NumericRange const>{&ordinary, size_t{1}},
                  .complete = true});
-            layer->addNamedValue(
-                id,
+            type.addNamedValue(
                 {.name = "VARIABLE",
                  .value = int64_t{254},
-                 .role = Schema::NamedValue::Role::Special,
-                 .meaning = Schema::NamedValue::Meaning::Variable});
-            layer->addNamedValue(
-                id,
+                 .role = Type::NamedValue::Role::Special,
+                 .meaning = Type::NamedValue::Meaning::Variable});
+            type.addNamedValue(
                 {.name = "UNLIMITED",
                  .value = int64_t{255},
-                 .role = Schema::NamedValue::Role::Special,
-                 .meaning = Schema::NamedValue::Meaning::Unbounded});
+                 .role = Type::NamedValue::Role::Special,
+                 .meaning = Type::NamedValue::Meaning::Unbounded});
         }
-        layer->addNamedValue(
-            speed,
+        speedType.addNamedValue(
             {.name = "UNDEFINED",
              .value = int64_t{0},
-             .role = Schema::NamedValue::Role::Special,
-             .meaning = Schema::NamedValue::Meaning::Unknown});
-        Schema::NumericRange widthRange{int64_t{0}, int64_t{253}};
-        layer->setNumericDomain(
-            width,
+             .role = Type::NamedValue::Role::Special,
+             .meaning = Type::NamedValue::Meaning::Unknown});
+        Type::NumericRange widthRange{int64_t{0}, int64_t{253}};
+        widthType.setNumericDomain(
             {.encoding = "uint8",
              .unit = "m",
-             .ordinaryRanges = {&widthRange, 1},
+             .ordinaryRanges = std::span<Type::NumericRange const>{&widthRange, size_t{1}},
              .scale = 0.1,
              .complete = true});
-        layer->setBitWidth(flags, 64);
         for (auto const& [name, bits] : std::vector<std::pair<std::string, uint64_t>>{
                  {"NONE", 0},
                  {"CAR", 1},
                  {"CAR_ALIAS", 1},
                  {"BIKE", 2},
                  {"BOTH", 3}})
-            layer->addNamedValue(
-                flags,
-                {.name = name, .value = bits, .role = Schema::NamedValue::Role::Flag});
-        layer->addFieldSchema(root, "properties", properties);
-        layer->addFieldSchema(properties, "speed", speed);
-        layer->addFieldSchema(properties, "classicSpeed", classicSpeed);
-        layer->addFieldSchema(properties, "width", width);
-        layer->addFieldSchema(properties, "flags", flags);
-        layer->addFeatureType(
+            flagsType.addFlag(name, bits);
+        properties.addField("speed", speedType);
+        properties.addField("classicSpeed", classicSpeedType);
+        properties.addField("width", widthType);
+        properties.addField("flags", flagsType);
+        auto feature = layer->newFeature(
             mapget::FeatureTypeInfo::fromJson(
                 {{"name", "Road"},
-                 {"uniqueIdCompositions", {{{{"partId", "id"}, {"datatype", "U32"}}}}}}),
-            root);
-        layer->setRootSchema(root);
+                 {"uniqueIdCompositions", {{{{"partId", "roadId"}, {"datatype", "U32"}}}}}}),
+            properties);
+        layer->setRootSchema(feature.id());
         auto raw = owner->newLayer("Raw", mapget::LayerType::SourceData);
-        rawRoot = raw->addSchema(Schema::Kind::Object);
-        raw->addFieldSchema(rawRoot, "speed", speed);
-        raw->addFieldSchema(rawRoot, "width", width);
-        raw->addFieldSchema(rawRoot, "flags", flags);
+        auto rawType = owner->newObjectType();
+        rawRoot = rawType.id();
+        rawType.addField("speed", speedType);
+        rawType.addField("width", widthType);
+        rawType.addField("flags", flagsType);
         raw->setRootSchema(rawRoot);
         owner->finalize();
         source.mapId_ = "ScalarSchema";
@@ -116,7 +108,7 @@ struct ScalarSchema
      */
     simfil::Value number(int64_t raw, simfil::TypeId type) const
     {
-        return simfil::Value(raw).withSchema({owner->binding(), type});
+        return simfil::Value(raw).withSchemaType(owner->schemaType(type));
     }
 };
 

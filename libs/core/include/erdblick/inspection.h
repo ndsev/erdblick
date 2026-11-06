@@ -211,7 +211,7 @@ public:
         JsValue const& fieldName,
         FieldOrIndex const& path,
         simfil::ModelNode::Ptr const& value,
-        simfil::SchemaReference type = {});
+        simfil::SchemaType type = {});
 
     /**
      * Store one referenced feature id as inspection node payload.

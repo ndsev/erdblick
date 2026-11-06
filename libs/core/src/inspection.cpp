@@ -1166,17 +1166,19 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
             featurePtr->typeId(),
             featureIdParts,
             false);
-        auto const* composition = compositionIndex
-            ? &layerInfo->getTypeInfo(featurePtr->typeId())->uniqueIdCompositions_[*compositionIndex]
-            : nullptr;
+        auto const identity = layerInfo->getTypeInfo(featurePtr->typeId());
+        auto const composition = compositionIndex ?
+            identity.compositions()[*compositionIndex] :
+            FeatureIdentity::Composition{};
         for (auto const& [key, value]: featureIdParts) {
             auto &field = current_->children_.emplace_back();
             field.key_ = convertString(key);
-            auto const isUnsigned64 = composition && std::ranges::any_of(
-                *composition,
-                [key](auto const& part) {
-                    return part.idPartLabel_ == key && part.datatype_ == IdPartDataType::U64;
-                });
+            auto const isUnsigned64 = composition &&
+                std::ranges::any_of(composition.parts(),
+                                    [key](auto const& part) {
+                                        return part.name() == key &&
+                                            part.datatype() == IdPartDataType::U64;
+                                    });
             if (isUnsigned64 && std::holds_alternative<int64_t>(value)) {
                 field.value_ = convertString(std::to_string(
                     std::bit_cast<uint64_t>(std::get<int64_t>(value))));
@@ -1200,7 +1202,7 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
                 convertString(key),
                 std::string_view(name),
                 child,
-                simfil::Value::field(*mergedBasicAttrs, *child, key).schemaReference());
+                simfil::Value::field(*mergedBasicAttrs, *child, key).schemaType());
         }
     }
 
@@ -1397,8 +1399,7 @@ void InspectionConverter::convertAttributeLayer(
                     convertString(fieldName),
                     std::string_view(fieldName),
                     val,
-                    simfil::Value::field(*attr, *val, stringPool_->get(fieldName))
-                        .schemaReference());
+                    simfil::Value::field(*attr, *val, stringPool_->get(fieldName)).schemaType());
                 return true;
             });
 
@@ -1824,7 +1825,7 @@ void InspectionConverter::convertField(
     const JsValue& fieldName,
     FieldOrIndex const& path,
     const simfil::ModelNode::Ptr& value,
-    simfil::SchemaReference type)
+    simfil::SchemaType type)
 {
     if (value->addr().column() == TileFeatureLayer::ColumnId::RelationReferences) {
         auto relationRef = tile_->resolve<RelationReference>(*value);
@@ -1850,7 +1851,7 @@ void InspectionConverter::convertField(
         assignFeatureReference(*fieldScope, featureId);
         return;
     }
-    if (fieldScope->setScalarValue(simfil::Value::field(*value).withSchema(std::move(type))))
+    if (fieldScope->setScalarValue(simfil::Value::field(*value).withSchemaType(std::move(type))))
         return;
     if (value->type() == simfil::ValueType::Array) {
         isArray = true;
@@ -1867,14 +1868,14 @@ void InspectionConverter::convertField(
                 kk,
                 static_cast<uint32_t>(index),
                 v,
-                simfil::Value::at(*value, *v, index).schemaReference());
+                simfil::Value::at(*value, *v, index).schemaType());
         }
         else {
             convertField(
                 kk,
                 std::string_view(keyPath),
                 v,
-                simfil::Value::field(*value, *v, k).schemaReference());
+                simfil::Value::field(*value, *v, k).schemaType());
         }
         ++index;
     }
@@ -1969,16 +1970,15 @@ bool InspectionConverter::InspectionNode::setScalarValue(simfil::Value const& va
         break;
     default: return false;
     }
-    auto reference = value.schemaReference();
-    auto const* type = reference.definition();
+    auto const type = value.schemaType();
     if (!type)
         return true;
-    scalarType_ = JsValue::fromSchema(reference);
+    scalarType_ = JsValue::fromSchema(type);
     std::vector<std::string> names;
     uint64_t knownBits = 0;
     bool special = false;
-    type->forEachNamedValue(
-        [&](simfil::Schema::NamedValue const& named)
+    type.forEachNamedValue(
+        [&](simfil::SchemaType::NamedValue const& named)
         {
             if (named.removed)
                 return;
@@ -1988,7 +1988,7 @@ bool InspectionConverter::InspectionNode::setScalarValue(simfil::Value const& va
                     using T = std::decay_t<decltype(raw)>;
                     if (value.type == NativeType::Bitmask) {
                         if constexpr (std::is_same_v<T, uint64_t> || std::is_same_v<T, int64_t>) {
-                            if (named.role != simfil::Schema::NamedValue::Role::Flag)
+                            if (named.role != simfil::SchemaType::NamedValue::Role::Flag)
                                 return false;
                             auto bits = uint64_t(raw);
                             knownBits |= bits;
@@ -2016,14 +2016,14 @@ bool InspectionConverter::InspectionNode::setScalarValue(simfil::Value const& va
                 named.value);
             if (matches) {
                 names.emplace_back(named.name);
-                special |= named.role == simfil::Schema::NamedValue::Role::Special;
+                special |= named.role == simfil::SchemaType::NamedValue::Role::Special;
             }
         });
     if (value.type == NativeType::Bitmask) {
         if (auto unknown = value.as<NativeType::Bitmask>().bits & ~knownBits)
             names.push_back(fmt::format("unknown bits 0x{:016x}", unknown));
     }
-    if (auto numeric = type->numericDomain(); numeric && !numeric->unit.empty() && !special &&
+    if (auto numeric = type.numericDomain(); numeric && !numeric->unit.empty() && !special &&
         (value.type == NativeType::Int || value.type == NativeType::Float))
     {
         auto raw = value.type == NativeType::Int ?

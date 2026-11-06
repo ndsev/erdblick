@@ -3,6 +3,7 @@
 #include "buffer.h"
 #include "interop/js-object.h"
 #include "layer.h"
+#include "mapget/model/featureidentity.h"
 #include "mapget/model/featurelayer.h"
 #include "mapget/model/mapschema.h"
 #include "mapget/model/sourcedatalayer.h"
@@ -37,10 +38,8 @@ public:
      */
     void installMapSchema(SharedUint8Array const& bytes, std::string const& expectedId);
 
-    /** Enumerate produced types, optionally including reference-only ID definitions. */
-    NativeJsValue
-    featureTypes(std::string const& mapId, std::string const& layerId, bool includeReferenceTypes)
-        const;
+    /** Enumerate only feature types produced by the selected layer. */
+    NativeJsValue featureTypes(std::string const& mapId, std::string const& layerId) const;
 
     /** Refresh service-derived incoming eligibility without replacing schema/model metadata. */
     void setIncomingRelationHints(SharedUint8Array const& catalogJson);
@@ -214,7 +213,10 @@ public:
         std::string id_;
         std::string name_;
         std::vector<std::string> maps_;
-        std::vector<mapget::IdPart> idParts_;
+        // The layer retains the graph once; this composition borrows its
+        // canonical parts instead of keeping a second vector of declarations.
+        mapget::FeatureIdentity::Composition composition_;
+        bool includeOptionalParts_ = false;
         std::shared_ptr<mapget::LayerInfo> layerInfo_;
     };
 

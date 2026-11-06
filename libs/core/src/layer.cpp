@@ -175,7 +175,7 @@ struct ValueSummary
 {
     // This is derived aggregate metadata. Individual values retain provenance
     // in the native model pool; there is no parallel per-result schema table.
-    simfil::SchemaReference schemaType;
+    simfil::SchemaType schemaType;
     uint64_t count = 0;
     uint64_t missing = 0;
     uint64_t nulls = 0;
@@ -252,7 +252,7 @@ void summarizeNode(
     uint32_t distinctLimit)
 {
     auto value = node ? simfil::Value::field(*node) : simfil::Value::undef();
-    auto schemaType = value.schemaReference();
+    auto schemaType = value.schemaType();
     auto group = std::ranges::find_if(
         groups,
         [&](auto const& candidate) { return candidate.schemaType == schemaType; });
@@ -268,11 +268,11 @@ void summarizeNode(
         return;
     }
     bool special = false;
-    if (auto const* definition = schemaType.definition()) {
-        definition->forEachNamedValue(
-            [&](simfil::Schema::NamedValue const& named)
+    if (schemaType) {
+        schemaType.forEachNamedValue(
+            [&](simfil::SchemaType::NamedValue const& named)
             {
-                if (named.role != simfil::Schema::NamedValue::Role::Special || named.removed)
+                if (named.role != simfil::SchemaType::NamedValue::Role::Special || named.removed)
                     return;
                 special |= std::visit(
                     [&](auto const& raw)
@@ -297,8 +297,8 @@ void summarizeNode(
     {
         if (special)
             return;
-        if (auto const* definition = schemaType.definition()) {
-            if (auto numeric = definition->numericDomain();
+        if (schemaType) {
+            if (auto numeric = schemaType.numericDomain();
                 numeric && !numeric->ordinaryRanges.empty()) {
                 bool ordinary = std::ranges::any_of(
                     numeric->ordinaryRanges,
@@ -656,7 +656,7 @@ NativeJsValue TileSourceDataLayer::toObject() const
     const auto& strings = *model_->strings();
     using InspectionNode = InspectionConverter::InspectionNode;
     using InspectionValueType = InspectionConverter::ValueType;
-    std::function<InspectionNode(JsValue, simfil::ModelNode const&, simfil::SchemaReference)> visit;
+    std::function<InspectionNode(JsValue, simfil::ModelNode const&, simfil::SchemaType)> visit;
 
     auto visitAddress = [&](SourceDataAddress const& addr) {
         if (model_->sourceDataAddressFormat() == mapget::TileSourceDataLayer::SourceDataAddressFormat::BitRange) {
@@ -683,17 +683,17 @@ NativeJsValue TileSourceDataLayer::toObject() const
                 result.children_.push_back(visit(
                     JsValue(std::string(*k)),
                     *v,
-                    simfil::Value::field(node, *v, field).schemaReference()));
+                    simfil::Value::field(node, *v, field).schemaType()));
             }
         }
         return result;
     };
 
-    visit = [&](JsValue key, simfil::ModelNode const& node, simfil::SchemaReference schemaType)
+    visit = [&](JsValue key, simfil::ModelNode const& node, simfil::SchemaType schemaType)
     {
         InspectionNode result;
         result.key_ = std::move(key);
-        if (result.setScalarValue(simfil::Value::field(node).withSchema(std::move(schemaType))))
+        if (result.setScalarValue(simfil::Value::field(node).withSchemaType(std::move(schemaType))))
             return result;
         switch (node.type()) {
         case simfil::ValueType::Object:
@@ -705,7 +705,7 @@ NativeJsValue TileSourceDataLayer::toObject() const
                 result.children_.push_back(visit(
                     JsValue(index),
                     *item,
-                    simfil::Value::at(node, *item, index).schemaReference()));
+                    simfil::Value::at(node, *item, index).schemaType()));
                 ++index;
             }
             break;

@@ -262,10 +262,10 @@ export class MapDataService implements AppActionContributor {
         return JSON.stringify(scope.map(mapId => [mapId, this.mapMetadataGeneration(mapId), this.isMapReady(mapId)]));
     }
 
-    /** Enumerates types from the installed graph, rather than a duplicate catalog registry. */
-    featureTypesForLayer(mapId: string, layerId: string, includeReferenceTypes = false): string[] {
+    /** Enumerates the selected layer's produced feature types from its installed schema. */
+    featureTypesForLayer(mapId: string, layerId: string): string[] {
         if (!this.isMapLayerReady(mapId, layerId)) return [];
-        const types: unknown = this.tileLayerParser.featureTypes(mapId, layerId, includeReferenceTypes);
+        const types: unknown = this.tileLayerParser.featureTypes(mapId, layerId);
         if (!Array.isArray(types) || !types.every(type => typeof type === "string")) {
             throw new Error(`Invalid native feature types for '${mapId}/${layerId}'.`);
         }
@@ -1198,9 +1198,9 @@ export class MapDataService implements AppActionContributor {
                 name: "viewer_list_layers",
                 mutation: false,
                 description:
-                    "List map layers, supported zoom levels and schema-owning feature types. Features are the " +
-                    "default; use layerType=SourceData for raw tables. featureTypes lists produced types; " +
-                    "referenceTypes lists additional ID targets. Both are absent until the source's schema is ready. " +
+                    "List map layers, supported zoom levels and produced feature types. Features are the " +
+                    "default; use layerType=SourceData for raw tables. featureTypes is absent until the " +
+                    "source's schema is ready. " +
                     "Optional viewId adds the current visibility, without changing defaults or loading data.",
                 inputSchema: z.strictObject({
                     mapId: identifierSchema.optional(),
@@ -1218,7 +1218,6 @@ export class MapDataService implements AppActionContributor {
                         visible: z.boolean().optional(),
                         zoomLevels: z.array(z.number().int().min(0).max(15)).max(16),
                         featureTypes: z.array(identifierSchema).max(1000).optional(),
-                        referenceTypes: z.array(identifierSchema).max(1000).optional(),
                         schemaStatus: z.enum(["loading", "ready", "failed"]),
                         schemaId: identifierSchema.optional(),
                         partitionKind: z.enum(["tile", "object"])
@@ -1530,8 +1529,7 @@ export class MapDataService implements AppActionContributor {
         const maps = input.mapId ? [this.requireMap(input.mapId)] : this.maps.maps.values();
         const layer = input.layerId ? this.requireLayer(input.mapId!, input.layerId) : undefined;
         const available = (mapId: string) => this.isMapReady(mapId);
-        const featureTypes = (mapId: string, layerId: string, references = false) =>
-            this.featureTypesForLayer(mapId, layerId, references);
+        const featureTypes = (mapId: string, layerId: string) => this.featureTypesForLayer(mapId, layerId);
         function* values() {
             for (const map of maps)
                 for (const child of layer ? [layer] : map.layers.values()) {
@@ -1546,10 +1544,7 @@ export class MapDataService implements AppActionContributor {
                             ? {}
                             : { visible: child.viewConfig[index]?.visible ?? false }),
                         zoomLevels: child.info.zoomLevels,
-                        ...(produced ? {
-                            featureTypes: produced,
-                            referenceTypes: featureTypes(map.id, child.id, true).filter(type => !produced.includes(type))
-                        } : {}),
+                        ...(produced ? { featureTypes: produced } : {}),
                         schemaStatus: map.info.schemaStatus ?? (available(map.id) ? "ready" : "loading"),
                         ...(map.info.schemaId ? { schemaId: map.info.schemaId } : {}),
                         partitionKind: child.info.partitionKind ?? ("tile" as const)

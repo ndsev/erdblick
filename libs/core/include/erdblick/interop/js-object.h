@@ -3,7 +3,7 @@
 #include <type_traits>
 #include <variant>
 #include "mapget/model/info.h"
-#include "simfil/model/schema.h"
+#include "simfil/model/schema-type.h"
 
 #ifdef EMSCRIPTEN
 #include <emscripten/bind.h>
@@ -58,7 +58,7 @@ struct JsValue
     static JsValue fromPartition(mapget::PartitionId const& partition);
 
     /** Project one exact type for inspection/style UI without exporting its schema graph. */
-    static JsValue fromSchema(simfil::SchemaReference const& reference);
+    static JsValue fromSchema(simfil::SchemaType const& type);
 
     /** Preserve a mask's raw uint64 bits and exact schema/type identity at the JS boundary. */
     static JsValue fromBitmask(simfil::Bitmask const& mask);

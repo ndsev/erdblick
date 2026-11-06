@@ -26,11 +26,16 @@ std::shared_ptr<mapget::MapSchema const> schemaFixture(std::string version = "1"
     for (auto const* name : {"Road", "Junction"}) {
         auto info = mapget::FeatureTypeInfo::fromJson(
             {{"name", name},
-             {"uniqueIdCompositions", {{{{"partId", "id"}, {"datatype", "U32"}}}}}});
-        auto root = layer->addSchema(simfil::Schema::Kind::Object);
-        layer->addFeatureType(std::move(info), root, std::string_view(name) == "Road");
-        if (std::string_view(name) == "Road")
-            layer->setRootSchema(root);
+             {"uniqueIdCompositions", {{{{"partId", "roadId"}, {"datatype", "U32"}}}}}});
+        if (std::string_view(name) == "Road") {
+            auto root = layer->newFeature(std::move(info));
+            layer->setRootSchema(root.id());
+        }
+        else {
+            // A relation target needs an identity definition but no invented
+            // feature root or claim that the Road layer produces Junctions.
+            graph->addFeatureType(std::move(info));
+        }
     }
     graph->finalize();
     return graph;
@@ -75,7 +80,7 @@ TEST_CASE(
     REQUIRE_THROWS(parser.installMapSchema(erdblick::SharedUint8Array(corrupt), id));
     REQUIRE_THROWS(parser.installMapSchema(erdblick::SharedUint8Array("truncated"), id));
     parser.setDataSourceInfo(sourceFixture("StillReady", id));
-    REQUIRE(parser.featureTypes("StillReady", "Road", false) == nlohmann::json::array({"Road"}));
+    REQUIRE(parser.featureTypes("StillReady", "Road") == nlohmann::json::array({"Road"}));
 }
 
 TEST_CASE(
@@ -94,8 +99,135 @@ TEST_CASE(
     first.setDataSourceInfo(sourceFixture("First", id));
     second.setDataSourceInfo(sourceFixture("Second", id));
     REQUIRE(first.info_.at("First").mapSchema_ == second.info_.at("Second").mapSchema_);
-    REQUIRE(first.featureTypes("First", "Road", false) == nlohmann::json::array({"Road"}));
-    REQUIRE(first.featureTypes("First", "Road", true).size() == 2);
+    REQUIRE(first.featureTypes("First", "Road") == nlohmann::json::array({"Road"}));
+
+    // Reference identities survive the binary roundtrip and remain usable for
+    // decoding, without becoming roots or destinations in the omnibar.
+    auto const& installed = first.info_.at("First");
+    auto const& roadLayer = installed.layers_.at("Road");
+    REQUIRE(installed.mapSchema_->featureIdentities().size() == 2);
+    REQUIRE(roadLayer->getTypeInfo("Junction") == installed.mapSchema_->getTypeInfo("Junction"));
+    REQUIRE(roadLayer->layerSchema()->featureSchema("Junction") == simfil::NoTypeId);
+    auto targets = first.filterFeatureJumpTargets("7");
+    REQUIRE(targets.size() == 1);
+    REQUIRE(targets.front().jumpTarget_.name_ == "Road");
+    REQUIRE_FALSE(targets.front().error_.has_value());
+}
+
+TEST_CASE(
+    "Jump targets preserve optional identity parts through canonical views",
+    "[erdblick.schema][erdblick.identity]")
+{
+    auto graph = std::make_shared<mapget::MapSchema>();
+    auto layer = graph->newLayer("Road", mapget::LayerType::Features);
+    auto root = layer->newFeature(mapget::FeatureTypeInfo::fromJson(
+        {{"name", "Road"},
+         {"uniqueIdCompositions",
+          nlohmann::json::array({nlohmann::json::array(
+              {{{"partId", "roadId"}, {"datatype", "U32"}},
+               {{"partId", "section"}, {"datatype", "STR"}, {"isOptional", true}}})})}}));
+    layer->setRootSchema(root.id());
+    graph->finalize();
+    auto const id = std::string(graph->schemaId());
+    erdblick::TileLayerParser parser;
+    parser.installMapSchema(schemaBytes(*graph), id);
+    parser.setDataSourceInfo(sourceFixture("JumpViews", id));
+
+    for (auto const& query : {"Road.007", "Road.007.North"}) {
+        auto targets = parser.filterFeatureJumpTargets(query);
+        REQUIRE(targets.size() == 2);
+        auto valid =
+            std::ranges::find_if(targets, [](auto const& target) { return !target.error_; });
+        REQUIRE(valid != targets.end());
+        auto projected = valid->toJsValue();
+        auto const& json = *projected;
+        CHECK(json.at("name") == "Road");
+        CHECK(json.at("maps") == nlohmann::json::array({"JumpViews"}));
+        CHECK(json.at("idParts")[0] == nlohmann::json({{"key", "roadId"}, {"value", 7}}));
+        if (query == std::string_view("Road.007.North")) {
+            CHECK(
+                json.at("idParts")[1] == nlohmann::json({{"key", "section"}, {"value", "North"}}));
+        }
+        else {
+            CHECK(json.at("idParts").size() == 1);
+        }
+    }
+}
+
+TEST_CASE(
+    "Inspection reads unsigned ID encoding from canonical identity views",
+    "[erdblick.schema][erdblick.identity]")
+{
+    auto graph = std::make_shared<mapget::MapSchema>();
+    auto layer = graph->newLayer("Road", mapget::LayerType::Features);
+    auto root = layer->newFeature(mapget::FeatureTypeInfo::fromJson(
+        {{"name", "Road"},
+         {"uniqueIdCompositions", {{{{"partId", "roadId"}, {"datatype", "U64"}}}}}}));
+    layer->setRootSchema(root.id());
+    graph->finalize();
+    auto source = mapget::DataSourceInfo::fromJson(
+        nlohmann::json::parse(
+            sourceFixture("UnsignedViews", std::string(graph->schemaId())).toString())
+            .front(),
+        [graph](std::string_view) { return graph; });
+    auto strings = std::make_shared<mapget::StringPool>(source.stringPoolId_);
+    auto tile = std::make_shared<mapget::TileFeatureLayer>(
+        mapget::TileId{},
+        source.stringPoolId_,
+        source.mapId_,
+        source.getLayer("Road"),
+        strings);
+    // The native feature-ID representation uses signed storage for uint64 bits.
+    // Inspection must preserve the unsigned decimal spelling at the UI boundary.
+    auto feature = tile->newFeature("Road", {{"roadId", int64_t{-1}}});
+    auto projected = erdblick::InspectionConverter().convert(feature);
+    auto const& identifiers = (*projected).front().at("children");
+    auto part = std::ranges::find_if(
+        identifiers,
+        [](auto const& row) { return row.at("key") == "roadId"; });
+    REQUIRE(part != identifiers.end());
+    CHECK(part->at("value") == "18446744073709551615");
+}
+
+TEST_CASE(
+    "Layer suggestions preserve unknown names without confusing the empty key",
+    "[erdblick.schema][erdblick.search]")
+{
+    auto graph = std::make_shared<mapget::MapSchema>();
+    for (auto const* name : {"Closed", "Open"}) {
+        auto layer = graph->newLayer(name, mapget::LayerType::Features);
+        auto root = graph->newObjectType(mapget::LayerSchema::FeatureKind);
+        root.setOpen(std::string_view(name) == "Open");
+        root.addField("", graph->newScalarType(simfil::SchemaType::Kind::String));
+        layer->addFeatureType(
+            mapget::FeatureTypeInfo::fromJson(
+                {{"name", "Thing"},
+                 {"uniqueIdCompositions", {{{{"partId", "thingId"}, {"datatype", "U32"}}}}}}),
+            root.id());
+        layer->setRootSchema(root.id());
+    }
+    graph->finalize();
+    erdblick::TileLayerParser parser;
+    auto const id = std::string(graph->schemaId());
+    parser.installMapSchema(schemaBytes(*graph), id);
+    parser.setDataSourceInfo(erdblick::SharedUint8Array(
+        nlohmann::json::array(
+            {{{"mapId", "Suggestions"},
+              {"stringPoolId", "Suggestions"},
+              {"schemaId", id},
+              {"layers",
+               {{"Closed", {{"layerId", "Closed"}, {"type", "Features"}}},
+                {"Open", {{"layerId", "Open"}, {"type", "Features"}}}}}}})
+            .dump()));
+    auto fields = parser.getMapLayersForQuery("missingQueryField", nlohmann::json::object());
+    CHECK(
+        fields.at("mapLayers") ==
+        nlohmann::json::array({{{"mapId", "Suggestions"}, {"layerId", "Open"}}}));
+    // Unknown object fields remain possible; undeclared enum meanings do not.
+    auto enums = parser.getMapLayersForQuery("\"NEVER_DECLARED_ENUM\"", nlohmann::json::object());
+    CHECK(enums.at("mapLayers").empty());
+    CHECK(graph->dictionary().get("missingQueryField") == simfil::StringPool::Empty);
+    CHECK(graph->dictionary().get("NEVER_DECLARED_ENUM") == simfil::StringPool::Empty);
 }
 
 TEST_CASE("Invalid metadata replacement preserves the previous bound graph", "[erdblick.schema]")
@@ -108,7 +240,7 @@ TEST_CASE("Invalid metadata replacement preserves the previous bound graph", "[e
     auto retained = parser.info_.at("First").mapSchema_;
     REQUIRE_THROWS(parser.setDataSourceInfo(sourceFixture("Replacement", "unknown-schema")));
     REQUIRE(parser.info_.at("First").mapSchema_ == retained);
-    REQUIRE(parser.featureTypes("First", "Road", false) == nlohmann::json::array({"Road"}));
+    REQUIRE(parser.featureTypes("First", "Road") == nlohmann::json::array({"Road"}));
 }
 
 TEST_CASE(
@@ -117,21 +249,17 @@ TEST_CASE(
 {
     auto graph = std::make_shared<mapget::MapSchema>();
     auto layer = graph->newLayer("Raw", mapget::LayerType::SourceData);
-    auto type = layer->addSchema(simfil::Schema::Kind::String);
-    layer->setRootSchema(type);
-    layer->addNamedValue(
-        type,
-        {.name = "LOW", .value = std::string_view{"LOW"}, .rawValue = int64_t{-1}});
-    layer->addNamedValue(
-        type,
-        {.name = "HIGH", .value = std::string_view{"HIGH"}, .rawValue = UINT64_MAX});
-    layer->addNamedValue(type, {.name = "PLAIN", .value = std::string_view{"PLAIN"}});
+    auto type = graph->newScalarType(simfil::SchemaType::Kind::String);
+    layer->setRootSchema(type.id());
+    type.addNamedValue({.name = "LOW", .value = std::string_view{"LOW"}, .rawValue = int64_t{-1}});
+    type.addNamedValue({.name = "HIGH", .value = std::string_view{"HIGH"}, .rawValue = UINT64_MAX});
+    type.addNamedValue({.name = "PLAIN", .value = std::string_view{"PLAIN"}});
     graph->finalize();
 
-    auto metadata = erdblick::JsValue::fromSchema({graph->binding(), type});
+    auto metadata = erdblick::JsValue::fromSchema(type);
     auto const& values = (*metadata).at("namedValues");
     REQUIRE(values.size() == 3);
-    CHECK((*metadata).at("typeId") == type);
+    CHECK((*metadata).at("typeId") == type.id());
     CHECK(values[0].at("value") == "LOW");
     CHECK(values[0].at("rawValue") == -1);
     CHECK(values[1].at("value") == "HIGH");
@@ -143,36 +271,34 @@ TEST_CASE(
     "Search styling exports widths only for concrete bitmask types",
     "[erdblick.schema][erdblick.search]")
 {
-    using Schema = simfil::Schema;
+    using Type = simfil::SchemaType;
     auto graph = std::make_shared<mapget::MapSchema>();
     auto layer = graph->newLayer("Road", mapget::LayerType::Features);
-    auto root =
-        layer->addSchema(mapget::LayerSchema::FeatureKind, mapget::LayerSchema::featureKey("Road"));
-    auto properties = layer->addSchema(Schema::Kind::Object);
-    layer->addFieldSchema(root, "properties", properties);
+    auto properties = graph->newObjectType();
     for (auto const& [name, kind] :
-         {std::pair{"any", Schema::Kind::Any},
-          {"unknown", Schema::Kind::Unknown},
-          {"value", Schema::Kind::Value},
-          {"flags", Schema::Kind::Bitmask}})
+         {std::pair{"any", Type::Kind::Any},
+          {"unknown", Type::Kind::Unknown},
+          {"value", Type::Kind::Value},
+          {"flags", Type::Kind::Bitmask}})
     {
-        auto id = layer->addSchema(kind);
-        layer->addFieldSchema(properties, name, id);
-        if (kind == Schema::Kind::Bitmask)
-            layer->setBitWidth(id, 8);
+        auto type = graph->newType(kind);
+        properties.addField(name, type);
+        if (kind == Type::Kind::Bitmask)
+            type.asBitmask().setBitWidth(8);
     }
-    layer->addFeatureType(
+    auto root = layer->newFeature(
         mapget::FeatureTypeInfo::fromJson(
             {{"name", "Road"},
-             {"uniqueIdCompositions", {{{{"partId", "id"}, {"datatype", "U32"}}}}}}),
-        root);
-    layer->setRootSchema(root);
+             {"uniqueIdCompositions", {{{{"partId", "roadId"}, {"datatype", "U32"}}}}}}),
+        properties);
+    layer->setRootSchema(root.id());
     graph->finalize();
 
     erdblick::TileLayerParser parser;
     parser.installMapSchema(schemaBytes(*graph), std::string(graph->schemaId()));
     parser.setDataSourceInfo(sourceFixture("StyleDomains", std::string(graph->schemaId())));
-    auto inventory = parser.searchStyleFieldsForQuery("true", "feature", nlohmann::json::object());
+    auto inventory =
+        parser.searchStyleFieldsForQuery("true", "feature", {{"path", {"attributes"}}});
     auto const& fields = inventory.at("fields");
     REQUIRE(inventory.at("complete") == true);
 
@@ -204,26 +330,34 @@ TEST_CASE(
     "Style discovery shares exact types and explores selected semantic branches without aliases",
     "[erdblick.schema][erdblick.search]")
 {
-    using Schema = simfil::Schema;
+    using Type = simfil::SchemaType;
     auto graph = std::make_shared<mapget::MapSchema>();
     auto layer = graph->newLayer("Road", mapget::LayerType::Features);
-    auto width = layer->addSchema(Schema::Kind::Int);
-    auto nested = layer->addSchema(Schema::Kind::Object);
-    layer->addFieldSchema(nested, "width", width);
+    auto width = graph->newScalarType(Type::Kind::Int);
+    auto nested = graph->newObjectType();
+    nested.addField("width", width);
     for (auto const* type : {"Road", "Building"}) {
-        auto root = layer->addSchema(mapget::LayerSchema::FeatureKind);
-        auto properties = layer->addSchema(Schema::Kind::Object);
-        layer->addFieldSchema(properties, "width", width);
-        layer->addFieldSchema(properties, "nested", nested);
-        layer->addFieldSchema(properties, "meaning", layer->addSchema(
-            std::string_view(type) == "Road" ? Schema::Kind::Int : Schema::Kind::String));
-        layer->addFieldSchema(root, "properties", properties);
-        layer->addFieldSchema(root, "$value", width);
-        layer->addFieldSchema(root, "$feature", root);
-        layer->setFieldRole(root, "$feature", Schema::FieldRole::Context);
-        layer->addFeatureType(mapget::FeatureTypeInfo::fromJson({{"name", type},
-            {"uniqueIdCompositions", {{{{"partId", "id"}, {"datatype", "U32"}}}}}}), root);
-        if (std::string_view(type) == "Road") layer->setRootSchema(root);
+        // This is a metadata-only root for testing arbitrary field spellings
+        // and Context edges. A native Feature factory owns a fixed envelope;
+        // its real geometry/relations would add unrelated recursive branches.
+        auto root = graph->newObjectType(mapget::LayerSchema::FeatureKind);
+        auto properties = graph->newObjectType();
+        properties.addField("width", width);
+        properties.addField("nested", nested);
+        properties.addField(
+            "meaning",
+            graph->newScalarType(
+                std::string_view(type) == "Road" ? Type::Kind::Int : Type::Kind::String));
+        root.addField("properties", properties);
+        root.addField("$value", width);
+        root.addField("$feature", root).setRole(Type::FieldRole::Context);
+        layer->addFeatureType(
+            mapget::FeatureTypeInfo::fromJson(
+                {{"name", type},
+                 {"uniqueIdCompositions", {{{{"partId", "roadId"}, {"datatype", "U32"}}}}}}),
+            root.id());
+        if (std::string_view(type) == "Road")
+            layer->setRootSchema(root.id());
     }
     graph->finalize();
     erdblick::TileLayerParser parser;
@@ -276,31 +410,32 @@ TEST_CASE(
     "Style discovery retains array elements and every object alternative",
     "[erdblick.schema][erdblick.search]")
 {
-    using Schema = simfil::Schema;
+    using Type = simfil::SchemaType;
     auto graph = std::make_shared<mapget::MapSchema>();
     auto layer = graph->newLayer("Road", mapget::LayerType::Features);
-    auto root = layer->addSchema(mapget::LayerSchema::FeatureKind);
-    auto properties = layer->addSchema(Schema::Kind::Object);
-    auto samples = layer->addSchema(Schema::Kind::Array);
-    auto alternatives = layer->addSchema(Schema::Kind::Union);
-    auto reading = layer->addSchema(Schema::Kind::Object);
-    auto label = layer->addSchema(Schema::Kind::Object);
-    layer->addFieldSchema(reading, "reading", layer->addSchema(Schema::Kind::Int));
-    layer->addFieldSchema(label, "label", layer->addSchema(Schema::Kind::String));
-    layer->addAlternative(alternatives, reading);
-    layer->addAlternative(alternatives, label);
-    layer->addElementSchema(samples, alternatives);
-    layer->addFieldSchema(properties, "samples", samples);
-    layer->addFieldSchema(root, "properties", properties);
-    layer->addFeatureType(mapget::FeatureTypeInfo::fromJson({{"name", "Road"},
-        {"uniqueIdCompositions", {{{{"partId", "id"}, {"datatype", "U32"}}}}}}), root);
-    layer->setRootSchema(root);
+    auto root = layer->newFeature(mapget::FeatureTypeInfo::fromJson(
+        {{"name", "Road"},
+         {"uniqueIdCompositions", {{{{"partId", "roadId"}, {"datatype", "U32"}}}}}}));
+    auto samples = graph->newArrayType();
+    auto alternatives = graph->newCompositionType(Type::Composition::AnyOf);
+    auto reading = graph->newObjectType();
+    auto label = graph->newObjectType();
+    reading.addField("reading", graph->newScalarType(Type::Kind::Int));
+    label.addField("label", graph->newScalarType(Type::Kind::String));
+    alternatives.addAlternative(reading);
+    alternatives.addAlternative(label);
+    samples.addElement(alternatives);
+    root.properties().addField("samples", samples);
+    layer->setRootSchema(root.id());
     graph->finalize();
 
     erdblick::TileLayerParser parser;
     parser.installMapSchema(schemaBytes(*graph), std::string(graph->schemaId()));
     parser.setDataSourceInfo(sourceFixture("Catalog", std::string(graph->schemaId())));
-    auto all = parser.searchStyleFieldsForQuery("false", "feature", {{"values", "scalar"}});
+    auto all = parser.searchStyleFieldsForQuery(
+        "false",
+        "feature",
+        {{"path", {"attributes"}}, {"values", "scalar"}});
     for (auto const* path : {"attributes.samples.*.reading", "attributes.samples.*.label"}) {
         INFO(path);
         CHECK(std::ranges::any_of(all.at("fields"), [&](auto const& field) {
@@ -352,7 +487,7 @@ TEST_CASE(
     Node flags;
     REQUIRE(flags.setScalarValue(simfil::Value(simfil::Bitmask{
         UINT64_C(0x8000000000000003),
-        {fixture.owner->binding(), fixture.flags}})));
+        fixture.owner->schemaType(fixture.flags)})));
     CHECK(*flags.value_ == "0x8000000000000003");
     CHECK(flags.displayValue_.find("BOTH") != std::string::npos);
     CHECK(flags.displayValue_.find("CAR_ALIAS") != std::string::npos);
@@ -360,7 +495,7 @@ TEST_CASE(
     Node zero;
     REQUIRE(zero.setScalarValue(simfil::Value(simfil::Bitmask{
         0,
-        {fixture.owner->binding(), fixture.flags}})));
+        fixture.owner->schemaType(fixture.flags)})));
     CHECK(zero.displayValue_.find("NONE") != std::string::npos);
 }
 
@@ -379,7 +514,7 @@ TEST_CASE(
             fixture.source.mapId_,
             fixture.source.getLayer("Road"),
             strings);
-        auto feature = tile->newFeature("Road", {{"id", int64_t{1}}});
+        auto feature = tile->newFeature("Road", {{"roadId", int64_t{1}}});
         REQUIRE(feature->attributes()->addField("speed", int64_t{255}));
         REQUIRE(feature->attributes()->addField("width", int64_t{12}));
         auto inspected = erdblick::InspectionConverter().convert(feature);
@@ -461,7 +596,7 @@ TEST_CASE(
         simfil::Value(int64_t{255}),
         simfil::Value(simfil::Bitmask{
             UINT64_C(0x8000000000000001),
-            {fixture.owner->binding(), fixture.flags}})};
+            fixture.owner->schemaType(fixture.flags)})};
     auto sequence = subset->copySequence(values);
     REQUIRE(sequence);
     auto channel = subset->newChannel(
@@ -475,7 +610,7 @@ TEST_CASE(
     point->append({11., 48., 0.});
     geometry->addGeometry(point);
     channel->newFeatureEntry(
-        subset->newFeatureId("Road", {{"id", int64_t{1}}}),
+        subset->newFeatureId("Road", {{"roadId", int64_t{1}}}),
         geometry,
         std::vector<simfil::ModelNode::Ptr>{*sequence});
     simfil::Trace trace;

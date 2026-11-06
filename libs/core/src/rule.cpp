@@ -1,12 +1,13 @@
 #include "rule.h"
-#include "mapget/model/hash.h"
 #include <algorithm>
-#include <charconv>
 #include <cctype>
+#include <charconv>
 #include <cmath>
 #include <iostream>
-#include "simfil/value.h"
+#include "mapget/model/hash.h"
 #include "search.h"
+#include "simfil/model/schema-pool.h"
+#include "simfil/value.h"
 
 namespace erdblick
 {
@@ -1173,10 +1174,10 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
             return color;
         };
         auto const evaluated = evalFun.evaluate(colorScale_->expression);
+        auto const type = evaluated.schemaType();
         if (!colorScale_->schemaId.empty()) {
-            auto const type = evaluated.schemaReference();
-            if (!type || type.id != colorScale_->typeId ||
-                type.binding->identity() != colorScale_->schemaId)
+            if (!type || type.id() != colorScale_->typeId ||
+                type.pool()->identity() != colorScale_->schemaId)
                 return fallback();
         }
         // Special overrides precede clamping/interpolation. A computed plain
@@ -1196,14 +1197,13 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
             // Generated type-bound scales cover ordinary measurements only.
             // Deleting a special override exposes fallback, never a high-end
             // gradient or ordinary category color for an exceptional code.
-            auto const* definition = evaluated.schemaReference().definition();
-            if (!definition)
+            if (!type)
                 return fallback();
             bool special = false;
-            definition->forEachNamedValue(
-                [&](simfil::Schema::NamedValue const& named)
+            type.forEachNamedValue(
+                [&](simfil::SchemaType::NamedValue const& named)
                 {
-                    if (named.role != simfil::Schema::NamedValue::Role::Special)
+                    if (named.role != simfil::SchemaType::NamedValue::Role::Special)
                         return;
                     std::visit(
                         [&](auto raw)
@@ -1222,8 +1222,7 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
                 });
             if (special)
                 return fallback();
-            if (auto numeric = definition->numericDomain();
-                numeric && !numeric->ordinaryRanges.empty()) {
+            if (auto numeric = type.numericDomain(); numeric && !numeric->ordinaryRanges.empty()) {
                 auto ordinary = std::ranges::any_of(
                     numeric->ordinaryRanges,
                     [&](auto const& range)
