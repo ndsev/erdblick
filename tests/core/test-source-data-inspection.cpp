@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "erdblick/layer.h"
+#include "erdblick/inspection.h"
 #include "erdblick/parser.h"
 #include "mapget/model/info.h"
 #include "mapget/model/feature.h"
@@ -8,6 +9,54 @@
 #include "mapget/model/sourcedatalayer.h"
 #include "mapget/model/stringpool.h"
 #include "nlohmann/json.hpp"
+
+TEST_CASE("Inspection preserves extern byte payloads instead of displaying NULL", "[erdblick.inspection][MAPV-555]")
+{
+    // The customer's seven-byte DrivingAutomationSystemConstraints.data payload.
+    auto const bytes = simfil::ByteArray::fromHex("03001808c08990");
+    REQUIRE(bytes);
+    auto info = mapget::LayerInfo::fromJson(nlohmann::json::parse(R"({"layerId":"Lane","type":"Features",
+        "featureTypes":[{"name":"Lane","uniqueIdCompositions":[[{"partId":"id","datatype":"U32"}]]}]})"));
+    auto strings = std::make_shared<mapget::StringPool>("ExternInspection");
+    auto tile = std::make_shared<mapget::TileFeatureLayer>(mapget::TileId{}, "ExternInspection", "TestMap", info, strings);
+    auto feature = tile->newFeature("Lane", {{"id", int64_t{116}}});
+    auto constraints = tile->newObject();
+    constraints->addField("data", tile->newValue(*bytes));
+    constraints->addField("system", int64_t{1});
+    feature->attributes()->addField("drivingAutomationSystemConstraints", constraints);
+    auto inspection = *erdblick::InspectionConverter().convert(feature);
+    std::function<void(nlohmann::json const&)> checkData;
+    size_t found = 0;
+    checkData = [&](nlohmann::json const& node) {
+        if (node.is_array()) {
+            for (auto const& child : node) checkData(child);
+            return;
+        }
+        if (node.value("key", std::string{}) == "data") {
+            CHECK(node.at("value") == "844528156182928");
+            CHECK(node.at("type") == static_cast<int>(erdblick::InspectionConverter::ValueType::String));
+            ++found;
+        }
+        if (node.contains("children")) checkData(node.at("children"));
+    };
+    checkData(inspection);
+    CHECK(found == 1);
+
+    auto rawInfo = mapget::LayerInfo::fromJson({{"layerId", "Raw"}, {"type", "SourceData"}});
+    auto raw = std::make_shared<mapget::TileSourceDataLayer>(mapget::TileId{}, "ExternInspection", "TestMap", rawInfo, strings);
+    auto root = raw->newCompound(1);
+    root->object()->addField("data", raw->newValue(*bytes));
+    raw->addRoot(root);
+    checkData(erdblick::TileSourceDataLayer(raw).toObject());
+    CHECK(found == 2);
+
+    // Large externs cannot be represented as an int64; their hex must remain visible.
+    auto large = simfil::ByteArray::fromHex("010203040506070809");
+    REQUIRE(large);
+    erdblick::InspectionConverter::InspectionNode scalar;
+    REQUIRE(scalar.setScalarValue(simfil::Value(*large)));
+    CHECK(scalar.value_.toString() == "0x010203040506070809");
+}
 
 TEST_CASE(
     "SourceData inspection reuses propagated feature summaries",
