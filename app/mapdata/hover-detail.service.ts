@@ -88,8 +88,9 @@ export class HoverDetailService implements OnDestroy {
     }
 
     /**
-     * Reconciles geometry-free projection demand. Partition arrays are retained
-     * and compared by identity; callers must replace them when coverage changes.
+     * Reconciles visible coverage for one view while retaining geometry-free projected values.
+     * Partition arrays are retained and compared by identity; callers must replace
+     * them when coverage changes.
      */
     reconcileView(
         viewIndex: number,
@@ -464,7 +465,10 @@ export class HoverDetailService implements OnDestroy {
         return syntheticStyle;
     }
 
-    /** Omits absent values, stringifies scalars, and falls back to JSON for structured results. */
+    /**
+     * Formats projected values without turning absent values into misleading text.
+     * Stringifies scalars and falls back to JSON for structured results.
+     */
     private displayValue(value: unknown): string | null {
         if (value === null || value === undefined) {
             return null;

@@ -18,7 +18,7 @@ import type { AppActionContributor, AppActionRegistration } from "./action-contr
 import { createControlActions, describeControls, viewerJsonSchema } from "./control-actions.util";
 import { ViewerActionFailure } from "./viewer-action-relay.contract";
 
-/** Infer control request/result types from the schemas used to validate tool calls. */
+/** Infer generic control payloads from the same schemas used at the boundary. */
 type ControlActions = ReturnType<typeof createControlActions>;
 type ControlInput<Name extends keyof ControlActions> = z.infer<ControlActions[Name]["inputSchema"]>;
 type ControlOutput<Name extends keyof ControlActions> = z.infer<ControlActions[Name]["outputSchema"]>;
@@ -37,8 +37,9 @@ interface RegisteredControl {
 /**
  * Register and dispatch the actions and controls exposed by domain controllers.
  * MCP and omnibar calls use the same argument/result checks and bound callbacks.
- * Controllers retain their application state; this service owns registration and
- * the generic describe/read/write operations for public controls.
+ * Owners register ordinary methods; this service neither discovers stored values
+ * nor owns domains. It owns registration and the generic describe/read/write
+ * operations for public controls.
  */
 @Injectable({ providedIn: "root" })
 export class AppActionRegistry implements AppActionRegistration {
@@ -85,7 +86,7 @@ export class AppActionRegistry implements AppActionRegistration {
         });
     }
 
-    /** Ask registered candidate providers for current omnibar choices and enforce unique IDs. */
+    /** Queries live owner choices for the omnibar and enforces unique candidate IDs. */
     getCandidates(query: string, history?: ActionCandidateHistory): RegisteredActionCandidate[] {
         const candidates: RegisteredActionCandidate[] = [];
         const ids = new Set<string>();
@@ -102,8 +103,9 @@ export class AppActionRegistry implements AppActionRegistration {
     }
 
     /**
-     * Bind a public control to its controller's read/write callbacks. defaultTargets
-     * supplies selectors for the overview returned when getControls omits targets.
+     * Binds an explicit public value to owner readers/writers. Default targets
+     * select the bounded overview; they do not discover or register stored slots.
+     * defaultTargets supplies selectors when getControls omits targets.
      * A writable declaration must have exactly one owner write binding.
      */
     registerControl<Selector extends z.ZodObject, Value extends z.ZodType>(
@@ -206,7 +208,10 @@ export class AppActionRegistry implements AppActionRegistration {
         return result instanceof Promise ? result.then(validate) : validate(result);
     }
 
-    /** Return registered control descriptions filtered by exact names and/or a name prefix. */
+    /**
+     * Returns declaration metadata without reading live owners or materializing defaults.
+     * Descriptions can be filtered by exact names and/or a name prefix.
+     */
     private describe(input: ControlInput<"describeControls">) {
         return {
             observedAt: new Date().toISOString(),
@@ -309,6 +314,7 @@ export class AppActionRegistry implements AppActionRegistration {
         const before = deepCopy(binding.read(selector, context));
         // Publish all AppState changes from this assignment together, so observers
         // of a compound value (for example a view configuration) see its final state.
+        // Owner methods also use transactions for their ordinary application workflows.
         this.persistence.transaction(() => {
             binding.write!(selector, binding.declaration.valueSchema.parse(input.value));
         });

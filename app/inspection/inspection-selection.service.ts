@@ -269,7 +269,7 @@ export class InspectionSelectionService implements AppActionContributor {
         return featureIds.map(feature => `${feature.mapTileKey}\u0000${feature.featureId}`).sort().join("\u0001");
     }
 
-    /** Shares one in-flight load for the same unordered feature identities across panel-state emissions. */
+    /** Shares one in-flight restricted load for the same unordered feature identities across rapid panel-state emissions. */
     private loadFeaturesOnce(featureIds: TileFeatureId[]): Promise<FeatureWrapper[]> {
         const key = this.featureLoadKey(featureIds);
         const pending = this.pendingFeatureLoads.get(key);
@@ -607,7 +607,11 @@ export class InspectionSelectionService implements AppActionContributor {
         if (target) targetViews.forEach(vi => this.viewState.moveToWgs84PositionTopic.next({ targetView: vi, ...target }));
     }
 
-    /** Computes an approximate fit from native centers/radii; returns undefined if any center is unavailable. */
+    /**
+     * Computes an approximate fit for a small explicit feature set before any
+     * camera/focus mutation. Uses native centers/radii; returns undefined if any
+     * center is unavailable.
+     */
     featureSetZoomTarget(features: readonly FeatureWrapper[]): Wgs84Point | undefined {
         const spheres = features.flatMap(wrapper => wrapper.peek((feature: Feature) => {
             const center = feature.center() as Wgs84Point;

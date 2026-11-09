@@ -48,7 +48,10 @@ struct BoundEvalFun
     EvalRef evalRef_ = nullptr;
     ReportIssueRef reportIssueRef_ = nullptr;
 
-    /** Uses the reference callback first, then eval_; returns undefined when neither is configured. */
+    /**
+     * Evaluate through the allocation-free callback reference first, then the
+     * owning eval_ fallback; returns undefined when neither is configured.
+     */
     [[nodiscard]] simfil::Value evaluate(std::string const& expression) const;
 
     /** Report a style issue through the configured reference or owning callback. */
@@ -72,10 +75,16 @@ struct BoundEvalFun
 class FeatureStyleRule
 {
 public:
-    /** Parses rule fields after stylesheet validation; malformed conversions/regexes may throw. */
+    /**
+     * Parse a rule from YAML and remember its index within the style sheet.
+     * Requires stylesheet validation; malformed conversions/regexes may throw.
+     */
     explicit FeatureStyleRule(YAML::Node const& yaml, uint32_t index=0);
 
-    /** Copies a rule (sharing relation helper styles); optionally clears feature type/filter and branch state. */
+    /**
+     * Clone a rule, sharing relation helper styles. For nested styles, optionally
+     * clear feature type/filter and branch state that should not propagate.
+     */
     FeatureStyleRule(FeatureStyleRule const& other, bool resetNonInheritableAttrs=false);
 
     /** Selects whether the rule runs against whole features, relations, or attributes. */
@@ -175,10 +184,11 @@ public:
     };
 
     /**
-     * Visits matching branch leaves and returns whether any callback ran. FirstOf
-     * stops at the first matching child; AllOf visits all. Host filters use
-     * featureEvalFun when supplied, while attribute filters use entryEvalFun.
-     * Scope, highlight mode, LOD and geometry gates remain the caller's responsibility.
+     * Visit matching concrete leaves using metadata and projected scalars,
+     * returning whether any callback ran. FirstOf stops at the first matching
+     * child; AllOf visits all. Host filters use featureEvalFun when supplied,
+     * while attribute filters use entryEvalFun. Scope, highlight mode, LOD and
+     * geometry gates remain the caller's responsibility.
      */
     bool forEachMatchingRule(
         MatchContext const& context,
@@ -186,7 +196,7 @@ public:
         std::function<void(FeatureStyleRule const&)> const& callback,
         BoundEvalFun const* featureEvalFun = nullptr) const;
 
-    /** Visits this branch tree's leaves without gates; relation helper styles are not traversed. */
+    /** Visit concrete renderable branch leaves without gates; relation helper styles are not traversed. */
     void forEachConcreteRule(std::function<void(FeatureStyleRule const&)> const& callback) const;
 
     /** Assign stable render identities to concrete leaf rules in source order. */
@@ -216,7 +226,10 @@ public:
     /** Report whether this rule participates in one integer LOD. */
     [[nodiscard]] bool supportsLod(uint8_t lod) const;
 
-    /** Ceils and clamps the expression to LOD 0..7; absent or invalid results use zero. */
+    /**
+     * Resolve the first integer LOD at which this concrete emitted entry is visible.
+     * Ceils and clamps the expression to 0..7; absent or invalid results use zero.
+     */
     [[nodiscard]] uint8_t minimumLod(BoundEvalFun const& evalFun) const;
 
     /** Report whether geometry emitted by this rule may be selected in the UI. */
@@ -244,9 +257,10 @@ public:
     [[nodiscard]] std::vector<std::pair<std::string, std::string>> expressionUses() const;
 
     /**
-     * Resolves literal, expression or scale color. A failed scale without fallback
-     * returns nullopt; invalid expression results use the literal color. Scale and
-     * string colors apply literal opacity, while integer RGBA expressions retain their own alpha.
+     * Resolve the effective RGBA color from literal, expression or color-scale modes.
+     * A failed scale without fallback returns nullopt; invalid expression results
+     * use the literal color. Scale and string colors apply literal opacity, while
+     * integer RGBA expressions retain their own alpha.
      */
     [[nodiscard]] std::optional<glm::fvec4> color(BoundEvalFun const& evalFun) const;
 
@@ -256,7 +270,7 @@ public:
     /** Report whether the rule explicitly overrides opacity. */
     [[nodiscard]] bool hasExplicitOpacity() const;
 
-    /** Returns the literal width before any per-entry width-scale override. */
+    /** Return the configured line width or point radius basis value before per-entry width-scale overrides. */
     [[nodiscard]] float width() const;
 
     /** Resolve a width-scale override against projected entry values. */
@@ -308,7 +322,7 @@ public:
     /** Return whether dash and gap lengths are measured in metres or pixels. */
     [[nodiscard]] LengthUnit dashUnit() const;
 
-    /** Returns the parsed legacy gap color; current GPU rendering does not consume it. */
+    /** Return the parsed legacy color for "off" dash segments; current GPU rendering does not consume it. */
     [[nodiscard]] glm::fvec4 const& gapColor() const;
 
     /** Returns the parsed legacy dash-pattern integer; current rendering uses dash length/gap instead. */

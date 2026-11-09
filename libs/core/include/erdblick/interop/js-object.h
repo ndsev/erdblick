@@ -27,9 +27,12 @@ template<typename T>
 struct always_false : std::false_type {};
 
 /**
- * Wraps an Emscripten JavaScript value or a native-build JSON stand-in.
- * Native properties are stored directly; call() additionally records invocations
- * in `methodCalls`. Copies share JS object handles but copy native JSON values.
+ * Class representing an Emscripten JavaScript value, or a mock object based on
+ * nlohmann::json for debugging or compiling without Emscripten support.
+ *
+ * Native properties are stored directly. call() also records invocations in
+ * `methodCalls`, a list of objects like {`methodName`: ..., `arguments`: [...]}.
+ * Copies share JS object handles but copy native JSON values.
  */
 struct JsValue
 {
@@ -53,7 +56,10 @@ struct JsValue
     /** Convert a tagged native partition without narrowing an object ID. */
     static JsValue fromPartition(mapget::PartitionId const& partition);
 
-    /** Projects one type without its graph; large integers use decimal strings and masks use hex strings. */
+    /**
+     * Project one exact type for inspection/style UI without exporting its schema
+     * graph. Large integers use decimal strings and masks use hex strings.
+     */
     static JsValue fromSchema(simfil::SchemaType const& type);
 
     /** Preserve a mask's raw uint64 bits and exact schema/type identity at the JS boundary. */
@@ -87,7 +93,7 @@ struct JsValue
 
     /**
      * Copy data into a JS Float64Array, or a plain JSON array in native builds.
-     * @param coordinates Float64 buffer to fill the typed array.
+     * @param data Float64 buffer to fill the typed array.
      */
     static JsValue Float64Array(std::span<const double> data);
 
@@ -232,7 +238,11 @@ struct JsValue
     /** Access the wrapped native object for low-level interop code. */
     inline const NativeJsValue& operator*() const {return value_;};
 
-    /** Converts an even-length list with string keys; retains string/int64 values and skips other types. */
+    /**
+     * Turn a [key, value, keyN, valueN, ...] list into KeyValuePairs. The list must
+     * have even length and string keys; string/int64 values are retained and
+     * other value types are skipped.
+     */
     [[nodiscard]] mapget::KeyValuePairs toKeyValuePairs() const;
 
     /**

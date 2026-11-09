@@ -76,9 +76,9 @@ const MASK_NO_DEPTH_PARAMETERS: RenderPipelineParameters = {
 // values after the [-1, 1] to [0, 1] depth mapping. It separates primitive kinds
 // inside the vector pass without changing physical Deck layer order.
 const PRIMITIVE_DEPTH_BIAS_STEP = 8 / 0x00ff_ffff;
-// The shader has room for 64 suppressed scene-global indices. Drill-pick callers
-// must keep their hit budget within this capacity to avoid returning an object
-// again after suppression fills up.
+// Drill picking disables every object already returned by the picker so it
+// cannot reappear in the same operation. The shader has room for 64 suppressed
+// scene-global indices; callers must keep their hit budget within this capacity.
 const MAX_DISABLED_PICK_INDICES = 64;
 
 const POINT_LAYOUT: BufferLayout[] = [
@@ -616,10 +616,11 @@ function primitiveProgram(source: GpuSceneMaterialStore): {
 /**
  * Draws every ordinary Erdblick vector contribution through persistent luma models.
  *
- * The layer shell survives packet updates; material models are retained while
- * their stores remain eligible and added or removed as scene materials change.
- * Deck still installs projection and picking uniforms;
- * this class only binds scene lookup tables and direct interleaved instance data.
+ * The layer shell survives while packets overwrite ranges in the scene-owned
+ * buffers. Material models are retained while their stores remain eligible and
+ * added or removed as scene materials change. Deck still installs projection and
+ * picking uniforms; this class only binds scene lookup tables and direct
+ * interleaved instance data.
  */
 export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
   static override layerName = "ErdblickVectorLayer";
@@ -715,8 +716,9 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
   }
 
   /**
-   * Suppress a non-negative integer scene index in the shared drill-pick set.
-   * Once 64 indices are retained, further requests are ignored until restoration.
+   * Temporarily suppress one scene-global object index during drill picking.
+   * Accepts non-negative integer indices. Once 64 indices are retained, further
+   * requests are ignored until restoration.
    */
   override disablePickingIndex(objectIndex: number): void {
     if (
@@ -952,8 +954,9 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
 }
 
 /**
- * Borrowed mask inputs over shared scene buffers. Neither the target texture nor
- * material-key set is copied or owned by the mask layer.
+ * Mutable state for one mask layer over the scene's shared buffers.
+ * Neither the target texture nor material-key set is copied or owned by the mask
+ * layer.
  */
 export interface ErdblickVectorMaskConfiguration {
   targetTexture: Texture;
@@ -1022,9 +1025,9 @@ export class ErdblickVectorMaskLayer extends Layer<ErdblickVectorMaskLayerProps>
   }
 
   /**
-   * Retain and bind a new mask configuration without replacing the layer. Call
-   * this after changing borrowed configuration inputs so revision checks refresh
-   * material selection and texture bindings.
+   * Replace sparse target/union state without replacing the Deck layer object.
+   * Retains the supplied configuration. Call this after changing borrowed inputs
+   * so revision checks refresh material selection and texture bindings.
    */
   configure(configuration: ErdblickVectorMaskConfiguration): void {
     this.configuration = configuration;

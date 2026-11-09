@@ -19,7 +19,10 @@ export class GpuRangeAllocator {
     private readonly freeRanges: GpuRecordRange[] = [];
     private nextRecord = 0;
 
-    /** Reserve a positive count, truncated to an integer, reusing the lowest suitable hole first. */
+    /**
+     * Reserve one contiguous range, reusing the lowest suitable hole first.
+     * The requested count must be positive and is truncated to an integer.
+     */
     allocate(recordCount: number): GpuRecordRange {
         const count = this.validCount(recordCount);
         for (let index = 0; index < this.freeRanges.length; ++index) {

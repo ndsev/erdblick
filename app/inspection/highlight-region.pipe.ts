@@ -10,7 +10,8 @@ export class HighlightRegion implements PipeTransform {
     constructor(private sanitizer: DomSanitizer) {}
 
     /**
-     * Trim a UTF-16 substring preview; nonpositive start/size returns empty.
+     * Trims the preview around the hit so large source-data strings stay inspectable.
+     * The substring uses UTF-16 offsets; nonpositive start/size returns empty.
      * Surrounding text must already be trusted: only the marked fragment is
      * sanitized before the assembled result bypasses Angular's HTML sanitizer.
      */

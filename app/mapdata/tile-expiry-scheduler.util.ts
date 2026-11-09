@@ -14,13 +14,15 @@ interface HeapEntry<
 }
 
 /**
- * One-timer, indexed min-heap for all finite-lifetime tiles.
+ * Schedule keyed expirations without one browser timer per retained value.
+ * Uses one timer and an indexed min-heap for all finite-lifetime tiles.
  *
  * Memory is O(active finite-TTL tiles), replacement/cancellation is O(log n),
  * and a bounded wake-up quantum prevents a large simultaneous expiry from
  * monopolizing the browser task queue. Owners supply absolute Date.now()
  * deadlines and decide how to renew expired values. Dispose the scheduler when
  * its transport lifetime ends; cancellation and disposal do not invoke onExpired.
+ * This class deliberately contains no retry delay or backoff policy.
  */
 export class TileExpiryScheduler<
     Owner extends object,

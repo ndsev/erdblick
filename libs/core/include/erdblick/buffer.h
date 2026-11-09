@@ -49,7 +49,10 @@ public:
     /** Interpret the current bytes as a string without applying any transcoding. */
     std::string toString() const;
 
-    /** Borrow the vector; its contents and element addresses can change on the next write. */
+    /**
+     * Provide direct read access to the underlying byte storage. The vector is
+     * borrowed; its contents and element addresses can change on the next write.
+     */
     std::vector<uint8_t> const& bytes() const;
 
 private:

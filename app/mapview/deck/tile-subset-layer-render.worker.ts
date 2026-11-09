@@ -165,7 +165,10 @@ function styleFor(key: string, source?: string): FeatureLayerStyle {
     return style;
 }
 
-/** Reuse native scratch by style, highlight mode, LOD and point-cloud revision, evicting least-recently used renderers. */
+/**
+ * Reuse native scratch and packet storage by style, highlight mode, LOD and
+ * point-cloud revision, evicting least-recently used renderers.
+ */
 function rendererFor(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderer {
     const key = JSON.stringify([
         task.styleKey,
@@ -200,9 +203,10 @@ function rendererFor(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderer {
 }
 
 /**
- * Deserialize one contribution and return its packets/bridge data or a task error.
- * Point-cloud input remains native-owned for reuse by matching revisions; other
- * subset handles are released after rendering, and renderer scratch is reset.
+ * Deserialize and render one tile contribution, returning packets/bridge data or
+ * a task error. Point-cloud input remains native-owned for reuse by matching
+ * revisions; other subset handles are released after rendering, and renderer
+ * scratch is reset.
  */
 function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
     const startedAt = performance.now();

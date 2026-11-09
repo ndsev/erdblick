@@ -240,9 +240,10 @@ export class ViewLayerController {
     }
 
     /**
-     * Clear this map's regular/interaction presentations and request fresh
-     * transport generations with their existing demand. SearchService retains its
-     * search presentations; this method skips them and removes regular fallbacks.
+     * Refresh one map's regular/interaction presentations without changing
+     * coverage, styles, visibility, or view state. Fresh transport generations
+     * retain their existing demand. SearchService retains its search
+     * presentations; this method skips them and removes regular fallbacks.
      */
     refreshMap(mapId: string): void {
         if (this.disposed || !mapId) {
@@ -1009,8 +1010,9 @@ export class ViewLayerController {
     }
 
     /**
-     * Use local masks for retained semantic targets and immutable filter owners for
-     * authored interaction geometry. Whole-feature relation rules remain additive.
+     * Reconcile hover and selection bundles. Use local masks for retained semantic
+     * targets and immutable filter owners for authored interaction geometry.
+     * Whole-feature relation rules remain additive.
      */
     private reconcileHighlightLayers(orderedStyles: readonly ErdblickStyle[]): void {
         const selectedTargets = this.inspection.selectionIdsTopic.getValue()
@@ -1817,8 +1819,9 @@ export class ViewLayerController {
     }
 
     /**
-     * Spend available worker slots on queued rerenders first, then pending tiles.
-     * Newly admitted tiles rotate across active styled layers.
+     * Dispatch changed and newly visible singleton tiles under one worker budget.
+     * Spend available slots on queued rerenders first, then pending tiles; newly
+     * admitted tiles rotate across active styled layers.
      */
     private drainPendingTiles(): void {
         if (!this.sceneHandle) {
@@ -2109,9 +2112,10 @@ export class ViewLayerController {
     }
 
     /**
-     * Return the last completed object union while refreshing a changed discovery
-     * footprint or expired semantic TTL. Superseded replies are ignored, not aborted.
-     * A failed refresh retains old coverage and retries after one second.
+     * Return the last completed object union and asynchronously refresh it when
+     * the fixed-level discovery footprint changes or its semantic TTL expires.
+     * Superseded replies are ignored, not aborted. A failed refresh retains old
+     * coverage and retries after one second.
      */
     private objectPartitionsForViewport(
         layer: MapgetLayer
@@ -2192,8 +2196,8 @@ export class ViewLayerController {
     }
 
     /**
-     * Cache tagged partitions by viewport-array identity. Callers must replace
-     * coverage arrays rather than mutate them in place.
+     * Preserve cached viewport-array identity across its tagged representation.
+     * Callers must replace coverage arrays rather than mutate them in place.
      */
     private tilePartitionsForCoverage(
         tileIds: readonly number[]
@@ -2207,8 +2211,9 @@ export class ViewLayerController {
     }
 
     /**
-     * Forward coverage only when either immutable array identity changes; array
-     * contents are not compared for in-place edits.
+     * Avoid rescanning unchanged large coverage arrays on non-viewport
+     * reconciliations. Forward coverage only when either immutable array identity
+     * changes; contents are not compared for in-place edits.
      */
     private setRegularCoverage(
         layer: StyledMapgetLayer,

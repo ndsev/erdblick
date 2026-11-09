@@ -42,8 +42,8 @@ export class TreeTableFilterPatchDirective implements AfterContentInit {
                 }
             }
 
-            // A matching leaf keeps its surrounding context. No child match also
-            // restores the original children for the strict parent-level decision.
+            // If we had a matching leaf node, add all original children.
+            // Since we are in strict mode, if no child matched, add all.
             if (hadMatchingLeaf || !matched) {
                 node.children = children;
             }

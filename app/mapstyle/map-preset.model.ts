@@ -47,8 +47,9 @@ const MAP_PRESET_SCHEMA = z.object({
 }).strict();
 
 /**
- * Validate structure without consulting maps/styles. Return valid siblings plus
- * issues; callers requiring an all-or-nothing catalog must reject any issues.
+ * Structurally validates an inline mapPresets array without consulting current maps or styles.
+ * Returns valid siblings plus issues; callers requiring an all-or-nothing catalog
+ * must reject any issues.
  */
 export function parseMapPresetDefinitions(source: unknown): MapPresetParseResult {
     if (!Array.isArray(source)) {

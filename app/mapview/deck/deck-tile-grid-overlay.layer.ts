@@ -308,9 +308,11 @@ export interface TileGridOverlayLayerProps extends SolidPolygonLayerProps<TileGr
     lineWidthPixels: number;
 }
 
-/** Raster overlay props. Replace imageData to upload changed pixels; mutating
- * the existing ImageData object does not trigger a texture update. localMin and
- * localSize use normalized XYZ or NDS grid coordinates.
+/**
+ * Props for the shader-driven tile-state raster overlay.
+ * Replace imageData to upload changed pixels; mutating the existing ImageData
+ * object does not trigger a texture update. localMin and localSize use normalized
+ * XYZ or NDS grid coordinates.
  */
 export interface TileGridStateOverlayLayerProps extends SolidPolygonLayerProps<TileGridOverlayDatum> {
     gridMode: "xyz" | "nds";
@@ -437,8 +439,10 @@ export class TileGridStateOverlayLayer extends SolidPolygonLayer<TileGridOverlay
         this.state.tileStateTexture = createTileStateTexture(this.context.device, null);
     }
 
-    /** Replace texture storage on imageData identity changes, releasing the old
-     * texture before creating the replacement. Null selects a transparent texel.
+    /**
+     * Rebuilds the backing texture only when the caller supplies new imageData.
+     * Releases the old texture before creating its replacement. Null selects a
+     * transparent texel.
      */
     override updateState(params: any): void {
         super.updateState(params);
@@ -513,8 +517,10 @@ color = vec4(stateColor.rgb, stateColor.a * layer.opacity);`
     }
 }
 
-/** Return a new wrapper around the shared Mercator-visible world ring (no polar
- * caps). Callers must not mutate the shared polygon vertices.
+/**
+ * Returns the default Mercator-visible world quad when callers need a single
+ * overlay datum. It excludes polar caps. Each call creates a new wrapper, but
+ * callers must not mutate the shared polygon vertices.
  */
 export function tileGridOverlayData(): TileGridOverlayDatum[] {
     return [{polygon: TILE_GRID_WORLD_RING}];

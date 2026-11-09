@@ -2,14 +2,18 @@
  * Shared value contracts for the application's action and control surface.
  * Controllers declare their schemas beside the callbacks that perform the work;
  * the registry uses these shapes to validate MCP calls and omnibar selections.
- * Each control pairs a public value schema with registered read/write callbacks.
- * Shared request/result limits and value checks live here too.
+ * A control is an explicitly exposed reader/writer, not an automatic projection
+ * of every persisted AppState. Each pairs a public value schema with registered
+ * callbacks. Shared request/result limits and value checks live here too.
  */
 import { z } from "zod";
 import { boundedUnicodeString, unicodePrefix } from "../utils/unicode-string.util";
 import { ViewerActionError, ViewerActionFailure } from "./viewer-action-relay.contract";
 
-/** A named action's public description, mutation policy and argument/result schemas. */
+/**
+ * Explicit action metadata: its public description, mutation policy and argument/
+ * result schemas. Registration never exposes an owner's other methods.
+ */
 export interface AppAction<Input extends z.ZodType = z.ZodType, Output extends z.ZodType = z.ZodType> {
     readonly name: string;
     readonly description: string;
@@ -53,7 +57,10 @@ export interface AppActionBubble {
     tone?: "error";
 }
 
-/** Saved candidate identity and payload used by its producer to reconstruct a current choice. */
+/**
+ * History is resolved again by the owning producer using its saved identity and
+ * payload; saved callbacks are never replayed.
+ */
 export interface ActionCandidateHistory {
     id: string;
     payload?: unknown;
@@ -63,7 +70,10 @@ export interface RegisteredActionCandidate extends AppActionCandidate {
     action: string;
 }
 
-/** A public control's selector/value schemas and persistence/synchronization policy. */
+/**
+ * A public typed reader/writer, separate from internal persisted AppState values.
+ * Declares selector/value schemas and persistence/synchronization policy.
+ */
 export interface AppControl<Selector extends z.ZodObject = z.ZodObject, Value extends z.ZodType = z.ZodType> {
     readonly name: string;
     readonly description: string;
@@ -146,7 +156,10 @@ export function catalogPage<T>(source: Iterable<T>, input: { offset?: number; li
     };
 }
 
-/** Per-control read limits and the first reason its returned value was shortened. */
+/**
+ * Per-control read limits and the first reason its returned value was shortened;
+ * no domain state is held here.
+ */
 export class ControlReadContext {
     reason?: "item_limit" | "byte_limit" | "text_limit";
     constructor(readonly byteLimit: number) { }

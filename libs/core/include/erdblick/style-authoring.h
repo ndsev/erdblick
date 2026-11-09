@@ -15,7 +15,10 @@ nlohmann::ordered_json const& styleAuthoringSchema();
 /** Exports plain data through Embind without allocating a JS-owned native wrapper. */
 std::string styleAuthoringSchemaJson();
 
-/** Copies canonical enum choices; missing record/field/values keys throw a JSON lookup exception. */
+/**
+     * Copy the canonical enum choices for a field in the authoring catalog.
+     * Missing record/field/values keys throw a JSON lookup exception.
+     */
 std::set<std::string> styleAuthoringEnumValues(std::string const& record, std::string const& field);
 
 }

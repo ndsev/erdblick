@@ -723,7 +723,8 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         relationTargetStyle_->parse(yaml["relation-target-style"]);
     }
     if (yaml["relation-recursive"].IsDefined()) {
-        // Retain the recursion policy passed to the backend relation channel.
+        // Parse whether relations should be resolved recursively by the backend
+        // relation channel.
         relationRecursive_ = yaml["relation-recursive"].as<bool>();
     }
     if (yaml["relation-merge-twoway"].IsDefined()) {

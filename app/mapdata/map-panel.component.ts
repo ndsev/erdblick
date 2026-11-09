@@ -834,7 +834,10 @@ export class MapPanelComponent {
         this.dialogStack.bringToFront(this.mapLayerDialog);
     }
 
-    /** Queues a trimmed filter for all views; nonempty input is delayed, while clearing applies immediately. */
+    /**
+     * Applies one presentation filter to the map trees rendered for every view.
+     * Input is trimmed; nonempty filters are delayed, while clearing applies immediately.
+     */
     updateMapFilter(filterText: string) {
         this.mapFilterText = filterText;
         this.mapFilterTextChanges.next(filterText);
@@ -1019,7 +1022,10 @@ export class MapPanelComponent {
         this.setMapsPanelVisible(!this.layerDialogVisible);
     }
 
-    /** Fits nonempty tile coverage using individual tile boxes and each range's two endpoint boxes. */
+    /**
+     * Moves the target view camera to the coverage bounds represented by one tree node.
+     * Fits nonempty coverage using individual tile boxes and each range's two endpoint boxes.
+     */
     focus(event: any, viewIndex: number, coverages: (number | CoverageRectItem)[]) {
         event.stopPropagation();
         let tileIds = coverages.map(coverage => {
@@ -1405,7 +1411,7 @@ export class MapPanelComponent {
         this.stylePresetProjectionChanges.next(this.stylePresetProjectionChanges.getValue() + 1);
     }
 
-    /** Returns the selected preset's single stylesheet, or an empty list when no preset resolves. */
+    /** Returns the selected preset's single stylesheet for editor shortcuts, or an empty list when no preset resolves. */
     selectedPresetStyleIds(node: LayerPresetNode, viewIndex: number): string[] {
         const preset = node.presets.find(candidate => candidate.key === node.selectedPresetKeys[viewIndex]);
         return preset ? [preset.styleId] : [];

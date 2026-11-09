@@ -199,9 +199,10 @@ struct TileSubsetLayer
     NativeJsValue channelSchema(uint32_t channelOrdinal) const;
 
     /**
-     * Copy terminal rows in channel order, starting at offset. A zero limit
-     * includes the remaining channel; a missing channel returns an empty list.
-     * Entries without a feature identity are omitted, so fewer rows may be returned.
+     * Copy a range of terminal rows for consumer-owned ingestion, in channel
+     * order starting at offset. A zero limit includes the remaining channel; a
+     * missing channel returns an empty list. Entries without a feature identity
+     * are omitted, so fewer rows may be returned.
      *
      * Values follow `channelSchema()`'s featureFields for feature scope and
      * entryFields for other scopes. Optional positions use a representative
@@ -265,8 +266,9 @@ struct TileSubsetLayer
     std::string toJson() const;
 
     /**
-     * Replace the output buffer with serialized SIMFIL diagnostics. Return false
-     * without changing output when serialization fails.
+     * Copy serialized SIMFIL diagnostics into the JS-visible output byte buffer,
+     * replacing its contents. Returns false without changing output when
+     * serialization fails.
      */
     bool copyDiagnostics(SharedUint8Array& output) const;
 

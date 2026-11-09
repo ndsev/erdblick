@@ -127,7 +127,10 @@ export class DatasourcesComponent {
         this.dialogStack.bringToFront(this.editorDialog);
     }
 
-    /** Releases editor subscriptions and session state; in-flight HTTP requests are not cancelled here. */
+    /**
+     * Tears down editor state when the dialog closes so stale subscriptions do not linger.
+     * In-flight HTTP requests are not cancelled here.
+     */
     onEditorDialogHide() {
         this.cleanupEditorSubscriptions();
         this.editorService.closeSession(this.datasourcesEditorSessionId);
@@ -141,7 +144,10 @@ export class DatasourcesComponent {
         this.getConfig();
     }
 
-    /** Rejects empty/read-only edits, posts the text, and clears the modified flag before the response. */
+    /**
+     * Posts the edited datasource configuration back to the backend.
+     * Rejects empty/read-only edits and clears the modified flag before the response.
+     */
     applyEditedDatasourceConfig() {
         if (this.readOnly) {
             return;

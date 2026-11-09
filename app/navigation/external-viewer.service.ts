@@ -63,7 +63,10 @@ export class ExternalViewerService implements AppActionContributor {
         return { lon: destination.lon, lat: destination.lat, source: "viewport" };
     }
 
-    /** Requests a separate tab for a configured provider; invalid coordinates are ignored. */
+    /**
+     * Request a separate browser tab for one configured provider at the supplied
+     * WGS84 point. Invalid coordinates are ignored.
+     */
     open(provider: ExternalViewerProvider, location: ExternalViewerLocation): void {
         if (!isValidExternalViewerLocation(location)) {
             return;

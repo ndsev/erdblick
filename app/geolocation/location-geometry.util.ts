@@ -28,9 +28,9 @@ export function locationExtent(value: unknown): RenderRectangle | undefined {
 }
 
 /**
- * Check coordinates, ring closure, nonzero planar area and the vertex budget.
- * A rejected ring rejects the whole geometry; ring intersections and hole
- * containment are outside this structural validation.
+ * Validates a boundary once; malformed rings reject the whole geometry.
+ * Checks coordinates, ring closure, nonzero planar area and the vertex budget.
+ * Ring intersections and hole containment are outside this structural validation.
  */
 export function locationPolygons(value: unknown): LocationPolygon[] | undefined {
     if (!value || typeof value !== "object") return undefined;

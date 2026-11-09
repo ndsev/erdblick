@@ -153,7 +153,10 @@ export class StyledMapgetLayer {
         );
     }
 
-    /** Copy requested partition coverage and retire values whose partitions were removed. */
+    /**
+     * Replace exact tagged partition demand. Copies requested coverage and retires
+     * values whose partitions were removed.
+     */
     setPartitionCoverage(
         partitions: readonly PartitionId[],
         priorityPartitions: readonly PartitionId[] = [],
@@ -293,8 +296,9 @@ export class StyledMapgetLayer {
     }
 
     /**
-     * Pin a state against off-coverage disposal. Deliveries may still replace its
-     * installed value, and disposing this presentation releases even pinned states.
+     * Retain a tile state while an in-flight visualization owns it, protecting it
+     * against off-coverage disposal. Deliveries may still replace its installed
+     * value, and disposing this presentation releases even pinned states.
      */
     retainTileState(state: FilterTileState): void {
         this.assertLive();

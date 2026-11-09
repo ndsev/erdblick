@@ -530,8 +530,8 @@ export function deckInteractionHaloUsesCoverage(
 /**
  * Projects one stable WGS84 anchor into drawing-buffer coordinates.
  *
- * The hatch keeps constant drawing-buffer pixel width and spacing, while
- * subtracting this moving origin pins its phase to the map during a pan.
+ * The hatch remains screen-space (constant drawing-buffer pixel width and spacing),
+ * while subtracting this moving origin pins its phase to the map during a pan.
  */
 export function deckInteractionStripeOrigin(
     viewport: PreRenderOptions["viewports"][number],
@@ -730,8 +730,9 @@ export class DeckInteractionOutline implements Effect {
     }
 
     /**
-     * Render the registered mask layers present in this frame, then build each
-     * group's blur fields. Stripe phase uses the first viewport's world projection.
+     * Renders stable feature identities into a group-local coverage source.
+     * Only registered mask layers present in this frame are rendered, then each
+     * group's blur fields are built. Stripe phase uses the first viewport's projection.
      */
     preRender(options: PreRenderOptions): void {
         if (options.isPicking || !this.context || !this.maskPass ||
@@ -783,8 +784,9 @@ export class DeckInteractionOutline implements Effect {
     }
 
     /**
-     * Borrow the current group textures for a fullscreen draw, or return null before
-     * allocation. Resizing, removing the group, or cleanup can invalidate them.
+     * Supplies the current textures and resolved material to the fullscreen layer.
+     * Textures are borrowed, or null is returned before allocation. Resizing,
+     * removing the group, or cleanup can invalidate them.
      */
     screenInput(groupId: string): {
         identityTexture: Texture;

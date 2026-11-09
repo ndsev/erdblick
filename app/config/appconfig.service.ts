@@ -96,8 +96,9 @@ export class AppConfigService {
     }
 
     /**
-     * Share the initialization promise for static and server configuration.
-     * Later preset refreshes update snapshot/config$ without replacing this promise.
+     * Loads `/static-config/config.json` and server configuration once, sharing the
+     * initialization promise. Later preset refreshes update snapshot/config$
+     * without replacing this promise.
      */
     async load(): Promise<AppConfig> {
         if (this.loadPromise !== null) {
@@ -293,7 +294,10 @@ export class AppConfigService {
         return { serverConfig, erdblickConfig };
     }
 
-    /** Validate an already decoded payload, preserving malformed preset presence. */
+    /**
+     * Validate an already decoded configuration payload. A present but non-array
+     * mapPresets value becomes [] with _mapPresetsInvalid set to true.
+     */
     private parseRawConfig(rawConfig: unknown, sourceLabel: string): RawAppConfig {
         const mapPresetsPresent = isPlainObject(rawConfig)
             && Object.prototype.hasOwnProperty.call(rawConfig, "mapPresets");

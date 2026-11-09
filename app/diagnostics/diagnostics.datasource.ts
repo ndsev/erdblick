@@ -341,7 +341,10 @@ export class DiagnosticsDatasource implements OnDestroy {
         this.refreshLogs();
     }
 
-    /** Assemble progress and finish viewport timing when backend and browser queues are done. */
+    /**
+     * Assemble current-generation progress without retaining historical tile state.
+     * Finish viewport timing when the backend and browser queues are done.
+     */
     private buildSnapshot(): DiagnosticsSnapshot {
         const summary = this.viewDiagnostics.currentSummary();
         const expected = summary.expected;

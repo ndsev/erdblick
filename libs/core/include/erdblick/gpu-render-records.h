@@ -85,7 +85,10 @@ enum class GpuScreenLengthAnchor {
     Center,
 };
 
-/** Path-wide values expanded into segment records; spans are borrowed only during appendPath(). */
+/**
+ * Path-wide values expanded into independently drawable segment records.
+ * Spans are borrowed only during appendPath().
+ */
 struct GpuPathRecordData {
     std::span<mapget::Point const> points;
     std::span<float const> lateralOffsetsPx;
@@ -126,7 +129,10 @@ struct GpuIconRecordData {
     GpuRecordStyle style;
 };
 
-/** Stream ranges for one path/arrow pair, valid only in the producing builder until reset(). */
+/**
+ * Final stream ranges belonging to one path and its optional arrowheads, valid
+ * only in the producing builder until reset().
+ */
 struct GpuPathRecordHandle {
     uint32_t pathStreamIndex = 0xffffffffU;
     uint32_t firstPathRecord = 0U;
@@ -158,7 +164,7 @@ public:
     /** Clear one completed or failed packet while retaining stream allocations. */
     void reset();
 
-    /** Sets sequencing/origin metadata before any contribution or primitive records exist. */
+    /** Set packet sequencing and deterministic origin metadata before any contribution or primitive records exist. */
     void configure(
         uint32_t sceneGeneration,
         uint32_t packetSequence,
@@ -183,15 +189,20 @@ public:
         bool ring = false);
 
     /**
-     * Expands a polyline; fewer than two points or nonpositive width emits nothing.
-     * Screen-length anchors require two points; overlays require a narrower compact stroke.
+     * Expand one directed polyline into final adjacency segment and arrow records.
+     * Fewer than two points or nonpositive width emits nothing. Screen-length
+     * anchors require two points; overlays require a narrower compact stroke.
      */
     [[nodiscard]] GpuPathRecordHandle appendPath(
         GpuPathRecordData const& path,
         bool billboard,
         bool depthTest);
 
-    /** Patches a live full-layout path/arrow handle; clamps negative thresholds to zero and rejects compact paths. */
+    /**
+     * Patch one transition group's final contraction threshold in-place using a
+     * live full-layout path/arrow handle. Clamps negative thresholds to zero and
+     * rejects compact paths.
+     */
     void updateAdaptiveOffsetThreshold(
         GpuPathRecordHandle const& handle,
         float threshold);
@@ -208,7 +219,11 @@ public:
         double polygonHeight = 0.0,
         bool surfaceShading = false);
 
-    /** Appends complete triangles (trailing vertices are ignored); positive height extrudes exact-coordinate boundary edges. */
+    /**
+     * Append triangle-list surface geometry, ignoring trailing vertices that do
+     * not form a complete triangle. Positive height extrudes exact-coordinate
+     * boundary edges.
+     */
     void appendTriangleMesh(
         std::span<mapget::Point const> points,
         GpuRecordStyle const& style,
@@ -222,7 +237,11 @@ public:
         bool billboard,
         bool depthTest);
 
-    /** Appends picks in contribution/local-index order after geometry; complete builds require dense local indices from zero. */
+    /**
+     * Add semantic picking metadata after geometry assigns local indices.
+     * Append in contribution/local-index order; complete builds require dense
+     * local indices from zero.
+     */
     void appendPick(GpuPickRecord pick);
 
     /** Add one logical label owned by its current contribution. */
@@ -231,10 +250,17 @@ public:
     /** Add a deduplicated missing browser-resource request. */
     void appendResourceRequest(GpuResourceRequest request);
 
-    /** Appends an issue for an existing contribution; keep issues grouped by increasing owner for fragmentation. */
+    /**
+     * Add one style evaluation issue without touching primitive streams.
+     * Its contribution must exist; keep issues grouped by increasing owner for
+     * fragmentation.
+     */
     void appendRuntimeIssue(GpuRuntimeIssue issue);
 
-    /** Encodes a closed packet after logical ownership checks; throws on invalid metadata or size overflow. */
+    /**
+     * Encode the complete transferable packet after closing contributions and
+     * checking logical ownership. Throws on invalid metadata or size overflow.
+     */
     [[nodiscard]] std::vector<std::byte> build() const;
 
     /** Splits a closed revision into bounded fragments; throws if an individual record or z-index table cannot fit. */

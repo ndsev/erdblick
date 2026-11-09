@@ -65,7 +65,10 @@ export function normalizeWasmException(exception: unknown): Error {
 }
 
 // Served by Angular as a static asset; see angular.json assets (/bundle/wasm).
-/** Shares one initialization attempt, including its rejected promise if loading fails. */
+/**
+ * Initializes the shared WASM module singleton. Callers share one attempt,
+ * including its rejected promise if loading fails.
+ */
 export async function initializeLibrary(): Promise<void> {
     // If the real library has already been initialized, simply reuse the existing instance.
     if (coreLib) {
@@ -90,8 +93,9 @@ export async function initializeLibrary(): Promise<void> {
 
 /**
  * Run a WASM function which places data in a SharedUint8Array,
- * and return a detached byte copy. The synchronous callback borrows the native
- * buffer only for its duration; false returns null and exceptions propagate.
+ * and then retrieve this data as a detached Uint8Array copy. Returns null
+ * if the user function returns false. The synchronous callback borrows the native
+ * buffer only for its duration; exceptions propagate.
  */
 export function uint8ArrayFromWasm<T>(fun: (data: SharedUint8Array) => T | false): Uint8Array | null {
     let sharedGlbArray: SharedUint8Array | null = null;
@@ -138,8 +142,10 @@ export function uint8ArrayToWasmOrThrow<T>(
 
 /**
  * Strict byte-to-WASM boundary for callers which own an error channel.
- * The synchronous callback borrows the copied native buffer until it returns;
- * false becomes null. Native exceptions are translated before the buffer is released.
+ * Native exceptions retain their concrete message instead of becoming a
+ * generic null parse result. The synchronous callback borrows the copied native
+ * buffer until it returns; false becomes null. Exceptions are translated before
+ * the buffer is released.
  */
 export function uint8ArrayToWasmOrThrow<T>(
     fun: (d: SharedUint8Array) => T | false,
@@ -169,7 +175,11 @@ export function uint8ArrayToWasmOrThrow<T>(
 export function uint8ArrayToWasmAsync<T>(fun: (d: SharedUint8Array) => Promise<T> | T, inputData: Uint8Array): Promise<T>;
 export function uint8ArrayToWasmAsync<T>(fun: (d: SharedUint8Array) => Promise<T | false> | T | false, inputData: Uint8Array): Promise<T | null>;
 
-/** Holds the copied native buffer until the callback settles; it must not be retained afterward. */
+/**
+ * Async variant of `uint8ArrayToWasm` for callbacks that await additional work.
+ * Holds the copied native buffer until the callback settles; it must not be
+ * retained afterward.
+ */
 export async function uint8ArrayToWasmAsync<T>(fun: (d: SharedUint8Array) => Promise<T | false> | T | false, inputData: Uint8Array): Promise<T | null> {
     let sharedGlbArray: SharedUint8Array | null = null;
     try {

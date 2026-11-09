@@ -79,9 +79,10 @@ public:
         float pixelHeight);
 
     /**
-     * Retain the subset's native model independently of its temporary wrapper,
-     * assigning its scene revision and activation identity. Reject an empty model
-     * or a second contribution before resetForNextTile().
+     * Install the single subset with its independently replaceable scene identity.
+     * Retains the native model independently of its temporary wrapper and assigns
+     * its scene revision/activation identity. Rejects an empty model or a second
+     * contribution before resetForNextTile().
      */
     void addTileSubsetContribution(
         TileSubsetLayer const& subset,
@@ -98,9 +99,10 @@ public:
     void run();
 
     /**
-     * Release the previous subset and clear packet/picking output for reuse.
-     * The borrowed style/LOD and cached channel bindings survive; reuse requires
-     * the same projection plan. Reinstall coordinate, packet and icon metadata.
+     * Release the previous subset and clear packet/picking output while retaining
+     * hot-path storage for reuse. The borrowed style/LOD and cached channel
+     * bindings survive; reuse requires the same projection plan. Reinstall
+     * coordinate, packet and icon metadata.
      */
     void resetForNextTile();
 

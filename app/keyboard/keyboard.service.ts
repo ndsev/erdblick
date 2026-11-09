@@ -95,8 +95,9 @@ export class KeyboardService {
     }
 
     /**
-     * Replace the key's callback and optionally suppress it while editing text.
-     * Existing suppression remains until unregisterShortcut removes the key.
+     * Registers a shortcut and optionally ignores it while the user edits text inputs.
+     * Replaces any callback for the same key, but existing suppression remains
+     * until unregisterShortcut removes the key.
      */
     registerShortcut(keys: string, callback: (event: KeyboardEvent) => void, preventOnInput: boolean = false): void {
         this.shortcuts.set(keys, callback);

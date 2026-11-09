@@ -13,9 +13,9 @@ export class PointCloudInputBudget {
     private limit = (DEFAULT_POINT_CLOUD_POLICY.workingMemoryMiB - 16) * 1048576 / 4;
 
     /**
-     * Derive the input allowance from a finite working-byte limit, reserving worker
-     * copies/model storage and fixed overhead. Shrinks evict synchronously in
-     * insertion order; replacing a claim does not promote its position.
+     * Leave space for worker copies/model storage and at least one worker's fixed overhead.
+     * The working-byte limit must be finite. Shrinks evict synchronously in insertion
+     * order; replacing a claim does not promote its position.
      */
     setWorkingLimit(bytes: number): void {
         this.limit = Math.max(0, (bytes - 16 * 1048576) / 4);

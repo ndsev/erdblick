@@ -83,7 +83,10 @@ export function normalizeOmnibarHistoryEntry(raw: unknown): OmnibarHistoryStateE
     };
 }
 
-/** JSON-roundtrips payloads up to 8192 serialized UTF-16 code units; rejects failed or larger encodings. */
+/**
+ * Returns a small JSON-serializable payload value, or undefined if encoding fails
+ * or exceeds 8192 UTF-16 code units. Successful values are JSON-roundtripped.
+ */
 export function normalizeOmnibarHistoryPayload(payload: unknown): unknown {
     if (payload === undefined) {
         return undefined;

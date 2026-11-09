@@ -16,7 +16,10 @@ class Cartesian2Impl {
 class Cartesian3Impl {
     constructor(public x: number = 0, public y: number = 0, public z: number = 0) {}
 
-    /** Converts degrees and metre height using a sphere of radius EARTH_RADIUS_METERS. */
+    /**
+     * Converts degrees plus height into an ECEF-like Cartesian approximation.
+     * Uses a sphere of radius EARTH_RADIUS_METERS; height is in metres.
+     */
     static fromDegrees(longitudeDegrees: number, latitudeDegrees: number, heightMeters: number = 0): Cartesian3Impl {
         const lon = longitudeDegrees * DEG_TO_RAD;
         const lat = latitudeDegrees * DEG_TO_RAD;
@@ -53,7 +56,10 @@ class Cartesian3Impl {
         return result;
     }
 
-    /** Computes the cross product; result must not alias either input vector. */
+    /**
+     * Computes the vector cross product into the provided result object.
+     * result must not alias either input vector.
+     */
     static cross(lhs: Cartesian3Impl, rhs: Cartesian3Impl, result: Cartesian3Impl = new Cartesian3Impl()): Cartesian3Impl {
         result.x = lhs.y * rhs.z - lhs.z * rhs.y;
         result.y = lhs.z * rhs.x - lhs.x * rhs.z;
@@ -141,7 +147,7 @@ class RectangleImpl {
         );
     }
 
-    /** Returns component-wise bounds for unwrapped rectangles; antimeridian wrapping is not handled. */
+    /** Returns the union of two unwrapped rectangles; antimeridian wrapping is not handled. */
     static union(lhs: RectangleImpl, rhs: RectangleImpl, result?: RectangleImpl | null): RectangleImpl {
         const out = result ?? new RectangleImpl();
         out.west = Math.min(lhs.west, rhs.west);
@@ -151,7 +157,7 @@ class RectangleImpl {
         return out;
     }
 
-    /** Tests inclusive radian bounds for an unwrapped rectangle (west <= east). */
+    /** Tests whether a point lies inside the rectangle's inclusive radian bounds (west <= east). */
     static contains(rect: RectangleImpl, point: {longitude?: number; latitude?: number; x?: number; y?: number}): boolean {
         const longitude = typeof point.longitude === "number" ? point.longitude : point.x;
         const latitude = typeof point.latitude === "number" ? point.latitude : point.y;

@@ -161,7 +161,9 @@ export class RightClickMenuService {
         this.rebuildMenuItems();
     }
 
-    /** Keep the first concrete hit for each map/layer/feature identity, ignoring
+    /**
+     * Replaces the ordered first-section rows from a desktop drill-pick.
+     * Keeps the first concrete hit for each map/layer/feature identity, ignoring
      * partition in deduplication. The caller supplies hit order and any pick limit.
      */
     setPickedFeatures(features: TileFeatureId[]): void {
@@ -276,7 +278,7 @@ export class RightClickMenuService {
         };
     }
 
-    /** Build an action selecting all rows in the current deduplicated pick set. */
+    /** Builds the explicit multi-selection action for all current deduplicated picks under the cursor. */
     private selectAllPickedFeaturesMenuItem(): MenuItem {
         return {
             automationId: "inspect-all-picked-features",

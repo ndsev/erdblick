@@ -76,8 +76,9 @@ function resizeAxis(
 }
 
 /**
- * Clamp the moved edges for one corner-resize gesture. Starting fixed edges must
- * already lie inside the viewport; they are preserved throughout the gesture.
+ * Calculates the moved edges for one AppDialog corner-resize gesture, clamped to
+ * the viewport. Starting fixed edges must already lie inside the viewport;
+ * they are preserved throughout the gesture.
  */
 export function resizeAppDialogBounds(
     start: AppDialogBounds,

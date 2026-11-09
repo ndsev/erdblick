@@ -108,7 +108,10 @@ export function dataSourceReadinessStatus(
     return item.schemaStatus === "failed" ? "failed" : "ready";
 }
 
-/** Treat progress <= 1 as a fraction and larger values as percentages; clamp for display. */
+/**
+ * Normalizes optional datasource startup progress to a display percentage.
+ * Treats progress <= 1 as a fraction and larger values as percentages; clamps for display.
+ */
 export function dataSourceProgressPercent(item: Pick<MapInfoItem, "progress">): number | null {
     if (typeof item.progress !== "number" || !Number.isFinite(item.progress)) {
         return null;

@@ -1,7 +1,8 @@
 /**
  * Resolve rendered feature picks into stable navigation anchors.
  * Renderer geometry, physical-altitude metadata and fallback depth coordinates
- * provide candidate positions; the active view decides when to navigate.
+ * provide candidate positions; the active view decides when to navigate and how
+ * to retain the resulting target.
  */
 import type { Deck, PickingInfo } from "@deck.gl/core";
 import { addMetersToLngLat } from "@math.gl/web-mercator";
@@ -106,9 +107,11 @@ export function navigationAnchorFromPickingInfo(picked: PickingInfo): Navigation
     return navigationTargetFromPickingInfo(picked)?.position ?? null;
 }
 
-/** Return a finite target for an eligible layer. preferPickedCoordinate bypasses
- * semantic anchors only when no altitude resolver is present. Path anchors must
- * pass the screen-distance check; a failed path snap does not fall back to depth.
+/**
+ * Returns the finite physical target and optional surface orientation of an
+ * eligible camera-navigation layer. preferPickedCoordinate bypasses semantic
+ * anchors only when no altitude resolver is present. Path anchors must pass the
+ * screen-distance check; a failed path snap does not fall back to depth.
  */
 export function navigationTargetFromPickingInfo(
     picked: PickingInfo,
@@ -302,8 +305,10 @@ function meterOffsetAnchor(
     return [position[0], position[1], position[2]];
 }
 
-/** Snap to the centerline segment nearest the pointer in screen space, then
- * perspective-correct its XYZ interpolation. The tolerance is in CSS pixels.
+/**
+ * Snaps a picked path ribbon point to its base centerline, choosing the segment
+ * nearest the pointer in screen space and perspective-correcting its XYZ
+ * interpolation. The tolerance is in CSS pixels.
  */
 function nearestPathCenterlineAnchor(
     picked: PickingInfo,
@@ -389,9 +394,10 @@ interface HomogeneousProjectedPoint {
 }
 
 /**
- * Find the closest screen point on the front-of-camera portion of a common-space
- * segment. Clip homogeneous W before division to avoid behind-camera projections;
- * this is not a full viewport/near/far-frustum clipping operation.
+ * Returns the closest screen point on the front-of-camera portion of one
+ * perspective-projected common-space segment. Clip homogeneous W before division
+ * to avoid the enormous false projections produced when one source vertex is
+ * behind the camera. This is not full viewport/near/far-frustum clipping.
  */
 function closestVisibleProjectedSegmentPoint(
     pixelProjectionMatrix: number[],

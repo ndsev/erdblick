@@ -74,7 +74,7 @@ public:
         bool addressScope_ = false;
         std::string schemaType_;
 
-        /** Populates a fresh scalar node and type decorations; returns false for compound values. */
+        /** Convert a primitive into a fresh scalar node and decorate known meanings; returns false for compound values. */
         bool setScalarValue(simfil::Value const& value);
 
         /** Source-data backlink attached to an inspection node. */
@@ -120,7 +120,10 @@ public:
      */
     static void finalizeTree(InspectionNode& root);
 
-    /** Renders incoming rows using their source models, grouping adjacent entries with the same source identity. */
+    /**
+     * Render backend-associated incoming relations using their original source
+     * models, grouping adjacent entries with the same source identity.
+     */
     JsValue convertIncoming(mapget::FeatureInspectionView const& view);
 
     /**
@@ -200,7 +203,10 @@ public:
     /** Convert one relation and attach hover metadata if applicable. */
     void convertRelation(mapget::model_ptr<mapget::Relation> const& r);
 
-    /** Converts geometry metadata/coordinates; Points share the preview budget, while other geometries remain complete. */
+    /**
+     * Convert one geometry node, including its semantic name and coordinates.
+     * Points share the preview budget; other geometries remain complete.
+     */
     void convertGeometry(
         JsValue const& key,
         mapget::model_ptr<mapget::Geometry> const& r,
@@ -250,13 +256,16 @@ public:
     /** Intern or reuse a field/value string through the converter's JS string cache. */
     JsValue convertString(const simfil::StringId& f);
 
-    /** Caches a copied JS string under a borrowed key; f's storage must outlive all cache lookups. */
+    /**
+     * Convert or reuse a string_view through the JS string cache. The JS value is
+     * copied, but f's borrowed storage must outlive all cache lookups.
+     */
     JsValue convertString(const std::string_view& f);
 
-    /** Uses the same borrowed-key cache; the source string must remain alive and unchanged. */
+    /** Convert or reuse a std::string through the borrowed-key cache; its storage must remain alive and unchanged. */
     JsValue convertString(const std::string& f);
 
-    /** Uses the same borrowed-key cache; s must be non-null and its storage must remain alive. */
+    /** Convert or reuse a non-null C-string through the borrowed-key cache; its storage must remain alive. */
     JsValue convertString(const char* s);
 
     std::string featureId_;

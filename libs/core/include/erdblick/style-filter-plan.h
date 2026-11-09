@@ -38,8 +38,9 @@ struct StyleFilterPlan
 };
 
 /**
- * Select active rules for this layer, highlight mode and LOD, then request the
- * feature/entry projections needed by the renderer. Invalid rule combinations
+ * Plan one concrete map/layer presentation without sending style semantics to
+ * mapget. Select active rules for this layer, highlight mode and LOD, then request
+ * the feature/entry projections needed by the renderer. Invalid rule combinations
  * are collected as issues; callers must reject the entire plan when valid is false.
  */
 StyleFilterPlan planStyleFilter(
@@ -49,6 +50,7 @@ StyleFilterPlan planStyleFilter(
     uint8_t lod);
 
 /**
+ * Expand Erdblick-only expression conveniences to their generic server form.
  * Replace the reserved $mergeCount spelling at identifier boundaries with
  * count($features.*) for server group evaluation. This is a textual rewrite.
  * The renderer applies the same mapping when binding an authored expression

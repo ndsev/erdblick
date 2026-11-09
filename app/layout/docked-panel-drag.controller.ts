@@ -28,10 +28,12 @@ interface DockedPanelDragControllerOptions<TId> {
 type DockedPanelDragMode = "reorder" | "undock";
 
 /**
- * Track one pointer gesture for docked panels and report the final reorder or
- * undock to the owning component. DOM order is sampled at drop time; the owner
- * persists the resulting order. Call destroy() when that component is removed
- * to release window listeners and the temporary body-mounted preview.
+ * Shared drag controller for AppPanel-backed dock entries.
+ *
+ * Tracks one pointer gesture and reports the final reorder or undock to the owning
+ * component. DOM order is sampled at drop time; the owner persists the resulting
+ * order. Call destroy() when that component is removed to release window listeners
+ * and the temporary body-mounted preview.
  */
 export class DockedPanelDragController<TId> {
     readonly state: DockedPanelDragState<TId> = {

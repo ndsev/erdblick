@@ -24,9 +24,10 @@ interface DiagnosticsProvider {
 /**
  * Read-through registry for current view presentation diagnostics.
  *
- * It owns neither subsets nor historical samples. Reads reuse cached snapshots
- * until a provider change or notification invalidates them. Callers must treat
- * returned objects as read-only; the service does not clone them per read.
+ * It owns neither subsets nor historical samples. Snapshots come from the
+ * StyledMapgetLayers currently owned or consumed by live view controllers and
+ * are cached until a provider change or notification invalidates them. Callers
+ * must treat returned objects as read-only; the service does not clone per read.
  */
 @Injectable({providedIn: "root"})
 export class ViewLayerDiagnosticsService {

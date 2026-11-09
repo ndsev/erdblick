@@ -97,7 +97,10 @@ export class GpuIconAtlas {
         }));
     }
 
-    /** Resolve a catalog page for a Deck device, uploading newly appended images before returning. */
+    /**
+     * Resolve and lazily synchronize one fixed atlas page for a Deck device.
+     * Uploads newly appended images before returning.
+     */
     texture(device: Device, atlasPage: number): Texture {
         let pages = this.devicePages.get(device);
         if (!pages) {

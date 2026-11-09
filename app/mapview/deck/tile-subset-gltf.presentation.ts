@@ -37,7 +37,7 @@ import type {TileSubsetRenderBridge} from
 const UNSELECTABLE = 0xffffffff;
 const MAX_TILE_SUBSET_RENDER_VERTICES = 20_000_000;
 
-/** Retained attachment awaiting installation or discard; its recipient owns both references. */
+/** A parsed attachment retained until installation or discard; its recipient owns both references. */
 export interface PreparedTileSubsetGltf {
     asset: DeckTileGltfAsset;
     assetRef: DeckTileGltfAssetRef;
@@ -95,9 +95,11 @@ export class TileSubsetGltfPresentation {
             deckTileGltfAssetStore
     ) {}
 
-    /** Fetch/parse without publication. Return null for absent inputs, failed assets
-     * or a lifecycle invalidated by clear(); other render-revision checks belong
-     * to the caller, which must install or discard each successful result once.
+    /**
+     * Fetches and parses the separately transferred GLB without publishing it.
+     * Returns null for absent inputs, failed assets or a lifecycle invalidated by
+     * clear(). Other render-revision checks belong to the caller, which must
+     * install or discard each successful result once.
      */
     async prepare(
         result: TileSubsetRenderBridge,
@@ -357,9 +359,11 @@ export class TileSubsetGltfPresentation {
         }
     }
 
-    /** Invalidate pending prepares and release active/attachment references. Pending
-     * parsed-asset references release when their promises settle. Pass the registry
-     * to remove published layers; null is for a registry already being discarded.
+    /**
+     * Removes GLTF presentation state while retaining this owner for reuse.
+     * Invalidates pending prepares and releases active/attachment references;
+     * pending parsed-asset references release when their promises settle. Pass the
+     * registry to remove published layers; null is for one already being discarded.
      */
     clear(registry: DeckLayerRegistry | null): void {
         this.lifecycleVersion += 1;
@@ -471,7 +475,9 @@ export class TileSubsetGltfPresentation {
         );
     }
 
-    /** Copy usable worker proxy ranges after checking outer array sizes and the
+    /**
+     * Validate and materialize the temporary GLTF triangle-pick bridge.
+     * Copies usable worker proxy ranges after checking outer array sizes and the
      * 20-million referenced-vertex limit. Ordered, nonoverlapping ranges are a
      * worker contract; that limit is not a total-byte budget for arbitrary input.
      */

@@ -142,10 +142,11 @@ export class InspectionFeatureTile {
     }
 
     /**
-     * Fetch and validate incoming-relation snapshots for the owning feature.
-     * Transport success is required even when the manifest reports partial scope.
-     * More than 64 snapshots or 64 MiB of snapshot bytes rejects the whole request;
-     * cancellation destroys the client and prevents publication of a late response.
+     * Load a request-local incoming-relation snapshot bundle without delaying or
+     * modifying ordinary inspection. Transport success is required even when the
+     * manifest reports partial scope. More than 64 snapshots or 64 MiB of snapshot
+     * bytes rejects the whole request; cancellation destroys the client and
+     * prevents publication of a late response.
      */
     async loadIncoming(featureId: string, signal: AbortSignal): Promise<IncomingInspectionResult> {
         signal.throwIfAborted();
@@ -220,7 +221,10 @@ export class InspectionFeatureTile {
     }
 }
 
-/** Serialized inspection handle that opens native feature wrappers only during peek(). */
+/**
+ * Inspection handle for one feature in a restricted tile value. Stores serialized
+ * data and opens native feature wrappers only during peek().
+ */
 export class FeatureWrapper implements TileFeatureId {
     constructor(
         readonly featureId: string,

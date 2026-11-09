@@ -136,8 +136,9 @@ export function tileGridExtentForLevel(
 }
 
 /**
- * Returns a column offset relative to minCol using a nearby world copy.
- * A column outside the visible extent can produce an out-of-range offset; callers must check it.
+ * Converts a tile id's raw column to an offset relative to minCol, choosing a
+ * nearby world copy so world-wrap repeats stay contiguous. Columns outside the
+ * visible extent can produce out-of-range offsets; callers must check them.
  */
 export function wrapColumnIntoExtent(rawCol: number, extent: TileGridLevelExtent): number {
     const normalizedCol = ((rawCol % extent.colCount) + extent.colCount) % extent.colCount;

@@ -997,7 +997,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.styleService.clearStorageForImportedStyles();
     }
 
-    /** Starts reloads of modified built-in styles and clears their stored overrides without awaiting completion. */
+    /**
+     * Restore built-in styles by reloading modified entries and clearing their
+     * stored overrides. Starts reloads without awaiting completion.
+     */
     clearModifiedStyles() {
         for (let [styleId, style] of this.styleService.styles) {
             if (!style.imported && style.modified) {

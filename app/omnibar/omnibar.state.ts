@@ -56,7 +56,10 @@ export class OmnibarState {
         this.historyState.next(this.normalizeHistory(entries));
     }
 
-    /** Places the command first with its current payload, dropping unresolved numeric legacy entries. */
+    /**
+     * Place a recently executed command first, keeping its current target payload
+     * and dropping unresolved numeric legacy entries.
+     */
     remember(entry: OmnibarHistoryEntry): void {
         this.replaceHistory([
             entry,

@@ -71,7 +71,10 @@ import {Popover} from "primeng/popover";
 export class ViewerActionStatusComponent {
     constructor(readonly actions: McpActionService, private readonly clipboard: ClipboardService, readonly webMcp: WebMcpService) {}
 
-    /** Show danger for unavailable controls, success while a call runs, and secondary when idle. */
+    /**
+     * Registration means available, not active; pending viewer calls own the green
+     * state. Show danger for unavailable controls and secondary when idle.
+     */
     get buttonSeverity(): "secondary" | "success" | "danger" {
         const availability = this.actions.availability$.value;
         if (availability.enabled ? !availability.ready : !this.webMcp.status$.value.viewerTools) return "danger";
@@ -90,7 +93,10 @@ export class ViewerActionStatusComponent {
         container.style.setProperty('--p-popover-arrow-left', `calc(${center}px - var(--p-popover-arrow-offset))`);
     }
 
-    /** Build a POSIX-shell client setup command with a validated endpoint and quoted arguments. */
+    /**
+     * Build client setup commands from fixed syntax and quoted metadata, never a
+     * server command template. Validate the endpoint and use POSIX-shell quoting.
+     */
     connectionText(kind: "codex" | "claude" | "copilot" | "cursor"): string {
         const info = this.actions.connectionInfo;
         if (!info.enabled) return "";

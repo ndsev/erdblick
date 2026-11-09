@@ -100,7 +100,10 @@ export class ErdblickDebugApi {
         return this.subsetRenderer.currentFrameTimeMs();
     }
 
-    /** Constructs a feature-layer key through WASM; tileId must be exactly representable as a Number. */
+    /**
+     * Construct a canonical feature-layer key through the authoritative WASM API.
+     * tileId must be exactly representable as a Number.
+     */
     mapTileKey(
         mapId: string,
         layerId: string,

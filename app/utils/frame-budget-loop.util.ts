@@ -1,12 +1,13 @@
 export type BudgetLoopScheduler = "frame" | "task";
 
 /**
- * Cooperative work queue owned and disposed by its consumer.
+ * Small consumer-owned budgeted work loop.
  *
  * Frame scheduling is the default for presentation work. Task scheduling is
  * available to transport consumers whose progress must not stop when rendering
- * misses animation frames. Each callback receives a performance.now() deadline
- * and must yield itself: this loop cannot interrupt a long-running callback.
+ * misses animation frames. It deliberately has no global queue or Angular
+ * lifetime; its consumer disposes it. Each callback receives a performance.now()
+ * deadline and must yield itself: this loop cannot interrupt a long-running callback.
  */
 export class FrameBudgetLoop<T> {
     private readonly queue: T[] = [];

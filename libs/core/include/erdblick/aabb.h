@@ -95,8 +95,9 @@ public:
     uint32_t numTileIds(uint32_t lv) const;
 
     /**
-     * Return the first level from 0 through 15 whose approximate count reaches
-     * minNumTiles, or 15 when no searched level reaches that count.
+     * Obtain the first tile level for this bounding box whose approximate tile
+     * count reaches minNumTiles. Searches levels 0 through 15 and returns 15 when
+     * none reaches that count.
      */
     uint8_t tileLevel(uint32_t minNumTiles = 8) const;
 
@@ -111,10 +112,11 @@ public:
     bool intersects(Wgs84AABB const& other) const;
 
     /**
-     * Append tiles and their prioFn scores without growing the result vector.
-     * Reserve capacity before calling; a full vector yields no new tiles.
-     * Enumeration stops at capacity in geographic scan order, so this is a
-     * bounded candidate list, not the globally best-scoring set of tiles.
+     * Obtain TileIds for a given tile level, appending each with its prioFn score
+     * to resultTileIdsWithPriority up to resultTileIdsWithPriority.capacity().
+     * Reserve capacity before calling; the vector does not grow, and a full
+     * vector yields no new tiles. Enumeration stops in geographic scan order,
+     * so this is a bounded candidate list, not the globally best-scoring set.
      * Anti-meridian boxes are split before enumeration. prioFn owns any
      * allocations or side effects it performs.
      */

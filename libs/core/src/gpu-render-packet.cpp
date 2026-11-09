@@ -195,7 +195,10 @@ private:
     std::span<std::byte const> bytes_;
 };
 
-/** Interns packet-relative string offsets; lookup keys borrow source strings for the encoder call. */
+/**
+ * String interner whose offsets are relative to the packet string table.
+ * Lookup keys borrow source strings for the encoder call.
+ */
 class StringTable
 {
 public:

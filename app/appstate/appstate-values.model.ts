@@ -31,7 +31,11 @@ export interface ConfigDefaultStateMeta {
     entries: Record<string, ConfigDefaultStateMetaEntry>;
 }
 
-/** Clone acyclic arrays, own enumerable object fields and Dates; object prototypes are discarded. */
+/**
+ * Produces a detached clone suitable for app-state snapshots and comparisons.
+ * Handles acyclic arrays, own enumerable object fields and Dates; object prototypes
+ * are discarded.
+ */
 export function cloneStateValue<T>(value: T): T {
     if (value === null || typeof value !== 'object') {
         return value;

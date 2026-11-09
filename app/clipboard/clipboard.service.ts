@@ -9,8 +9,9 @@ export class ClipboardService {
     constructor(private messageService: InfoMessageService) {}
 
     /**
-     * Copy asynchronously, falling back to a manual dialog when unavailable or
-     * rejected. Synchronous setup failures are logged; completion is not awaited.
+     * Copies text to the system clipboard. The asynchronous write falls back to a
+     * manual-copy dialog when unavailable or rejected. Synchronous setup failures
+     * are logged; completion is not awaited.
      */
     copyToClipboard(text: string, info?: string) {
         try {

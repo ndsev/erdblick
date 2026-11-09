@@ -17,7 +17,10 @@ import {
 } from "./viewer-action-relay.contract";
 import { VIEWER_ACTION_INVOCATION_BYTES, VIEWER_ACTION_RESULT_BYTES } from "./action.model";
 
-/** Action name and execution status displayed in the MCP activity popover. */
+/**
+ * Small activity summary for the MCP popover: action name and execution status.
+ * Never includes arguments, session UUIDs, credentials or map data.
+ */
 export interface ViewerActionActivity {
     action: string;
     status: "running" | "applied" | "completed" | ViewerActionError["code"];
@@ -96,9 +99,10 @@ export class McpActionService implements OnDestroy {
         this.subscriptions.add(this.stream.actionControlReceived.subscribe(({ payload, receivedAt }) => this.receive(payload, receivedAt)));
 
         void this.zone.runOutsideAngular(async () => {
-            // Allow 30 seconds for capability discovery: catalog/schema startup
-            // can occupy the main thread and delay processing an already received
-            // response. On timeout, MCP stays unavailable for this viewer session.
+            // Catalog/schema startup may occupy the main thread while this small
+            // response is already in flight. Use the action transport's 30-second
+            // discovery budget, not five seconds. On timeout, MCP stays
+            // unavailable for this viewer session.
             const timer = setTimeout(() => this.infoAbort.abort(), 30000);
             try {
                 const response = await fetch(new URL("mcp/info", document.baseURI), {
@@ -112,22 +116,29 @@ export class McpActionService implements OnDestroy {
                 this.info = parsed.data;
                 this.register();
             } catch {
-                // Keep discovery failure in the MCP availability state; the map
-                // continues loading and the adapter can be retried by reloading.
+                // Optional discovery failure must not break startup or create toast spam.
+                // Keep it in MCP availability state; the map continues loading,
+                // and reloading can retry the adapter.
             } finally {
                 clearTimeout(timer);
             }
         });
     }
 
-    /** Abort each pending agent call and report cancellation to its caller. */
+    /**
+     * Request cancellation of pending agent calls and report it to their callers.
+     * Completed mutations and human searches are untouched.
+     */
     stopCurrentAction(): void {
         for (const call of this.pending.values()) this.finish(call, undefined, {
             code: "cancelled", message: "Stopped by the user", outcome: "not_applied"
         });
     }
 
-    /** Trim the session label to 120 Unicode characters and send it to the connected relay. */
+    /**
+     * Change display metadata on the existing connection, never its identity or
+     * authorization. Trim the label to 120 Unicode characters before sending it.
+     */
     renameSession(label: string): void {
         this.sessionLabel = unicodePrefix(label.trim(), 120) || "erdblick";
         if (this.registered && this.clientId) this.stream.sendActionControl(this.clientId, {
@@ -136,7 +147,10 @@ export class McpActionService implements OnDestroy {
         });
     }
 
-    /** Abort discovery and pending calls, detach listeners and release UI automation resources. */
+    /**
+     * Abort discovery and pending calls, detach listeners and release UI automation
+     * resources without sending on a later connection.
+     */
     ngOnDestroy(): void {
         this.ui.clear();
         this.infoAbort.abort();
@@ -174,7 +188,10 @@ export class McpActionService implements OnDestroy {
         });
     }
 
-    /** Validate a relay message and route registration, cancellation or invocation to its handler. */
+    /**
+     * Validate a relay message and route registration, cancellation or invocation
+     * independently of tile request IDs and worker admission.
+     */
     private receive(payload: unknown, receivedAt: number): void {
         const parsed = viewerActionServerMessageSchema.safeParse(payload);
         if (!parsed.success) {
@@ -203,10 +220,11 @@ export class McpActionService implements OnDestroy {
     }
 
     /**
-     * Execute a WebMCP call in this browser tab through the shared relay dispatcher.
-     * `action` names a registered tool and `input` contains its arguments. The
-     * promise resolves with its validated result or rejects with ViewerActionFailure.
-     * The caller's signal, the Stop control and a 30-second deadline can cancel it.
+     * Run a WebMCP tool in this document with the same admission, output validation
+     * and Stop control as relayed calls. `action` names a registered tool and
+     * `input` contains its arguments. The promise resolves with its validated
+     * result or rejects with ViewerActionFailure. The caller's signal, Stop
+     * control and a 30-second deadline can request cancellation.
      */
     invokeLocal(action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
         signal.throwIfAborted();
@@ -336,15 +354,19 @@ export class McpActionService implements OnDestroy {
         this.zone.run(() => this.activity$.next([...this.activity$.value]));
     }
 
-    /** Publish the MCP connection status inside Angular so the status component refreshes. */
+    /**
+     * Publish MCP availability changes inside Angular so the status component
+     * refreshes, without processing streamed tile/camera frames here.
+     */
     private availability(message: string): void {
         this.zone.run(() => this.availability$.next({ enabled: this.info.enabled, ready: this.registered, message }));
     }
 
     /**
-     * Dispatch a named action through AppActionRegistry's argument/result checks.
-     * Run mutations inside Angular so state changes refresh the UI; run read-only
-     * actions outside Angular to avoid unnecessary change-detection work.
+     * Domain methods are registered by owners; the relay selects their Angular
+     * execution boundary. Dispatch through AppActionRegistry's argument/result
+     * checks, running mutations inside Angular so state changes refresh the UI
+     * and read-only actions outside it to avoid unnecessary change detection.
      */
     execute(name: string, argumentsValue: unknown, signal?: AbortSignal): unknown | Promise<unknown> {
         const declaration = this.actions.publicActions[name as string];

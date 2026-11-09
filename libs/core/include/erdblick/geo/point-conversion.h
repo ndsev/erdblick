@@ -8,7 +8,12 @@
 #include <cmath>
 
 namespace nlohmann {
-/** JSON adapter allowing `mapget::Point` values to round-trip through debug/native builds. */
+/**
+ * We add a JSON adapter for points, so we can convert mapget::Point values
+ * seamlessly to nlohmann JSON objects just as we convert them to native JS
+ * objects (see the call to em::value_object in bindings.cpp). This also supports
+ * round-tripping points in debug/native builds.
+ */
 template <>
 struct adl_serializer<mapget::Point> {
     /** Serialize a `mapget::Point` as an `{x, y, z}` JSON object. */
@@ -55,10 +60,11 @@ constexpr double WGS84_EP2 = (WGS84_A * WGS84_A - WGS84_B * WGS84_B) / (WGS84_B 
 }
 
 /**
- * Convert longitude/latitude in degrees and ellipsoidal height in metres to
- * ECEF metres. offset uses those same WGS84 units before conversion; it is
- * not a Cartesian displacement. Use a double-precision ResultVec when the
- * result will be subtracted from another Earth-scale position.
+ * Convert a WGS84 point to Cartesian ECEF coordinates.
+ * Longitude/latitude use degrees and ellipsoidal height uses metres; the result
+ * is in metres. offset uses those same WGS84 units before conversion, not a
+ * Cartesian displacement. Use a double-precision ResultVec when the result will
+ * be subtracted from another Earth-scale position.
  */
 template <typename ResultVec = glm::vec3>
 ResultVec wgsToCartesian(mapget::Point const& wgsPoint, glm::dvec3 const& offset = {.0, .0, .0})
@@ -82,8 +88,9 @@ ResultVec wgsToCartesian(mapget::Point const& wgsPoint, glm::dvec3 const& offset
 }
 
 /**
- * Convert ECEF metres to longitude/latitude in degrees and ellipsoidal height
- * in metres. Longitude is set to zero on the polar axis, where it is undefined.
+ * Convert Cartesian ECEF coordinates in metres to WGS84 longitude/latitude in
+ * degrees and ellipsoidal height in metres. Longitude is set to zero on the
+ * polar axis, where it is undefined.
  */
 template <typename ResultVec = glm::vec3>
 ResultVec cartesianToWgs(glm::dvec3 const& cart)

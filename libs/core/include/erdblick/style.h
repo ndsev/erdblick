@@ -135,8 +135,9 @@ class FeatureLayerStyle
 {
 public:
     /**
-     * Parse YAML, retaining usable rules when individual rules are rejected.
-     * Inspect validationReport() for skipped rules even when isValid() is true.
+     * Parse a style sheet from YAML stored in a byte buffer, retaining usable
+     * rules when individual rules are rejected. Inspect validationReport() for
+     * skipped rules even when isValid() is true.
      */
     explicit FeatureLayerStyle(SharedUint8Array const& yamlArray);
 
@@ -195,8 +196,9 @@ public:
     [[nodiscard]] bool hasRelationRules(FeatureStyleRule::HighlightMode mode) const;
 
     /**
-     * Return runtime-vector indices eligible for this feature type, highlight mode
-     * and LOD. Per-feature filters still need evaluation after this coarse lookup.
+     * Return candidate rule indices for a feature type in the requested render
+     * pass (highlight mode and LOD). These index the runtime rule vector;
+     * per-feature filters still need evaluation after this coarse lookup.
      *
      * The returned vector is borrowed from an internal cache and remains valid for the
      * lifetime of the style object.

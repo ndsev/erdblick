@@ -173,9 +173,10 @@ interface PreparedContextMenuPosition {
     standalone: false
 })
 /**
- * Host for one logical map view, with a layer controller retained across renderer
- * generations. It owns renderer setup/teardown, hover UI and context-menu bindings;
- * renderer rebuilds are serialized and obsolete generations cannot be installed.
+ * Host component for one interactive map view.
+ * It owns renderer setup/teardown, hover UI, right-click context-menu preparation,
+ * and view-local mode toggles. Its layer controller survives renderer generations;
+ * rebuilds are serialized and obsolete generations cannot be installed.
  */
 export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private static readonly RIGHT_DRAG_SUPPRESS_THRESHOLD_PX = 4;
@@ -451,9 +452,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /**
-     * Tear down the previous renderer and set up the requested projection outside
-     * Angular. Return the installed view, or undefined if this generation became
-     * obsolete; setup failures propagate to the queue's error UI.
+     * Recreate the viewer with a different projection for 2D/3D modes.
+     * Tears down the previous renderer and sets up the requested projection
+     * outside Angular. Returns the installed view, or undefined if this generation
+     * became obsolete; setup failures propagate to the queue's error UI.
      */
     private async createViewerForMode(
         is2D: boolean,
@@ -531,9 +533,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /**
-     * Invalidate queued setup and release this view's subscriptions and layer owner.
-     * Active renderer destruction runs asynchronously; a setup already in progress
-     * sees the changed generation and retires itself after successful setup.
+     * Stop view subscriptions and renderer ownership before destruction or reindexing.
+     * Invalidates queued setup and releases the layer owner. Active renderer
+     * destruction runs asynchronously; setup already in progress sees the changed
+     * generation and retires itself after successful setup.
      */
     private disposeView(): void {
         this.unregisterRenderView?.();
@@ -574,9 +577,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /**
-     * Queue a renderer rebuild and refresh UI bindings only for the latest setup
-     * generation. Rapid preference changes skip obsolete queued work; an active
-     * setup is allowed to settle before the next one starts.
+     * Queue a renderer rebuild and refresh hover UI, sync toggles, and the initial
+     * viewport only for the latest setup generation. Rapid preference changes
+     * skip obsolete queued work; an active setup settles before the next starts.
      */
     private initializeViewer(mode2d: boolean) {
         const setupGeneration = ++this.viewerSetupGeneration;
@@ -672,9 +675,11 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /**
-     * Install capture-phase listeners outside Angular. A right press moving more
-     * than four CSS pixels on either axis suppresses the menu; menu UI changes
-     * explicitly re-enter Angular. The matching teardown removes these listeners.
+     * Installs capturing pointer listeners directly on the viewer DOM element.
+     * This avoids PrimeNG/Cesium/deck interaction quirks and lets us suppress
+     * context menus after drags. Listeners run outside Angular; a right press
+     * moving more than four CSS pixels on either axis suppresses the menu. Menu
+     * UI changes re-enter Angular, and the matching teardown removes the listeners.
      */
     private setupViewerContextMenuHandling(): void {
         const viewer = this.viewerElement?.nativeElement;
@@ -778,9 +783,11 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /**
-     * Drill-pick asynchronously, discarding replies superseded within this host or
-     * produced by a replaced renderer. Pick failures abort opening; source-data or
-     * search preparation failures still allow the remaining menu actions to open.
+     * Prepares source-data context and opens the PrimeNG context menu at the
+     * supplied screen position. Drill-picks asynchronously, discarding replies
+     * superseded within this host or produced by a replaced renderer. Pick failures
+     * abort opening; source-data or search preparation failures still allow the
+     * remaining menu actions to open.
      */
     private async openContextMenu(menu: ContextMenu, event: { clientX: number; clientY: number; pageX: number; pageY: number }) {
         this.menuService.closeAllContextMenus();
@@ -932,9 +939,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /**
-     * Build source-data choices for levels 0–15 at the clicked world position.
-     * Prefer the deepest enabled picked tile, then an enabled visible feature level;
-     * the menu service applies its remembered-level/default fallback afterward.
+     * Derives source-data tile choices from the clicked world position and updates
+     * the menu service. Builds choices for levels 0–15, preferring the deepest
+     * enabled picked tile, then an enabled visible feature level. The menu service
+     * applies its remembered-level/default fallback afterward.
      */
     private prepareSourceDataContextMenu(contextPosition: PreparedContextMenuPosition | null): void {
         if (!this.mapView || this.appModeService.isVisualizationOnly) {
@@ -976,8 +984,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /**
-     * Group visible feature-layer tiles at the clicked position only when occupancy
-     * is known to be non-empty. Unknown, empty and error states do not create rows.
+     * Builds grouped tile diagnostics entries for visible feature layers at the
+     * clicked position when occupancy is known to be non-empty. Unknown, empty
+     * and error states do not create rows.
      */
     private prepareTileDiagnosticsContextMenu(lon: number, lat: number): void {
         const viewIndex = this.viewIndex();

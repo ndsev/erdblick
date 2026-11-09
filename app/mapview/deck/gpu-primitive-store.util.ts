@@ -130,7 +130,10 @@ export class GpuPrimitiveStore {
         this.renderHighWaterRecord = 0;
     }
 
-    /** Publish the latest allocation; superseded render buffers remain until releaseRetiredBuffers(). */
+    /**
+     * Publish the latest allocation, retaining superseded render buffers for
+     * in-flight draws until releaseRetiredBuffers().
+     */
     publish(): void {
         this.renderBuffer = this.allocator.highWaterRecord > 0
             ? this.gpuBuffer
@@ -180,7 +183,10 @@ export class GpuPrimitiveStore {
         return this.allocator.highWaterRecord - this.allocator.fragmentedRecords;
     }
 
-    /** Return diagnostics; allocatedBytes counts the current buffer, excluding retained older generations. */
+    /**
+     * Return diagnostics without reading GPU memory back to JavaScript.
+     * allocatedBytes counts the current buffer, excluding retained older generations.
+     */
     snapshot(): GpuPrimitiveStoreSnapshot {
         return {
             materialKey: this.materialKey,

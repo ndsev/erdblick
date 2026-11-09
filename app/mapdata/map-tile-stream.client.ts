@@ -138,8 +138,9 @@ export abstract class MapTileStreamClientBase {
     }
 
     /**
-     * Return borrowed slices for complete frames and the consumed-byte count.
-     * The caller retains any trailing partial frame and owns the backing bytes.
+     * Decode every complete frame from streamed HTTP chunks, returning borrowed
+     * slices and the consumed-byte count. The caller owns the backing bytes and
+     * retains any trailing partial frame.
      */
     protected decodeAvailableFrames(bytes: Uint8Array): DecodedTransportFrames {
         const frames: QueuedTransportFrame[] = [];

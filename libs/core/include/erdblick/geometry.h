@@ -9,9 +9,10 @@ namespace erdblick
 {
 
 /**
- * Signed 2D cross product of lineVector and (p - lineStart).
- * Positive means left of the directed line, negative right, and zero on it;
- * altitude is ignored and the magnitude is not a normalized distance.
+ * Calculate the side of a point relative to a line defined by a start point and
+ * direction vector. Returns the signed 2D cross product of lineVector and
+ * (p - lineStart): positive means left, negative right, and zero on the line.
+ * Altitude is ignored; the magnitude is not a normalized distance.
  */
 double pointSideOfLine(m::Point const& lineVector, m::Point const& lineStart, m::Point const& p);
 
@@ -22,8 +23,9 @@ double pointSideOfLine(m::Point const& lineVector, m::Point const& lineStart, m:
 bool checkIfTriangleIntersectsWithInfinite2dLine(m::Point const& lineStart, m::Point const& lineVector, m::Point const& triA, m::Point const& triB, m::Point const& triC);
 
 /**
- * Test XY coordinates against triangle edge half-planes, including the edges.
- * Callers must supply a non-degenerate triangle; altitude is ignored.
+ * Returns whether the given point is inside the given 2D triangle, including its
+ * edges. Tests XY edge half-planes and ignores altitude; callers must supply a
+ * non-degenerate triangle.
  */
 bool isPointInsideTriangle(m::Point const& p, m::Point const& p0, m::Point const& p1, m::Point const& p2);
 

@@ -854,7 +854,10 @@ export class SearchStyleColorComponent implements OnChanges {
         return undefined;
     }
 
-    /** Explain the current aggregation state; the requesting action starts the work. */
+    /**
+     * Explains why observed data is not available yet. The requesting action starts
+     * lazy aggregation; this method only reports its current state.
+     */
     private dataSummaryMissingMessage(): string {
         if (this.dataSummaryStatus === "loading") {
             return "Summarizing observed values...";

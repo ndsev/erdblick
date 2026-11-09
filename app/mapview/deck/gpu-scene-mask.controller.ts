@@ -66,10 +66,11 @@ class SparseMaskTargetTable {
         this.targetTexture = this.createTexture(this.height);
     }
 
-    /** Return the borrowed sampled texture after updating targets. requiredRecords
-     * must cover every target index; capacity grows geometrically and never shrinks.
-     * Growth publishes only after upload succeeds; an in-place upload can fail
-     * after earlier spans have already changed.
+    /**
+     * Update sparse identities and return the current sampled texture, borrowed
+     * from this owner. requiredRecords must cover every target index; capacity
+     * grows geometrically and never shrinks. Growth publishes only after upload
+     * succeeds; an in-place upload can fail after earlier spans have changed.
      */
     update(next: ReadonlyMap<number, DeckRgba>, requiredRecords: number): Texture {
         const nextHeight = this.requiredHeight(requiredRecords);
@@ -214,10 +215,12 @@ export class GpuSceneMaskController {
         private readonly flattenZ: boolean
     ) {}
 
-    /** Replace an owner's targets and schedule reconciliation. Collections/anchor are
-     * copied, but overlay objects and their nested effects/targets are borrowed;
-     * keep them unchanged until replaced. Owners sharing an overlay ID must agree
-     * on its effect/order/anchor because the first owner supplies the group settings.
+    /**
+     * Replace one stable scene owner's exact local targets and schedule reconciliation.
+     * Collections/anchor are copied, but overlay objects and their nested effects/
+     * targets are borrowed; keep them unchanged until replaced. Owners sharing an
+     * overlay ID must agree on its effect/order/anchor because the first owner
+     * supplies the group settings.
      */
     setOverlays(
         ownerId: string,
@@ -380,7 +383,10 @@ export class GpuSceneMaskController {
         }
     }
 
-    /** Reconcile groups independently; allocation/upload failures do not roll back earlier groups. */
+    /**
+     * Install, mutate, or remove hidden mask layers, reconciling groups independently.
+     * Allocation/upload failures do not roll back earlier groups.
+     */
     private reconcile(): void {
         this.reconcileHandle = null;
         this.reconcileDelayMs = null;

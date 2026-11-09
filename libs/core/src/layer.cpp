@@ -53,8 +53,9 @@ std::optional<uint32_t> relationIndexForSource(
 }
 
 /**
- * Copy JSON into embind-facing values. Integers outside JS's exact number range
- * become decimal strings so feature identities and raw values do not lose bits.
+ * Convert nlohmann JSON into JsValue for embind-facing APIs. Integers outside
+ * JS's exact number range become decimal strings so feature identities and raw
+ * values do not lose bits.
  */
 auto jsonToJsValue(nlohmann::json const& json) -> erdblick::JsValue
 {
@@ -100,7 +101,10 @@ auto jsonToJsValue(nlohmann::json const& json) -> erdblick::JsValue
     return JsValue();
 }
 
-/** Use the first geometry with a usable WGS84 center; this is not a collection centroid. */
+/**
+ * Pick a representative WGS84 center for one copied subset geometry collection.
+ * Uses the first geometry with a usable center, not a collection centroid.
+ */
 auto subsetGeometryCenter(
     mapget::model_ptr<mapget::GeometryCollection> const& collection)
     -> std::optional<mapget::Point>
