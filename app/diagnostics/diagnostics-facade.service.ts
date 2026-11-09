@@ -1,25 +1,24 @@
 import { Injectable, NgZone, OnDestroy } from "@angular/core";
 import { BehaviorSubject } from "rxjs";
 import { z } from "zod";
-
-import { boundedCollection, identifierSchema, rejectAction } from "../action/action.model";
 import { AppActionContributor, AppActionRegistration } from "../action/action-contributor.model";
+import { boundedCollection, identifierSchema, rejectAction } from "../action/action.model";
+import { AppStateService } from "../appstate/appstate.service";
 import {
     DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID,
     DIAGNOSTICS_PERFORMANCE_DIALOG_LAYOUT_ID
 } from "../layout/layout.model";
 import { LayoutService } from "../layout/layout.service";
-import { MapDataService } from "../mapdata/mapdata.service";
 import { MapTileStreamService } from '../mapdata/map-tile-stream.service';
+import { MapDataService } from "../mapdata/mapdata.service";
+import { StyleValidationReportService } from '../mapstyle/style-validation-report.service';
 import { TileSubsetLayerRenderService } from '../mapview/deck/tile-subset-layer-render.service';
 import { viewIdSchema } from "../mapview/mapview.model";
 import { MapViewState } from "../mapview/mapview.state";
 import { ViewLayerDiagnosticsService } from '../mapview/view-layer-diagnostics.service';
 import { SearchService } from "../search/search.service";
 import { boundedUnicodeString, unicodePrefix } from "../utils/unicode-string.util";
-import { AppStateService } from "../appstate/appstate.service";
-import { StyleValidationReportService } from '../mapstyle/style-validation-report.service';
 import { DiagnosticsDatasource } from './diagnostics.datasource';
 import type { DiagnosticsExportOptions, DiagnosticsLogFilter } from "./diagnostics.model";
 import {
@@ -281,7 +280,6 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         );
     }
 
-
     /** Samples fixed-size counters and existing caches only, never the per-tile diagnostics/export path. */
     getDiagnostics(input: {
         viewId?: string;
@@ -417,7 +415,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
                     )
                 )
                     continue;
-                for (const error of session.errors)
+                for (const error of session.results.errors)
                     yield { source: session.id, message: unicodePrefix(error, 4096) };
             }
         }.bind(this);

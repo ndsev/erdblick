@@ -1,40 +1,33 @@
 import "@angular/compiler";
 import domToImage from "dom-to-image-more";
 import { BehaviorSubject, Subject } from "rxjs";
-import {
-    afterEach,
-    describe,
-    expect,
-    it,
-    vi
-} from "vitest";
-import { stateOwners } from '../../support/state-owners';
-import { InspectionSelectionService } from '../../../app/inspection/inspection-selection.service';
-import { MapDataService } from '../../../app/mapdata/mapdata.service';
-import { MapTileStreamService } from '../../../app/mapdata/map-tile-stream.service';
-import { StyleOptionNode } from "../../../app/mapdata/map-tree.controller";
-import { MapViewService } from "../../../app/mapview/mapview.service";
-import { ExternalViewerService } from "../../../app/navigation/external-viewer.service";
-import { type FeatureSearchSession } from "../../../app/search/search.service";
-import { JumpTargetService } from "../../../app/navigation/jump.service";
-import { LocationNavigationService } from '../../../app/navigation/location-navigation.service';
-import { AppStateService } from "../../../app/appstate/appstate.service";
-import {
-    VIEW_SYNC_MOVEMENT,
-    VIEW_SYNC_POSITION,
-    type CameraViewState
-} from "../../../app/mapview/mapview.model";
-import { createFeatureSearchStateEntry } from "../../../app/search/search-definition.model";
-import type { StyleValidationReport } from "../../../app/mapstyle/style-validation.model";
-import { type ErdblickStyle } from "../../../app/mapstyle/mapstyle.model";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppActionRegistry } from '../../../app/action/action-registry.service';
 import { VIEWER_ACTION_CATALOG_ID } from "../../../app/action/generated/catalog-id";
-import { ViewerActionFailure } from "../../../app/action/viewer-action-relay.contract";
-import { applicationControls, viewerActions, type ViewerActionOutput } from "../../support/action-contract";
 import { McpActionService } from "../../../app/action/mcp-action.service";
 import { UiAutomationService } from "../../../app/action/ui-automation.service";
+import { screenshotRasterizer } from "../../../app/action/screenshot-raster.util";
+import { ViewerActionFailure } from "../../../app/action/viewer-action-relay.contract";
+import { AppStateService } from "../../../app/appstate/appstate.service";
+import { InspectionSelectionService } from '../../../app/inspection/inspection-selection.service';
+import { MapTileStreamService } from '../../../app/mapdata/map-tile-stream.service';
+import { StyleOptionNode } from "../../../app/mapdata/map-tree.controller";
+import { MapDataService } from '../../../app/mapdata/mapdata.service';
+import { type ErdblickStyle } from "../../../app/mapstyle/mapstyle.model";
+import type { StyleValidationReport } from "../../../app/mapstyle/style-validation.model";
+import { VIEW_SYNC_MOVEMENT, VIEW_SYNC_POSITION, type CameraViewState } from "../../../app/mapview/mapview.model";
+import { MapViewService } from "../../../app/mapview/mapview.service";
+import { ExternalViewerService } from "../../../app/navigation/external-viewer.service";
+import { JumpTargetService } from "../../../app/navigation/jump.service";
+import { LocationNavigationService } from '../../../app/navigation/location-navigation.service';
+import { createFeatureSearchStateEntry } from "../../../app/search/search-definition.model";
+import { SearchResultDensityIndex } from "../../../app/search/search-result-density.visualization";
+import { SearchResults } from "../../../app/search/search-results.model";
+import type { FeatureSearchSession } from "../../../app/search/search-session.model";
+import { viewerActions, type ViewerActionOutput } from "../../support/action-contract";
+import { stateOwners } from '../../support/state-owners';
 
-vi.mock("dom-to-image-more", () => ({ default: { toCanvas: vi.fn() } }));
+vi.mock("dom-to-image-more", () => ({ default: { toSvg: vi.fn() } }));
 
 /** Supplies a complete schema-analysis record for otherwise partial search-service doubles. */
 function readySearchAnalysis(query: string): FeatureSearchSession["schemaAnalysis"] {
@@ -148,7 +141,8 @@ describe("McpActionService", () => {
         localStorage.clear();
         vi.unstubAllGlobals();
         vi.restoreAllMocks();
-        vi.mocked(domToImage.toCanvas).mockReset();
+        vi.mocked(domToImage.toSvg).mockReset();
+        vi.useRealTimers();
     });
 
     /** Keeps each real AppState owner scoped to its test. */
@@ -242,18 +236,28 @@ describe("McpActionService", () => {
         vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(1600);
         vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(1000);
         const encoded = { width: 1280, height: 800, toDataURL: vi.fn(() => "data:image/jpeg;base64,/9j/2Q==") };
-        vi.mocked(domToImage.toCanvas).mockImplementation(async (root, options) => {
+        vi.spyOn(screenshotRasterizer, "rasterize").mockResolvedValue(encoded as unknown as HTMLCanvasElement);
+        vi.mocked(domToImage.toSvg).mockImplementation(async (root, options) => {
             expect(root).toBe(document.body);
             expect(options).toMatchObject({ width: 1600, height: 1000, scale: 0.8, preserveScroll: true });
             expect(options!.filterStyles!(document.body, "--p-primary-color")).toBe(false);
             expect(options!.filterStyles!(document.body, "color")).toBe(true);
             const snapshot = renderers[0].captureCanvas.mock.results[0].value;
-            const clone = document.createElement("img");
+            const parent = document.createElement("div");
+            const sibling = document.createElement("span");
+            parent.append(snapshot.canvas, sibling);
+            const clone = document.createElement("div");
+            const siblingClone = document.createElement("span");
+            clone.append(siblingClone);
             clone.style.color = "var(--p-primary-color)";
-            options!.adjustClonedNode!(snapshot.canvas, clone, false);
-            expect(clone.src).toBe(snapshot.dataUrl);
+            expect(options!.filter!(snapshot.canvas)).toBe(false);
+            options!.adjustClonedNode!(sibling, siblingClone, false);
+            options!.adjustClonedNode!(parent, clone, false);
+            options!.adjustClonedNode!(parent, clone, true);
+            expect(clone.firstElementChild?.getAttribute("src")).toBe(snapshot.dataUrl);
+            expect(clone.lastElementChild).toBe(siblingClone);
             expect(clone.hasAttribute("style")).toBe(false);
-            return encoded as unknown as HTMLCanvasElement;
+            return "data:image/svg+xml,<svg/>";
         });
         const result = viewerActions.viewer_screenshot.outputSchema.parse(await service.execute("viewer_screenshot", {}));
         expect(renderers.every(renderer => renderer.captureCanvas.mock.calls.length === 1)).toBe(true);
@@ -262,6 +266,7 @@ describe("McpActionService", () => {
             viewportWidth: 1600, viewportHeight: 1000, readiness: { status: "unknown" }
         });
         expect(result.metadata.warnings).toContain("Image downscaled to fit the requested dimensions and transport budget.");
+        expect(screenshotRasterizer.rasterize).toHaveBeenCalledWith("data:image/svg+xml,<svg/>", 1280, 800, expect.any(AbortSignal));
     });
 
     it("downscales oversized screenshots without changing the relay byte budget", async () => {
@@ -271,7 +276,8 @@ describe("McpActionService", () => {
         const large = { width: 1280, height: 800, toDataURL: vi.fn(() => "data:image/jpeg;base64," + "A".repeat(240004)) };
         const drawImage = vi.fn();
         const small = { width: 0, height: 0, toDataURL: () => "data:image/jpeg;base64,/9j/2Q==", getContext: () => ({ drawImage }) };
-        vi.mocked(domToImage.toCanvas).mockImplementation(async () => {
+        vi.mocked(domToImage.toSvg).mockResolvedValue("data:image/svg+xml,<svg/>");
+        vi.spyOn(screenshotRasterizer, "rasterize").mockImplementation(async () => {
             vi.spyOn(document, "createElement").mockReturnValue(small as unknown as HTMLCanvasElement);
             return large as unknown as HTMLCanvasElement;
         });
@@ -287,7 +293,7 @@ describe("McpActionService", () => {
         vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(800);
         renderers[0].isAvailable.mockReturnValue(false);
         await expect(service.execute("viewer_screenshot", {})).rejects.toMatchObject({ detail: { code: "not_available" } });
-        expect(domToImage.toCanvas).not.toHaveBeenCalled();
+        expect(domToImage.toSvg).not.toHaveBeenCalled();
     });
 
     it.each(["cancel", "resize", "failure"])("releases screenshot admission after %s, never returning a late/stale capture", async reason => {
@@ -295,20 +301,40 @@ describe("McpActionService", () => {
         let width = 1280;
         vi.spyOn(document.documentElement, "clientWidth", "get").mockImplementation(() => width);
         vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(800);
-        let finish!: (canvas: HTMLCanvasElement) => void;
+        let finish!: (svg: string) => void;
         let fail!: (error: Error) => void;
-        vi.mocked(domToImage.toCanvas).mockImplementation(() => new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
+        vi.mocked(domToImage.toSvg).mockImplementation(() => new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
         const controller = new AbortController();
         const capture = service.execute("viewer_screenshot", {}, controller.signal);
-        await vi.waitFor(() => expect(domToImage.toCanvas).toHaveBeenCalledOnce());
+        await vi.waitFor(() => expect(domToImage.toSvg).toHaveBeenCalledOnce());
         await expect(service.execute("viewer_screenshot", {})).rejects.toMatchObject({ detail: { code: "busy" } });
         if (reason === "cancel") controller.abort();
         if (reason === "resize") width = 1200;
         if (reason === "failure") fail(new Error("SecurityError"));
-        else finish({} as HTMLCanvasElement);
+        else if (reason !== "cancel") finish("data:image/svg+xml,<svg/>");
         await expect(capture).rejects.toMatchObject({ detail: { code: reason === "cancel" ? "cancelled" : "not_available" } });
-        vi.mocked(domToImage.toCanvas).mockResolvedValue({ width: 128, height: 80, toDataURL: () => "data:image/jpeg;base64,/9j/2Q==" } as unknown as HTMLCanvasElement);
+        // Cancellation must release admission even when the serializer has not settled.
+        vi.mocked(domToImage.toSvg).mockResolvedValue("data:image/svg+xml,<svg/>");
+        vi.spyOn(screenshotRasterizer, "rasterize").mockResolvedValue({ width: 128, height: 80, toDataURL: () => "data:image/jpeg;base64,/9j/2Q==" } as unknown as HTMLCanvasElement);
         await expect(service.execute("viewer_screenshot", {})).resolves.toMatchObject({ image: { mimeType: "image/jpeg" } });
+        if (reason === "cancel") finish("data:image/svg+xml,<svg/>");
+    });
+
+    it("times out a stalled serializer and permits another capture without a tab reload", async () => {
+        vi.useFakeTimers();
+        const { service } = fixture();
+        vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(1280);
+        vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(800);
+        vi.mocked(domToImage.toSvg).mockImplementation(() => new Promise(() => {}));
+        const capture = service.execute("viewer_screenshot", {});
+        const failure = expect(capture).rejects.toMatchObject({detail: {code: "timeout"}});
+        await vi.advanceTimersByTimeAsync(15001);
+        await failure;
+        vi.mocked(domToImage.toSvg).mockResolvedValue("data:image/svg+xml,<svg/>");
+        vi.spyOn(screenshotRasterizer, "rasterize").mockResolvedValue({width: 128, height: 80,
+            toDataURL: () => "data:image/jpeg;base64,/9j/2Q=="} as unknown as HTMLCanvasElement);
+        await expect(service.execute("viewer_screenshot", {})).resolves.toMatchObject({image: {mimeType: "image/jpeg"}});
+        expect(vi.getTimerCount()).toBe(0);
     });
 
     it("bounds concurrent calls, rejects queued mutations and releases slots", async () => {
@@ -891,15 +917,16 @@ describe("McpActionService", () => {
             label: "sign", mapId: "m", layerId: "l", featureId: "Road.1", resultIndex: 0, resultKey: "r", mapTileKey: "Features:m:l:1",
             sourceTileKey: "Features:m:l:1", sourceMapId: "m", sourceLayerId: "l", sourceTileId: -2147483648, hoverFeatureId: "Road.1"
         };
-        const session = {
-            id: "s", definition, runId: "run-1", refresh: 2, complete: true, paused: false,
+        const session: FeatureSearchSession = {
+            layoutId: "search-test", startTime: 0, endTime: 0, pointColor: "#ffffff", timeElapsed: "0ms",
+            id: "s", definition, runId: "run-1", refresh: 2, paused: false,
             schemaAnalysis: readySearchAnalysis(definition.query),
             preparation: {signature: "ready", status: "ready", interpretations: [], selectedIds: [], branches: [], initialStyles: []},
-            searchResults: [result, { ...result, resultKey: "r2" }], errors: new Set<string>(), progressDone: 2, progressTotal: 2
-        } satisfies Partial<FeatureSearchSession> as unknown as FeatureSearchSession;
+            results: Object.assign(new SearchResults(new SearchResultDensityIndex()), {complete: true, searchResults: [result, { ...result, resultKey: "r2" }], progressDone: 2, progressTotal: 2})
+        } satisfies FeatureSearchSession;
         searches.getSession.mockReturnValue(session);
         expect(viewerActions.viewer_get_search.outputSchema.parse(service.execute("viewer_get_search", { searchId: "s" }))).toMatchObject({ responseComplete: true, searchComplete: true, settings: { scope: "auto" }, status: { resultCount: 2 } });
-        searches.getSession.mockReturnValue({ ...session, complete: false } as FeatureSearchSession);
+        searches.getSession.mockReturnValue({ ...session, results: {...session.results, complete: false} });
         expect(viewerActions.viewer_get_search.outputSchema.parse(service.execute("viewer_get_search", { searchId: "s" })))
             .toMatchObject({ responseComplete: true, searchComplete: false, status: { complete: false } });
         searches.getSession.mockReturnValue({
@@ -986,9 +1013,14 @@ describe("McpActionService", () => {
                 specials: [{value: 255, color: "#00ffff"}]
             }}]});
         const session: Partial<FeatureSearchSession> = {
-            id: definition.id, definition, runId: "run", refresh: 0, complete: true,
+            id: definition.id, definition, runId: "run", refresh: 0,
             schemaAnalysis: readySearchAnalysis(definition.query),
-            paused: false, searchResults: [], errors: new Set<string>(), progressDone: 1, progressTotal: 1
+            paused: false,
+            results: Object.assign(new SearchResults(new SearchResultDensityIndex()), {
+                complete: true,
+                progressDone: 1,
+                progressTotal: 1
+            })
         };
         searches.getSession.mockReturnValue(session as FeatureSearchSession);
         stateOwners(state).searchService.state.featureSearches = [definition];
@@ -1004,13 +1036,13 @@ describe("McpActionService", () => {
         const { service, searches, state, views } = fixture();
         const definition = createFeatureSearchStateEntry({ id: "patch", query: "true", bookmarked: true });
         const sibling = createFeatureSearchStateEntry({ id: "sibling", query: "false" });
-        const searchResults: FeatureSearchSession["searchResults"] = [];
-        const session = {
-            id: definition.id, definition, runId: "run", refresh: 0, complete: false,
+        const searchResults: FeatureSearchSession["results"]["searchResults"] = [];
+        const session: FeatureSearchSession = {
+            layoutId: "search-test", startTime: 0, endTime: 0, pointColor: "#ffffff", timeElapsed: "0ms",
+            id: definition.id, definition, runId: "run", refresh: 0,
             schemaAnalysis: readySearchAnalysis(definition.query),
-            paused: false, searchResults, errors: new Set<string>(), progressDone: 0,
-            progressTotal: 1
-        } satisfies Partial<FeatureSearchSession> as FeatureSearchSession;
+            paused: false, results: Object.assign(new SearchResults(new SearchResultDensityIndex()), {searchResults})
+        } satisfies FeatureSearchSession;
         searches.getSession.mockReturnValue(session);
         stateOwners(state).searchService.state.featureSearches = [definition, sibling];
         const settings = { autoUpdate: false, renderStrategy: { showHighFiGeometry: true, showLowFiDots: false } };

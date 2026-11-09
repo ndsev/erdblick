@@ -1,23 +1,17 @@
-import { InspectionState } from "../../../app/inspection/inspection.state";
-import { LayoutState } from "../../../app/layout/layout.state";
 import "@angular/compiler";
-import {
-    describe,
-    expect,
-    it,
-    vi
-} from "vitest";
-
-import {AppModule} from "../../../app/app.module";
-import {SearchComponent} from "../../../app/search/search.component";
-import {testPersistence} from "../../support/state-owners";
-import {LayoutService} from "../../../app/layout/layout.service";
-import {InspectionPanelService} from "../../../app/inspection/inspection-panel.service";
+import { describe, expect, it, vi } from "vitest";
+import { AppModule } from "../../../app/app.module";
+import { InspectionPanelService } from "../../../app/inspection/inspection-panel.service";
+import { InspectionState } from "../../../app/inspection/inspection.state";
+import { LayoutService } from "../../../app/layout/layout.service";
+import { LayoutState } from "../../../app/layout/layout.state";
+import { SearchResultsComponent } from "../../../app/search/search-results.component";
+import { testPersistence } from "../../support/state-owners";
 
 void AppModule;
 
 function resultTreeFixture() {
-    const component = Object.create(SearchComponent.prototype) as any;
+    const component = Object.create(SearchResultsComponent.prototype) as any;
     const nestedGroup = {
         key: "nested",
         expanded: false,
@@ -41,15 +35,15 @@ describe("Feature Search result-tree completion", () => {
         const {component, rootGroup, nestedGroup} = resultTreeFixture();
         const session = {
             runId: "search-run",
-            complete: false,
-            searchResults: [{}, {}]
+            results: {complete: false,
+            searchResults: [{}, {}]}
         };
 
         component.expandCompletedResultTreeIfReady(session);
         expect(rootGroup.expanded).toBe(false);
         expect(nestedGroup.expanded).toBe(false);
 
-        session.complete = true;
+        session.results.complete = true;
         component.resultTreeInputLength = 1;
         component.expandCompletedResultTreeIfReady(session);
         expect(rootGroup.expanded).toBe(false);
@@ -65,8 +59,8 @@ describe("Feature Search result-tree completion", () => {
         const {component, rootGroup} = resultTreeFixture();
         const session = {
             runId: "search-run",
-            complete: true,
-            searchResults: [{}, {}]
+            results: {complete: true,
+            searchResults: [{}, {}]}
         };
 
         component.expandCompletedResultTreeIfReady(session);
@@ -84,11 +78,11 @@ function inspectionSelectionFixture() {
     const inspectionState = new InspectionPanelService(persistence, layout, {} as never, new InspectionState(persistence));
     const focusOnFeature = vi.fn().mockResolvedValue(undefined);
     const showError = vi.fn();
-    const component = Object.create(SearchComponent.prototype) as SearchComponent;
+    const component = Object.create(SearchResultsComponent.prototype) as SearchResultsComponent;
     Object.assign(component, {
         stateService: persistence,
         inspectionState,
-        isDocked: () => true,
+        docked: true,
         inspectionSelection: {focusOnFeature},
         infoMessageService: {showError}
     });

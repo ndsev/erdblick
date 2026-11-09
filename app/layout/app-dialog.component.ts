@@ -41,7 +41,8 @@ interface AppDialogResizeSession {
 @Component({
     selector: 'app-dialog',
     host: {
-        class: 'app-dialog'
+        class: 'app-dialog',
+        '(window:resize)': 'handleViewportResize()'
     },
     template: `
         <p-dialog #dialog
@@ -206,6 +207,27 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         this.syncPersistedOpenState(value);
         this.refreshEffectiveStyle(value);
         this.visibleChange.emit(value);
+    }
+
+    /** Keeps fixed dialog bounds on-screen without overwriting the user's saved size or position. */
+    protected handleViewportResize(): void {
+        if (!this.visible || !this.keepInViewport || this.dragging || this.resizeSession) {
+            return;
+        }
+        const container = this.container();
+        const layout = this.persistLayout && this.layoutId ? this.layout.getDialogLayout(this.layoutId) : this.resizedLayout;
+        if (!container || !layout) {
+            return;
+        }
+        // CSS max-width shrinks the surface but cannot clamp its persisted left/top coordinates.
+        // Update both DOM bounds and the bound style, as in the existing drag/resize path.
+        const normalized = this.normalizeLayout(layout);
+        if (this.resizable) {
+            this.applyLayout(container, normalized);
+        } else {
+            this.applyPosition(container, normalized.position);
+        }
+        this.refreshEffectiveStyle(false, normalized);
     }
 
     /** Applies persisted layout before forwarding the show event. */

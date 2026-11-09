@@ -10,7 +10,7 @@ the workshop explicitly deferred their implementation.
 | Concern | Convention and consequence |
 | --- | --- |
 | Shared application state | One `<domain>.state.ts` container per state-owning domain, named `<Domain>State`; controller access is `controller.state`. No empty containers for stateless domains. |
-| Domain values | `.model.ts` describes values or a runtime model with its own invariants. Background layers, retry policy and point-cloud input admission are examples. |
+| Domain values | `.model.ts` describes values or a runtime model with its own invariants. Background layers and retry policy are examples. |
 | Public contracts | Keep schemas and public shapes beside their owning values. Domain schemas and normalization live with their consumers; `appconfig.model.ts` only composes the configuration envelope. Type-only consumers avoid importing controllers. |
 | Helpers | Use `.util.ts` for reusable operations and mechanisms, including classes with caller-managed state and cleanup. Keep domain helpers in that domain; put domain-independent helpers shared across domains in `utils/`. Inline trivial single-consumer wrappers. |
 | Folders | Name a capability or responsibility. `search/`, `geolocation/`, `mapstyle/` and `scss/` replace the overlapping older names. Alerts, clipboard, keyboard and editor now have explicit homes. |
@@ -47,12 +47,6 @@ tests. There is no second action declaration catalog in this file.
 **Coordinate frame helper.** The one-consumer wrapper was removed. The panel now
 contains the `auditTime(0, animationFrameScheduler)` operator beside the display
 update it schedules. Its test exercises the panel's actual coalescing and teardown.
-
-**Point-cloud input budget.** This models the domain's retained immutable payloads
-and eviction policy. It moved beside `FilterTileState`
-in `mapdata/point-cloud-input-budget.model.ts`. Rendering supplies its working-memory
-allowance. The fetched `origin/release/2026.5.0` still had the same budget
-implementation at this review; no unverified upstream rewrite was substituted.
 
 **Application registration.** Retain one explicit composition function, shared by
 browser startup and the Angular-in-Node catalog collector. Angular root providers
@@ -385,7 +379,6 @@ focused name in the inspection test directory.
 | `mapview/deck/deck-view3d.ts` | `mapview/deck/deck-view3d.controller.ts` |
 | `mapview/deck/deck-viewport-coverage.ts` | `mapview/deck/deck-viewport-coverage.util.ts` |
 | `mapview/deck/gpu-icon-atlas.service.ts` | `mapview/deck/gpu-icon-atlas.visualization.ts` |
-| `mapview/deck/gpu-memory-budget.ts` | `mapview/deck/gpu-memory-budget.model.ts` |
 | `mapview/deck/gpu-primitive-store.ts` | `mapview/deck/gpu-primitive-store.util.ts` |
 | `mapview/deck/gpu-range-allocator.ts` | `mapview/deck/gpu-range-allocator.model.ts` |
 | `mapview/deck/gpu-render-packet.ts` | `mapview/deck/gpu-render-packet.model.ts` |

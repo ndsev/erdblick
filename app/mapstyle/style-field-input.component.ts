@@ -1,5 +1,6 @@
 import {Component, EventEmitter, Input, OnChanges, OnDestroy, Output} from "@angular/core";
 import {FormsModule} from "@angular/forms";
+import {ColorPickerModule} from "primeng/colorpicker";
 import {StyleField} from "./style-authoring-schema.adapter";
 import {stylePickerColor} from "./style-color.util";
 import {parseStyleNumber, StyleDocumentEdit, StyleDocumentModel, StylePath} from "./style-document.model";
@@ -10,8 +11,7 @@ export interface StyleInputProblem {path: string; message: string;}
 @Component({
     selector: "style-field-input",
     standalone: true,
-    imports: [FormsModule, SimfilExpressionInputComponent],
-    styleUrl: "./style-form.scss",
+    imports: [FormsModule, ColorPickerModule, SimfilExpressionInputComponent],
     template: `
         @switch (kind) {
             @case ('expression') {
@@ -34,7 +34,7 @@ export interface StyleInputProblem {path: string; message: string;}
             @case ('enum-list') {
                 <div class="style-choices" [attr.aria-label]="label">
                     @for (choice of field.values; track choice) {
-                        <label><input type="checkbox" [checked]="includes(choice)"
+                        <label [class.is-selected]="includes(choice)"><input type="checkbox" [checked]="includes(choice)"
                             (change)="toggleChoice(choice, $event)">{{ choice }}</label>
                     }
                 </div>
@@ -109,7 +109,12 @@ export interface StyleInputProblem {path: string; message: string;}
             }
             @case ('color') {
                 <div class="style-color">
-                    <input type="color" aria-label="Color picker" [value]="pickerColor()" (input)="set(eventText($event))">
+                    <!-- Escape belongs to the picker, not the editor window's close shortcut. -->
+                    <p-colorpicker [ngModel]="pickerColor()" format="hex" appendTo="body"
+                        [overlayOptions]="{baseZIndex: 31000}"
+                        [pt]="{preview: {'aria-label': 'Color picker for ' + label}}"
+                        (keydown.escape)="$event.stopPropagation()"
+                        (onChange)="set($event.value)"/>
                     <input [attr.aria-label]="label" [ngModel]="text()" (ngModelChange)="set($event)"
                         placeholder="Named color or RGB hex">
                 </div>
@@ -234,7 +239,11 @@ export class StyleFieldInputComponent implements OnChanges, OnDestroy {
     /** Removes precisely the chosen stop. */
     remove(index: number): void { this.edit.emit({op: "remove", path: [...this.path, index]}); }
 
-    /** Shows an RGB picker only as a convenience; the text field retains native color syntax. */
+    /**
+     * Shows an RGB picker as a convenience while retaining native color syntax
+     * in the text field. Preview normalization never edits the authored source;
+     * only the picker's explicit onChange commits a color.
+     */
     pickerColor(): string {
         return stylePickerColor(this.value);
     }

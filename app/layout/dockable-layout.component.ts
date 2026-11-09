@@ -8,27 +8,19 @@ import {
     Renderer2,
     ViewChild
 } from '@angular/core';
-import {
-    map,
-    Observable,
-    startWith,
-    Subscription
-} from "rxjs";
+import { map, Observable, startWith, Subscription } from "rxjs";
 import { UiAutomationService } from "../action/ui-automation.service";
+import { AppStateService } from "../appstate/appstate.service";
 import { CoordinatesPolicyService } from "../coordinates/coordinates-policy.service";
 import { environment } from "../environments/environment";
 import { InspectionState } from "../inspection/inspection.state";
 import { MapDataService } from "../mapdata/mapdata.service";
 import { MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT } from "../mapview/render-view.model";
-import { SearchService, FeatureSearchSession } from "../search/search.service";
-import { AppStateService } from "../appstate/appstate.service";
-import {
-    INSPECTION_DOCK_TAB_ID,
-    LEGAL_INFO_DIALOG_LAYOUT_ID,
-    SEARCH_DOCK_TAB_ID
-} from "./layout.model";
-import { LayoutService } from "./layout.service";
+import type { FeatureSearchSession } from "../search/search-session.model";
+import { SearchService } from "../search/search.service";
 import { DockedPanelDragController, DockedPanelDragOffset } from "./docked-panel-drag.controller";
+import { INSPECTION_DOCK_TAB_ID, LEGAL_INFO_DIALOG_LAYOUT_ID, SEARCH_DOCK_TAB_ID } from "./layout.model";
+import { LayoutService } from "./layout.service";
 
 @Component({
     selector: 'dockable-layout',

@@ -620,7 +620,7 @@ rules:
     renderer.run();
     REQUIRE(renderer.pointCloudRenderedCount() == 5);
     renderer.resetForNextTile();
-    renderer.setPointCloudPolicy(true, mapget::DefaultPointCloudMaxPoints, 100, "points:1");
+    renderer.setPointCloudPolicy(true, 50'000'000, 100, "points:1");
     installSubset(renderer, TileSubsetLayer(subset));
     renderer.run();
     REQUIRE(renderer.pointCloudRenderedCount() == 5);

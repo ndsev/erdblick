@@ -12,32 +12,17 @@ import {
     SimpleChanges,
     ViewChild
 } from "@angular/core";
-import {basicSetup} from "codemirror";
-import {
-    Compartment,
-    EditorState,
-    Extension,
-    Prec
-} from "@codemirror/state";
-import {
-    EditorView,
-    keymap,
-    placeholder,
-    ViewUpdate
-} from "@codemirror/view";
-import {syntaxHighlighting} from "@codemirror/language";
-import {
-    debounceTime,
-    distinctUntilChanged,
-    Subject,
-    Subscription
-} from "rxjs";
-import {FeatureSearchMapLayerRef, FeatureSearchScope} from "./search-definition.model";
-import {currentInlineCodeMirrorTheme} from "../editor/codemirror-theme.extension";
-import {CompletionCandidate} from "./search.model";
-import {SearchService} from "./search.service";
-import {SearchCompletionPopupComponent} from "./search-completion-popup.component";
-import {simfilHighlightStyle, simfilLanguage} from "./simfil-language.extension";
+import { syntaxHighlighting } from "@codemirror/language";
+import { Compartment, EditorState, Extension, Prec } from "@codemirror/state";
+import { EditorView, keymap, placeholder, ViewUpdate } from "@codemirror/view";
+import { basicSetup } from "codemirror";
+import { debounceTime, distinctUntilChanged, Subject, Subscription } from "rxjs";
+import { currentInlineCodeMirrorTheme } from "../editor/codemirror-theme.extension";
+import { FeatureSearchSchemaService } from "./feature-search-schema.service";
+import { SearchCompletionPopupComponent } from "./search-completion-popup.component";
+import { FeatureSearchMapLayerRef, FeatureSearchScope } from "./search-definition.model";
+import { CompletionCandidate } from "./search.model";
+import { simfilHighlightStyle, simfilLanguage } from "./simfil-language.extension";
 
 @Component({
     selector: "simfil-expression-input",
@@ -111,7 +96,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
     };
 
     /** Wires the completion service and DOM renderer used by the inline editor. */
-    constructor(private readonly searchService: SearchService,
+    constructor(private readonly searchService: FeatureSearchSchemaService,
                 private readonly renderer: Renderer2,
                 private readonly changeDetector: ChangeDetectorRef) {
         this.subscriptions.add(this.completionRequests.pipe(debounceTime(this.completionDelay)).subscribe(() => {

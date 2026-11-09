@@ -12,6 +12,8 @@ import {AppModule} from "../../../app/app.module";
 import {initializeLibrary} from "../../../app/integrations/wasm.adapter";
 import {featureSearchResultFields} from "../../../app/search/feature-search-runtime-state.model";
 import {createFeatureSearchStateEntry} from "../../../app/search/search-definition.model";
+import {SearchResults} from "../../../app/search/search-results.model";
+import {SearchResultDensityIndex} from "../../../app/search/search-result-density.visualization";
 import {SearchService} from "../../../app/search/search.service";
 import {buildFeatureSearchFilterChannels} from "../../../app/search/feature-search-style.adapter";
 import {SearchStyleColorComponent} from "../../../app/search/search-style-color.component";
@@ -55,6 +57,7 @@ describe("Search observed category values", () => {
 
     it("merges only identical native types for both projected values and traces", () => {
         const service = Object.create(SearchService.prototype) as SearchService;
+        const results = new SearchResults(new SearchResultDensityIndex());
         const resultFields = new Map<string, SearchResultFieldValueSummary>();
         const traces = new Map<string, SearchTraceValueSummary>();
         const types: Array<SchemaScalarType | undefined> = [
@@ -68,12 +71,12 @@ describe("Search observed category values", () => {
         for (let tile = 0; tile < 2; ++tile) {
             types.forEach((schemaType, index) => {
                 const value = index + 1;
-                const summary = service["emptyValueSummary"](schemaType);
+                const summary = results.emptyValueSummary(schemaType);
                 summary.count = 1;
                 summary.kinds.integer = 1;
                 summary.numeric = {count: 1, min: value, max: value, sum: value, average: value};
                 summary.histogram = [{value: String(value), count: 1}];
-                service["mergeTileValueSummaries"](resultFields, traces, {
+                results.mergeTileValueSummaries(resultFields, traces, {
                     resultFields: [{source: "resultField", index: 0, expression: "value", summary}],
                     traces: [{source: "trace", name: "value", calls: 1, totalus: 10, summary}]
                 });
@@ -143,10 +146,10 @@ describe("Search observed category values", () => {
             results: [], diagnostics: null, layerBlob: new Uint8Array(), valueSummary: null, points: []
         };
 
-        const summary = service["valueSummariesForContribution"](contribution);
+        const summary = service["valueSummariesForContribution"](contribution, new SearchResults(new SearchResultDensityIndex()));
         expect(subset.valueSummaries).toHaveBeenCalledWith(resultChannelOrdinal, 64, 2048);
         expect(subset.delete).toHaveBeenCalledOnce();
-        expect(service["valueSummariesForContribution"](contribution)).toBe(summary);
+        expect(service["valueSummariesForContribution"](contribution, new SearchResults(new SearchResultDensityIndex()))).toBe(summary);
         expect(subset.valueSummaries).toHaveBeenCalledOnce();
     });
 

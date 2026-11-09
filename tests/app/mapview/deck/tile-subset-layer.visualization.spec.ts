@@ -63,6 +63,12 @@ describe("TileSubsetLayerVisualization", () => {
         expect(renderService.render).toHaveBeenCalledOnce();
         expect(finishRender).toHaveBeenCalledOnce();
         expect(scene.removeContributions).not.toHaveBeenCalled();
+        expect(visualization.requestedSignature).toBe("");
+
+        visualization.state.valueVersion += 1;
+        await expect(visualization.render(sceneHandle)).rejects.toThrow("Device allocation failed");
+        expect(renderService.render).toHaveBeenCalledTimes(2);
+        expect(finishRender).toHaveBeenCalledTimes(2);
     });
 
     it("rejects a late worker packet after datasource retirement and releases lazy picking state", async () => {
@@ -88,23 +94,6 @@ describe("TileSubsetLayerVisualization", () => {
         expect(await pending).toBe(false);
         expect(scene.applyPacket).not.toHaveBeenCalled();
         expect(finishRender).toHaveBeenCalledOnce();
-    });
-
-    it("invalidates renders admitted under a larger working-memory allowance", () => {
-        const scene = {removeContributions: vi.fn()};
-        const cancel = vi.fn();
-        const visualization = Object.assign(Object.create(TileSubsetLayerVisualization.prototype), {
-            visualizationId: "roads", renderedSignature: "installed", requestedSignature: "running",
-            sceneRevision: 0, contributionIdentities: new Set(["roads"]),
-            sceneHandle: {scene: {gpuScene: scene}}, renderService: {cancel},
-            owner: {filterPlan: {channels: [{}]}},
-            state: {status: "ready", renderedValueVersion: 1, valueVersion: 1}
-        });
-        visualization.setPointCloudScale(null, true);
-        expect(cancel).toHaveBeenCalledExactlyOnceWith("roads");
-        expect(scene.removeContributions).toHaveBeenCalledExactlyOnceWith(["roads"]);
-        expect(visualization.isCurrentPresentationInstalled()).toBe(false);
-        expect(visualization.requestedSignature).toBe("");
     });
 
     it("resolves cloud picks from entry identities without parsing another subset", () => {

@@ -7,6 +7,7 @@ import { boundedUnicodeString, unicodePrefix } from "../utils/unicode-string.uti
 import { rejectAction } from "./action.model";
 import { AppActionContributor, AppActionRegistration } from "./action-contributor.model";
 import { ViewerActionFailure } from "./viewer-action-relay.contract";
+import { screenshotRasterizer } from "./screenshot-raster.util";
 
 /** Components retain layout state; this registration only connects a live DOM surface to its owner. */
 interface ResizeTarget {
@@ -564,7 +565,7 @@ export class UiAutomationService implements AppActionContributor {
     }
 
 
-    /** Captures only on demand; owns admission until DOM rasterization settles, even if the relay call was cancelled. */
+    /** Captures on demand with an active deadline; cancellation retires callbacks and releases admission. */
     async screenshot(input: { maxWidth?: number; maxHeight?: number }, signal?: AbortSignal) {
         if (this.capturingScreenshot) rejectAction("A screenshot is already being captured", "busy");
         this.capturingScreenshot = true;
@@ -572,8 +573,21 @@ export class UiAutomationService implements AppActionContributor {
         const viewportWidth = document.documentElement.clientWidth;
         const viewportHeight = document.documentElement.clientHeight;
         const deadline = performance.now() + 15000;
+        const controller = new AbortController();
+        const cancel = () => controller.abort(new ViewerActionFailure({code: "cancelled", message: "Screenshot cancelled", outcome: "not_applied"}));
+        const timer = setTimeout(() => controller.abort(new ViewerActionFailure({
+            code: "timeout", message: "Screenshot capture exceeded its time budget", outcome: "not_applied"
+        })), 15000);
+        signal?.addEventListener("abort", cancel, {once: true});
+        if (signal?.aborted) cancel();
+        const cancelled = new Promise<never>((_resolve, reject) => {
+            if (controller.signal.aborted) reject(controller.signal.reason);
+            else controller.signal.addEventListener("abort", () => reject(controller.signal.reason), {once: true});
+        });
+        // Attach a handler even if a synchronous preflight fails before the first race is awaited.
+        void cancelled.catch(() => {});
         const check = () => {
-            if (signal?.aborted) rejectAction("Screenshot cancelled", "cancelled");
+            controller.signal.throwIfAborted();
             if (performance.now() >= deadline)
                 rejectAction("Screenshot capture exceeded its time budget", "timeout");
             if (revision !== this.views.viewLayoutRevision)
@@ -600,7 +614,7 @@ export class UiAutomationService implements AppActionContributor {
             )
                 rejectAction("Viewport is unavailable or too large for capture");
             // Lazy loaded: ordinary browsing pays no DOM-capture startup/runtime cost.
-            const { default: domToImage } = await import("dom-to-image-more");
+            const { default: domToImage } = await Promise.race([import("dom-to-image-more"), cancelled]);
             check();
             const scale = Math.min(
                 1,
@@ -619,7 +633,8 @@ export class UiAutomationService implements AppActionContributor {
                 "DOM-based capture: browser chrome, pointer and some CSS effects are not captured. This is not a render-ready fence."
             ]);
             let nodeCount = 0;
-            let canvas = await domToImage.toCanvas(document.body, {
+            const clones = new WeakMap<Node, Node>();
+            const svg = await Promise.race([domToImage.toSvg(document.body, {
                 width: viewportWidth,
                 height: viewportHeight,
                 scale,
@@ -634,6 +649,9 @@ export class UiAutomationService implements AppActionContributor {
                 filter: (node) => {
                     check();
                     if (++nodeCount > 20000) rejectAction("Visible UI exceeds the screenshot node budget");
+                    // The library converts canvases through an unbounded animation-frame wait.
+                    // Reinsert frozen images at their original sibling positions after cloning their parent.
+                    if (node instanceof HTMLCanvasElement) return false;
                     if (node instanceof Element && getComputedStyle(node).display === "none") return false;
                     // Cross-origin/interactive embedded documents cannot be reproduced safely by a DOM snapshot.
                     if (node instanceof HTMLIFrameElement || node instanceof HTMLVideoElement) {
@@ -644,15 +662,24 @@ export class UiAutomationService implements AppActionContributor {
                 },
                 adjustClonedNode: (original, clone, after) => {
                     check();
+                    clones.set(original, clone);
                     // Let the library fill resolved computed values, not retain inline var()/relative
                     // styles whose theme definitions or containing block are absent in the standalone SVG.
                     if (!after && clone instanceof Element) clone.removeAttribute("style");
-                    if (
-                        original instanceof HTMLCanvasElement &&
-                        clone instanceof HTMLImageElement &&
-                        canvases.has(original)
-                    ) {
-                        clone.src = canvases.get(original)!;
+                    if (after) {
+                        for (const child of original.childNodes) {
+                            if (!(child instanceof HTMLCanvasElement)) continue;
+                            const image = document.createElement("img");
+                            image.src = canvases.get(child) ?? child.toDataURL();
+                            const style = getComputedStyle(child);
+                            for (const property of style) {
+                                if (!property.startsWith("--")) image.style.setProperty(property, style.getPropertyValue(property));
+                            }
+                            let next = child.nextSibling;
+                            while (next && clones.get(next)?.parentNode !== clone) next = next.nextSibling;
+                            clone.insertBefore(image, next ? clones.get(next)! : null);
+                            clones.set(child, image);
+                        }
                     }
                 },
                 onclone: (clone) => {
@@ -670,7 +697,11 @@ export class UiAutomationService implements AppActionContributor {
                     warn: () => warnings.add("The DOM renderer reported a capture limitation."),
                     error: () => warnings.add("The DOM renderer could not reproduce some UI content.")
                 }
-            });
+            }), cancelled]);
+            check();
+            let canvas = await Promise.race([screenshotRasterizer.rasterize(svg,
+                Math.max(1, Math.floor(viewportWidth * scale)),
+                Math.max(1, Math.floor(viewportHeight * scale)), controller.signal), cancelled]);
             check();
             // Keep existing relay bounds, not an unbounded screenshot escape hatch. Prefer readable text over very low JPEG quality.
             for (let attempt = 0; attempt < 6; ++attempt) {
@@ -713,6 +744,12 @@ export class UiAutomationService implements AppActionContributor {
             if (error instanceof ViewerActionFailure) throw error;
             rejectAction("Application screenshot failed; a canvas or UI resource may be inaccessible");
         } finally {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", cancel);
+            // Any late third-party callback must stop before touching a replacement capture.
+            if (!controller.signal.aborted) controller.abort(new ViewerActionFailure({
+                code: "cancelled", message: "Screenshot capture finished", outcome: "not_applied"
+            }));
             this.capturingScreenshot = false;
         }
     }

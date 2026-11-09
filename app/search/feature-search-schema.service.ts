@@ -1,18 +1,22 @@
 import type {PreparedSearchBranch} from "./search-preparation.model";
 import { Injectable } from "@angular/core";
+import { BehaviorSubject, type Subscription } from "rxjs";
 import { MapDataService } from "../mapdata/mapdata.service";
 import type { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldInventory, FeatureSearchStyleFieldOptions } from "./search.model";
-import type { FeatureSearchMapLayerRef, FeatureSearchScope } from "./search-definition.model";
 import type {
     SearchCompletionDataSourceInfoMessage,
     SearchCompletionRequestMessage,
     SearchCompletionResultMessage,
+    SearchCompletionWorkerOptions,
     SearchCompletionWorkerOutboundMessage,
     SearchScopeAnalysisRequestMessage,
     SearchScopeAnalysisResultMessage,
     SearchStyleFieldsRequestMessage,
     SearchStyleFieldsResultMessage
 } from "./search-completion.worker.protocol";
+import type { FeatureSearchMapLayerRef, FeatureSearchScope } from "./search-definition.model";
+import type { CompletionOwnerState, FeatureSearchCompletionOptions } from "./search-session.model";
+import type { CompletionCandidate } from "./search.model";
 
 export interface FeatureSearchScopeAnalysis {
     signature: string;
@@ -50,6 +54,239 @@ interface SchemaWorkerState {
 @Injectable({providedIn: "root"})
 export class FeatureSearchSchemaService {
     private readonly styleFieldInventories = new Map<string, Promise<FeatureSearchStyleFieldInventory>>();
+
+    private static readonly DEFAULT_COMPLETION_OWNER_ID = "omnibox";
+
+    private readonly completionStates = new Map<string, CompletionOwnerState>();
+
+    private readonly completionTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+    readonly completionCandidates = this.completionStateForOwner(FeatureSearchSchemaService.DEFAULT_COMPLETION_OWNER_ID).candidates;
+
+    readonly completionPending = this.completionStateForOwner(FeatureSearchSchemaService.DEFAULT_COMPLETION_OWNER_ID).pending;
+
+    completionCandidateLimit: number = 15;
+
+    /** Returns the completion stream pair owned by one input surface. */
+    public completionStateForOwner(ownerId: string): CompletionOwnerState {
+        const normalizedOwnerId = ownerId || FeatureSearchSchemaService.DEFAULT_COMPLETION_OWNER_ID;
+        let state = this.completionStates.get(normalizedOwnerId);
+        if (!state) {
+            state = {
+                candidates: new BehaviorSubject<CompletionCandidate[]>([]),
+                pending: new BehaviorSubject<boolean>(false),
+                candidateList: [],
+                requestSerial: 0
+            };
+            this.completionStates.set(normalizedOwnerId, state);
+        }
+        return state;
+    }
+
+    /**
+     * Clears the currently shown completion list for one input surface.
+     */
+    public clearCurrentCompletion(ownerId: string = FeatureSearchSchemaService.DEFAULT_COMPLETION_OWNER_ID) {
+        const normalizedOwnerId = ownerId || FeatureSearchSchemaService.DEFAULT_COMPLETION_OWNER_ID;
+        this.cancelPendingCompletion(normalizedOwnerId);
+        const state = this.completionStateForOwner(normalizedOwnerId);
+        state.requestSerial++;
+        state.candidateList = [];
+        state.pending.next(false);
+        state.candidates.next([]);
+    }
+
+    /**
+     * The omnibar discovers suggestions across all ready feature layers,
+     * including hidden ones. An unrelated failed or still-loading datasource
+     * must not block these suggestions. Confirmed searches retain their own
+     * explicit source scope and its strict schema-readiness checks.
+     */
+    public completeQuery(query: string, point: number | undefined) {
+        const selectedMapLayers = [...this.mapInfo.maps.allFeatureLayers()]
+            .filter(layer => this.mapInfo.isMapLayerReady(layer.mapId, layer.id))
+            .map(layer => ({mapId: layer.mapId, layerId: layer.id}));
+        this.completeQueryForOwner(FeatureSearchSchemaService.DEFAULT_COMPLETION_OWNER_ID, query, point, {selectedMapLayers});
+    }
+
+    /**
+     * Enter submits a fully spelled symbol for interpretation, even when its
+     * completion would insert an explicit predicate. Partial words still accept
+     * the highlighted suggestion before the user confirms the completed query.
+     */
+    public hasExactCompletionCandidate(
+        query: string,
+        ownerId: string = FeatureSearchSchemaService.DEFAULT_COMPLETION_OWNER_ID
+    ): boolean {
+        const trimmedQuery = query.trim();
+        const state = this.completionStateForOwner(ownerId);
+        return state.candidateList.some(candidate => candidate.query.trim() === trimmedQuery
+            || (candidate.isExactMatch && candidate.source.trim() === trimmedQuery));
+    }
+
+    /**
+     * Completes a query from schema metadata. Datasources without feature-model schema provide no candidates.
+     */
+    public completeQueryForOwner(
+        ownerId: string,
+        query: string,
+        point: number | undefined,
+        options: FeatureSearchCompletionOptions = {}
+    ) {
+        const normalizedOwnerId = ownerId || FeatureSearchSchemaService.DEFAULT_COMPLETION_OWNER_ID;
+        this.cancelPendingCompletion(normalizedOwnerId);
+        const state = this.completionStateForOwner(normalizedOwnerId);
+        const requestSerial = ++state.requestSerial;
+        const caret = point ?? query.length;
+        state.candidateList = [];
+        state.candidates.next([]);
+        state.pending.next(true);
+        const timer = setTimeout(() => {
+            this.completionTimers.delete(normalizedOwnerId);
+            const currentState = this.completionStateForOwner(normalizedOwnerId);
+            if (currentState.requestSerial !== requestSerial) {
+                return;
+            }
+            if (this.requestWorkerCompletion(normalizedOwnerId, requestSerial, query, caret, options)) {
+                return;
+            }
+            currentState.pending.next(false);
+            currentState.candidates.next([]);
+        }, 0);
+        this.completionTimers.set(normalizedOwnerId, timer);
+    }
+
+    /** Sends one completion request to the schema worker, returning false when completion is unavailable. */
+    private requestWorkerCompletion(
+        ownerId: string,
+        requestSerial: number,
+        query: string,
+        point: number,
+        options: FeatureSearchCompletionOptions
+    ): boolean {
+        const message: SearchCompletionRequestMessage = {
+            type: "SearchCompletionRequest",
+            ownerId,
+            requestSerial,
+            query,
+            point,
+            options: this.completionWorkerOptions(options)
+        };
+        return this.requestCompletion(
+            message,
+            result => this.handleCompletionWorkerMessage(result)
+        );
+    }
+
+    /** Applies a worker completion result if it still matches the owner's latest request serial. */
+    private handleCompletionWorkerMessage(message: SearchCompletionResultMessage): void {
+        const state = this.completionStateForOwner(message.ownerId);
+        if (state.requestSerial !== message.requestSerial) {
+            return;
+        }
+        if (message.error) {
+            console.warn("Schema completion worker failed to complete a query.", message.error);
+        }
+        if (message.candidates.length > 0) {
+            state.candidateList = this.mergeCompletionCandidates(state.candidateList, message.candidates);
+            state.candidates.next(state.candidateList);
+        }
+        if (message.done) {
+            state.pending.next(false);
+            if (message.candidates.length === 0) {
+                state.candidates.next(state.candidateList);
+            }
+        }
+    }
+
+    /** Adds streamed candidate batches while preserving stable order and removing cross-layer duplicates. */
+    private mergeCompletionCandidates(
+        currentCandidates: CompletionCandidate[],
+        nextCandidates: CompletionCandidate[]
+    ): CompletionCandidate[] {
+        const merged = [...currentCandidates];
+        const indexByKey = new Map(currentCandidates.map((candidate, index) => [
+            this.completionCandidateKey(candidate),
+            index
+        ]));
+        for (const candidate of nextCandidates) {
+            const key = this.completionCandidateKey(candidate);
+            const existingIndex = indexByKey.get(key);
+            if (existingIndex !== undefined) {
+                merged[existingIndex] = this.mergeCompletionCandidateOrigins(merged[existingIndex]!, candidate);
+                continue;
+            }
+            if (merged.length >= this.completionCandidateLimit) {
+                continue;
+            }
+            indexByKey.set(key, merged.length);
+            merged.push(candidate);
+        }
+        return merged;
+    }
+
+    /** Preserves exact-input recognition and schema origins across identical suggestions. */
+    private mergeCompletionCandidateOrigins(
+        currentCandidate: CompletionCandidate,
+        nextCandidate: CompletionCandidate
+    ): CompletionCandidate {
+        const originLayers = this.mergeCompletionOriginLayers(
+            currentCandidate.originLayers ?? [],
+            nextCandidate.originLayers ?? []
+        );
+        return {
+            ...currentCandidate,
+            isExactMatch: currentCandidate.isExactMatch || nextCandidate.isExactMatch,
+            ...(originLayers.length ? {originLayers} : {})
+        };
+    }
+
+    /** Returns unique completion-origin layers in first-seen order. */
+    private mergeCompletionOriginLayers(
+        currentLayers: FeatureSearchMapLayerRef[],
+        nextLayers: FeatureSearchMapLayerRef[]
+    ): FeatureSearchMapLayerRef[] {
+        const result: FeatureSearchMapLayerRef[] = [];
+        const seen = new Set<string>();
+        for (const layer of [...currentLayers, ...nextLayers]) {
+            const key = JSON.stringify([layer.mapId, layer.layerId]);
+            if (seen.has(key)) {
+                continue;
+            }
+            seen.add(key);
+            result.push(layer);
+        }
+        return result;
+    }
+
+    /** Builds a de-duplication key for completion candidates streamed from multiple schema contexts. */
+    private completionCandidateKey(candidate: CompletionCandidate): string {
+        return `${candidate.query}\u0000${candidate.begin}\u0000${candidate.end}\u0000${candidate.kind}\u0000${candidate.hint}`;
+    }
+
+    /** Converts UI completion options into the worker/native option shape. */
+    private completionWorkerOptions(options: FeatureSearchCompletionOptions): SearchCompletionWorkerOptions {
+        return {
+            limit: this.completionCandidateLimit,
+            timeoutMs: options.timeoutMs ?? 35,
+            ...(options.scope ? { scope: options.scope } : {}),
+            ...(options.selectedMapLayers !== undefined ? { selectedMapLayers: options.selectedMapLayers } : {})
+        };
+    }
+
+    /** Retires both the deferred request and any older worker scan for this editor. */
+    private cancelPendingCompletion(ownerId: string): void {
+        this.cancelCompletion(ownerId);
+        const timer = this.completionTimers.get(ownerId);
+        if (!timer) {
+            return;
+        }
+        clearTimeout(timer);
+        this.completionTimers.delete(ownerId);
+    }
+    private readonly catalogSubscription: Subscription;
+    private destroyed = false;
+
     private readonly pendingCompletionHandlers = new Map<string, (message: SearchCompletionResultMessage) => void>();
     private readonly pendingScopeAnalysis = new Map<number, {
         resolve: (value: FeatureSearchScopeAnalysis) => void;
@@ -75,7 +312,7 @@ export class FeatureSearchSchemaService {
 
     constructor(private readonly mapInfo: MapDataService) {
         let catalogSignature = this.mapInfo.schemaScopeSignature();
-        this.mapInfo.layerStateChanged.subscribe(reason => {
+        this.catalogSubscription = this.mapInfo.layerStateChanged.subscribe(reason => {
             if (reason === "datasources") {
                 const nextSignature = this.mapInfo.schemaScopeSignature();
                 if (nextSignature === catalogSignature) return;
@@ -86,6 +323,21 @@ export class FeatureSearchSchemaService {
                 // another map do not discard their work or restart a search.
             }
         });
+    }
+
+    /** Cancels both lanes and owner timers when the application injector is retired. */
+    ngOnDestroy(): void {
+        this.destroyed = true;
+        this.catalogSubscription.unsubscribe();
+        for (const timer of this.completionTimers.values()) clearTimeout(timer);
+        this.completionTimers.clear();
+        this.resetWorker("completion", "Search completion owner was destroyed.");
+        this.resetWorker("analysis", "Search schema owner was destroyed.");
+        for (const state of this.completionStates.values()) {
+            state.candidates.complete();
+            state.pending.complete();
+        }
+        this.completionStates.clear();
     }
 
     /** Returns the stable signature used for schema-derived search analysis caches. */
@@ -339,7 +591,7 @@ export class FeatureSearchSchemaService {
     /** Lazily creates an isolated schema-processing worker for one workload lane. */
     private schemaWorker(kind: SchemaWorkerKind): Worker | null {
         const state = this.workerStates[kind];
-        if (state.failed || typeof Worker === "undefined") {
+        if (this.destroyed || state.failed || typeof Worker === "undefined") {
             return null;
         }
         if (state.worker) {

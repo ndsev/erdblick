@@ -13,7 +13,7 @@ import {
     searchAutoStyleFieldOptions,
     searchAutoStyleFieldOptionsArePortable
 } from "../../../app/search/feature-search-auto-style.util";
-import {SearchComponent} from "../../../app/search/search.component";
+import {SearchVisualizationComponent} from "../../../app/search/search-visualization.component";
 import type {FeatureSearchStyleFieldInventory} from "../../../app/search/search.model";
 
 void AppModule;
@@ -142,7 +142,7 @@ describe("Feature Search automatic rule geometry", () => {
     });
 
     it("offers a shared expression once while preserving attribute owners for automatic rules", () => {
-        const component = Object.create(SearchComponent.prototype) as any;
+        const component = Object.create(SearchVisualizationComponent.prototype) as any;
         const session = {definition: {searchStyleRules: [{}]}};
         const inventory = {
             contexts: ["SPEED_LIMIT_METRIC", "SPEED_LIMIT_IMPERIAL"].map(attrName => ({
@@ -172,7 +172,7 @@ describe("Feature Search automatic rule geometry", () => {
     });
 
     it("keeps ambiguous meanings explicit and reuses the picker until its context changes", () => {
-        const component = Object.create(SearchComponent.prototype) as any;
+        const component = Object.create(SearchVisualizationComponent.prototype) as any;
         const session = {definition: {searchStyleRules: [{}]}};
         const inventory = {
             contexts: [{mapId: "Map", layerId: "Road", featureType: "Road"},
@@ -201,7 +201,7 @@ describe("Feature Search automatic rule geometry", () => {
     });
 
     it("merges a Classic warning-sign field across attribute layers into one portable option", () => {
-        const component = Object.create(SearchComponent.prototype) as any;
+        const component = Object.create(SearchVisualizationComponent.prototype) as any;
         component.styleAttributeOptions = [];
         component.styleScalarAttributeOptions = [];
         component.styleAttributeOptionsLoading = true;
@@ -298,7 +298,7 @@ describe("Feature Search automatic rule geometry", () => {
     });
 
     it("offers the union of symbolic categories when editing a field shared by schema versions", () => {
-        const component = Object.create(SearchComponent.prototype) as any;
+        const component = Object.create(SearchVisualizationComponent.prototype) as any;
         const contexts = ["Old", "New"].map(mapId => ({mapId, layerId: "Road",
             featureType: "Road", attrName: "WARNING_SIGN", attrLayerName: "Rules"}));
         const inventory: FeatureSearchStyleFieldInventory = {
@@ -336,7 +336,7 @@ describe("Feature Search automatic rule geometry", () => {
     });
 
     it("does not initialize or replace styles while receiving results", () => {
-        const component = Object.create(SearchComponent.prototype) as any;
+        const component = Object.create(SearchVisualizationComponent.prototype) as any;
         component.resultPanelIndex = "results";
         component.scheduleStyleAttributeOptionsRefresh = vi.fn();
         expect(component.refreshStyleAttributeOptionsIfNeeded({schemaAnalysis: {status: "ready"}})).toBe(false);

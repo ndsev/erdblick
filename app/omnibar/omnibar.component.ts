@@ -21,33 +21,30 @@ import {
 } from "rxjs";
 import { AppActionBubble, RegisteredActionCandidate } from "../action/action.model";
 import { AppActionRegistry } from "../action/action-registry.service";
-import { RightClickMenuService } from "../mapview/rightclickmenu.service";
-import { AppDialogComponent } from "../layout/app-dialog.component";
-import getCaretCoordinates from "./caret.util";
 import { InfoMessageService } from "../diagnostics/info.service";
+import { GeolocationService, isSupportedLocationSearchQuery } from "../geolocation/geolocation.service";
 import { KeyboardService } from "../keyboard/keyboard.service";
+import { AppDialogComponent } from "../layout/app-dialog.component";
+import { RightClickMenuService } from "../mapview/rightclickmenu.service";
+import { JumpTargetService } from "../navigation/jump.service";
+import { LocationNavigationService } from "../navigation/location-navigation.service";
+import { FeatureSearchSchemaService } from "../search/feature-search-schema.service";
+import { featureSearchActionPayloadFromCompletion } from "../search/search-session.model";
+import { CompletionCandidate } from "../search/search.model";
+import { SearchService } from "../search/search.service";
+import getCaretCoordinates from "./caret.util";
 import {
     historyEntryDedupeKey,
     historyEntryKey,
     isLegacyOmnibarHistoryEntry,
     LegacyOmnibarHistoryEntry,
-    normalizeResolvedOmnibarHistoryEntry,
     normalizeOmnibarHistoryEntry,
     normalizeOmnibarHistoryPayload,
+    normalizeResolvedOmnibarHistoryEntry,
     OmnibarHistoryEntry,
     withOmnibarHistoryActionName
 } from "./omnibar-history.model";
-import {
-    featureSearchActionPayloadFromCompletion,
-    SearchService
-} from "../search/search.service";
-import {
-    JumpTargetService
-} from "../navigation/jump.service";
-import { LocationNavigationService } from "../navigation/location-navigation.service";
-import { isSupportedLocationSearchQuery, GeolocationService } from "../geolocation/geolocation.service";
 import { OmnibarState } from "./omnibar.state";
-import { CompletionCandidate } from "../search/search.model";
 
 interface OmnibarHistoryViewEntry extends OmnibarHistoryEntry {
     name: string;
@@ -249,7 +246,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
     /**
      * Wires the omnibar to global keyboard shortcuts, jump-target updates, history persistence, and completion streams.
      */
-    constructor(private renderer: Renderer2,
+    constructor(private readonly searchCompletion: FeatureSearchSchemaService, private renderer: Renderer2,
         private elRef: ElementRef<HTMLElement>,
         private keyboardService: KeyboardService,
         private messageService: InfoMessageService,
@@ -327,7 +324,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
 
         this.subscriptions.add(this.state.historyState.subscribe(() => this.reloadHistory()));
 
-        this.subscriptions.add(this.featureSearch.completionCandidates.pipe(distinctUntilChanged()).subscribe((value: CompletionCandidate[]) => {
+        this.subscriptions.add(this.searchCompletion.completionCandidates.pipe(distinctUntilChanged()).subscribe((value: CompletionCandidate[]) => {
             if (this.isCompletionDismissedFor(this.inputValue, this.cursorPosition)) {
                 this.completionItems = [];
                 this.completion.visible = false;
@@ -355,14 +352,14 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
                 this.refreshOverlayZIndices();
             }
             this.completion.visible = length > 0 && focusValid;
-            if (this.featureSearch.hasExactCompletionCandidate(this.inputValue)) {
+            if (this.searchCompletion.hasExactCompletionCandidate(this.inputValue)) {
                 this.schemaInput = this.inputValue;
                 this.refreshActionMenu();
             }
             this.changeDetectorRef.markForCheck();
         }));
 
-        this.subscriptions.add(this.featureSearch.completionPending.pipe(distinctUntilChanged()).subscribe((pending: boolean) => {
+        this.subscriptions.add(this.searchCompletion.completionPending.pipe(distinctUntilChanged()).subscribe((pending: boolean) => {
             if (pending && this.isCompletionDismissedFor(this.inputValue, this.cursorPosition)) {
                 this.completion.pending = false;
                 this.completion.visible = false;
@@ -579,14 +576,12 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
         };
     }
 
-
     /** Executes one omnibar action and records it in the bounded local history. */
     private executeAndRemember(entry: OmnibarHistoryEntry): void {
         this.state.remember(entry);
         this.executeHistoryEntry(entry);
         this.reloadHistory();
     }
-
 
     /**
      * Reloads persisted omnibar history and drops entries that no longer point at valid actions.
@@ -1046,7 +1041,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
         return this.completion.visible
             && this.completionItems.length > 0
             && !this.isCompletionDismissedFor(this.inputValue, this.cursorPosition)
-            && (this.completionSelectionExplicit || !this.featureSearch.hasExactCompletionCandidate(this.inputValue));
+            && (this.completionSelectionExplicit || !this.searchCompletion.hasExactCompletionCandidate(this.inputValue));
     }
 
     /**
@@ -1167,16 +1162,16 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
             this.completion.visible = false;
             this.completion.pending = false;
             this.completionItems = [];
-            this.featureSearch.clearCurrentCompletion();
+            this.searchCompletion.clearCurrentCompletion();
             return;
         }
         if (this.isCompletionDismissedFor(query, point ?? query.length)) {
             this.hideCompletionPopup();
-            this.featureSearch.clearCurrentCompletion();
+            this.searchCompletion.clearCurrentCompletion();
             return;
         }
 
-        this.featureSearch.completeQuery(query, point ?? query.length);
+        this.searchCompletion.completeQuery(query, point ?? query.length);
         this.completion.selectionIndex = 0;
         this.completionSelectionExplicit = false;
     }
@@ -1185,7 +1180,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
      * Clears both local popup state and the feature-search service's outstanding completion job.
      */
     resetCompletion() {
-        this.featureSearch.clearCurrentCompletion();
+        this.searchCompletion.clearCurrentCompletion();
         this.completion.selectionIndex = 0;
         this.completionItems = [];
         this.completion.visible = false;
@@ -1213,7 +1208,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
             this.inputValue,
             this.cursorPosition
         );
-        this.featureSearch.clearCurrentCompletion();
+        this.searchCompletion.clearCurrentCompletion();
         this.completion.selectionIndex = 0;
         this.completionSelectionExplicit = false;
         this.completionItems = [];

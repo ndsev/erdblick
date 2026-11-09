@@ -168,23 +168,16 @@ export class TileSubsetLayerVisualization {
         }
     }
 
-    /** Refresh point-cloud demand and discard previously admitted work when its memory allowance shrinks. */
-    setPointCloudScale(metersPerPixel: number | null, reclaim = false): void {
+    /** Refresh count-based sampling and the immutable worker cache identity. */
+    setPointCloudScale(metersPerPixel: number | null): void {
         this.pointCloudScale = metersPerPixel;
-        if (reclaim) {
-            this.renderService.cancel(this.visualizationId);
-            this.renderedSignature = "";
-            this.requestedSignature = "";
-            ++this.sceneRevision;
-            TileSubsetLayerVisualization.retireContributions(this.sceneHandle, this.contributionIdentities);
-        }
         if (!this.owner.filterPlan.channels.some(channel => channel.pointCloudMaxPoints !== undefined)) return;
-        this.renderService.registerPointCloud(this.visualizationId, this.viewIndex, this.state.subsetBlob?.byteLength ?? 0);
+        this.renderService.registerPointCloud(this.visualizationId);
         const next = this.renderService.pointCloudPolicyFor(this.visualizationId, metersPerPixel,
             this.pointCloud?.spacingMeters);
         next.cacheKey = JSON.stringify([this.owner.mapInfo.mapMetadataGeneration(this.state.mapId), this.owner.ownerId,
         this.state.mapTileKey, this.state.valueVersion]);
-        if (JSON.stringify(next) === JSON.stringify(this.pointCloud) && !reclaim) return;
+        if (JSON.stringify(next) === JSON.stringify(this.pointCloud)) return;
         this.pointCloud = next;
         this.renderService.cancel(this.visualizationId);
         this.renderedSignature = "";
@@ -268,7 +261,6 @@ export class TileSubsetLayerVisualization {
             this.owner.plannedLod,
             this.lineSimplificationToleranceMeters,
             JSON.stringify(this.pointCloud),
-            this.renderService.pointCloudPolicy.workingMemoryMiB,
             this.owner.style.id,
             this.owner.renderStyleKey,
             this.owner.styleOrder,

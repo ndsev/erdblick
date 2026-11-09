@@ -201,6 +201,10 @@ export class GpuPrimitiveStore {
         };
     }
 
+    private destroyBuffer(buffer: Buffer): void {
+        buffer.destroy();
+    }
+
     /** Grow geometrically and preserve existing records entirely on the GPU. */
     private ensureCapacity(requiredRecords: number): void {
         if (requiredRecords <= this.capacity) {
@@ -261,7 +265,7 @@ export class GpuPrimitiveStore {
                 this.device.submit(encoder.finish());
             }
         } catch (error) {
-            next?.destroy();
+            if (next) this.destroyBuffer(next);
             throw error;
         }
         if (this.gpuBuffer) {

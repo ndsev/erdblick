@@ -15,6 +15,9 @@ import {TEST_LAYER_NAMES, TEST_MAP_NAMES} from '../utils/test-params';
 
 test.use({stateSnapshot: null});
 
+// Native-grid and Python fixtures publish different feature identities.
+const inspectionFeatureId = process.env['EB_TEST_FEATURE_ID'] || 'Way.0';
+
 /** Reads persisted settings through the same public snapshot boundary used by saved sessions. */
 async function snapshot(page: Page) {
     return page.evaluate(() => window.ebDebug!.stateService.exportSnapshot());
@@ -46,7 +49,7 @@ for (const removed of [0, 1]) {
             const closingLayer = page.getByTestId(`map-tab-${removed}`)
                 .locator(`[data-id="${TEST_MAP_NAMES[0]}/${TEST_LAYER_NAMES[0]}"]`).first();
             await closingLayer.locator('input.p-checkbox-input').first().uncheck();
-            await selectFeatureForInspection(page, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0], 'Way.0');
+            await selectFeatureForInspection(page, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0], inspectionFeatureId);
             const panel = page.getByTestId('inspection-panel').first();
             await expect(panel).toBeVisible();
             const survivor = 1 - removed;

@@ -1,11 +1,6 @@
-import {
-    IconLayer,
-    IconLayerProps,
-    TextLayer,
-    TextLayerProps
-} from "@deck.gl/layers";
-import type {Parameters as LumaParameters} from "@luma.gl/core";
-import type {SearchResultDensityMarker} from "../../search/search-result-density.visualization";
+import { IconLayer, IconLayerProps, TextLayer, TextLayerProps } from "@deck.gl/layers";
+import type { Parameters as LumaParameters } from "@luma.gl/core";
+import type { SearchResultDensityMarker } from "../../search/search-results.model";
 import {ScreenSpaceSizeExtension} from "./screen-space-size.extension";
 
 /** Public props for the low-fidelity search-result density layer. */

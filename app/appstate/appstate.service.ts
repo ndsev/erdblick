@@ -319,13 +319,13 @@ export class AppStateService implements OnDestroy {
 
     /**
      * Old snapshots/config defaults may contain values that are now runtime
-     * metadata, removed preferences or server-owned catalogs. Ignore these keys
-     * without rejecting the user's remaining preferences; never recreate
-     * writable states for them.
+     * metadata, server-owned catalogs, or settings from withdrawn experiments.
+     * Ignore these keys without rejecting the user's remaining preferences;
+     * never recreate writable states for them.
      */
     private readonly RETIRED_STATE_KEYS = new Set([
         "mapPresets", "distributionVersions", "erdblickVersion",
-        "gpuMemoryManagementEnabled", "pointCloudGpuMemoryMiB"
+        "gpuMemoryManagementEnabled", "pointCloudWorkingMemoryMiB", "pointCloudGpuMemoryMiB"
     ]);
     private static readonly URL_SYNC_MIN_INTERVAL_MS = 50;
     private configDefaultStateMeta: ConfigDefaultStateMeta = {

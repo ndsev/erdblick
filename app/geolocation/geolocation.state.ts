@@ -39,6 +39,14 @@ export class GeolocationState {
         return this.locationSearchEnabled && locationBoundaryConsentAccepted(this.locationBoundaryConsentState.value);
     }
 
+    /** Apply dialog choices atomically so navigation sees only the completed policy. */
+    setLocationPreferences(searchEnabled: boolean, consent: LocationBoundaryConsent): void {
+        this.persistence.transaction(() => {
+            this.locationSearchEnabledState.next(searchEnabled);
+            this.locationBoundaryConsentState.next(consent);
+        });
+    }
+
     /** Publish consent and availability together after a complete preference edit. */
     readonly locationPolicyChanges = this.persistence.observe(
         () => ({enabled: this.locationSearchEnabled, boundaries: this.locationBoundariesEnabled}),

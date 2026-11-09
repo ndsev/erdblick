@@ -120,8 +120,8 @@ Enable **Point clouds**, then choose a layer preset:
 layer's style options. All presets retain depth occlusion and object picking.
 Overlay changes point appearance. The style opts into count-based downsampling
 for `PointCloudObject`; picking still identifies the
-containing object. By default, objects with fewer than 14,000,000 points retain
-every point. Objects with at least 14,000,000 points retain 13,999,999 original
+containing object. By default, objects with up to 14,000,000 points retain
+every point. Larger objects retain 14,000,000 original
 points, spaced evenly through the object's point sequence, including both
 endpoints. This is deterministic selection by source index; spatial coverage
 depends on source ordering. For example, a 16-million-point object
@@ -129,19 +129,27 @@ retains approximately 87.5% of its points. Zooming out or opening another view
 does not reduce this per-object count. LiveSource converts the complete source
 objects; sampling applies only to visualization.
 
-Preferences → Rendering → Point clouds controls adaptive detail. Disabling it
-requests exact backend geometry and renders all delivered points, subject to
-available memory.
+**Enable point-cloud downsampling** under **Preferences → Rendering → Point clouds**
+is on by default. **Maximum points per cloud object** sets the same quota for
+the backend and browser, from 100,000 to 14,000,000 points (default 14,000,000).
+Use the slider in 100,000-point steps or enter an exact count in the numeric field.
+With the standard style, the backend samples before transferring geometry; the
+browser retains every delivered point when the result already fits the quota.
+Turning the setting off requests exact backend geometry and renders all delivered
+points, subject to available memory.
 
-The separate **Memory** section controls browser working memory for point clouds
-(default **6144 MiB**) and the shared GPU allocation allowance for all map geometry
-(default **3072 MiB**). **Manage GPU memory** is enabled by default. Turning it off
-immediately bypasses GPU allowance checks and resumes work paused by that allowance;
-it keeps normal rendering and resource disposal, point-count sampling, and the
-point-cloud working-memory allowance. Turning it back on releases existing
-presentations and rebuilds them within the saved GPU allowance. These settings
-persist in this browser. The allowances are not preallocated memory or measurements
-of available VRAM. Saved user values take precedence over defaults.
+When at least one object is downsampled, its tile receives a warning in the
+current tile diagnostics and the diagnostics log. The warning covers backend
+and viewer sampling once per tile value; it does not prevent rendering. Tiles
+that retain every point do not warn. An unsampled replacement clears the current
+warning; previous log entries remain as history. Inspection and export stay exact.
+
+Both preferences persist in this browser and are included in
+exported state snapshots; neither is added to shared URLs. Press **Apply** to
+commit the change; dragging the slider alone does not reload geometry. Applying
+a different count releases the old cloud presentation before uploading its replacement,
+so retaining the old records cannot block a reduction in detail. A saved user
+choice takes precedence over the default.
 
 Custom styles opt in on a top-level, feature-scope, point-only rule:
 
@@ -149,41 +157,26 @@ Custom styles opt in on a top-level, feature-scope, point-only rule:
 rules:
   - geometry: point
     point-cloud: true
-    point-cloud-max-points: 13999999
     color: "#70D6C7"
     width: 2
 ```
 
-`point-cloud-max-points` is a backend visualization quota for each object,
-combining its matching point geometries. Its default is 13999999; custom styles
-may explicitly request a smaller sample. Set it to zero for exact backend
-delivery with frontend sampling. Allowed values are 0–13999999. Subrules inherit
-the policy and must not override it. Ordinary point/POI rules remain unchanged.
+The preference combines each object's matching point geometries. Regular viewer
+rendering overrides any authored `point-cloud-max-points` value, including zero;
+styles opt in with `point-cloud: true` and do not choose a separate detail limit.
+The older key remains accepted for native filter-plan consumers, where zero
+requests exact geometry and positive unsigned 32-bit values specify a quota.
+Subrules inherit the policy and must not override it. Ordinary point/POI rules remain unchanged.
 Selection preserves original coordinates, source order and duplicates; Draco
 can use a different decoded order from native arrays. The canonical model,
 inspection and export remain exact.
 
 The frontend selects before projection and packet generation. Statistics expose
-delivered/rendered instance counts. The GPU allowance accounts for requested
-primitive-buffer capacity, replacement overlap and observed luma resources.
-Memory admission pauses work that cannot fit; it does not silently lower the
-point count.
-
-Reducing working memory, or reducing the GPU allowance while GPU management is
-enabled, terminates render workers to release their WASM heaps and retires GPU
-contributions from all layers. Lowering working memory may
-additionally evict retained cloud input.
-Replacement work waits for safe retirement after Deck rebinds its models. It can
-reuse released ranges inside buffers that remain allocated. Under allocation
-pressure, superseded fallback visuals retire before their replacements are ready;
-this may leave a temporary gap while the replacement renders.
-GPU allocation exhaustion produces one warning per memory or point-cloud preference change.
-Affected work retries automatically when usable capacity is released or its
-allowance/input changes. Smaller jobs can proceed while larger jobs wait. Hide
-data or restrict a style's filter to reduce demand without raising the allowance
-or reloading the viewer. An object that still cannot fit remains paused. If browser working-memory
-admission rejects input or rendering, raise that allowance, or hide other clouds
-and refresh the affected layer.
+delivered/rendered instance counts. Sampling does not depend on available memory
+or other visible clouds. The threshold is not a combined tile/view memory budget:
+several small objects can still exhaust a shared GPU buffer. Lower the threshold,
+hide unused layers/styles, narrow a style's filter, or lower **Max Tiles to Load**
+to reduce rendering demand.
 
 <!-- mcp:
 keywords: [style, YAML, search visualization]
@@ -240,12 +233,17 @@ retains the child rules. Relation endpoints use the same nested rule controls.
 Document groups expose options of all three native types (Boolean, color, string),
 local presets, LOD thresholds, and hover/selection effects. Maps & Layers also provides
 runtime controls for all non-internal option types. Color text accepts native named
-colors and RGB hex forms; the picker is a convenience. Scale rows retain numeric,
-string, and Boolean category keys and optional fallbacks. Numeric entry uses native
+colors and RGB hex forms. Click the color swatch to open the picker; choosing a
+color writes RGB hex, while opening or dismissing it preserves the authored value.
+Scale rows retain numeric, string, and Boolean category keys and optional fallbacks.
+Numeric entry uses native
 validation rather than search-editor slider limits.
 
-**Unset** removes a field, retaining inheritance or native defaults; opening the
-form does not materialize defaults. Inherited scales/expressions retain their native
+Each rule has a collapsible header with reorder, duplicate, and remove controls.
+**Add properties** reveals unconfigured common fields. **Add** sets an optional
+field; the reset-arrow button removes its value, retaining
+inheritance or native defaults. Hover or focus a field's information button for
+its explanation. Opening the form does not materialize defaults. Inherited scales/expressions retain their native
 precedence over child literals. Compatibility fields are explicitly labeled when
 they have no rendering effect. Edits patch individual YAML nodes, preserving
 unrelated content and comments. Editing an alias makes a local copy without changing
@@ -1240,7 +1238,5 @@ stay renderer-local.
 
 Point-cloud picking reuses compact worker-produced feature identities, without
 deserializing another full cloud on the main thread. Browser subset routing
-accepts metadata prefixes up to 256 KiB. Increasing the working-memory setting
-retries clouds whose input was rejected; after hiding other clouds, refresh the
-affected layer to retry it. Complete delivered sources within their point quota
-keep all records, including duplicates.
+accepts metadata prefixes up to 256 KiB. Complete delivered sources within their
+point quota keep all records, including duplicates.

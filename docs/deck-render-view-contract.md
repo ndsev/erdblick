@@ -77,6 +77,34 @@ recheck their current intent after the asynchronous lookup.
 ### `app/mapview/deck/deck-view.controller.ts`
 - subscribes to map service topics for render/destroy/pick/move updates
 
+## Per-canvas ownership
+
+`DeckMapView` remains the renderer lifetime owner. It creates Deck and its device,
+attaches the scene, handles context loss, sizes the canvas, invalidates rendering,
+and commits camera state. Camera synchronization and first-person transitions
+remain here because they share preview/commit and view-removal boundaries.
+
+| Collaborator | Owned state and inputs |
+| --- | --- |
+| `DeckBackground` (`deck-background.presentation.ts`) | XYZ/WMS layers, request options, signature and removal; receives normalized background values and the registry. |
+| `DeckSearchOverlay` (`deck-search-overlay.presentation.ts`) | Debounce/animation-frame refresh, density layout, pins, source keys and layer IDs; receives result values and viewport/visibility decisions. |
+| `DeckTileOverlay` (`deck-tile-overlay.presentation.ts`) | Grid scheduling, geometry, tile-state overlays and outlines; receives tile/grid snapshots and reuses `DeckTileGridLayer`. |
+| `DeckLocationOverlay` (`deck-location-overlay.presentation.ts`) | Marker, location/jump-area highlights, fades and label timers; receives geographic/style values, without navigation or search-session ownership. |
+| `DeckPicking` (`deck-picking.controller.ts`) | Eligible layers, rendered order, decoding, navigation anchors, coalesced hover samples and readback generations; receives a narrow live Deck/scene/viewport surface and publishes typed hover/click results. |
+
+These are plain objects created for each view, not Angular singleton services.
+Overlays do not import application config, search or inspection services.
+The renderer projects those services' values and retains inspection/coordinate
+actions at its application boundary. Rectangle overlay geometry is shared through
+`deck-rectangle-overlay.layer.ts`; there is no duplicate grid implementation.
+
+Destruction unsubscribes application events and stops renderer scheduling, then
+destroys picking and all overlay owners before the layer registry. Each owner
+cancels its pending work and removes its layers. Queued readbacks and discovery
+results cannot publish into a retired owner. Scene buffers and atlases are retired
+before Deck/device destruction. Event removal uses the owned Deck canvas, never a
+DOM-ID lookup that could return a replacement view's canvas.
+
 ## 3D navigation ownership
 
 Feature-relative navigation is split into generic camera behavior and Erdblick representation policy:

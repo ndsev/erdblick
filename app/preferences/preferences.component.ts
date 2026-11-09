@@ -56,6 +56,8 @@ import {
 } from "../mapview/presentation-lod.model";
 import {
     DEFAULT_POINT_CLOUD_POLICY,
+    MIN_POINT_CLOUD_MAX_POINTS,
+    MAX_POINT_CLOUD_MAX_POINTS,
     PointCloudPolicy,
     pointCloudPolicySchema
 } from "../mapview/point-cloud-policy.model";
@@ -260,17 +262,21 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                             </p-multiSelect>
                         </div>
                         <p-divider></p-divider>
-                        <div class="slider-container">
-                            <label [for]="locationSearchResultLimitInput">Location Matches</label>
+                        <div class="slider-container" data-testid="location-matches-setting">
+                            <label for="location-search-result-limit">Location Matches</label>
                             <div class="slider-controls">
                                 <div style="display: inline-block">
-                                    <input class="tiles-input w-full"
+                                    <input id="location-search-result-limit" class="tiles-input w-full"
                                            type="text"
                                            pInputText
+                                           [disabled]="!locationSearch.locationSearchEnabled"
                                            [(ngModel)]="locationSearchResultLimitInput"
                                            (ngModelChange)="onLocationSearchResultLimitInputChange($event)"
                                            (keydown.enter)="applyLocationSearchResultLimit()"/>
                                     <p-slider [(ngModel)]="locationSearchResultLimitInput"
+                                              [disabled]="!locationSearch.locationSearchEnabled"
+                                              [attr.aria-disabled]="!locationSearch.locationSearchEnabled"
+                                              ariaLabel="Location Matches"
                                               (ngModelChange)="onLocationSearchResultLimitSliderChange($event)"
                                               class="w-full"
                                               [min]="1"
@@ -279,7 +285,7 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                                 <p-button (click)="applyLocationSearchResultLimit()"
                                           label=""
                                           icon="pi pi-check"
-                                          [disabled]="!locationSearchResultLimitChanged"></p-button>
+                                          [disabled]="!locationSearch.locationSearchEnabled || !locationSearchResultLimitChanged"></p-button>
                             </div>
                         </div>
                         <section data-testid="location-search-preferences">
@@ -297,7 +303,7 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                             </div>
                             <div class="button-container" data-testid="location-boundaries-setting">
                                 <div>
-                                    <label for="location-boundaries-enabled">Location boundaries</label>
+                                    <label for="location-boundaries-enabled">Use location boundaries</label>
                                     <div class="location-preference-links">
                                         <a href="#location-disclaimer" (click)="$event.preventDefault(); locationPolicy.showDisclaimer()">Disclaimer</a>
                                         · <location-attribution />
@@ -306,6 +312,7 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                                 <!-- Consent can reject a toggle; keep the form control at the accepted state. -->
                                 <p-toggleswitch inputId="location-boundaries-enabled" #locationBoundaryModel="ngModel"
                                                [ngModel]="locationPolicy.boundariesAccepted"
+                                               [disabled]="!locationSearch.locationSearchEnabled"
                                                (onChange)="onLocationBoundariesChange($event, locationBoundaryModel)" />
                             </div>
                         </section>
@@ -398,25 +405,34 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                     </p-tabpanel>
 
                     <p-tabpanel value="rendering">
-                        <section data-testid="rendering-memory-preferences">
-                            <h3>Memory</h3>
-                            <div class="slider-container">
-                                <label for="point-cloud-working-memory">Rendering working memory (MiB)</label>
-                                <input id="point-cloud-working-memory" type="number" pInputText
-                                       min="32" max="16384" [(ngModel)]="pointCloudPolicyDraft.workingMemoryMiB" />
-                            </div>
-                            <small>Point-cloud working memory is shared across views. Apply numeric changes below.</small>
-                        </section>
-                        <p-divider></p-divider>
                         <section data-testid="point-cloud-preferences">
                             <h3>Point clouds</h3>
                             <div class="button-container">
-                                <label for="point-cloud-downsampling">Adaptive detail</label>
+                                <label for="point-cloud-downsampling">Enable point-cloud downsampling</label>
                                 <p-toggleswitch inputId="point-cloud-downsampling"
                                                [(ngModel)]="pointCloudPolicyDraft.enabled" />
                             </div>
-                            <p>Objects below 14 million points keep every point. Larger objects are
-                                progressively sampled to just below that count. This setting is independent of GPU memory management.</p>
+                            <div class="slider-container">
+                                <label for="point-cloud-max-points">Maximum points per cloud object</label>
+                                <div class="slider-controls">
+                                    <div style="display: inline-block">
+                                        <input id="point-cloud-max-points" data-testid="point-cloud-max-points"
+                                               type="number" pInputText class="tiles-input w-full"
+                                               [(ngModel)]="pointCloudPolicyDraft.maxPoints"
+                                               [min]="MIN_POINT_CLOUD_MAX_POINTS" [max]="MAX_POINT_CLOUD_MAX_POINTS"
+                                               [disabled]="!pointCloudPolicyDraft.enabled"
+                                               (keydown.enter)="applyPointCloudPolicy()" />
+                                        <p-slider [(ngModel)]="pointCloudPolicyDraft.maxPoints"
+                                                  class="w-full"
+                                                  data-testid="point-cloud-max-points-slider"
+                                                  ariaLabel="Maximum points per cloud object"
+                                                  [min]="MIN_POINT_CLOUD_MAX_POINTS" [max]="MAX_POINT_CLOUD_MAX_POINTS"
+                                                  [step]="100000" [disabled]="!pointCloudPolicyDraft.enabled" />
+                                    </div>
+                                </div>
+                            </div>
+                            <p>Each object keeps every point up to this count. Larger objects are sampled evenly.
+                                This is not a total tile or view budget. Turn off to request and render all points.</p>
                             <p-button label="Apply" data-testid="point-cloud-apply"
                                       [disabled]="!pointCloudPolicyChanged" (click)="applyPointCloudPolicy()" />
                         </section>
@@ -633,6 +649,8 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     tilePullCompressionEnabledSetting: boolean = false;
     connectionRetryEnabled = true;
     pointCloudPolicyDraft: PointCloudPolicy = { ...DEFAULT_POINT_CLOUD_POLICY };
+    readonly MIN_POINT_CLOUD_MAX_POINTS = MIN_POINT_CLOUD_MAX_POINTS;
+    readonly MAX_POINT_CLOUD_MAX_POINTS = MAX_POINT_CLOUD_MAX_POINTS;
     connectionInitialSeconds = 5;
     connectionBackoffMultiplier = 2;
     connectionMaximumSeconds = 60;
@@ -1069,7 +1087,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     applyPointCloudPolicy(): void {
         const parsed = pointCloudPolicySchema.safeParse(this.pointCloudPolicyDraft);
         if (!parsed.success) {
-            this.messageService.showError("Working memory must be 32–16384 MiB and GPU allowance 16–8192 MiB.");
+            this.messageService.showError("Invalid point-cloud sampling preferences.");
             return;
         }
         this.mapService.setPointCloudPolicy(parsed.data);
@@ -1215,7 +1233,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
 
     /** Commits the location result limit after validating the pending input. */
     protected applyLocationSearchResultLimit() {
-        if (!this.locationSearchResultLimitChanged) {
+        if (!this.locationSearch.locationSearchEnabled || !this.locationSearchResultLimitChanged) {
             return;
         }
         const limit = Number(this.locationSearchResultLimitInput);

@@ -5,7 +5,7 @@ import {BehaviorSubject, Subject} from "rxjs";
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import {OmnibarComponent} from "../../../app/omnibar/omnibar.component";
 import type {CompletionCandidate} from "../../../app/search/search.model";
-import {SearchService} from "../../../app/search/search.service";
+import {FeatureSearchSchemaService} from "../../../app/search/feature-search-schema.service";
 
 const cleanups: Array<() => void> = [];
 beforeEach(() => vi.useFakeTimers());
@@ -40,7 +40,7 @@ function fixture() {
         id, action: id, input: query, name: id, label: id, icon: "", color: "", enabled: !!query
     }))};
     const component = new OmnibarComponent(
-        {} as never, new ElementRef(host), {registerShortcut: vi.fn(), unregisterShortcut: vi.fn()} as never,
+        search as never, {} as never, new ElementRef(host), {registerShortcut: vi.fn(), unregisterShortcut: vi.fn()} as never,
         {} as never,
         {targetValueSubject: new Subject<string>(), targetsChanged: new Subject<void>(), mapSelectionSubject: new Subject()} as never,
         {lastInspectedTileSourceDataOption: new Subject()} as never,
@@ -214,7 +214,7 @@ describe("omnibar completion and actions", () => {
 
 describe("omnibar schema scope", () => {
     it("includes hidden ready layers and excludes unrelated unavailable sources", () => {
-        const service = Object.create(SearchService.prototype) as SearchService;
+        const service = Object.create(FeatureSearchSchemaService.prototype) as FeatureSearchSchemaService;
         const layers = [
             {mapId: "Visible", id: "Road"}, {mapId: "Hidden", id: "Lane"}, {mapId: "Failed", id: "Road"}
         ];

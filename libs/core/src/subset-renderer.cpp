@@ -582,7 +582,9 @@ void TileSubsetLayerRenderer::setLineSimplificationTolerance(
 void TileSubsetLayerRenderer::setPointCloudPolicy(
     bool enabled, uint32_t maxPoints, double spacingMeters, std::string const& /*cacheKey*/)
 {
-    if (maxPoints > mapget::DefaultPointCloudMaxPoints || !std::isfinite(spacingMeters) || spacingMeters < 0.)
+    // The caller supplies the user's quota. A default detail setting is not
+    // an allocation limit and must not reject a valid requested point count.
+    if (!std::isfinite(spacingMeters) || spacingMeters < 0.)
         throw std::invalid_argument("Invalid point-cloud rendering policy");
     pointCloudEnabled_ = enabled;
     pointCloudMaxPoints_ = maxPoints;
@@ -4077,15 +4079,17 @@ NativeJsValue TileSubsetLayerRenderer::renderBridgeResult() const
     return *result;
 }
 
-NativeJsValue TileSubsetLayerRenderer::renderPackets() const
+NativeJsValue TileSubsetLayerRenderer::renderPackets()
 {
     auto result = JsValue::List();
-    for (auto const& packet : renderPacketFragmentsBytes()) {
+    // Copy each bounded packet into JS before releasing its native record blocks.
+    // Holding all encoded packets here used to duplicate the entire cloud in WASM.
+    gpuPacketBuilder_.consumeFragments([&](std::vector<std::byte>&& packet) {
         result.push(JsValue::Uint8Array(std::span<uint8_t const>{
             reinterpret_cast<uint8_t const*>(packet.data()),
             packet.size(),
         }));
-    }
+    });
     return *result;
 }
 

@@ -123,6 +123,15 @@ struct GpuRecordStream {
     uint32_t atlasPage = 0U;
     uint32_t renderOrder = 0U;
     std::vector<std::byte> records;
+    /** Optional borrowed bytes for encoding a bounded slice without copying it first.
+     * The owner must keep this view alive until encoding has returned.
+     */
+    std::span<std::byte const> recordView;
+
+    [[nodiscard]] std::span<std::byte const> recordBytes() const
+    {
+        return recordView.empty() ? std::span<std::byte const>{records} : recordView;
+    }
 };
 
 /** A contiguous range in one record stream owned by one contribution. */

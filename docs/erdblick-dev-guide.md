@@ -149,6 +149,7 @@ For the real HTTP-to-browser action path, enable the native local MCP fixture:
 ```bash
 EB_MAPGET_MCP_LOCAL=1 EB_MAPGET_CONFIG=tests/playwright/fixtures/mapget-native-grid.yaml \
   npm run test:integration -- tests/playwright/tests/viewer-actions-native.spec.ts \
+  tests/playwright/tests/state-owner-actions.spec.ts \
   tests/playwright/tests/schema-completion.spec.ts tests/playwright/tests/tile-request.spec.ts \
   --project='' --workers=1
 ```
@@ -353,15 +354,16 @@ A Deck/device recreation replaces only the scene handle. Logical styled
 layers, filter refs, subsets, and visualizations survive until the logical
 view/controller disposes them.
 
-Worker completion advances the pending render queue without reconciling the full
-view or rebuilding style plans. Point-cloud demand and camera scale do not change
-the count-based sampling policy. The working-memory allowance bounds retained
-point-cloud input and worker heaps across views; it does not limit GPU allocation.
+Worker completion only advances the pending render queue; it does not reconcile
+the full view or rebuild style plans. Jobs dispatch in queue order as worker
+slots become available. Point-cloud ownership and camera scale do not change
+the count-based sampling policy.
 
 GPU buffers follow their scene's presentation lifetime. Replaced buffers remain
 alive until Deck has rebound its models; empty material stores are then destroyed.
-The retired `gpuMemoryManagementEnabled` and `pointCloudGpuMemoryMiB` preferences
-are ignored when importing existing snapshots or deployment defaults.
+The retired `gpuMemoryManagementEnabled`, `pointCloudWorkingMemoryMiB` and
+`pointCloudGpuMemoryMiB` preferences are ignored when importing existing snapshots
+or deployment defaults.
 
 ### Transport refs
 
@@ -574,6 +576,48 @@ complete `{visible, level, autoLevel}` value with only the desired fields change
 using `{target: {control: "view.layer", viewId, mapId, layerId}, value}`. No checkbox click is necessary. Use
 `viewer_describe_controls` to discover other writable settings and their schemas.
 
+### Discover and verify a control
+
+For remote MCP, call `viewer_list_sessions` with `{}` and select the intended tab
+by its label. Keep that tab open. Pass its `clientId` in each viewer tool call;
+native `mapget_*` tools use their own data selectors and do not require a tab.
+These examples show the `params` object of a `tools/call` request. Replace the
+placeholders with identities returned by the server.
+
+```json
+{"name":"viewer_get_controls","arguments":{"clientId":"<tab-client-id>","targets":[{"control":"app.views"}]}}
+```
+
+Read the `app.views` entry in `structuredContent.values`. Its value contains
+`focusedViewId`, `sync` and `views`, with a `viewId`, `projection` and
+`navigationMode` for each view. Use a returned logical `viewId` in subsequent
+selectors:
+
+```json
+{"name":"viewer_get_controls","arguments":{"clientId":"<tab-client-id>","targets":[{"control":"view.projection","viewId":"<view-id>"},{"control":"view.layers","viewId":"<view-id>"}]}}
+```
+
+Record the original projection before changing it. This assignment uses the
+current control contract:
+
+```json
+{"name":"viewer_set_control","arguments":{"clientId":"<tab-client-id>","target":{"control":"view.projection","viewId":"<view-id>"},"value":"2d"}}
+```
+
+Repeat the read to verify the result, then restore the recorded projection when
+this is a smoke test. Projection synchronization may intentionally change other
+views; inspect `app.views.sync` and record those views too. A reload or reconnect
+retires the tab's `clientId`; rediscover the session before continuing. Public
+view selectors use `viewId`, with no `viewIndex` or `viewLayoutRevision` argument.
+For browser-native WebMCP, omit `clientId` and start directly with `app.views` in
+the current document; see [Browser-native WebMCP](#browser-native-webmcp).
+
+For a remote tool failure, check `isError` and decode the JSON error object in the
+text content block. Error results omit `structuredContent`; the advertised output
+schema describes successful results. Preserve the returned `code`, `reason` and
+`outcome` when deciding whether to retry, and read current state after an unknown
+mutation outcome.
+
 <!-- mcp:
 title: "Viewer semantic commands and style discovery"
 keywords: ["MCP", "catalog", "styles", "local YAML", "validation", "inspection", "source references"]
@@ -593,7 +637,7 @@ keywords: ["MCP", "catalog", "styles", "local YAML", "validation", "inspection",
 | `viewer_get_search_results`, `viewer_export_search` | Bounded flat identity slices or JSON configuration/results, without building the result tree |
 | `viewer_get_style`, `viewer_validate_style`, `viewer_edit_style` | Read YAML, validate it natively, or create/update/reset/delete/toggle browser-local styles |
 | `viewer_get_diagnostics` | Browser counters, cached loading/GPU observations, and bounded style/search errors; use separately privileged `mapget_get_diagnostics`, when exposed, for native backend workers/cache |
-| `viewer_get_share_link` | Read a URL through the normal URL-state codec; report browser-local style/search dependencies that are not embedded |
+| `viewer_get_share_link` | Copy the current page URL exactly; report browser-local style/search dependencies that are not embedded |
 
 Only read tools require `viewer-read`; state-changing commands require
 `viewer-control`. Style drafts use the same native version-2 parser as the editor.
@@ -634,7 +678,7 @@ keywords: ["MCP", "search", "partial settings", "renderStrategy", "pagination", 
 -->
 ### Search commands
 
-Search creation requires explicit map/layers and view indices and defaults to
+Search creation requires explicit `mapLayers` and logical `viewIds` and defaults to
 `autoUpdate: false`. Configure all initial coverage options before dispatching the
 first request. The returned `searchId` addresses the ordinary visible, persisted
 search, including its layer/type/level/view scope, style rules and rendering
@@ -674,9 +718,11 @@ render-settling fences are not part of this API.
 
 ### Share links
 
-`viewer_get_share_link` returns the normal URL-state serialization without changing
-browser navigation or forwarding unknown URL parameters, fragments or authentication
-parameters. It reports `localOnly` for loopback URLs and lists visible browser-local
+`viewer_get_share_link` returns `window.location.href` exactly, including the
+current route, query parameters and fragment. It does not rebuild URL state,
+flush a pending address-bar update or navigate. Deployment-specific parameters
+are preserved, so this action does not sanitize a URL for publication. It reports
+`localOnly` for loopback URLs and lists visible browser-local
 styles and enabled map-search overlays under `localStyleIds` and `localSearchIds`.
 These definitions are not embedded in the URL. Export required searches and styles
 separately when sharing them; the link alone does not reproduce those dependencies.
@@ -731,7 +777,9 @@ second layout tree is maintained.
 
 ### Application screenshots
 
-`viewer_screenshot` requires `viewer-read` and an explicit `clientId`. It captures
+Through remote MCP, `viewer_screenshot` requires `viewer-read` and an explicit
+`clientId`. Browser-native WebMCP captures the current document without that routing
+argument. The action captures
 the **visible application viewport**, including both map views, labels/highlights,
 inspection panels, toolbars and open overlays, not browser chrome or a full-page
 scrolling export. Optional `maxWidth`/`maxHeight` (128–1920; defaults 1280×960)
@@ -742,9 +790,13 @@ screen-sharing prompt or screenshot storage is involved.
 Each render view forces one synchronous Deck frame and immediately copies its
 canvas after post-render effects/text, before WebGL clears the non-preserved
 drawing buffer. The ordinary renderer still uses `preserveDrawingBuffer: false`.
-A lazily loaded `dom-to-image-more` then rasterizes the visible DOM with those
-frozen canvases. Only one capture can run at once, outside Angular change detection;
-cancellation discards late output without modifying app state. Resource failures
+A lazily loaded `dom-to-image-more` serializes the visible DOM to SVG. Frozen
+canvas images are inserted at their original sibling positions without using the
+library's animation-frame-dependent canvas conversion. The owned rasterizer waits
+for image decoding and a frame or short timer fallback, so a background tab does
+not need to become visible to finish. An active 15-second deadline and cancellation
+retire stalled work, release capture admission, and discard late output. Browser
+animation scheduling and ordinary rendering remain unchanged. Resource failures
 produce warnings; canvas/capture failures produce explicit action errors.
 
 The browser result is `{image: {mimeType, data}, metadata}`. Mapget validates that
@@ -752,8 +804,14 @@ full result, promotes the JPEG to MCP **ImageContent**, advertises the metadata
 schema as the MCP output schema, and returns metadata-only structured/text content.
 Image bytes are not duplicated in the model's text context. JPEG data is capped at
 240,000 base64 characters within the existing 256 KiB relay budget; complex scenes
-may be downscaled further. Metadata includes actual and original viewport sizes,
-capture time, layout revision and warnings.
+may be downscaled further. Metadata includes scope, actual and original viewport
+sizes, capture time, readiness and warnings. Layout changes are checked internally;
+the result does not expose a layout revision.
+
+WebMCP currently returns the browser's `{image, metadata}` object directly. It
+does not pass through mapget's `ImageContent` projection. Verify image display and
+model perception in the particular browser-agent host before treating this result
+as a delivered image attachment.
 
 This is an approximate DOM-based capture for acceptance/debugging, not pixel-exact
 browser screenshotting: browser chrome/cursor, embedded frames/video and some CSS
@@ -764,7 +822,10 @@ search/inspection/diagnostic state observations before capturing when needed.
 ### Contract generation and relay
 
 `npm run generate:viewer-actions` exports self-contained Draft-07 schemas from the
-same DOM-free Zod definitions used at runtime. Both webapp variants package
+same owner registrations used at runtime. Its build-time Angular application
+collects the catalog in a disposable document without starting network, renderer
+or search work; see [Catalog generation in Node](erdblick-state-actions.md#catalog-generation-in-node).
+Both webapp variants package
 `web-mcp-actions.json` beside `index.html`. Its `catalogId` hashes compact JSON
 with recursively sorted object keys, retained array order and ECMAScript JSON
 scalar encoding; the digest and timestamps are not hash input. Generated files
@@ -788,8 +849,8 @@ branches derived from the control declarations to pair each target with its exac
 value schema. Keep runtime and native parity fixtures together when extending
 this surface; client-side conditional-schema support is a separate acceptance gate.
 When changing contracts during an already-running watch/serve session, rerun
-`npm run generate:viewer-actions` and publish the updated generated artifact
-beside the frontend before reloading;
+`npm run generate:viewer-actions`, rebuild the browser bundle, and publish the
+matching bundle and generated artifact together before reloading;
 the lifecycle hook runs when the watcher starts, not on each source edit.
 
 For local native development, start mapget with `serve --host 127.0.0.1 -p 8099
@@ -829,7 +890,9 @@ renameable tab label, bounded recent action names/outcomes and Stop current acti
 Stop cancels pending agent work, not completed edits or human searches. Catalog
 mismatch disables agent controls only; ordinary viewing remains available.
 
-The compact Codex, Claude, Copilot and Cursor buttons share the label
+The compact Codex, Claude, Copilot and Cursor buttons copy setup for **Codex CLI**,
+**Claude Code**, **GitHub Copilot CLI** and the **Cursor editor**, respectively.
+They share the label
 **Copy Add-MCP-Command:** and stay together in one row (the label can wrap above
 them on narrow screens). They use the server's public connection metadata and fixed, POSIX-shell-quoted command
 syntax. Local mode copies only the add command. For Codex and Claude, OAuth mode
@@ -850,7 +913,29 @@ Without that ID, Cursor uses OAuth discovery. Its inherited `--add-mcp` option
 targets the separate VS Code configuration store, so this button uses Cursor's
 own installation flow instead.
 Run the copied snippet in a POSIX shell and complete login in the client; the
-browser UI only copies commands and never handles OAuth credentials. See the official
+browser UI only copies commands and never handles OAuth credentials. For the
+local server on port 8099 shown above, the basic setup is:
+
+```sh
+codex mcp add mapviewer --url 'http://127.0.0.1:8099/mcp'
+claude mcp add --transport http --scope local mapviewer 'http://127.0.0.1:8099/mcp'
+```
+
+Run the command for your client. Claude's `--scope local` stores the entry for
+the current project; use `--scope user` if it should be available across projects.
+This flag controls configuration storage, while `oauth.scopes` controls requested
+authorization. The copied Claude command uses its default local storage scope.
+Check the saved entry with `codex mcp get mapviewer` or
+`claude mcp get mapviewer`, then inspect `/mcp` in a new client session and run
+the [control smoke test](#discover-and-verify-a-control). A saved entry alone
+does not establish that a model can discover and call every tool.
+
+The loopback address must be reachable from the environment running the client.
+For a client running in another container, VM or hosted service, use the
+[hosted authentication setup](../../mapget/docs/mapget-mcp.md#hosted-authentication)
+and its configured public endpoint. Desktop apps and their browser integrations
+need acceptance in their own execution environment; CLI success does not verify
+those surfaces. See the official
 [Codex MCP instructions](https://learn.chatgpt.com/docs/extend/mcp?surface=cli),
 [Claude Code MCP instructions](https://code.claude.com/docs/en/mcp),
 [Copilot CLI MCP reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#mcp-server-configuration),
@@ -859,44 +944,53 @@ browser UI only copies commands and never handles OAuth credentials. See the off
 
 ## Render pipeline
 
-`TileSubsetLayerRenderService` is a global finite worker service. It schedules
-one immutable pre-render Morton block of subset blobs plus style/pass inputs.
-Newer render signatures replace queued work and stale completions are
-rejected.
-
-`ViewLayerController` assembles canonical half-level Morton-prefix rectangles:
-`1x1`, `2x1`, `2x2`, `4x2`, and `4x4`. It chooses the largest ready block
-whose subsets share style-plan ownership and string-pool identity and whose combined
-stored geometry contains at most 16,384 vertices. The 4x4 limit remains the
-hard spatial ceiling; an individual oversized tile is still rendered as a
-singleton.
+`TileSubsetLayerRenderService` schedules one immutable tile subset and its
+style/pass inputs per worker job. New render signatures replace queued work,
+and stale completions are rejected. `TileSubsetLayerVisualization` owns the
+resulting tile/style contribution and its GLTF bridge. Each view's `GpuScene`
+combines compatible material records from multiple contributions into shared
+GPU buffers, while retaining separate contribution and picking identities.
 
 Workers:
 
-1. parse every subset in the block;
+1. parse the subset, reusing an unchanged point-cloud input when possible;
 2. run `TileSubsetLayerRenderer`;
-3. return logical point/path/surface/label/arrow buffers;
+3. return bounded GPU packet fragments plus the GLTF bridge;
 4. return exact `(channel ordinal, typed-entry ordinal)` pick refs;
 5. report attachment demand, issues, and timing.
 
-`TileSubsetLayerVisualization` is the block coordinator and atomically installs
-three tile-scoped presenters. `TileSubsetVectorPresentation` owns arena and
-direct Deck contributions for surfaces, paths, points, labels, and arrows.
-`TileSubsetGltfPresentation` owns attachment transfer, a
-`DeckTileGltfAssetRef`, visible nodes, pick proxies, and GLTF interaction
-contributions. `DeckTileGltfAssetStore` coalesces parsing into an immutable
-CPU-side document without a luma-device key. `DeckGltfNodeLayer` alone creates
-and destroys the per-device scenegraph models and texture resources. The
-`TileSubsetInteractionPresentation` owns the local semantic-target index,
-style-glow masks, hover/selection masks, direct fallback layers, and transient
-GLTF interaction contributions. Pure buffer selection and mask construction
-live in `tile-subset-interaction-data.ts`; the coordinator retains picking
-resolution because it owns the exact worker pick table. The visualization
-keeps the exact immutable subset bytes which produced those
-presentations until every contribution and pick reference is removed. A block
-remains alive while any constituent tile overlaps current demand.
-Primitive-level information such as relation endpoint role or nested
-render-rule index stays renderer-local.
+### Native record storage and packet encoding
+
+`GpuRenderPacketBuilder` stores each material stream in record-aligned blocks
+bounded by the existing 4 MiB packet size. Small streams allocate only the
+capacity they need; growth never reallocates the entire accumulated stream.
+This avoids a large vector's old and replacement allocations coexisting when
+its capacity doubles, which previously exhausted the worker's WASM heap on
+dense point clouds. Record indices remain stable for later path/arrow patches.
+
+Fragment planning calculates how many records fit after packet metadata and
+borrows slices of these blocks. It does not copy the remaining cloud into
+oversized candidates. The browser uses `consumeFragments`: one fragment is
+encoded and copied into its JavaScript array, then blocks whose last slice
+has been consumed are released. Native `buildFragments()` collects output
+through the same encoder for callers that need to retain the bytes. Success,
+failure, and renderer reset release record blocks; large capacities are not
+kept in the renderer cache.
+
+The packet ABI, contribution completion markers, feature identities, and
+point-cloud downsampling policy are unchanged. The worker still parses a
+whole input subset, and JavaScript can retain the completed packet arrays
+until transfer/upload. Bounded native allocations therefore do not imply
+constant total memory or remove the separate limits of shared GPU buffers.
+
+`MapViewState.pointCloudPolicy` owns the enabled flag and per-object `maxPoints`.
+Regular `ViewLayerController` filter plans replace authored cloud quotas with this
+preference (zero when disabled); the worker receives the same value. Applying a
+new quota changes filter identity and releases the previous cloud presentation
+instead of retaining it as a replacement fallback. Otherwise old records can
+occupy the capacity needed to apply a lower count. Backend/native validation
+checks the quota's representation and channel semantics, not an independent
+14-million-point ceiling.
 
 Large GLBs are requested only after renderer output reports demand. The
 GLTF presenter combines attachment bytes with subset GLTF-node/AABB entries.
@@ -910,6 +1004,12 @@ WebGL context. `DeckMapView` therefore publishes its immutable scene handle
 only after `onDeviceInitialized`; otherwise attachment-backed presentation
 would permanently observe a null device and never request its GLB.
 
+Background, search, tile and location overlays are per-view presentation owners;
+`DeckPicking` owns readback/hover scheduling. They receive explicit values or
+narrow renderer surfaces and retire before the layer registry and device.
+`DeckMapView` keeps camera, context-loss and final renderer ownership. See
+[Deck Render View Contract](deck-render-view-contract.md#per-canvas-ownership).
+
 `FrameBudgetLoop<T>` is the shared main-thread time-slice utility. It services
 bounded work such as search-result ingestion without creating a global
 "schedule anything" ownership service.
@@ -918,9 +1018,15 @@ bounded work such as search-result ingestion without creating a global
 
 Search is an ordinary styled presentation:
 
-- the editor/session service owns query and result-list state;
-- `feature-search-style.ts` creates a synthetic version-2 style;
-- one `StyledMapgetLayer` runs that style through `/filter`;
+- `SearchComponent` owns the dialog/dock/query shell; local scope, results,
+  visualization and diagnostics components own their drafts and scheduling;
+- `SearchService` coordinates sessions; `SearchResults` owns each session's
+  contributions/progress and pure summary aggregation;
+- `FeatureSearchSchemaService` owns lazy schema/completion workers and each
+  input owner's independent completion cancellation;
+- `feature-search-style.adapter.ts` creates a synthetic version-2 style;
+- `SearchPresentation` owns the compiled style, `StyledMapgetLayer` subscription,
+  coverage and cleanup;
 - subset rows feed both map rendering and frame-budgeted list ingestion;
 - category/gradient choices become `color-scale` with typed list-pair stops.
 
@@ -1096,12 +1202,13 @@ See [Style System](erdblick-stylesystem.md).
 ## Failure and cancellation rules
 
 - GPU buffer allocations are performed by the graphics device, without an
-  application-wide allowance. Failed allocations roll back unpublished ranges
-  and release partial render work. An unchanged failed render is not retried on
-  every worker-completion notification. Deck's presentation/rebind boundary
-  controls safe retirement of replaced buffers; empty stores are reclaimed once
-  their final contribution is gone.
-
+  application-wide allowance. Failed buffer allocation or upload releases the attempt's uncommitted resources.
+  An unchanged failed render signature is not resubmitted on every scheduler tick;
+  changed input, style, or a recreated scene can request a new render. Deck's
+  presentation/rebind boundary controls safe retirement of installed buffers.
+  Empty material stores are reclaimed after their contributions leave the
+  presentation. Renderer invalidation remains necessary after unsafe publication
+  or WebGL context loss.
 - A new filter generation makes older subset/status/render completions stale.
 - Filter status frames use `filterId` and `generation`, independent of viewport
   request IDs. Route them before request-status filtering; the subscription
@@ -1149,7 +1256,15 @@ suffix solely to restore older links.
 
 ## Tile warnings and transient datasource recovery
 
-Tile metadata exposes warnings, errors and ordinary timestamp/TTL pairs for every tile type. Warned subset values remain ready and render normally. Warnings are retained with the current value and emitted once per value into diagnostics logs at warning severity, including map/layer/partition context. Replacing or disposing a value replaces or clears its diagnostics. Feature and source-data inspection also surface warnings without discarding content.
+Tile metadata exposes warnings, errors and ordinary timestamp/TTL pairs for every tile type. Warned subset values remain ready and render normally. Warnings are retained with the current value and each distinct message is emitted once per value into diagnostics logs at warning severity, including map/layer/partition context. Replacing or disposing a value replaces or clears its diagnostics. Feature and source-data inspection also surface warnings without discarding content.
+
+View diagnostics add one point-cloud downsampling warning when backend
+`PointCloud/SourceRecords` exceeds `PointCloud/DeliveredRecords`, or the worker's
+`pointCloudDeliveredCount` exceeds `pointCloudRenderedCount`. These existing
+counters avoid inspecting point geometry or changing canonical source warnings.
+Per-message deduplication lets a later worker warning appear even after other
+warnings for the same value were logged. Exact replacements clear the derived
+warning; historical log entries remain.
 
 Failed tile values expire through the same `TileExpiryScheduler` as successful finite-lifetime values. Mapget caps error tiles with `mapget.serve.error-tile-ttl` (default five seconds). Mapget also caps successful empty source layers with `mapget.serve.empty-tile-ttl` (default five seconds), including missing LiveSource tiles/objects. Empty search/inspection matches inherit their source lifetime; they do not receive a separate empty-result cap. Filter errors retain their per-output diagnostics and earliest dependency expiry; unrelated new coverage is sent immediately. There is no subscription-level suppression, retry deadline map, or tile-specific backoff. Release and coverage pruning cancel expiry ownership. Retained inspection renewals preserve older content on error and schedule the returned value's absolute expiry. Initial inspection failures are surfaced immediately, not hidden in a transport retry loop.
 

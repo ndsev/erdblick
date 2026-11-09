@@ -1,30 +1,213 @@
-:host { display: block; min-width: 0; }
-:host([hidden]) { display: none; }
-/* Native form controls should use the same app font as their labels. Desktop
-   theme defaults otherwise change their text metrics and the height of every row. */
-button, input, select, textarea {
-    font: inherit;
+// Loaded once through styles.scss. Scope the shared recursive form here instead of
+// emitting the same stylesheet for the document, record and leaf components.
+style-document-editor, style-record-editor, style-field-input {
+  display: block;
+  min-width: 0;
 }
-.style-form { padding: .5rem; }
-.style-form-body { border: 0; margin: 0; padding: 0; min-width: 0; }
-.style-form-field { display: grid; gap: .35rem; margin: .65rem 0; min-width: 0; }
-.style-field-heading, .style-item-heading { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
-.style-field-heading > label, .style-item-title { flex: 1; font-weight: 600; text-align: left; }
-.style-unset, small { opacity: .75; font-size: .8rem; overflow-wrap: anywhere; }
-.style-form-error { color: var(--p-red-500, #d33); opacity: 1; }
-.style-form-issues { max-height: 12rem; overflow: auto; padding-left: 1.2rem; font-size: .85rem; }
-.style-form-group { border-top: 1px solid var(--p-content-border-color, #8885); margin-top: .7rem; padding-top: .5rem; }
-summary { cursor: pointer; font-weight: 600; padding: .25rem 0; }
-.style-list-item, .style-nested-record { border-left: 2px solid var(--p-content-border-color, #8885); padding: .5rem; margin: .5rem 0; }
-input:not([type=checkbox]), select { background: var(--p-inputtext-background, transparent); color: inherit;
-    border: 1px solid var(--p-inputtext-border-color, #8888); border-radius: .25rem; padding: .4rem; min-width: 0; width: 100%; }
-button { color: inherit; background: var(--p-button-secondary-background, #8882); border: 1px solid var(--p-content-border-color, #8885);
-    border-radius: .25rem; padding: .3rem .5rem; cursor: pointer; }
-button:disabled { opacity: .45; cursor: default; }
-.style-choices, .style-vector, .style-color, .style-stop { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
-.style-choices label { display: flex; gap: .25rem; align-items: center; }
-.style-vector input { flex: 1; width: 5rem; }
-.style-color input[type=color] { width: 2.8rem; padding: .15rem; }
-.style-color input:not([type=color]), .style-color select { flex: 1; width: 7rem; }
-.style-stop-list { display: grid; gap: .5rem; }
-.style-stop input, .style-stop select { flex: 1; width: 5rem; }
+style-record-editor[hidden] { display: none; }
+
+.style-form {
+  --style-form-soft-background: color-mix(in srgb, var(--p-content-background) 60%, var(--p-content-hover-background));
+  padding: 0.25rem;
+  font-size: 0.875rem;
+  line-height: 1.4;
+
+  style-record-editor { container: style-record / inline-size; }
+  .style-form-body { border: 0; margin: 0; padding: 0; min-width: 0; }
+  // Native controls share the label font so their text metrics and row heights agree.
+  button, input, select, textarea { font: inherit; }
+
+  button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    min-height: 2rem;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid transparent;
+    border-radius: var(--p-border-radius-sm, 4px);
+    background: transparent;
+    color: var(--p-text-muted-color);
+    cursor: pointer;
+    &:enabled:hover { background: var(--p-content-hover-background); color: var(--p-text-color); }
+    &:disabled { opacity: 0.4; cursor: default; }
+    .pi { font-size: 0.8rem; }
+  }
+
+  :is(button, input, select, summary):focus-visible {
+    outline: 2px solid var(--p-primary-color);
+    outline-offset: 2px;
+  }
+
+  input:not([type=checkbox]), select {
+    width: 100%;
+    min-width: 0;
+    min-height: 2.125rem;
+    padding: 0.35rem 0.55rem;
+    border: 1px solid var(--p-inputtext-border-color);
+    border-radius: var(--p-inputtext-border-radius, 6px);
+    background: var(--p-inputtext-background);
+    color: var(--p-inputtext-color);
+    &:enabled:hover { border-color: var(--p-inputtext-hover-border-color); }
+    &:disabled { opacity: 0.5; }
+  }
+
+  .style-form-field {
+    display: grid;
+    grid-template-columns: minmax(7rem, 10rem) minmax(0, 1fr) 2rem;
+    align-items: start;
+    gap: 0.35rem 0.65rem;
+    min-width: 0;
+    padding: 0.35rem 0;
+    > style-field-input { grid-column: 2; grid-row: 1; }
+    > .style-form-error { grid-column: 2 / -1; }
+  }
+  .style-field-heading { display: contents; }
+  .style-field-label {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: center;
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+  .style-field-help {
+    display: inline-flex;
+    width: 1.5rem;
+    min-height: 1.5rem;
+    padding: 0;
+    vertical-align: middle;
+  }
+  .style-field-reset { grid-column: 3; grid-row: 1; }
+  .style-field-add { grid-column: 2 / -1; grid-row: 1; justify-self: start; color: var(--p-primary-color); }
+  .style-field-unset .style-field-label { color: var(--p-text-muted-color); }
+
+  .style-field-wide {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.65rem;
+    padding-block: 0.5rem;
+    > .style-field-heading {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      .style-field-label { flex: 1; font-weight: 600; }
+    }
+    > style-field-input, > .style-form-error { grid-column: 1; grid-row: auto; }
+  }
+
+  .style-list-item, .style-nested-record {
+    min-width: 0;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: var(--p-border-radius-md, 6px);
+    background: var(--p-content-background);
+  }
+  .style-list-item {
+    > style-record-editor { padding: 0.65rem 0.85rem; }
+    &.is-expanded > .style-item-heading { border-bottom: 1px solid var(--p-content-border-color); }
+  }
+  .style-nested-record { padding: 0.65rem 0.85rem; }
+  .style-item-heading {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.4rem;
+    border-radius: inherit;
+    background: var(--style-form-soft-background);
+  }
+  .style-item-title {
+    flex: 1;
+    min-width: 0;
+    justify-content: flex-start;
+    text-align: left;
+    font-weight: 600;
+    color: var(--p-text-color);
+    span { overflow-wrap: anywhere; }
+    > .pi { flex: 0 0 auto; color: var(--p-primary-color); font-size: 0.65rem; }
+    &[aria-expanded=true] > .pi { transform: rotate(90deg); }
+  }
+  .style-item-actions {
+    display: flex;
+    gap: 0.1rem;
+    flex: 0 0 auto;
+    button { width: 2rem; padding: 0; }
+    .style-item-remove:enabled:hover { color: var(--p-red-500); }
+  }
+  .style-list-add {
+    justify-self: start;
+    color: var(--p-primary-color);
+    border-color: var(--p-content-border-color);
+    background: var(--p-content-background);
+  }
+
+  .style-form-group {
+    border-top: 1px solid var(--p-content-border-color);
+    margin-top: 0.5rem;
+    > summary {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.7rem 0.25rem;
+      border-radius: var(--p-border-radius-sm, 4px);
+      cursor: pointer;
+      font-weight: 600;
+      list-style: none;
+      &::-webkit-details-marker { display: none; }
+      &:hover { background: var(--style-form-soft-background); }
+      > .pi { font-size: 0.65rem; color: var(--p-text-muted-color); }
+    }
+    &[open] > summary > .pi { transform: rotate(90deg); }
+  }
+
+  .style-optional-fields {
+    border-top: 0;
+    > summary { color: var(--p-primary-color); font-weight: 500; }
+    .style-optional-count {
+      border-radius: var(--p-border-radius-sm, 4px);
+      background: var(--style-form-soft-background);
+      color: var(--p-text-muted-color);
+      padding: 0.05rem 0.4rem;
+      font-size: 0.75rem;
+    }
+  }
+
+  small { font-size: 0.8rem; color: var(--p-text-muted-color); overflow-wrap: anywhere; }
+  .style-inheritance-note { display: block; padding-bottom: 0.5rem; }
+  .style-form-error { color: var(--p-red-500); }
+  .style-form-issues { max-height: 12rem; overflow: auto; padding-left: 1.2rem; font-size: 0.85rem; }
+
+  .style-choices, .style-vector, .style-color, .style-stop {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .style-choices label {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 2rem;
+    padding: 0.2rem 0.5rem;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: var(--p-border-radius-sm, 4px);
+    cursor: pointer;
+    &:hover { background: var(--p-content-hover-background); }
+    &.is-selected { background: var(--p-highlight-background); border-color: var(--p-primary-color); color: var(--p-highlight-color); }
+    input { margin: 0; accent-color: var(--p-primary-color); }
+  }
+  .style-vector input { flex: 1 1 4rem; width: 4rem; }
+  .style-color .p-colorpicker { flex: 0 0 2.5rem; }
+  .style-color .p-colorpicker-preview { display: block; width: 2.5rem; height: 2.125rem; padding: 0; cursor: pointer; }
+  .style-color > input, .style-color > select { flex: 1 1 6rem; width: 6rem; }
+  .style-stop-list { display: grid; gap: 0.5rem; }
+  .style-stop input, .style-stop select { flex: 1 1 4rem; width: 4rem; }
+
+  @container style-record (max-width: 28rem) {
+    .style-form-field:not(.style-field-wide):not(.style-field-unset) {
+      grid-template-columns: minmax(0, 1fr) 2rem;
+      > style-field-input { grid-column: 1 / -1; grid-row: 2; }
+      .style-field-reset { grid-column: 2; }
+    }
+    .style-item-heading { flex-wrap: wrap; }
+    .style-item-title { flex-basis: 10rem; }
+    .style-item-actions { margin-left: auto; }
+  }
+}

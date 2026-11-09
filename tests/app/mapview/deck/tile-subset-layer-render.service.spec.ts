@@ -1,8 +1,6 @@
-import {pointCloudInputBudget} from "../../../../app/mapdata/point-cloud-input-budget.model";
-import {POINT_CLOUD_MAX_POINTS} from "../../../../app/mapview/point-cloud-policy.model";
+import {DEFAULT_POINT_CLOUD_MAX_POINTS} from "../../../../app/mapview/point-cloud-policy.model";
 import {MapViewState} from "../../../../app/mapview/mapview.state";
 import {testPersistence} from "../../../support/state-owners";
-import {DEFAULT_POINT_CLOUD_POLICY} from "../../../../app/mapview/point-cloud-policy.model";
 import {
     describe,
     expect,
@@ -112,83 +110,80 @@ function completedTile(
     return {admit, prepare, resolve, reject};
 }
 
-describe("TileSubsetLayerRenderService", () => {
-    it("reconsiders queued work when working-memory preferences change", async () => {
+describe("TileSubsetLayerRenderService scheduling", () => {
+    it("coalesces sampling preferences without starting idle workers", async () => {
         const persistence = testPersistence();
         const state = new MapViewState(persistence);
-        state.pointCloudWorkingMemoryMiBState.next(64);
         const service = new TileSubsetLayerRenderService(state);
-        const internal = service as any;
-        const pump = vi.spyOn(internal, "pump").mockResolvedValue(undefined);
+        const pump = vi.spyOn(service as any, "pump").mockResolvedValue(undefined);
         const changed = vi.fn();
         const subscription = service.pointCloudPolicyChanged.subscribe(changed);
         try {
             await vi.waitFor(() => expect(changed).toHaveBeenCalledOnce());
-            expect(pump).not.toHaveBeenCalled();
-            internal.queue = [{}];
-            state.pointCloudWorkingMemoryMiBState.next(128);
+            state.pointCloudDownsamplingEnabledState.next(false);
+            state.pointCloudDetailPixelsState.next(8);
+            state.pointCloudMaxPointsState.next(500_000);
             await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(2));
-            expect(changed).toHaveBeenLastCalledWith(false);
-            expect(pump).toHaveBeenCalledOnce();
-            state.pointCloudWorkingMemoryMiBState.next(32);
+            expect(service.pointCloudPolicyFor("cloud", 1).enabled).toBe(false);
+            expect(service.pointCloudPolicyFor("cloud", 1).maxPoints).toBe(500_000);
+            state.pointCloudMaxPointsState.next(1_000_000);
             await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(3));
-            expect(changed).toHaveBeenLastCalledWith(true);
+            expect(service.pointCloudPolicyFor("cloud", 1).maxPoints).toBe(1_000_000);
+            expect(pump).not.toHaveBeenCalled();
         } finally {
             subscription.unsubscribe();
             persistence.ngOnDestroy();
-            pointCloudInputBudget.setWorkingLimit(DEFAULT_POINT_CLOUD_POLICY.workingMemoryMiB * 1048576);
         }
     });
 
-    it("releases worker heaps and outstanding working memory when retiring running work", () => {
+    it("reclaims worker heaps and rejects tasks when retiring running work", () => {
         const service = new TileSubsetLayerRenderService();
         const internal = service as any;
         const {reject} = completedTile(service);
         const terminate = vi.fn();
         internal.workers[0].terminate = terminate;
         internal.workerHeapBytes[0] = 1000;
-        internal.inFlight.get("tile-task").workingBytes = 123;
-        internal.workingBytes = 123;
         internal.retireWorker(0);
         expect(terminate).toHaveBeenCalledOnce();
         expect(reject).toHaveBeenCalledOnce();
         expect(internal.inFlight.size).toBe(0);
         expect(internal.ready).toHaveLength(0);
         expect(internal.workerHeapBytes[0]).toBe(0);
-        expect(internal.workingBytes).toBe(0);
     });
 
-    it("dispatches smaller jobs while larger jobs wait for working memory", async () => {
+    it("dispatches large clouds in queue order using available worker slots", async () => {
         const service = new TileSubsetLayerRenderService();
         const internal = service as any;
         const postMessage = vi.fn();
-        internal.appState = {pointCloudPolicy: {...DEFAULT_POINT_CLOUD_POLICY, workingMemoryMiB: 64}};
-        internal.workingBytes = 32 * 1048576;
-        const jobs = [100000, 1000].map((points, index) => ({
+        // Metadata is sufficient: no geometry-sized test allocations are needed.
+        const jobs = [16_000_000, 20_000_000, 1_000].map((points, index) => ({
             task: {taskId: String(index), visualizationId: String(index), renderSignature: "same",
                 subsetBlob: new Uint8Array(4), inputGeometryVertexCount: points,
                 mapId: "Map", catalogRevision: 1, stringPoolId: "pool", styleKey: "style", iconCatalogVersion: 0,
-                pointCloud: {enabled: true, maxPoints: points, spacingMeters: 0, cacheKey: String(index)}},
+                pointCloud: service.pointCloudPolicyFor(String(index), 1)},
             admit: vi.fn(), prepare: vi.fn(), resolve: vi.fn(), reject: vi.fn(), queuedAt: 0
         }));
         internal.workers = [{postMessage}, {postMessage}];
-        internal.runningTaskIdByWorker = ["running", null];
-        internal.inFlight.set("running", {});
+        internal.runningTaskIdByWorker = [null, null];
         internal.workerHeapBytes = [0, 0];
-        // Both workers have installed the schema; this test isolates working-memory admission.
+        // Both workers have installed the schema; this test isolates queue admission by worker slots.
         internal.catalogKeysByWorker = [new Set(["1:Map"]), new Set(["1:Map"])];
         internal.fieldDictSizesByWorker = [new Map(), new Map()];
         internal.styleKeysByWorker = [new Set(), new Set()];
         internal.iconCatalogVersionByWorker = [-1, -1];
-        internal.idleWorkers = [1];
+        internal.idleWorkers = [0, 1];
         internal.queue = [...jobs];
         jobs.forEach(job => internal.latestSignatureByVisualization.set(job.task.visualizationId, "same"));
         internal.ensureWorkers = vi.fn().mockResolvedValue(undefined);
         internal.activeWorkerCount = () => 2;
+
         await internal.pump();
-        expect(postMessage).toHaveBeenCalledOnce();
-        expect(postMessage.mock.calls[0][0].taskId).toBe("1");
-        expect(internal.queue).toEqual([jobs[0]]);
+
+        expect(postMessage.mock.calls.map(([task]) => task.taskId)).toEqual(["0", "1"]);
+        expect(postMessage.mock.calls.map(([task]) => task.pointCloud.maxPoints))
+            .toEqual([DEFAULT_POINT_CLOUD_MAX_POINTS, DEFAULT_POINT_CLOUD_MAX_POINTS]);
+        expect(internal.queue).toEqual([jobs[2]]);
+        for (const job of jobs) expect(job.reject).not.toHaveBeenCalled();
     });
 
     it("preloads one emitted worker module and reuses its cached source", async () => {
@@ -813,17 +808,17 @@ describe("TileSubsetLayerRenderService", () => {
 });
 
 
-describe("point-cloud view allocation", () => {
+describe("point-cloud sampling", () => {
     it("keeps per-object fidelity independent of other views and visible contributions", () => {
         const service = new TileSubsetLayerRenderService();
-        service.registerPointCloud("a", 0, 100);
+        service.registerPointCloud("a");
         const whole = service.pointCloudPolicyFor("a", 1).maxPoints;
-        service.registerPointCloud("b", 1, 100);
-        service.registerPointCloud("c", 1, 100);
+        service.registerPointCloud("b");
+        service.registerPointCloud("c");
         const first = service.pointCloudPolicyFor("a", 1);
         const second = service.pointCloudPolicyFor("b", 1);
         const third = service.pointCloudPolicyFor("c", 1);
-        expect(whole).toBe(POINT_CLOUD_MAX_POINTS);
+        expect(whole).toBe(DEFAULT_POINT_CLOUD_MAX_POINTS);
         expect(first.maxPoints).toBe(whole);
         expect(second.maxPoints).toBe(third.maxPoints);
         expect(first.maxPoints).toBe(second.maxPoints);
@@ -835,9 +830,9 @@ describe("point-cloud view allocation", () => {
         const service = new TileSubsetLayerRenderService();
         const changed = vi.fn();
         const subscription = service.pointCloudPolicyChanged.subscribe(changed);
-        service.registerPointCloud("a", 0, 100);
-        service.registerPointCloud("b", 0, 200);
-        service.registerPointCloud("a", 0, 100);
+        service.registerPointCloud("a");
+        service.registerPointCloud("b");
+        service.registerPointCloud("a");
         await Promise.resolve();
         service.unregisterPointCloud("b");
         expect(changed).not.toHaveBeenCalled();

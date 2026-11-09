@@ -1418,7 +1418,7 @@ describe("GpuScene contribution lifecycle", () => {
     expect(presented.destroyed).toBe(true);
   });
 
-  it("reuses retired ranges without replacing a nonempty material buffer", () => {
+  it("reuses retired ranges in a nonempty buffer without allocating another buffer", () => {
     const {scene, device} = createScene();
     const install = (identity: string) => {
       const reservation = scene.prepareRender("origin", [11, 48, 0], [{
@@ -1431,15 +1431,18 @@ describe("GpuScene contribution lifecycle", () => {
     };
     install("first");
     install("second");
+    const allocated = scene.snapshot().stores[0].allocatedBytes;
     const buffer = device.buffers[0];
     try {
       scene.removeContribution("first");
       scene.publishPresentation();
       scene.releaseRetiredPresentationResources();
+      expect(scene.snapshot().stores[0].allocatedBytes).toBe(allocated);
       expect(buffer.destroyed).toBe(false);
       install("third");
       expect(scene.snapshot().activeContributionCount).toBe(2);
       expect(device.buffers).toHaveLength(1);
+      expect(scene.snapshot().stores[0].allocatedBytes).toBe(allocated);
     } finally {
       scene.destroy();
     }

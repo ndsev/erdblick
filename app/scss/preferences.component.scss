@@ -286,16 +286,16 @@
     display: flex;
     flex: 1 1 auto;
     flex-direction: column;
-    gap: 0.5em;
+    gap: 0.75rem;
     min-height: 0;
+    padding: 0.35rem;
     overflow: auto;
 
-    > search-style-rule-editor {
+    > style-document-editor {
       flex: 0 0 auto;
-      min-height: 12em;
     }
 
-    &.read-only search-style-rule-editor {
+    &.read-only style-document-editor {
       opacity: 0.6;
       pointer-events: none;
     }
@@ -306,7 +306,10 @@
     flex: 0 0 auto;
     gap: 0.65em 0.9em;
     grid-template-columns: minmax(10em, 1fr) minmax(14em, 1.5fr);
-    padding: 0.25em;
+    padding: 0.85rem;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: var(--p-border-radius-md);
+    background: color-mix(in srgb, var(--p-content-background) 65%, var(--p-content-hover-background));
   }
 
   .style-editor-quick-field {
@@ -314,6 +317,11 @@
     flex-direction: column;
     gap: 0.3em;
     min-width: 0;
+
+    > label {
+      font-size: 0.875rem;
+      font-weight: 600;
+    }
 
     > input,
     > p-multiselect,
@@ -332,18 +340,19 @@
 
   .style-editor-custom-affinity {
     align-items: center;
-    border: 1px solid var(--p-content-border-color);
-    border-radius: var(--p-border-radius-md);
     display: flex;
     flex-wrap: wrap;
     gap: 0.4em;
     min-height: 2.25em;
-    padding: 0.35em 0.5em;
+    padding: 0;
 
     > span {
       color: var(--p-text-muted-color);
-      flex: 1 1 12em;
+      font-size: 0.8rem;
+      flex: 1 1 100%;
     }
+
+    > input { width: 100%; min-width: 0; }
   }
 
   .style-editor-quick-stale {
@@ -413,6 +422,8 @@
 
   .style-editor-actions {
     flex-wrap: nowrap;
+    padding-top: 0.65rem;
+    border-top: 1px solid var(--p-content-border-color);
 
     p-button {
       flex: 0 0 auto;
@@ -435,6 +446,10 @@
 
     .editor-shortcuts {
       white-space: nowrap;
+      color: var(--p-text-muted-color);
+      font-size: 0.75rem;
+
+      kbd { font: inherit; font-weight: 500; }
     }
   }
 

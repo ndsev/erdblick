@@ -3,7 +3,6 @@
  * Replacement and retention preserve exact generation and expiry semantics
  * while transport and renderer owners control when values are installed or used.
  */
-import {pointCloudInputBudget} from "./point-cloud-input-budget.model";
 import type {TileSubsetDelivery} from "./filter-subscription.model";
 import {
     partitionKey,
@@ -59,7 +58,6 @@ export class FilterTileState {
     info: Record<string, unknown> = {};
     receivedAt = 0;
     renderStats: Record<string, number> = {};
-    pointCloudInputRejected = false;
 
     /** Create one pending output-tile identity for a filter generation. */
     constructor(
@@ -111,9 +109,7 @@ export class FilterTileState {
      */
     install(
         delivery: TileSubsetDelivery,
-        remainsPending = false,
-        pointCloud = false,
-        onEvicted: () => void = () => undefined
+        remainsPending = false
     ): boolean {
         if (delivery.mapId !== this.mapId ||
             delivery.layerId !== this.layerId ||
@@ -140,16 +136,6 @@ export class FilterTileState {
             }
         }
 
-        if (pointCloud && !pointCloudInputBudget.admit(this, delivery.blob.byteLength, () => {
-            this.rejectPointCloudInput();
-            onEvicted();
-        })) {
-            this.rejectPointCloudInput();
-            this.deliveredGeneration = delivery.generation;
-            ++this.valueVersion;
-            return true;
-        }
-
         const dependencies = delivery.dependencies as TileSubsetDependency[];
         const localDependencies = dependencies.filter(dependency =>
             dependency.mapId === this.mapId &&
@@ -165,7 +151,6 @@ export class FilterTileState {
         }
 
         this.subsetBlob = delivery.blob;
-        this.pointCloudInputRejected = false;
         this.deliveredGeneration = delivery.generation;
         this.pendingGeneration = delivery.generation;
         this.valueVersion += 1;
@@ -197,18 +182,8 @@ export class FilterTileState {
         this.error = message;
     }
 
-    /** Make memory admission failure visible without retaining the oversized payload. */
-    private rejectPointCloudInput(): void {
-        this.dispose();
-        this.status = "error";
-        this.pointCloudInputRejected = true;
-        this.error = "Point-cloud input exceeds the shared browser memory allowance. Increase the working-memory setting to retry, or hide other clouds and refresh this layer.";
-    }
-
     /** Drop all potentially large immutable payloads while preserving identity fields. */
     dispose(): void {
-        pointCloudInputBudget.release(this);
-        this.pointCloudInputRejected = false;
         this.subsetBlob = null;
         this.backendPending = false;
         this.stringPoolId = "";

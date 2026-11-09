@@ -58,8 +58,8 @@ export async function openLocationPreferences(page: Page): Promise<Locator> {
 /** Gives explicit UI consent for tests whose subject is location-area navigation. */
 export async function acceptLocationBoundaries(page: Page): Promise<void> {
     const preferences = await openLocationPreferences(page);
-    await preferences.getByLabel('Location boundaries', {exact: true}).click();
-    await page.getByTestId('location-boundaries-accept').click();
+    await preferences.getByLabel('Use location boundaries', {exact: true}).click();
+    await page.getByTestId('location-terms-apply').click();
     await preferences.getByRole('button', {name: /Close$/}).last().click();
 }
 
@@ -90,7 +90,7 @@ export async function navigateToRoot(page: Page, locationIndex: number = 0): Pro
     await finishInitialNavigation(page);
 }
 
-/** Waits for boot and declines the initial location terms unless the test owns that decision. */
+/** Waits for boot and applies the default disabled boundaries unless the test owns that decision. */
 export async function waitForAppReady(page: Page, {keepLocationTerms = false}: {keepLocationTerms?: boolean} = {}): Promise<void> {
     // The global spinner hides once the Angular app is ready.
     await page.waitForSelector('#global-spinner-container', {
@@ -98,8 +98,8 @@ export async function waitForAppReady(page: Page, {keepLocationTerms = false}: {
         timeout: 30000
     });
     if (!keepLocationTerms) {
-        const keepBoundariesDisabled = page.getByTestId('location-boundaries-refuse');
-        if (await keepBoundariesDisabled.isVisible()) await keepBoundariesDisabled.click();
+        const applyLocationTerms = page.getByTestId('location-terms-apply');
+        if (await applyLocationTerms.isVisible()) await applyLocationTerms.click();
     }
 }
 

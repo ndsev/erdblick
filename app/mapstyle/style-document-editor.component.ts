@@ -14,7 +14,6 @@ const reportSchema = z.object({valid: z.boolean(), issues: z.array(z.object({
     selector: "style-document-editor",
     standalone: true,
     imports: [StyleRecordEditorComponent],
-    styleUrl: "./style-form.scss",
     template: `
         <div class="style-form" data-testid="style-document-editor">
             @if (parseError) { <p class="style-form-error" role="alert">{{ parseError }}</p> }

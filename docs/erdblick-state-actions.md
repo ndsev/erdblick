@@ -42,7 +42,7 @@ controls. Preference dialogs and deployment configuration supply values, but do
 not own the behavior those values control.
 
 Use `.model.ts` for domain value models, such as background layers, retry policies
-and retained point-cloud input budgets. Use `.util.ts` for reusable operations and
+and point-cloud sampling preferences. Use `.util.ts` for reusable operations and
 mechanisms, including caller-managed queues, timers and cleanup. Domain-specific
 utilities stay beside their domain; shared domain-independent mechanisms belong
 in `utils/`. See [Source roles and dependencies](erdblick-source-structure.md) for
@@ -62,7 +62,7 @@ The main service boundaries are:
 
 | Owner | Responsibility |
 | --- | --- |
-| `MapViewState` | Durable identities, committed cameras, projection/sync values, rendering budgets and GPU-management switch, positional codecs and coherent membership edits |
+| `MapViewState` | Durable identities, committed cameras, projection/sync values, rendering and point-cloud sampling preferences, positional codecs and coherent membership edits |
 | `MapViewService` | Renderer lifetimes, live camera previews, navigation, view teardown and view/render-preference actions and controls |
 | `MapDataState` | Layer values, style-option associations, preset selections, compression and retry preferences |
 | `MapDataService` | Loaded catalog/tree, preset application, complete-catalog cleanup and transport-preference controls |
@@ -201,6 +201,16 @@ first, then operations; the registry derives `viewer_describe_controls`,
 Duplicate and late registrations fail. There is no second production list of
 expected declarations to keep aligned.
 
+Remote MCP callers first select a tab through `viewer_list_sessions`, then read
+the `app.views` control with `viewer_get_controls` to discover logical view IDs.
+Selectors use `{control: "view.camera", viewId}` or the corresponding control's
+declared fields. `viewer_set_control` accepts one `{target, value}` assignment;
+the value must match the selected control. Mapget adds the tab-routing `clientId`
+to remote requests. Browser-native WebMCP uses the same action arguments inside
+the current document without `clientId` or session discovery. The
+[developer guide's control smoke test](erdblick-dev-guide.md#discover-and-verify-a-control)
+shows the request and readback sequence.
+
 This explicit list is intentional. `providedIn: "root"` makes a service available
 for injection; it does not instantiate every owner before persistence hydration.
 An Angular multi-provider would still require an explicit provider inventory and
@@ -253,6 +263,13 @@ and URL codecs. Search references use live IDs and project old selected-view ind
 at storage/UI boundaries. Newly created views inherit selection from the requested
 source; removed references are pruned. Split proportions remain positional layout.
 
+Public action arguments carry logical IDs (`viewId`, or `viewIds` for search
+creation), not positional view indices or `viewLayoutRevision`. A tab's remote
+`clientId` has a separate lifetime: reload or interactive reconnect replaces it,
+even when the restored application retains its logical view IDs. Rediscover the
+tab before sending further remote actions, and reacquire view identities when
+membership changes.
+
 The deployed scalar codec compacts booleans to `0`/`1`; per-view snapshot and storage
 arrays retain booleans. URL CSV encoding compacts both. Public controls expose their
 typed boolean values independently of these persistence formats.
@@ -287,7 +304,9 @@ does not serialize state, navigate, or flush a pending URL update. Copying there
 matches the address currently visible in the browser. Normal hydration, pruning
 and address-bar synchronization retain their codecs; those are still needed when
 state changes or a link is opened. The action separately reports dependencies on
-browser-local styles/searches that a URL cannot carry.
+browser-local styles/searches that a URL cannot carry. It does not remove unknown
+query parameters or fragments, so callers must not treat its output as a sanitized
+publication URL.
 
 ## Catalog generation in Node
 
@@ -306,8 +325,9 @@ document are destroyed when collection finishes.
 The output is the static `web-mcp-actions.json` manifest, its canonical JSON, the
 catalog hash used by the browser, the relay schemas and generated TypeScript
 contract types. The type compiler runs in Node after the disposable browser
-environment has been removed. The manifest currently
-contains 32 public actions and 21 controls. Permissions derive from each action's
+environment has been removed. Read the generated manifest for the current action
+and control inventory; client acceptance must compare against the artifact served
+with the tested browser bundle. Permissions derive from each action's
 `mutation` flag. Mapget continues to read the static artifact; Node is required
 only on the build machine.
 
@@ -360,7 +380,7 @@ Release baseline: `6f5ba2fd6d6cb3810cd9bf4c305e0d5b229f4ef8`. The actual owner s
 | Owner file | Stored keys |
 | --- | --- |
 | `app/coordinates/coordinates.state.ts` | `coordinatesEnabled`, `coordinatesLegalTermsAccepted`, `marker`, `markedPosition`, `enabledCoordsTileIds` |
-| `app/mapview/mapview.state.ts` (rendering) | `deckAntialiasingEnabled`, `semanticCompositingEnabled`, `contactShadingEnabled`, `lod3TileThreshold`, `tileSubsetRenderWorkerCount`, `pointCloudDownsamplingEnabled`, `pointCloudDetailPixels`, `pointCloudWorkingMemoryMiB`, `tilesLoadLimit` |
+| `app/mapview/mapview.state.ts` (rendering) | `deckAntialiasingEnabled`, `semanticCompositingEnabled`, `contactShadingEnabled`, `lod3TileThreshold`, `tileSubsetRenderWorkerCount`, `pointCloudDownsamplingEnabled`, `pointCloudMaxPoints`, `pointCloudDetailPixels`, `tilesLoadLimit` |
 | `app/mapview/mapview.state.ts` (views) | `viewIds`, `numberOfViews`, `focus`, `viewSync`, `cameraView`, `mode2d`, `mapZoomStep`, `featureZoomClearanceMeters`, `background`, `tileBorders`, `tileGridMode`, `tileGridLevel`, `tileGridAutoLevel`, `tileGridColor`, `tileGridOpacity` |
 | `app/mapdata/mapdata.state.ts` | `layerSyncOptions`, `layerNames`, `visibility`, `zoomLevel`, `autoZoomLevel`, `styleOptions`, `stylePresetSelection`, `mapPresetSelection` |
 | `app/layout/layout.state.ts` | `mapsOpenState`, `dockOpenState`, `dockWidth`, `viewPanelSizes`, `dockActiveTabState`, `dockAutoCollapse`, `dialogLayouts` |

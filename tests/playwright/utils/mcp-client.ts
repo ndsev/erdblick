@@ -3,6 +3,21 @@ import {expect} from '@playwright/test';
 
 const protocolVersion = '2026-07-28';
 
+/** Decode actionable tool errors without applying the tool's success output schema. */
+export function mcpToolError(result: {
+    isError?: boolean;
+    structuredContent?: unknown;
+    content: Array<{type: string; text?: string}>;
+}): {code: string; message: string; reason?: string; outcome?: string; issues?: unknown} {
+    expect(result.isError).toBe(true);
+    expect(result).not.toHaveProperty('structuredContent');
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0]).toMatchObject({type: 'text', text: expect.any(String)});
+    const payload = JSON.parse(result.content[0].text!);
+    expect(payload).toMatchObject({error: {code: expect.any(String), message: expect.any(String)}});
+    return payload.error;
+}
+
 /** Actual Streamable HTTP client; browser actions travel through mapget and its existing WS. */
 export function mcpClient(request: APIRequestContext, defaultHeaders: Record<string, string> = {}) {
     let nextId = 0;

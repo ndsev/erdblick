@@ -2,11 +2,16 @@
 import "@angular/compiler";
 import {describe, expect, it, vi} from "vitest";
 import {AppModule} from "../../../app/app.module";
-import {SearchService, type FeatureSearchSession} from "../../../app/search/search.service";
+import {SearchService} from "../../../app/search/search.service";
+import {SearchResults} from "../../../app/search/search-results.model";
+import {SearchResultDensityIndex} from "../../../app/search/search-result-density.visualization";
+import type {FeatureSearchSession} from "../../../app/search/search-session.model";
+import {FeatureSearchSchemaService} from "../../../app/search/feature-search-schema.service";
+import {SearchDiagnosticsComponent} from "../../../app/search/search-diagnostics.component";
 import {createFeatureSearchStateEntry} from "../../../app/search/search-definition.model";
 import type {PreparedSearchBranch, SearchPreparation} from "../../../app/search/search-preparation.model";
 import type {FeatureSearchScopeAnalysis} from "../../../app/search/feature-search-schema.service";
-import {SearchComponent} from "../../../app/search/search.component";
+import {SearchScopeComponent} from "../../../app/search/search-scope.component";
 import {SearchState} from "../../../app/search/search.state";
 import {viewerActions} from "../../support/action-contract";
 import type {FeatureSearchStatePatch} from "../../../app/search/search-definition.model";
@@ -33,10 +38,16 @@ function fixture(branches: PreparedSearchBranch[]) {
     const preparation: SearchPreparation = {
         signature: "v1", status: "preparing", interpretations: [], selectedIds: [], branches: [], initialStyles: []
     };
-    const session = {
-        id: definition.id, definition, preparation, schemaAnalysis: {status: "pending"},
-        progressByRequestKey: new Map(), startTime: 0
-    } as FeatureSearchSession;
+    const session: FeatureSearchSession = {
+        id: definition.id, layoutId: definition.id, runId: "test-run", refresh: 0, paused: false,
+        definition, preparation, schemaAnalysis: {
+            signature: "v1", status: "pending", concreteScope: "feature", normalizedQuery: definition.query,
+            attributeScopes: [], attributeScopeCandidateCount: 0, rewriteSuppressed: false,
+            rewriteSuppressionReason: "", matchedFieldNames: [], matchedEnumValues: [], matchedFeatureTypes: []
+        },
+        results: new SearchResults(new SearchResultDensityIndex()), startTime: 0, endTime: 0,
+        timeElapsed: "0ms", pointColor: "#123456"
+    };
     let signature = "v1";
     const activate = vi.fn();
     const reset = vi.fn((_session: FeatureSearchSession, next: typeof definition) => {session.definition = next;});
@@ -293,7 +304,7 @@ describe("Confirmed search preparation", () => {
 
 describe("Complete symbols are submitted without accepting a suggestion", () => {
     it("recognizes the original native symbol without interpreting the displayed predicate", () => {
-        const service = Object.create(SearchService.prototype) as SearchService;
+        const service = Object.create(FeatureSearchSchemaService.prototype) as FeatureSearchSchemaService;
         const candidate: CompletionCandidate = {
             text: "**.SPEED_LIMIT_METRIC", query: "**.SPEED_LIMIT_METRIC", source: "SPEED_LIMIT_METRIC",
             kind: "field", hint: "SPEED_LIMIT_METRIC attribute", begin: 0, end: 18, isExactMatch: true
@@ -310,7 +321,7 @@ describe("Complete symbols are submitted without accepting a suggestion", () => 
 describe("Disabled search progress", () => {
     it.each([undefined, "preparing", "needs-choice", "waiting-for-schema", "invalid", "ready"] as const)(
         "shows a static disabled status even when preparation is %s", status => {
-            const component = Object.create(SearchComponent.prototype) as SearchComponent;
+            const component = Object.create(SearchDiagnosticsComponent.prototype) as SearchDiagnosticsComponent;
             const f = fixture([]);
             f.session.definition.enabled = false;
             f.session.preparation = status ? {...f.preparation, status} : undefined;
@@ -428,7 +439,7 @@ describe("Selected source scope stays explicit", () => {
     });
 
     it("updates the layer selector when the same session is scoped externally", () => {
-        const component = Object.create(SearchComponent.prototype) as SearchComponent;
+        const component = Object.create(SearchScopeComponent.prototype) as SearchScopeComponent;
         const f = fixture([]);
         f.session.definition.selectedMapLayers = [{mapId: "Live", layerId: "Road"}];
         const select = vi.fn();

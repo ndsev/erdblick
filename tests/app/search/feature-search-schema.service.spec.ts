@@ -17,7 +17,7 @@ class SchemaWorker {
     onerror?: (event: ErrorEvent) => void;
     constructor() { SchemaWorker.instances.push(this); }
     postMessage(message: SearchCompletionWorkerInboundMessage): void { this.messages.push(message); }
-    terminate(): void {}
+    terminate = vi.fn();
     reply(message: SearchCompletionWorkerOutboundMessage): void {
         this.onmessage?.({data: message} as MessageEvent<SearchCompletionWorkerOutboundMessage>);
     }
@@ -94,7 +94,7 @@ describe("compact style inventory", () => {
     });
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("schema worker admission", () => {
     it("browses all prepared owners with one schema installation and reuses them across predicates", async () => {
@@ -290,5 +290,49 @@ describe("schema worker admission", () => {
         await vi.waitFor(() => expect(worker.messages).toHaveLength(3));
         await finishFields(worker, 2);
         expect(await retry).toEqual(emptyInventory);
+    });
+});
+
+
+/** Completion UI state follows the same owner isolation and lifetime as its native worker. */
+describe("Search completion owner", () => {
+    it("observes catalog changes without starting a worker", () => {
+        const {service, mapInfo} = fixture();
+        service.completionStateForOwner("editor");
+        mapInfo.layerStateChanged.next("datasources");
+        expect(SchemaWorker.instances).toHaveLength(0);
+        service.ngOnDestroy();
+    });
+
+    it("isolates owner cancellation and retires timers and workers on destruction", async () => {
+        const {service} = fixture();
+        service.completeQueryForOwner("first", "road", 4);
+        await vi.waitFor(() => expect(SchemaWorker.instances[0]?.messages.some(
+            message => message.type === "SearchCompletionDataSourceInfo")).toBe(true));
+        const worker = SchemaWorker.instances[0];
+        const configuration = worker.messages.find(message => message.type === "SearchCompletionDataSourceInfo")!;
+        if (configuration.type !== "SearchCompletionDataSourceInfo") throw new Error("Missing configuration");
+        worker.reply({type: "SearchCompletionDataSourceInfoReady", requestId: configuration.requestId});
+        await vi.waitFor(() => expect(worker.messages.some(message => message.type === "SearchCompletionRequest")).toBe(true));
+        const first = worker.messages.find(message => message.type === "SearchCompletionRequest")!;
+        if (first.type !== "SearchCompletionRequest") throw new Error("Missing request");
+        service.clearCurrentCompletion("first");
+        worker.reply({type: "SearchCompletionResult", ownerId: "first", requestSerial: first.requestSerial,
+            candidates: [], done: true});
+        service.completeQueryForOwner("second", "lane", 4);
+        await vi.waitFor(() => expect(worker.messages.filter(message => message.type === "SearchCompletionRequest")).toHaveLength(2));
+        const second = worker.messages.filter(message => message.type === "SearchCompletionRequest")[1];
+        if (second.type !== "SearchCompletionRequest") throw new Error("Missing second request");
+        worker.reply({type: "SearchCompletionResult", ownerId: "second", requestSerial: second.requestSerial,
+            candidates: [{text: "lane", query: "lane", kind: "Field", begin: 0, end: 4, source: "lane", hint: ""}], done: true});
+        expect(service.completionStateForOwner("first").pending.getValue()).toBe(false);
+        expect(service.completionStateForOwner("first").candidateList).toEqual([]);
+        expect(service.completionStateForOwner("second").candidateList.map(candidate => candidate.text)).toEqual(["lane"]);
+        vi.useFakeTimers();
+        service.completeQueryForOwner("queued", "new", 3);
+        service.ngOnDestroy();
+        vi.runAllTimers();
+        expect(worker.terminate).toHaveBeenCalledOnce();
+        expect(worker.messages.filter(message => message.type === "SearchCompletionRequest")).toHaveLength(2);
     });
 });

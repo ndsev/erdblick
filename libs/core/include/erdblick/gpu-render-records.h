@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -161,7 +162,7 @@ public:
     GpuRenderPacketBuilder(GpuRenderPacketBuilder&&) noexcept;
     GpuRenderPacketBuilder& operator=(GpuRenderPacketBuilder&&) noexcept;
 
-    /** Clear one completed or failed packet while retaining stream allocations. */
+    /** Clear one completed or failed packet and release its record blocks. */
     void reset();
 
     /** Set packet sequencing and deterministic origin metadata before any contribution or primitive records exist. */
@@ -265,6 +266,12 @@ public:
 
     /** Splits a closed revision into bounded fragments; throws if an individual record or z-index table cannot fit. */
     [[nodiscard]] std::vector<std::vector<std::byte>> buildFragments() const;
+
+    /** Encode one fragment at a time and release its consumed record blocks.
+     * The callback owns each encoded packet; the builder resets even if it throws.
+     */
+    void consumeFragments(
+        std::function<void(std::vector<std::byte>&&)> const& emit);
 
     /** Number of contribution descriptors currently present in the packet. */
     [[nodiscard]] uint32_t contributionCount() const;

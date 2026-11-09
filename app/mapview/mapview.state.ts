@@ -2,8 +2,8 @@ import { clampLod3TileThreshold, DEFAULT_LOD3_TILE_THRESHOLD } from "./presentat
 import {
     DEFAULT_POINT_CLOUD_POLICY,
     pointCloudDetailSchema,
-    type PointCloudPolicy,
-    pointCloudWorkingMemorySchema
+    pointCloudMaxPointsSchema,
+    type PointCloudPolicy
 } from "./point-cloud-policy.model";
 import { clampTileSubsetRenderWorkerCount, DEFAULT_VISIBLE_TILE_LIMIT } from "./tile-render-policy.model";
 import { Injectable } from "@angular/core";
@@ -64,7 +64,7 @@ interface ViewMembershipOwner {
 
 /**
  * Durable view identities, committed cameras and rendering preferences.
- * Renderer quality and resource budgets share this owner with per-view settings;
+ * Renderer quality and scheduling preferences share this owner with per-view settings;
  * renderers and workers can observe them without constructing MapViewService.
  * Membership edits keep all per-view values coherent during hydration, when no
  * renderer exists yet. Live camera previews, renderer teardown and navigation
@@ -817,7 +817,7 @@ export class MapViewState {
     /**
      * These rendering choices are shared by all views. They retain their deployed
      * keys, while renderer and worker observers only need this state container.
-     * Compound resource-budget edits are validated by MapViewService.
+     * Compound point-cloud sampling edits are validated by MapViewService.
      */
     readonly deckAntialiasingEnabledState = this.persistence.registerState<boolean>({
         name: "deckAntialiasingEnabled",
@@ -865,28 +865,28 @@ export class MapViewState {
         schema: pointCloudDetailSchema
     });
 
-    readonly pointCloudWorkingMemoryMiBState = this.persistence.registerState<number>({
-        name: "pointCloudWorkingMemoryMiB",
-        defaultValue: DEFAULT_POINT_CLOUD_POLICY.workingMemoryMiB,
-        schema: pointCloudWorkingMemorySchema
+    readonly pointCloudMaxPointsState = this.persistence.registerState<number>({
+        name: "pointCloudMaxPoints",
+        defaultValue: DEFAULT_POINT_CLOUD_POLICY.maxPoints,
+        schema: pointCloudMaxPointsSchema
     });
 
-    /** Read the same validated policy for Preferences, rendering and worker admission. */
+    /** Read the same sampling preferences for the UI and rendering. */
     get pointCloudPolicy(): PointCloudPolicy {
         return {
             enabled: this.pointCloudDownsamplingEnabledState.getValue(),
-            detailPixels: this.pointCloudDetailPixelsState.getValue(),
-            workingMemoryMiB: this.pointCloudWorkingMemoryMiBState.getValue()
+            maxPoints: this.pointCloudMaxPointsState.getValue(),
+            detailPixels: this.pointCloudDetailPixelsState.getValue()
         };
     }
 
-    /** Presents all resource limits from one completed preference edit. */
+    /** Publish sampling preferences from one completed edit. */
     readonly pointCloudPolicyChanges = this.persistence.observe(
         () => this.pointCloudPolicy,
         (left, right) =>
             left.enabled === right.enabled &&
-            left.detailPixels === right.detailPixels &&
-            left.workingMemoryMiB === right.workingMemoryMiB
+            left.maxPoints === right.maxPoints &&
+            left.detailPixels === right.detailPixels
     );
 
     readonly tilesLoadLimitState = this.persistence.registerState<number>({
