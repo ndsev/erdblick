@@ -1577,7 +1577,6 @@ export class SearchService implements AppActionContributor {
             !strategy.showLowFiDots ||
             this.viewState.prefersHighFidelityForSearchResultTile(
                 viewIndex,
-                session.id,
                 partition.id,
                 strategy.highFidelityMaxVisibleTiles
             );

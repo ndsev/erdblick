@@ -19,6 +19,28 @@ test.beforeAll(async () => {
     bundle = result.outputFiles[0].text;
 });
 
+test('pixel paths, icons and labels keep their sizes throughout zoom and tilt', async ({page}, testInfo) => {
+    await page.setContent('<html><body></body></html>');
+    await page.addScriptTag({content: bundle});
+    const measurements = await page.evaluate(() => window.pathComparison.measureScreenSizes());
+    await testInfo.attach('pixel-sizes.json', {body: JSON.stringify(measurements), contentType: 'application/json'});
+    expect(measurements).toHaveLength(24 * 3);
+    for (const {camera, frame, sizes} of measurements) {
+        for (let i = 0; i < 3; i++) {
+            expect(sizes[i][1], `path ${i}, camera ${camera}, frame ${frame}`).toBeGreaterThanOrEqual(5);
+            expect(sizes[i][1], `path ${i}, camera ${camera}, frame ${frame}`).toBeLessThanOrEqual(7);
+        }
+        for (const dimension of sizes[3]) expect(dimension).toBeGreaterThanOrEqual(31);
+        for (const dimension of sizes[3]) expect(dimension).toBeLessThanOrEqual(33);
+        for (const labelPart of [4, 5]) {
+            const reference = measurements[0].sizes[labelPart];
+            sizes[labelPart].forEach((value, axis) => expect(Math.abs(value - reference[axis])).toBeLessThanOrEqual(2));
+        }
+        expect(sizes[4][1]).toBeGreaterThan(10);
+        expect(sizes[5][1]).toBeGreaterThan(sizes[4][1]);
+    }
+});
+
 for (const pipeline of ['direct', 'contact', 'semantic'] as const) {
     for (const pitch of [0, 55]) {
         for (const billboard of [false, true]) {

@@ -66,7 +66,7 @@ function subsetPickResolver(
 
 describe("Deck rendered-feature picking", () => {
     it("acquires navigation targets through the real view wiring before and after reordering", () => {
-        const viewIds = ["view-north", "view-south"];
+        const viewIds = ["4", "7"];
         const view = create3DView(viewIds) as any;
         const target = {position: [11, 48, 0], origin: "ground"};
         const resolve = vi.spyOn(view, "resolveControllerNavigationTarget").mockReturnValue(target);
@@ -80,7 +80,7 @@ describe("Deck rendered-feature picking", () => {
                 viewId: deckView.id, viewport, screenPosition: [500, 350],
                 operation: "rotate", source: "pointer"
             });
-            expect(deckView.id).toBe("view-north");
+            expect(deckView.id).toBe("4");
             expect(acquired?.coordinate).toEqual(target.position);
             expect(view.createFirstPersonDeckView().id).toBe(deckView.id);
         }
@@ -552,7 +552,7 @@ describe("Deck rendered-feature picking", () => {
     it("samples one exact top surface from the controller's view-local acquisition", () => {
         const view = create3DView() as any;
         const viewport = new WebMercatorViewport({
-            id: "deck-view-0",
+            id: "deck-0",
             x: 40,
             y: 60,
             width: 1000,
@@ -586,7 +586,7 @@ describe("Deck rendered-feature picking", () => {
             preventDefault
         });
         const target = view.resolveControllerNavigationTarget({
-            viewId: "deck-view-0",
+            viewId: "deck-0",
             operation: "rotate",
             source: "pointer",
             screenPosition: [12, 24],
@@ -641,7 +641,7 @@ describe("Deck rendered-feature picking", () => {
         view.groundNavigationTarget = vi.fn();
 
         const target = view.resolveControllerNavigationTarget({
-            viewId: "deck-view-0",
+            viewId: "deck-0",
             operation: "rotate",
             source: "pointer",
             screenPosition: [12, 24],

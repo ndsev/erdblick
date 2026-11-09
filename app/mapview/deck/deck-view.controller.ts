@@ -144,6 +144,7 @@ import {
     TileGridStateOverlayLayer
 } from "./deck-tile-grid-overlay.layer";
 import { clippedGeographicBounds } from "./deck-viewport-coverage.util";
+import {ScreenSpaceSizeExtension} from "./screen-space-size.extension";
 import {
     createErdblickVectorLayers,
     ErdblickVectorLayer
@@ -3443,7 +3444,6 @@ export abstract class DeckMapView implements IRenderView {
         }
         return this.mapViewState.prefersHighFidelityForSearchResultTile(
             this._viewIndex,
-            searchLayer.id,
             tileId,
             strategy.highFidelityMaxVisibleTiles
         );
@@ -3484,6 +3484,7 @@ export abstract class DeckMapView implements IRenderView {
             getPosition: marker => marker.coordinates,
             getColor: () => color,
             getSize: () => DeckMapView.SEARCH_RESULT_PIN_RENDER_SIZE_PX,
+            extensions: [new ScreenSpaceSizeExtension()],
             sizeUnits: "pixels",
             billboard: true,
             pickable: false,
@@ -3580,6 +3581,7 @@ export abstract class DeckMapView implements IRenderView {
             getIcon: () => DeckMapView.LOCATION_MARKER_ICON_NAME,
             getPosition: (marker: DeckLocationMarkerDatum) => marker.position,
             getSize: () => DeckMapView.LOCATION_MARKER_RENDER_SIZE_PX,
+            extensions: [new ScreenSpaceSizeExtension()],
             sizeUnits: "pixels",
             billboard: true,
             pickable: false,
@@ -4110,6 +4112,7 @@ export abstract class DeckMapView implements IRenderView {
                 getOutlineColor: () => [0, 0, 0, Math.round(alpha * 255)],
                 getOutlineWidth: () => 3,
                 getSize: () => 30,
+                extensions: [new ScreenSpaceSizeExtension()],
                 sizeUnits: "pixels",
                 getTextAnchor: () => "middle",
                 getAlignmentBaseline: () => "bottom",

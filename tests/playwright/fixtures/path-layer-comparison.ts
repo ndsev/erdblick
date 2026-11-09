@@ -1,5 +1,5 @@
 import {COORDINATE_SYSTEM, Deck} from '@deck.gl/core';
-import {PathLayer} from '@deck.gl/layers';
+import {IconLayer, PathLayer, TextLayer} from '@deck.gl/layers';
 import {lngLatToWorld, unitsPerMeter, worldToLngLat} from '@math.gl/web-mercator';
 import type {Device} from '@luma.gl/core';
 import {ErdblickVectorLayer} from '../../../app/mapview/deck/erdblick-vector.layer';
@@ -11,7 +11,8 @@ import {
     isSemanticZIndexPassLayer,
     isSemanticZIndexPickingLayer
 } from '../../../app/mapview/deck/deck-semantic-z-index.visualization';
-import {ErdblickMapView} from '../../../app/mapview/deck/navigation/web-mercator-feature-navigation.adapter';
+import {DECK_MAP_DEFAULT_ALTITUDE, ErdblickMapView} from '../../../app/mapview/deck/navigation/web-mercator-feature-navigation.adapter';
+import {ScreenSpaceSizeExtension} from '../../../app/mapview/deck/screen-space-size.extension';
 import {
     GPU_RENDER_PACKET_ABI_VERSION,
     GPU_RENDER_PACKET_HEADER_BYTES,
@@ -203,7 +204,10 @@ export async function render(pitch: number, billboard: boolean, pipeline: 'direc
                                 ]);
                                 return [lon, lat, point[2]] as [number, number, number];
                             }),
-                            getWidth: path => path.width, getColor: path => path.color,
+                            // Stock PathLayer multiplies billboard widths by its focal
+                            // distance a second time. Compare equal CSS-pixel strokes.
+                            getWidth: path => path.width / (billboard ? DECK_MAP_DEFAULT_ALTITUDE : 1),
+                            getColor: path => path.color,
                             widthUnits: 'pixels', billboard, capRounded: true, jointRounded: true,
                             antialiasing: false,
                             coordinateSystem: COORDINATE_SYSTEM.LNGLAT
@@ -238,4 +242,109 @@ export async function render(pitch: number, billboard: boolean, pipeline: 'direc
         renderers: results.map(({pixels, ...statistics}) => statistics),
         relativePixelDifference: difference / results[1].coverage
     };
+}
+
+/**
+ * Measure actual raster sizes while one retained scene changes zoom and tilt.
+ * Three path layouts, an icon and a text label sit 500 m above the ground.
+ * Nothing is rebuilt between cameras: both the first frame and settled frames
+ * must use the current projection, just as during an interactive zoom gesture.
+ */
+export async function measureScreenSizes() {
+    document.body.innerHTML = '';
+    const canvas = document.createElement('canvas');
+    document.body.append(canvas);
+    const cameras = [0, 55, 70, 73].flatMap(pitch =>
+        [13.3, 13.5, 13.7, 13.8, 13.9, 14].map(zoom => ({pitch, zoom})));
+    const measurements: Array<{camera: number; frame: number; sizes: number[][]}> = [];
+    const world = lngLatToWorld(ORIGIN);
+    const scale = unitsPerMeter(ORIGIN[1]);
+    const position = (x: number, y: number) => [
+        ...worldToLngLat([world[0] + x * scale, world[1] + y * scale]), 500
+    ] as [number, number, number];
+    return new Promise<typeof measurements>((resolve, reject) => {
+        let camera = 0;
+        let frames = 0;
+        let installed = false;
+        let scene: GpuScene;
+        let device: Device;
+        const viewState = () => ({longitude: ORIGIN[0], latitude: ORIGIN[1], bearing: 0, ...cameras[camera]});
+        const deck = new Deck({
+            canvas, width: WIDTH, height: HEIGHT, useDevicePixels: false,
+            views: new ErdblickMapView(), controller: false, _animate: true,
+            viewState: viewState(),
+            deviceProps: {type: 'webgl', webgl: {antialias: true, preserveDrawingBuffer: true}},
+            onDeviceInitialized: value => { device = value; },
+            onError: reject,
+            onLoad: () => {
+                scene = new GpuScene(device, () => {}, reject);
+                (['simple', 'compact', 'full'] as const).forEach((layout, i) => {
+                    // Separate paths horizontally so high pitch cannot make
+                    // one stroke occlude another and corrupt its pixel bounds.
+                    const x = -200 + i * 200;
+                    const y = -120;
+                    const color: [number, number, number, number] = [0, 0, 0, 255];
+                    color[i] = 255;
+                    installPath(scene, {
+                        points: layout === 'simple' ? [[x - 60, y, 500], [x + 60, y, 500]]
+                            : [[x - 60, y, 500], [x, y, 500], [x + 60, y, 500]],
+                        width: 6, color, layout
+                    }, i, true);
+                });
+                scene.publishPresentation();
+                const atlas = document.createElement('canvas');
+                atlas.width = atlas.height = 32;
+                const context = atlas.getContext('2d')!;
+                context.fillStyle = 'yellow';
+                context.fillRect(0, 0, 32, 32);
+                deck.setProps({layers: [
+                    new ErdblickVectorLayer({id: 'paths', scene, flattenZ: false,
+                        coordinateSystem: COORDINATE_SYSTEM.LNGLAT}),
+                    new IconLayer({id: 'icon', data: [position(-500, -300)],
+                        iconAtlas: atlas, iconMapping: {square: {x: 0, y: 0, width: 32, height: 32, mask: false}},
+                        getIcon: () => 'square', getPosition: item => item, getSize: 32,
+                        sizeUnits: 'pixels', billboard: true, extensions: [new ScreenSpaceSizeExtension()]}),
+                    new TextLayer({id: 'label', data: [position(500, -300)],
+                        getText: () => 'HHHH', getPosition: item => item, getSize: 24,
+                        getColor: [255, 0, 255, 255], fontFamily: 'sans-serif',
+                        background: true, getBackgroundColor: [0, 255, 255, 255], backgroundPadding: [3, 3],
+                        sizeUnits: 'pixels', billboard: true, extensions: [new ScreenSpaceSizeExtension()]})
+                ]});
+                installed = true;
+            },
+            onAfterRender: ({gl}) => {
+                if (!installed) return;
+                const pixels = new Uint8Array(WIDTH * HEIGHT * 4);
+                gl.readPixels(0, 0, WIDTH, HEIGHT, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+                const bounds = Array.from({length: 6}, () => [WIDTH, HEIGHT, -1, -1]);
+                for (let y = 0; y < HEIGHT; y++) for (let x = 0; x < WIDTH; x++) {
+                    const offset = (y * WIDTH + x) * 4;
+                    // Mixed glyph/background edge pixels can look blue even
+                    // though they belong to neither blue path nor blue glyph.
+                    // Measure only pixels close to an authored primary color.
+                    if ([0, 1, 2].some(channel => pixels[offset + channel] > 30 && pixels[offset + channel] < 220)) continue;
+                    const bits = (pixels[offset] >= 220 ? 1 : 0) |
+                        (pixels[offset + 1] >= 220 ? 2 : 0) | (pixels[offset + 2] >= 220 ? 4 : 0);
+                    const index = [1, 2, 4, 3, 5, 6].indexOf(bits);
+                    if (index < 0) continue;
+                    const box = bounds[index];
+                    box[0] = Math.min(box[0], x); box[1] = Math.min(box[1], y);
+                    box[2] = Math.max(box[2], x); box[3] = Math.max(box[3], y);
+                }
+                // Font/atlas initialization precedes the camera sweep.
+                if (camera === 0 && bounds.some(box => box[2] < 0)) return;
+                measurements.push({camera, frame: frames, sizes: bounds.map(([x0, y0, x1, y1]) =>
+                    [Math.max(0, x1 - x0 + 1), Math.max(0, y1 - y0 + 1)])});
+                if (++frames < 3) return;
+                frames = 0;
+                if (++camera < cameras.length) {
+                    deck.setProps({viewState: viewState()});
+                } else {
+                    deck.finalize();
+                    scene.destroy();
+                    resolve(measurements);
+                }
+            }
+        });
+    });
 }
