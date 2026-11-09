@@ -56,12 +56,6 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Emscripten")
   add_executable(erdblick-core ${ERDBLICK_SOURCE_FILES})
   target_compile_definitions(erdblick-core PUBLIC EMSCRIPTEN)
   target_compile_options(erdblick-core PRIVATE -msimd128)
-  # Keep catches at validation/error-reporting boundaries. Enabling emulated
-  # catching globally routes hot model access through JavaScript invoke wrappers.
-  # Simfil, mapget and the subset renderer use Emscripten's default compile policy.
-  set_source_files_properties(
-    src/parser.cpp src/style.cpp src/style-validation.cpp src/gpu-render-records.cpp
-    PROPERTIES COMPILE_OPTIONS "-fexceptions")
   set_property(TARGET erdblick-core PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
   # For Address Sanitization, uncomment the next line and
   #  add sanitize-address to the LINK_FLAGS.

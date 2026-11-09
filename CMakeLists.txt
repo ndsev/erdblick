@@ -5,7 +5,7 @@ include(FetchContent)
 
 set(CMAKE_CXX_STANDARD 20)
 
-# Treat warnings as errors.
+# Enable general warnings and suppress selected dependency/toolchain diagnostics.
 set(ERDBLICK_CXX_FLAGS
   "-Wall -Wno-error=sign-conversion -Wno-sign-compare -Wno-sign-conversion -Wno-unused-local-typedefs -Wno-comment -Wno-effc++")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -17,6 +17,13 @@ endif()
 # Adjust CXX_FLAGS for Debug builds
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+endif()
+
+# Emscripten must compile exception handling into dependencies as well as the
+# final core. Schema import uses catches for legacy declarations and RAII for
+# transaction/cache rollback; link flags cannot restore omitted unwind code.
+if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
+  add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-fexceptions>")
 endif()
 
 # External dependencies
