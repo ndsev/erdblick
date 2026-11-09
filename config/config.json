@@ -1,7 +1,4 @@
 {
-  "extensionModules": {
-    "distribVersions": "distribution_versions"
-  },
   "coordinates-enabled": true,
   "surveys": [],
   "styles": [

@@ -36,10 +36,14 @@ function retryStateHarness() {
     };
 }
 
-function serviceHarness(): MapTileStreamService {
+function serviceHarness(mapInfo: object = {}): MapTileStreamService {
     return new MapTileStreamService(
         { ...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>() } as any,
-        { dataSourceInfoChanged: new Subject<void>() } as any,
+        {
+            dataSourceInfoChanged: new Subject<readonly string[]>(),
+            waitForMapLayersReady: vi.fn().mockResolvedValue(undefined),
+            ...mapInfo
+        } as any,
         {} as any,
         {
             run: (callback: () => unknown) => callback(),
@@ -49,6 +53,27 @@ function serviceHarness(): MapTileStreamService {
 }
 
 describe("MapTileStreamService request failures", () => {
+    it("cancels an inspection synchronously only when its datasource retires", async () => {
+        const changes = new Subject<readonly string[]>();
+        const service = serviceHarness({dataSourceInfoChanged: changes});
+        vi.spyOn(service as any, "scheduleUpdate").mockImplementation(() => {});
+        const request = vi.spyOn(MapTileStreamClientTiles.prototype, "request")
+            .mockImplementation(() => new Promise(() => {}));
+        const destroy = vi.spyOn(MapTileStreamClientTiles.prototype, "destroy");
+        try {
+            const mapTileKey = coreLib.createMapTileKey("Features", "Map", "Layer",
+                String(coreLib.getTileIdFromPosition(10, 48, 13)));
+            const loading = service.loadFeatures([{mapTileKey, featureId: "Road.1"}]);
+            const cancelled = expect(loading).rejects.toMatchObject({name: "AbortError"});
+            await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+            changes.next(["Sibling"]);
+            expect(destroy).not.toHaveBeenCalled();
+            changes.next(["Map"]);
+            expect(destroy).toHaveBeenCalledOnce();
+            await cancelled;
+        } finally {request.mockRestore(); destroy.mockRestore();}
+    });
+
     it("aborts a one-shot inspection and destroys its transport without starting locate fallback", async () => {
         const service = serviceHarness();
         const request = vi.spyOn(MapTileStreamClientTiles.prototype, "request").mockImplementation(() => new Promise(() => { }));
@@ -56,14 +81,42 @@ describe("MapTileStreamService request failures", () => {
         const fetchSpy = vi.spyOn(globalThis, "fetch");
         const controller = new AbortController();
         try {
-            const loading = service.loadFeatures([{ mapTileKey: "Features:Map:Layer:1", featureId: "Road.1" }], controller.signal);
-            expect(request).toHaveBeenCalledOnce();
+            const mapTileKey = coreLib.createMapTileKey("Features", "Map", "Layer",
+                String(coreLib.getTileIdFromPosition(10, 48, 13)));
+            const loading = service.loadFeatures([{mapTileKey, featureId: "Road.1"}], controller.signal);
+            await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
             controller.abort(new Error("cancelled by caller"));
             await expect(loading).rejects.toThrow("cancelled by caller");
-            expect(destroy).toHaveBeenCalledOnce();
+            expect(destroy).toHaveBeenCalled();
             expect(fetchSpy).not.toHaveBeenCalled();
         } finally {
             request.mockRestore(); destroy.mockRestore(); fetchSpy.mockRestore();
+        }
+    });
+
+    it("does not request restored inspection tiles until their schemas are ready", async () => {
+        let ready!: () => void;
+        const waitForMapLayersReady = vi.fn(() => new Promise<void>(resolve => {ready = resolve;}));
+        const service = serviceHarness({waitForMapLayersReady});
+        const request = vi.spyOn(MapTileStreamClientTiles.prototype, "request")
+            .mockImplementation(() => new Promise(() => {}));
+        const controller = new AbortController();
+        try {
+            const mapTileKey = coreLib.createMapTileKey("Features", "Map", "Layer",
+                String(coreLib.getTileIdFromPosition(10, 48, 13)));
+            const loading = service.loadFeatures([
+                {mapTileKey, featureId: "Road.1"}
+            ], controller.signal);
+            expect(waitForMapLayersReady).toHaveBeenCalledWith([
+                expect.objectContaining({mapId: "Map", layerId: "Layer"})
+            ], controller.signal);
+            expect(request).not.toHaveBeenCalled();
+            ready();
+            await vi.waitFor(() => expect(request).toHaveBeenCalledOnce());
+            controller.abort();
+            await expect(loading).rejects.toMatchObject({name: "AbortError"});
+        } finally {
+            request.mockRestore();
         }
     });
 
@@ -86,6 +139,60 @@ describe("MapTileStreamService request failures", () => {
             await expect(service.locateFeature("Map", "Road.1", undefined, controller.signal)).rejects.toThrow("cancelled");
             expect(fetchSpy).toHaveBeenCalledOnce();
         } finally { fetchSpy.mockRestore(); }
+    });
+
+    it("locates named foreign picks losslessly and caches only the matching target generation", async () => {
+        let generation = "first";
+        const service = serviceHarness({schemaScopeSignature: () => generation});
+        const partitionKey = "Features:Target:Road:object/18446744073709551615";
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({
+            responses: [[{partitionKey, canonicalFeatureId: "Road.9223372036854775807"}]]
+        })));
+        const reference = {mapId: "Target", typeId: "Road", id: {id: 9223372036854775807n, text: "42"}};
+        const pick = {mapTileKey: "Features:Source:Layer:object/1", featureReference: reference, attributeIndex: 2, validityIndex: 0};
+        try {
+            const result = await service.resolveFeaturePicks([pick]);
+            expect(result).toEqual([{mapTileKey: partitionKey, featureId: "Road.9223372036854775807:attribute#2:validity#0"}]);
+            expect(fetchSpy.mock.calls[0][1]?.body).toContain('"id":9223372036854775807');
+            expect(fetchSpy.mock.calls[0][1]?.body).toContain('"text":"42"');
+            expect(service.cachedFeaturePicks([pick])).toEqual(result);
+            await service.resolveFeaturePicks([pick]);
+            expect(fetchSpy).toHaveBeenCalledTimes(1);
+            generation = "replacement";
+            expect(service.cachedFeaturePicks([pick])).toEqual([]);
+            await service.resolveFeaturePicks([pick]);
+            expect(fetchSpy).toHaveBeenCalledTimes(2);
+        } finally {fetchSpy.mockRestore(); service.ngOnDestroy();}
+    });
+
+    it.each(["Source", "Target"])("rejects a locate overtaken by replacement of %s", async replacedMap => {
+        const generations: Record<string, string> = {Source: "original", Target: "original"};
+        const service = serviceHarness({schemaScopeSignature: (maps: string[]) => maps.map(map => generations[map]).join(",")});
+        let finish!: (response: Response) => void;
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+        try {
+            const pending = service.resolveFeaturePicks([{
+                mapTileKey: "Features:Source:Layer:object/1",
+                featureReference: {mapId: "Target", typeId: "Road", id: {id: 7}}
+            }]);
+            generations[replacedMap] = "replaced";
+            finish(new Response(JSON.stringify({responses: [[{
+                partitionKey: "Features:Target:Road:object/1", canonicalFeatureId: "Road.7"
+            }]]})));
+            await expect(pending).rejects.toThrow("datasource changed");
+        } finally { fetchSpy.mockRestore(); service.ngOnDestroy(); }
+    });
+
+    it("keeps an unavailable foreign target unresolved instead of persisting display text as an ID", async () => {
+        const service = serviceHarness({schemaScopeSignature: () => "ready"});
+        const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response('{"responses":[[]]}'));
+        const pick = {mapTileKey: "Source/Layer/1", featureReference: {mapId: "Missing", typeId: "Road", id: {id: 42}}};
+        try {
+            await expect(service.resolveFeaturePicks([pick])).rejects.toThrow("unavailable in Missing");
+            expect(service.cachedFeaturePicks([pick])).toEqual([]);
+            await expect(service.resolveFeaturePicks([pick])).rejects.toThrow("unavailable in Missing");
+            expect(fetchSpy).toHaveBeenCalledTimes(2);
+        } finally {fetchSpy.mockRestore(); service.ngOnDestroy();}
     });
 
     it("logs bulk viewport failures without flooding error toasts", () => {
@@ -140,7 +247,7 @@ describe("MapTileStreamService page lifecycle", () => {
                 tilePullCompressionEnabledState: new Subject<boolean>()
             } as any,
             {
-                dataSourceInfoChanged: new Subject<void>(),
+                dataSourceInfoChanged: new Subject<readonly string[]>(),
                 reloadDataSources: vi.fn().mockResolvedValue(true)
             } as any,
             { showBackendConnectionError: connectionError } as any,
@@ -276,7 +383,7 @@ describe("MapTileStreamService source catalog refresh", () => {
             finishFirstReload = () => resolve(true);
         });
         const mapInfo = {
-            dataSourceInfoChanged: new Subject<void>(),
+            dataSourceInfoChanged: new Subject<readonly string[]>(),
             sourceCatalogRevision: 49,
             reloadDataSources: vi.fn()
                 .mockReturnValueOnce(firstReload)
@@ -335,7 +442,7 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
         try {
             const service = new MapTileStreamService(
                 { ...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>() } as any,
-                { dataSourceInfoChanged: new Subject<void>() } as any,
+                { dataSourceInfoChanged: new Subject<readonly string[]>() } as any,
                 {} as any,
                 {
                     run: (callback: () => unknown) => callback(),

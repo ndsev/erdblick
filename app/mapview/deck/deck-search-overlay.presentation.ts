@@ -1,5 +1,6 @@
 import { COORDINATE_SYSTEM } from "@deck.gl/core";
 import { IconLayer } from "@deck.gl/layers";
+import { ScreenSpaceSizeExtension } from "./screen-space-size.extension";
 import { coreLib } from "../../integrations/wasm.adapter";
 import type { SearchResultDensityMarker, SearchResultPoint } from "../../search/search-results.model";
 import type { FeatureSearchOverlayLayer } from "../../search/search-session.model";
@@ -42,7 +43,7 @@ export interface DeckSearchOverlayFrame {
     layers: readonly FeatureSearchOverlayLayer[];
     markerAtlas(): string;
     showsTile(mapId: string, layerId: string, tileId: number): boolean;
-    prefersHighFidelity(searchId: string, tileId: number, maxVisibleTiles: number): boolean;
+    prefersHighFidelity(tileId: number, maxVisibleTiles: number): boolean;
     densityTargetLevel(maxVisibleLevel: number, maxVisibleTiles: number): number;
 }
 
@@ -283,7 +284,6 @@ export class DeckSearchOverlay {
             return true;
         }
         return this.frame!.prefersHighFidelity(
-            searchLayer.id,
             tileId,
             strategy.highFidelityMaxVisibleTiles
         );
@@ -324,6 +324,7 @@ export class DeckSearchOverlay {
             getPosition: marker => marker.coordinates,
             getColor: () => color,
             getSize: () => DeckSearchOverlay.SEARCH_RESULT_PIN_RENDER_SIZE_PX,
+            extensions: [new ScreenSpaceSizeExtension()],
             sizeUnits: "pixels",
             billboard: true,
             pickable: false,

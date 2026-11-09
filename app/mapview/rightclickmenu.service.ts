@@ -161,7 +161,11 @@ export class RightClickMenuService {
         this.rebuildMenuItems();
     }
 
-    /** Replaces the ordered first-section rows from one bounded desktop drill-pick. */
+    /**
+     * Replaces the ordered first-section rows from a desktop drill-pick.
+     * Keeps the first concrete hit for each map/layer/feature identity, ignoring
+     * partition in deduplication. The caller supplies hit order and any pick limit.
+     */
     setPickedFeatures(features: TileFeatureId[]): void {
         const rows: PickedFeatureMenuRow[] = [];
         const seen = new Set<string>();
@@ -187,7 +191,9 @@ export class RightClickMenuService {
 
     /**
      * Chooses the best source-data tile candidate for the current context.
-     * Preference is: explicit user choice, last inspected level, then deepest enabled tile.
+     * Prefer an enabled explicit choice, then the first enabled candidate at the
+     * last inspected level, then the last enabled entry. The caller must order
+     * candidates from shallow to deep for that final choice to mean deepest.
      */
     preferredSourceDataTile(tileIds: SourceDataDropdownOption[]): SourceDataDropdownOption | undefined {
         if (this.preferredTileIdForSourceData !== null) {
@@ -272,7 +278,7 @@ export class RightClickMenuService {
         };
     }
 
-    /** Builds the explicit multi-selection action for every bounded pick under the cursor. */
+    /** Builds the explicit multi-selection action for all current deduplicated picks under the cursor. */
     private selectAllPickedFeaturesMenuItem(): MenuItem {
         return {
             automationId: "inspect-all-picked-features",

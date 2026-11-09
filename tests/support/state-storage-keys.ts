@@ -56,6 +56,7 @@ export const APPLICATION_STORAGE_KEYS = [
     "numberOfViews",
     "pointCloudDetailPixels",
     "pointCloudDownsamplingEnabled",
+    "pointCloudMaxPoints",
     "selected",
     "semanticCompositingEnabled",
     "sourceDataInspectionDefaultColumns",

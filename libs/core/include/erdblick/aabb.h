@@ -14,6 +14,7 @@ namespace erdblick
 
 /** Type alias for viewport tile enumeration helpers. */
 using TileId = mapget::TileId;
+
 /** Scores a tile relative to the current camera; smaller values mean higher priority. */
 using TilePriorityFn = std::function<double(TileId const&)>;
 using Wgs84Point = mapget::Point;
@@ -47,7 +48,7 @@ public:
     static Wgs84AABB
     fromCenterAndTileLimit(Wgs84Point const& center, uint32_t softLimit, uint16_t level);
 
-    /** Determine, whether the AABBs size is within reasonable bounds. */
+    /** Check angular size only: width in [0, 360] and height in [0, 180] degrees. */
     bool valid() const;
 
     /** Obtain the South-West corner of this AABB. */
@@ -93,23 +94,31 @@ public:
      */
     uint32_t numTileIds(uint32_t lv) const;
 
-    /** Obtain the first tile level for this bounding box, for which
-     *  a certain minimum number of tiles would be contained.
+    /**
+     * Obtain the first tile level for this bounding box whose approximate tile
+     * count reaches minNumTiles. Searches levels 0 through 15 and returns 15 when
+     * none reaches that count.
      */
     uint8_t tileLevel(uint32_t minNumTiles = 8) const;
 
     /** Determine whether this bounding rect contains the given point */
     bool contains(Wgs84Point const& point) const;
 
-    /** Determine whether this bounding rect has an intersection with another bounding rect. */
+    /**
+     * Test overlap through corner containment. The current fallback does not
+     * terminate when neither box contains a corner of the other, including
+     * disjoint boxes.
+     */
     bool intersects(Wgs84AABB const& other) const;
 
     /**
-     * Obtain TileIds for a given tile level. Will fill in tileIds for the
-     * given level into resultTileIdsWithPriority up to resultTileIdsWithPriority.capacity(),
-     * so the function is guaranteed not to allocate any heap memory.
-     * Also annotates each returned TileId with a float as returned by the
-     * TilePenaltyFn lambda.
+     * Obtain TileIds for a given tile level, appending each with its prioFn score
+     * to resultTileIdsWithPriority up to resultTileIdsWithPriority.capacity().
+     * Reserve capacity before calling; the vector does not grow, and a full
+     * vector yields no new tiles. Enumeration stops in geographic scan order,
+     * so this is a bounded candidate list, not the globally best-scoring set.
+     * Anti-meridian boxes are split before enumeration. prioFn owns any
+     * allocations or side effects it performs.
      */
     void tileIdsWithPriority(
         uint16_t level,

@@ -52,6 +52,11 @@ bool markIsValid(YAML::Mark const& mark)
     return mark.pos >= 0 && mark.line >= 0 && mark.column >= 0;
 }
 
+/**
+ * Read an optional scalar without changing out when absent or invalid. Parsing
+ * failures append a located rule-skipped issue; required properties are enforced
+ * by their owning validator.
+ */
 template <typename T>
 bool readScalar(
     YAML::Node const& parent,
@@ -475,6 +480,11 @@ bool validateLodRange(
         node);
 }
 
+/**
+ * Locate literal scalar text from its YAML mark. This deliberately remains a
+ * best-effort UI location: decoded escapes and folded scalars may not occur in
+ * the original source.
+ */
 std::optional<size_t> findScalarOffset(YAML::Node const& node, std::string const& source)
 {
     if (!node.IsScalar()) {
@@ -516,6 +526,11 @@ StyleSourceLocation locationFromOffset(std::string const& source, size_t offset,
     return loc;
 }
 
+/**
+ * Compile an optional expression in a fresh mapget environment without rewriting
+ * it. Report a scalar-relative location when possible, otherwise the YAML node;
+ * this checks syntax and compilation, not evaluation against a feature.
+ */
 bool validateExpression(
     YAML::Node const& parent,
     std::string const& property,
@@ -599,6 +614,11 @@ bool validateGeometry(YAML::Node const& ruleYaml, std::string const& rulePath, S
     return validateOne(node);
 }
 
+/**
+ * Validate scale structure, stop ordering or typed categorical uniqueness, and
+ * schema guards for special values. Literal colors follow Color's accepted input
+ * formats; expression validity is checked separately from runtime value types.
+ */
 bool validateColorScale(
     YAML::Node const& ruleYaml,
     std::string const& rulePath,
@@ -712,6 +732,67 @@ bool validateColorScale(
             }
             if (!categoricalKeys.insert(std::move(normalized)).second) {
                 return fail("Categorical color-scale contains a duplicate typed stop key.", stop[0]);
+            }
+        }
+    }
+    // Validate the same input spelling that FeatureStyleRule reads. An invalid
+    // current guard must not fall back to a different legacy identity.
+    auto validateType = [&](YAML::Node const& type, char const* idKey)
+    {
+        if (!type.IsMap() || !type["schemaId"].IsScalar() || type["schemaId"].Scalar().empty() ||
+            !type[idKey].IsScalar())
+            return fail(
+                "color-scale type guards require an exact schemaId and a positive typeId.",
+                type);
+        try {
+            auto id = type[idKey].as<uint64_t>();
+            if (id == 0 || id > simfil::MaxTypeId)
+                return fail("color-scale typeId is out of range.", type);
+        }
+        catch (YAML::Exception const&) {
+            return fail("color-scale typeId must be a positive integer.", type);
+        }
+        return true;
+    };
+    bool hasTypeGuard = false;
+    if (auto types = scale["schemaTypes"]; types.IsDefined()) {
+        if (!types.IsSequence() || types.size() == 0)
+            return fail(
+                "color-scale.schemaTypes requires a nonempty list of exact type guards.",
+                types);
+        for (auto const& type : types) {
+            if (!validateType(type, "typeId"))
+                return false;
+        }
+        hasTypeGuard = true;
+    }
+    else {
+        auto const hasCanonicalType = scale["schemaType"].IsDefined();
+        if (auto type = scale[hasCanonicalType ? "schemaType" : "domain"]; type.IsDefined()) {
+            if (!validateType(type, hasCanonicalType ? "typeId" : "domainId"))
+                return false;
+            hasTypeGuard = true;
+        }
+    }
+    if (auto specials = scale["specials"]; specials.IsDefined()) {
+        if (!specials.IsSequence() || !hasTypeGuard)
+            return fail(
+                "color-scale.specials requires a list and an exact schema type guard.",
+                specials);
+        std::set<double> values;
+        for (auto const& stop : specials) {
+            if (!stop.IsSequence() || stop.size() != 2 || !stop[0].IsScalar() ||
+                !stop[1].IsScalar() || !Color(stop[1].Scalar()).isValid())
+                return fail(
+                    "Every special color must be a [numeric raw value, literal color] pair.",
+                    stop);
+            try {
+                auto raw = stop[0].as<double>();
+                if (!std::isfinite(raw) || !values.insert(raw).second)
+                    return fail("Special colors require unique finite raw values.", stop);
+            }
+            catch (YAML::Exception const&) {
+                return fail("Special color keys must be numeric raw values.", stop);
             }
         }
     }
@@ -1495,6 +1576,8 @@ bool validateStyleRuleYamlImpl(
         return false;
     }
 
+    // Continue across independent properties so one edit exposes all actionable
+    // issues. Nested failures still invalidate their containing top-level rule.
     bool ok = true;
     auto markInvalid = [&ok](bool value) { ok = value && ok; };
     auto rejectRemoved = [&](std::string const& property, std::string message) {
@@ -1527,6 +1610,8 @@ bool validateStyleRuleYamlImpl(
             : validateEnumValue(ruleYaml, property, allowed, rulePath, report, sourceRuleIndex));
     }
 
+    // Reject removed authoring forms explicitly, before validating the current
+    // property set, so users see the migration they need to make.
     rejectRemoved(
         "aspect",
         "aspect was renamed to scope in style schema version 2.");
@@ -1882,6 +1967,8 @@ bool validateStyleRuleYamlImpl(
         report,
         sourceRuleIndex));
 
+    // Literal validation above cannot establish expression syntax or relationships
+    // between independently valid properties. Check those before nested styles.
     markInvalid(validateExpression(ruleYaml, "filter", true, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "attribute-filter", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "color-expression", false, rulePath, source, report, sourceRuleIndex));
@@ -1930,6 +2017,8 @@ bool validateStyleRuleYamlImpl(
         ok = false;
     }
 
+    // Branches inherit the current evaluation context. Relation endpoint styles
+    // have their own feature context, unlike a top-level relation-scope rule.
     if (ruleYaml["first-of"].IsDefined() && ruleYaml["all-of"].IsDefined()) {
         auto& issue = report.addIssue(
             "error",

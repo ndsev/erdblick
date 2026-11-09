@@ -38,6 +38,7 @@ class RightClickMenuServiceStub {
 }
 
 class AppStateServiceStub {
+    state = { selectionState: new Subject() };
     setMarker = vi.fn();
     setSelection = vi.fn();
     focusedView = 0;
@@ -59,6 +60,7 @@ const createService = (config: any = {}, initialize = true) => {
     const stateService = new AppStateServiceStub();
     const searchService = new FeatureSearchServiceStub();
     const configService = new ConfigServiceStub();
+    const tileStream = {locateFeatureReference: vi.fn()};
     configService.getExtensionModuleId.mockImplementation((key: string) =>
         key === 'jumpTargets' ? config?.extensionModules?.jumpTargets ?? null : null
     );
@@ -68,14 +70,42 @@ const createService = (config: any = {}, initialize = true) => {
         inspectionSelection as any,
         infoService as any,
         menuService as any,
-        configService as any, stateService as any as never, stateService as any as never, Object.assign(stateService as any, { viewIdAt: (index: number) => String(index) }) as never, stateService as any as never
+        configService as any, stateService as any as never, stateService as any as never, Object.assign(stateService as any, { viewIdAt: (index: number) => String(index) }) as never, stateService as any as never, tileStream as never
     );
 
     if (initialize) service.initialize();
-    return { service, mapService, inspectionSelection, infoService, menuService, stateService, searchService, configService };
+    return { service, mapService, inspectionSelection, infoService, menuService, stateService, searchService, configService, tileStream };
 };
 
 describe('JumpTargetService', () => {
+    it('publishes only located identities and discards a result after another inspection edit', async () => {
+        const h = createService({}, false);
+        const reference = {mapId: "Remote", typeId: "Road", id: {id: 9007199254740993n}};
+        const targets = [{mapTileKey: "remote-partition", featureId: "Road.9007199254740993"}];
+        h.tileStream.locateFeatureReference.mockResolvedValue(targets);
+        await h.service.highlightFeatureReference(reference);
+        expect(h.stateService.setSelection).toHaveBeenCalledWith(targets);
+        h.stateService.setSelection.mockClear();
+        let finish!: (value: typeof targets) => void;
+        h.tileStream.locateFeatureReference.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+        const pending = h.service.highlightFeatureReference(reference);
+        h.stateService.state.selectionState.next([]);
+        finish(targets);
+        await pending;
+        expect(h.stateService.setSelection).not.toHaveBeenCalled();
+        expect(h.stateService.state.selectionState.observed).toBe(false);
+    });
+
+    it('cancels a departed reference hover before it can publish', async () => {
+        const h = createService({}, false);
+        const controller = new AbortController();
+        h.tileStream.locateFeatureReference.mockResolvedValue([{mapTileKey: "remote", featureId: "Road.7"}]);
+        const pending = h.service.highlightFeatureReference(
+            {mapId: "Remote", typeId: "Road", id: {id: 7}}, coreLib.HighlightMode.HOVER_HIGHLIGHT, controller.signal);
+        controller.abort();
+        await expect(pending).rejects.toMatchObject({name: "AbortError"});
+        expect(h.inspectionSelection.setHoveredFeatures).not.toHaveBeenCalled();
+    });
 
     it('does not construct the native parser before explicit startup', () => {
         const { service, mapService } = createService({}, false);
@@ -201,7 +231,7 @@ describe('JumpTargetService', () => {
         expect(service.validatePackedTileId('1 2')).toBe(false);
     });
 
-    it('builds inspect-tile source-data target label and validity based on map and layer presence', () => {
+    it('builds source-data bubbles and validates map and layer presence without error labels', () => {
         const { service, mapService } = createService();
 
         mapService.maps.maps.set('m1', {});
@@ -211,17 +241,21 @@ describe('JumpTargetService', () => {
 
         service.targetValueSubject.next('65536');
         let target = service.getInspectTileSourceDataTarget();
-        expect(target.label).toBe('packedTileId = 65536 | (mapId = ?) | (sourceLayerId = ?)');
+        expect(target.bubbles).toEqual([
+            {name: 'packedTileId', value: 65536},
+            {name: 'mapId', value: undefined, optional: true},
+            {name: 'sourceLayerId', value: undefined, optional: true}
+        ]);
         expect(target.validate('any')).toBe(true);
 
         service.targetValueSubject.next('65536 m1');
         target = service.getInspectTileSourceDataTarget();
-        expect(target.label).toBe('packedTileId = 65536 | mapId = m1 | (sourceLayerId = ?)');
+        expect(target.bubbles?.[1]).toEqual({name: 'mapId', value: 'm1', optional: true});
         expect(target.validate('any')).toBe(true);
 
         service.targetValueSubject.next('65536 m1 layerA');
         target = service.getInspectTileSourceDataTarget();
-        expect(target.label).toBe('packedTileId = 65536 | mapId = m1 | sourceLayerId = layerA');
+        expect(target.bubbles?.[2]).toEqual({name: 'sourceLayerId', value: 'layerA', optional: true});
         expect(target.validate('any')).toBe(true);
 
         service.targetValueSubject.next('abc');
@@ -230,13 +264,26 @@ describe('JumpTargetService', () => {
 
         service.targetValueSubject.next('65536 unknownMap');
         target = service.getInspectTileSourceDataTarget();
-        expect(target.label).toContain('Map ID not found');
+        expect(target.label).toBe('');
+        expect(target.bubbles?.[1].value).toBe('unknownMap');
         expect(target.validate('any')).toBe(false);
 
         service.targetValueSubject.next('65536 m1 unknownLayer');
         target = service.getInspectTileSourceDataTarget();
-        expect(target.label).toContain('SourceData layer ID not found');
+        expect(target.label).toBe('');
+        expect(target.bubbles?.[2].value).toBe('unknownLayer');
         expect(target.validate('any')).toBe(false);
+    });
+
+    it('preserves coordinate ordering and zeroes in the displayed bubbles', () => {
+        const {service} = createService();
+        const candidates = service.coordinateTargetsForValue('0,11');
+        expect(candidates.find(candidate => candidate.id === 'j:wgs84-lon-lat')?.bubbles).toEqual([
+            {name: 'lon', value: 0}, {name: 'lat', value: 11}, {name: 'level', value: undefined, optional: true}
+        ]);
+        expect(candidates.find(candidate => candidate.id === 'j:wgs84-lat-lon')?.bubbles).toEqual([
+            {name: 'lat', value: 0}, {name: 'lon', value: 11}, {name: 'level', value: undefined, optional: true}
+        ]);
     });
 
     it('executes inspect-tile source-data target and sets selection when map and layer exist', () => {

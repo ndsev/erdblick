@@ -17,6 +17,8 @@ export type FilterBindingValue = null | boolean | number | string;
 /** One generic mapget evaluation channel produced by Erdblick's style planner. */
 export interface FilterChannelDefinition {
     channelId: string;
+    /** Exact schema used to prepare this search predicate. */
+    schemaId?: string;
     scope: "feature" | "attribute" | "relation" | "auto";
     rewrite: boolean;
     featureTypes: string[];

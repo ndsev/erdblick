@@ -1,11 +1,13 @@
 /**
  * Resolve rendered feature picks into stable navigation anchors.
- * Picking metadata provides the exact displayed geometry; the active view
- * decides when to navigate and how to retain the resulting target.
+ * Renderer geometry, physical-altitude metadata and fallback depth coordinates
+ * provide candidate positions; the active view decides when to navigate and how
+ * to retain the resulting target.
  */
 import type { Deck, PickingInfo } from "@deck.gl/core";
 import { addMetersToLngLat } from "@math.gl/web-mercator";
 import type { TileFeatureId } from "../../../inspection/inspection.model";
+import type { FeaturePickTarget } from "../../../inspection/feature-identity.model";
 import type {
     NavigationAnchor,
     NavigationScreenPosition,
@@ -25,7 +27,7 @@ export interface DeckFeaturePickLayerProps {
     searchResultFeatureIds?: string[];
     featureAddresses?: ArrayLike<number | null>;
     featureAddressesByPath?: ArrayLike<number | null>;
-    subsetPickResolver?: (pickIndex: number) => TileFeatureId[];
+    subsetPickResolver?: (pickIndex: number) => FeaturePickTarget[];
     navigationAnchorEligible?: boolean;
     navigationAltitudeResolver?: (globalPickIndex: number) => number | undefined;
     markerAnchorEligible?: boolean;
@@ -53,6 +55,8 @@ export interface NavigationAnchorPick<ValueT> {
  * Resolves the topmost eligible physical representation whose application value
  * is accepted. When equality is supplied, a deeper representation of the same
  * feature may contribute a surface normal without changing the topmost anchor.
+ * At most 32 Deck hits are considered. screenPosition/radius use CSS pixels;
+ * returned positions are WGS84 longitude/latitude degrees and altitude metres.
  */
 export function pickNavigationAnchor<ValueT>(
     deck: Pick<Deck, "pickMultipleObjects">,
@@ -103,7 +107,12 @@ export function navigationAnchorFromPickingInfo(picked: PickingInfo): Navigation
     return navigationTargetFromPickingInfo(picked)?.position ?? null;
 }
 
-/** Returns the finite physical target and optional surface orientation of a camera layer. */
+/**
+ * Returns the finite physical target and optional surface orientation of an
+ * eligible camera-navigation layer. preferPickedCoordinate bypasses semantic
+ * anchors only when no altitude resolver is present. Path anchors must pass the
+ * screen-distance check; a failed path snap does not fall back to depth.
+ */
 export function navigationTargetFromPickingInfo(
     picked: PickingInfo,
     maxScreenDistancePx = NAVIGATION_PICK_RADIUS_PIXELS,
@@ -296,7 +305,11 @@ function meterOffsetAnchor(
     return [position[0], position[1], position[2]];
 }
 
-/** Snaps a picked path ribbon point to the nearest point on its base XYZ centerline. */
+/**
+ * Snaps a picked path ribbon point to its base centerline, choosing the segment
+ * nearest the pointer in screen space and perspective-correcting its XYZ
+ * interpolation. The tolerance is in CSS pixels.
+ */
 function nearestPathCenterlineAnchor(
     picked: PickingInfo,
     path: DeckFeaturePickLayerProps["pathCenterline"],
@@ -381,9 +394,10 @@ interface HomogeneousProjectedPoint {
 }
 
 /**
- * Returns the closest visible point on one perspective-projected common-space segment.
- * Segment endpoints are clipped in homogeneous space before division, avoiding the
- * enormous false projections produced when one source vertex is behind the camera.
+ * Returns the closest screen point on the front-of-camera portion of one
+ * perspective-projected common-space segment. Clip homogeneous W before division
+ * to avoid the enormous false projections produced when one source vertex is
+ * behind the camera. This is not full viewport/near/far-frustum clipping.
  */
 function closestVisibleProjectedSegmentPoint(
     pixelProjectionMatrix: number[],

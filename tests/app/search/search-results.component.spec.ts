@@ -32,7 +32,7 @@ function fixture(count: number) {
     };
     const component = new SearchResultsComponent({state: {featureSearchGrouping: [],
         featureSearchGroupingState: new BehaviorSubject<number[]>([])}} as never,
-        {} as never, {} as never, {} as never, {} as never, {markForCheck: vi.fn()} as never,
+        {} as never, {} as never, {} as never, {} as never, {markForCheck: vi.fn(), detectChanges: vi.fn()} as never,
         {run: (work: () => unknown) => work(), runOutsideAngular: (work: () => unknown) => work()} as never,
         {} as never, {} as never, {} as never);
     component.searchId = session.id;

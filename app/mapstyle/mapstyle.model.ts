@@ -43,7 +43,7 @@ export function normalizeStyles(styles: Array<StyleConfigEntry | string> | undef
 import type { FeatureLayerStyle, FeatureStyleOptionType } from "../../build/libs/core/erdblick-core";
 import type { LayerPresetDefinition } from "./layer-preset.model";
 import type { StyleSourceRef } from "./style-validation.model";
-/** Original server-provided builtin style source kept for resets and comparisons. */
+
 /** Original style source used when comparing or restoring a built-in style. */
 export interface BuiltinStyleBaseline {
     id: string,

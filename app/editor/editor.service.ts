@@ -81,7 +81,7 @@ export class EditorService {
         return this.sessions.get(id)?.source$.getValue() ?? '';
     }
 
-    /** Pushes new source text into an existing session if it actually changed. */
+    /** Update an existing session, including read-only UI sessions; unchanged text is ignored. */
     updateSessionSource(id: string, source: string): void {
         const session = this.sessions.get(id);
         if (!session) {
@@ -141,7 +141,7 @@ export class EditorService {
         }
     }
 
-    /** Closes and disposes one editor session. */
+    /** Close an existing session and its pending reveal; an unknown session is a no-op. */
     closeSession(id: string): void {
         const session = this.sessions.get(id);
         if (!session) {

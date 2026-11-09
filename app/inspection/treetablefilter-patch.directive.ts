@@ -5,7 +5,7 @@ import {TreeTableNode} from "primeng/api";
 /**
  * This is a monkey-patched version of PrimNG's findFilteredNodes with the following changes:
  *   - Expand matches automatically
- *   - Keep unmatched leaf-node siblings
+ *   - Keep every original sibling when a leaf matches or no child matches
  *
  * Sadly, ngPrime does not provide a function for matching a single node without recursion,
  * otherwise we could implement this via the `onFilter` subject.
@@ -42,8 +42,8 @@ export class TreeTableFilterPatchDirective implements AfterContentInit {
                 }
             }
 
-            // If we had a matching leaf node, add all leaf nodes.
-            // Since we are in strict mode, if no child matched, add all
+            // If we had a matching leaf node, add all original children.
+            // Since we are in strict mode, if no child matched, add all.
             if (hadMatchingLeaf || !matched) {
                 node.children = children;
             }

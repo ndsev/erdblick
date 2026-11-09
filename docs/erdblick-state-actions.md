@@ -42,7 +42,7 @@ controls. Preference dialogs and deployment configuration supply values, but do
 not own the behavior those values control.
 
 Use `.model.ts` for domain value models, such as background layers, retry policies
-and retained point-cloud input budgets. Use `.util.ts` for reusable operations and
+and point-cloud sampling preferences. Use `.util.ts` for reusable operations and
 mechanisms, including caller-managed queues, timers and cleanup. Domain-specific
 utilities stay beside their domain; shared domain-independent mechanisms belong
 in `utils/`. See [Source roles and dependencies](erdblick-source-structure.md) for
@@ -347,13 +347,13 @@ collection executes no callbacks.
 
 ## Verification
 
-Run from the erdblick root with matching native/WASM artifacts already available:
+Run from the erdblick root after the toolchain preparation described in the
+[developer guide](erdblick-dev-guide.md#build-and-test). The wrapper refreshes
+the WASM artifacts, generated action catalog and both frontend bundles:
 
 ```sh
+NG_BUILD_MAX_WORKERS=2 ./ci/20_linux_rebuild.bash
 NG_BUILD_MAX_WORKERS=2 npm run test -- --watch=false
-npm run lint
-NG_BUILD_MAX_WORKERS=2 npm run build -- -c profiling
-npm run generate:viewer-actions
 ```
 
 The suite covers transaction rollback/reentrancy/origins, the actual Angular
@@ -380,7 +380,7 @@ Release baseline: `6f5ba2fd6d6cb3810cd9bf4c305e0d5b229f4ef8`. The actual owner s
 | Owner file | Stored keys |
 | --- | --- |
 | `app/coordinates/coordinates.state.ts` | `coordinatesEnabled`, `coordinatesLegalTermsAccepted`, `marker`, `markedPosition`, `enabledCoordsTileIds` |
-| `app/mapview/mapview.state.ts` (rendering) | `deckAntialiasingEnabled`, `semanticCompositingEnabled`, `contactShadingEnabled`, `lod3TileThreshold`, `tileSubsetRenderWorkerCount`, `pointCloudDownsamplingEnabled`, `pointCloudDetailPixels`, `tilesLoadLimit` |
+| `app/mapview/mapview.state.ts` (rendering) | `deckAntialiasingEnabled`, `semanticCompositingEnabled`, `contactShadingEnabled`, `lod3TileThreshold`, `tileSubsetRenderWorkerCount`, `pointCloudDownsamplingEnabled`, `pointCloudMaxPoints`, `pointCloudDetailPixels`, `tilesLoadLimit` |
 | `app/mapview/mapview.state.ts` (views) | `viewIds`, `numberOfViews`, `focus`, `viewSync`, `cameraView`, `mode2d`, `mapZoomStep`, `featureZoomClearanceMeters`, `background`, `tileBorders`, `tileGridMode`, `tileGridLevel`, `tileGridAutoLevel`, `tileGridColor`, `tileGridOpacity` |
 | `app/mapdata/mapdata.state.ts` | `layerSyncOptions`, `layerNames`, `visibility`, `zoomLevel`, `autoZoomLevel`, `styleOptions`, `stylePresetSelection`, `mapPresetSelection` |
 | `app/layout/layout.state.ts` | `mapsOpenState`, `dockOpenState`, `dockWidth`, `viewPanelSizes`, `dockActiveTabState`, `dockAutoCollapse`, `dialogLayouts` |

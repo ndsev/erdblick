@@ -282,6 +282,7 @@ export interface DeckGltfNodeDatum {
     nodeIndex: number;
     featureAddress: number;
     color: [number, number, number, number];
+
     /** Texture-to-tint interpolation used only by flat interaction passes. */
     tintMix?: number;
     depthTest: boolean;
@@ -437,6 +438,7 @@ type LayerScenegraphState = {
     textureCacheDevice: Device | null;
 };
 
+/** Create a detached scenegraph state with no acquired models, textures or device. */
 function createEmptyLayerScenegraphState(): LayerScenegraphState {
     return {
         assetCacheKey: null,

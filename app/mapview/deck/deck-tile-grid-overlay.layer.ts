@@ -308,7 +308,12 @@ export interface TileGridOverlayLayerProps extends SolidPolygonLayerProps<TileGr
     lineWidthPixels: number;
 }
 
-/** Props for the shader-driven tile-state raster overlay. */
+/**
+ * Props for the shader-driven tile-state raster overlay.
+ * Replace imageData to upload changed pixels; mutating the existing ImageData
+ * object does not trigger a texture update. localMin and localSize use normalized
+ * XYZ or NDS grid coordinates.
+ */
 export interface TileGridStateOverlayLayerProps extends SolidPolygonLayerProps<TileGridOverlayDatum> {
     gridMode: "xyz" | "nds";
     localMin: [number, number];
@@ -420,7 +425,8 @@ color = vec4(
 
 /**
  * Shader-backed tile-state overlay that samples the cell colors from a raster
- * texture while using the exact same NDS remap as the grid lines.
+ * texture in the grid's XYZ/NDS coordinate convention. The raster uses absolute
+ * coordinates; high-zoom line rendering also uses camera-relative phases.
  */
 export class TileGridStateOverlayLayer extends SolidPolygonLayer<TileGridOverlayDatum, TileGridStateOverlayLayerProps> {
     static override layerName = "TileGridStateOverlayLayer";
@@ -433,7 +439,11 @@ export class TileGridStateOverlayLayer extends SolidPolygonLayer<TileGridOverlay
         this.state.tileStateTexture = createTileStateTexture(this.context.device, null);
     }
 
-    /** Rebuilds the backing texture only when the caller supplied new image data. */
+    /**
+     * Rebuilds the backing texture only when the caller supplies new imageData.
+     * Releases the old texture before creating its replacement. Null selects a
+     * transparent texel.
+     */
     override updateState(params: any): void {
         super.updateState(params);
         if (params.props.imageData === params.oldProps.imageData) {
@@ -507,7 +517,11 @@ color = vec4(stateColor.rgb, stateColor.a * layer.opacity);`
     }
 }
 
-/** Returns the default full-world quad used when callers need a single overlay datum. */
+/**
+ * Returns the default Mercator-visible world quad when callers need a single
+ * overlay datum. It excludes polar caps. Each call creates a new wrapper, but
+ * callers must not mutate the shared polygon vertices.
+ */
 export function tileGridOverlayData(): TileGridOverlayDatum[] {
     return [{polygon: TILE_GRID_WORLD_RING}];
 }

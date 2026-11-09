@@ -535,6 +535,52 @@ Linear keys must be finite, numeric, and strictly increasing. Colors are
 interpolated between adjacent stops. `fallback` handles null, unsupported
 types, and values which cannot be mapped.
 
+Schema-generated numeric scales can accept several verified equivalent source
+types and give named exceptional values their own colors:
+
+```yaml
+color-scale:
+  mode: linear
+  expression: "properties.speed"
+  schemaTypes:
+    - {schemaId: "<exact schema token>", typeId: 42}
+    - {schemaId: "<another equivalent schema token>", typeId: 198}
+  stops:
+    - [1, blue]
+    - [253, red]
+  specials:
+    - [0, gray]
+    - [254, purple]
+    - [255, cyan]
+  fallback: white
+```
+
+This example illustrates a type whose ordinary range is 1–253; discover the
+actual token, type ID, field path and meanings from the selected source. Special
+colors are checked before gradient interpolation or categorical lookup. Removing
+a special override routes that value to the fallback. Values outside the
+type's ordinary ranges also use the fallback. A schema/type outside the accepted list, or an
+unqualified computed number, cannot reuse a bound scale. Equivalent speed types
+from several maps share two generated rules: points and other geometry. Types
+with different units, ranges or named special values remain separate. Existing
+manual scales without type guards retain their unrestricted behavior. `specials` requires an
+exact schema type guard and finite numeric keys; saved YAML preserves both the
+guards and edited colors. Historical `schemaType: {schemaId, typeId}` and
+`domain: {schemaId, domainId}` guards remain accepted when loading local searches
+or YAML styles, including server-hosted styles. Import normalizes them to the
+`schemaTypes` list emitted by newly generated styles.
+
+Generated symbolic category scales combine labels across schema versions of the
+same field. Adding an enum entry or changing its wire ordinal does not change
+the color assigned to an existing logical label. The combined scale retains all
+accepted exact type identities and the union of category stops. This applies to
+new automatic styles; edited palettes are not merged or recolored.
+
+Stops use raw source numbers. The search editor can label scaled units and choose
+round steps in those units without changing the stored encoding. For flags, prefer
+a boolean categorical scale over a named `hasFlag(...)` expression or explicit
+rule priority; enumerating all mask combinations loses useful meaning.
+
 Use one scale instead of a palette-only `first-of` chain. Structural
 `first-of`/`all-of` trees remain appropriate for geometry, dash composition,
 or other compound presentation changes.

@@ -32,10 +32,12 @@ public:
       * Construct a color from a hex string. The string may have the following formats:
       * - #ffffff
       * - #fff
-      * - 0xfffff
+      * - 0xffffff
       * - 0xfff
       * - A CSS color name: https://www.w3.org/wiki/CSS/Properties/color/keywords
-      * If none of these formats matches the input, the resulting color will be invalid.
+      * CSS names are matched exactly. The legacy hex parser checks length but
+      * does not strictly validate digits; validate user input before calling it.
+      * Three-digit input shifts each nibble by four bits (e.g. #fff -> #f0f0f0).
      */
     Color(const char* colorString);
     Color(const std::string& colorString);
@@ -58,12 +60,12 @@ public:
     static Color fromHSV(const glm::vec3& hsv);
 
     /**
-      * Constructs a RBG color from an RGB float vector ([0,1]).
+      * Constructs an RGB color from an RGB float vector ([0,1]).
      */
     static Color fromRGB(const glm::vec3& rgb);
 
     /**
-      * Constructs a RBG color from an RGB uint; 8-bit per channel.
+      * Constructs an RGB color from an RGB uint; 8-bit per channel.
      */
     static Color fromRGB(uint32_t rrggbb);
 
@@ -112,7 +114,7 @@ public:
     /**
       * Returns false if the color was constructed from the default ctor,
       * or from an invalid hexstring, and all components are zero.
-      * Use Color::Black to obtain a valid black color instance.
+      * Use Color("#000000") to obtain a valid black color instance.
      */
     bool isValid() const;
 

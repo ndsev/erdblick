@@ -11,13 +11,19 @@ Erdblick has two search surfaces:
 Erdblick's search palette unifies jump targets, utility actions, and the Simfil-based feature-search entry point. Open it with `Ctrl+K` or by clicking the magnifier icon; the textarea expands into a command palette whenever the dialog is visible.
 
 1. **Input field** - accepts coordinates, tile IDs, feature identifiers, or Simfil expressions. The field turns multi-line while the palette is open.
-2. **Autocompletion** - suggestions appear near the caret after a short delay. Use `Tab`, `ArrowUp`, `ArrowDown`, or the mouse to pick a candidate; `Enter` inserts it.
-3. **Active vs. inactive items** - targets validate your input in real time. Matching targets move to the top of the list with colored icons; non-matching entries remain grey and show inline warnings such as "Insufficient parameters".
+2. **Autocompletion** - suggestions from ready maps appear near the caret after a short delay, including for hidden layers. An unavailable map does not block other maps' suggestions. `ArrowUp`/`ArrowDown` select a suggestion; `Tab`, `Enter`, or a click inserts it without running an action. A fully typed name can be confirmed directly with `Enter`. Attribute suggestions insert ordinary names; ambiguous names are resolved when the search is confirmed.
+3. **Actions and parameters** - targets validate your input in real time. Feature search remains visible for an invalid draft, disabled with its Simfil parse error in a bubble. Feature jumps show matching type prefixes or complete valid IDs. Single-line rows use right-aligned bubbles for filters, location sources and parsed parameters; `?` marks an unspecified value, with optional parameters identified in their tooltips. Incomplete actions remain grey. Long bubble contents truncate within the panel; hover to read the full value. Narrow panels hide parameter names while retaining values.
 4. **History** - executed targets are stored in browser state. Matching entries appear below active actions and can be re-run or removed individually.
-5. **Execution shortcuts** - press `Enter` to run the first active target, or click any entry. `Escape` dismisses autocompletion, clears the current input, or closes the palette, depending on the current focus state.
+5. **Execution shortcuts** - after completion is accepted or dismissed, `Enter` runs the first active target. Completed schema input puts **Search Features and Attributes** first; commands using typed input precede commands that can use the current viewport. With completion closed, `ArrowDown` enters the first action and `ArrowUp` the last action or history entry. Continue with the arrows or `Tab`/`Shift-Tab`; disabled entries are skipped, and the focused row scrolls into view. `Shift-Tab` from the first action returns to the input, and `Tab` from the last row does likewise. `Enter` executes that row. `Escape` dismisses completion first, or returns from an action to the draft. Further `Escape` presses in the input clear the draft, then close the palette. Clicking an action also executes it directly.
 6. **Context hand-offs** - SourceData actions, inspection row actions, map coverage buttons, and other tools can push pre-filled queries into the palette or directly open a feature-search panel.
 
 The palette closes automatically when you click the map or another control, but search history and partially typed queries are preserved until you clear them.
+
+New feature searches start with the active map layers. A completion's source list
+is a suggestion, not a scope restriction: it seeds the search only when no layers
+are active. Accepting completion in an existing search edits its expression and
+preserves its **Map Layers** selection. Explicit scopes supplied by other actions
+remain authoritative.
 <!-- --8<-- [end:overview] -->
 
 ![Schema completion over NDS.Island-6 lanes](screenshots/search-palette.png)
@@ -49,7 +55,7 @@ hint: "For a place name, use mapget_lookup_place to obtain candidate WGS84 coord
 | **Open in OpenStreetMap** | Optional WGS84 coordinates | Opens OpenStreetMap at the supplied coordinates, or at the current marker/viewport fallback location. |
 | **Open in Bing Maps** | Optional WGS84 coordinates | Opens Bing Maps at the supplied coordinates, or at the current marker/viewport fallback location. |
 | **Inspect Tile Layer Source Data** | `<tileId> ["Map Id"] ["Source Layer"]`<br/>Quotes are optional; escape spaces with `\ ` | Opens the SourceData inspector for the chosen tile/layer. The validator checks that the map ID exists and that the layer matches a known SourceData entry. |
-| **Feature ID Jump** | `FeatureType key1=value1 key2=value2 ...` | Locates a specific feature by its identifier fields, pans the active view to the match, and highlights it. Only feature types advertised by the loaded maps are offered. |
+| **Feature ID Jump** | `FeatureType value1 value2 ...` or `FeatureType.value1.value2` | Locates a specific feature by its identifier fields, pans the active view to the match, and highlights it. Only feature types advertised by the loaded maps are offered. |
 
 All coordinate targets accept decimal or degree-minute-second formats. When you include a zoom level, erdblick fits the containing tile rectangle while keeping the marker at the exact entered coordinate.
 
@@ -97,8 +103,8 @@ Use **Location Matches** in the same preferences tab to control how many locatio
 <!-- --8<-- [start:feature-jumps] -->
 In addition to the static entries above, erdblick exposes per-feature actions based on the feature types advertised by the loaded maps:
 
-- Start your query with a feature type prefix, for example `LaneGroup`, followed by the ID parts defined in that type's metadata. Tokens may be separated by spaces, commas, dots, or semicolons.
-- The palette lists compatible feature types and shows the required key/value pairs. Invalid entries reveal parser errors such as "Expecting I32".
+- Start your query with a feature type prefix, for example `LaneGroup`, followed by ID values in the order shown by its parameter bubbles. Tokens may be separated by spaces, commas, dots, or semicolons.
+- The palette lists matching feature types and their ID parameters. Without a type prefix, only complete valid IDs produce feature-jump entries. Empty or unrelated input does not list every feature type. Missing or invalid ID parts show `?`, and incomplete jumps remain disabled.
 - If the feature type is offered by multiple maps, erdblick prompts you to pick the target map before it asks the backend to locate and highlight the feature.
 - Successful jumps move the camera in the currently focused view and select the located feature.
 <!-- --8<-- [end:feature-jumps] -->
@@ -127,10 +133,30 @@ results. The same subset feeds styled map geometry and frame-budgeted result
 list ingestion, so matches can appear while backend work and tree construction
 are still in progress.
 
+Confirm a new query with **Enter** before preparation starts. Typing only edits the draft and offers completions. Preparation resolves the query against the selected schemas, chooses its evaluation contexts, and creates its initial visualization before any backend search is sent. A spinner identifies interpretation discovery and initial visualization preparation.
+
+If a name has several meanings, **Choose one interpretation** shows each proposed query and its applicable maps/layers. For example, `SPEED_LIMIT` can name a Classic speed-limit attribute or a Live warning-sign value. Exactly one interpretation can run. The highlighted choice step replaces progress and result tabs until you choose; scope controls remain available above it. Changing those controls recalculates the choices for the confirmed shorthand. If only one meaning remains, preparation continues automatically.
+
+An unambiguous attribute name stays as entered: `SPEED_LIMIT_METRIC` needs no `**.` prefix. Its prepared execution plan supplies the attribute-root predicate. If you later add sources that introduce another meaning for that shorthand, preparation asks you to choose.
+
+Choosing an interpretation writes its ordinary Simfil expression into the query editor and updates **Map Layers** to that choice's initial sources. For example, the warning-sign choice can become:
+
+```simfil
+**.warningSign == "SPEED_LIMIT" or **.movableWarningSign == "SPEED_LIMIT"
+```
+
+That expression is the saved query. It contains no schema hash, graph-local type number, or enum-version restriction. Recursive field selection accommodates wrappers such as `attributeValue.warningSign`. Numeric named values use symbolic comparisons against each field's current type; flags use `hasFlag` rather than converting their encodings to strings. A name alone and its quoted standalone spelling offer the same choices; an explicit comparison selects the addressed field directly.
+
+After acceptance, editing **Map Layers**, feature types or result scope prepares the same expression again. Adding a map with a different schema hash or signs version does not reopen the original shorthand's ambiguity. Its data matches when it satisfies the explicit condition; a genuinely renamed field requires editing that condition. Completion can also insert an explicit expression into the draft, with preparation still waiting for **Enter**.
+
+While a replacement is preparing, waiting for a schema, or awaiting a choice, previous results remain labeled with their previous query. Saved searches and JSON exports retain the accepted query text, not a schema-specific interpretation binding. Each temporary execution plan still records its current schema artifact so stale plans can be rejected and prepared again safely.
+
+MCP follows the same workflow: `viewer_start_search` creates the session, `viewer_get_search.preparation` reports readiness and choices (including their proposed `query`), and `viewer_choose_search_interpretations` accepts exactly one choice. The accepted text appears in the session's `query`; all search action inputs reject combined interpretations. `searchComplete` remains false until preparation and result ingestion have completed.
+
 Important controls:
 
 - **Docked or floating panel** - keep a search in the Search dock, undock it into a dialog, reorder docked panels by dragging their headers, or keep several searches open side by side.
-- **Enabled toggle** - disables a search without deleting it. A disabled search keeps its query and results visible but does not run, auto-update, or accept query edits until it is enabled again.
+- **Enabled toggle** - disables a search without deleting it. Its query and settings remain saved, and its Visualization and Diagnostics tabs remain accessible, including after a page reload. The status reads **Search disabled**; preparation and execution resume when it is enabled again.
 - **Query input** - edit the Simfil expression inline. Press `Enter` to rerun. If the text differs from the active search, the refresh action becomes **Rerun search**.
 - **Map Layers** - restrict the search to selected maps and layers. This also narrows schema-aware completion and style-field pickers.
 - **Scope** - choose `Auto`, `Feature`, or `Attribute`. Feature scope evaluates once per feature. Attribute scope evaluates once per attribute/validity context and exposes `$name`, `$layer`, `$feature`, `$attributeIndex`, `$hasValidity`, `$validityIndex`, and `$validityCount`. Auto chooses attribute scope when schema metadata proves that the query targets attribute-layer fields.
@@ -196,15 +222,15 @@ colors, and **Marker Size** scales the markers.
 <!-- mcp:
 title: "Detailed search result geometry"
 keywords: ["high fidelity", "high-fi", "geometry", "validity", "pins", "visible tiles"]
-hint: "In viewer_set_search settings.renderStrategy, showHighFiGeometry enables detailed geometry; highFidelityMaxVisibleTiles gates it by visible tile count. Preserve density settings for a broad-view fallback. Search help for \"Style Rules\" to configure colors and labels."
+hint: "In viewer_set_search settings.renderStrategy, showHighFiGeometry enables detailed geometry; highFidelityMaxVisibleTiles gates it by a tilt-independent camera-scale tile count, as for ordinary map styles. Preserve density settings for a broad-view fallback. Search help for \"Style Rules\" to configure colors and labels."
 -->
 ### High-fi Visualization
 
-High-fi visualization draws styled result geometry when the visible tile count is low enough for detailed rendering.
+High-fi visualization draws styled result geometry when the camera is close enough for detailed rendering. The cutoff uses the same canonical, top-down camera-scale tile count as ordinary map styles. Tilting toward the horizon does not hide nearby results or abruptly coarsen their density markers. The search still requests tiles in the actual viewport footprint.
 
 - Toggle styled result geometry on or off.
 - Enable per-feature result pins when high-fi geometry is active.
-- The default high-fidelity cutoff is 512 visible tiles. Above that limit, density markers remain the practical overview.
+- The default high-fidelity cutoff is 512 tiles at the canonical camera scale. Zooming out beyond that limit switches to density markers.
 - Attribute-scope results use computed validity geometry where available; attributes without validities use feature display geometry. A failed validity computation can produce empty geometry rather than a whole-feature fallback.
 
 <!-- mcp:
@@ -220,10 +246,59 @@ Search style rules are evaluated only for the result layer of the current search
 - **Filter** conditions can use schema-backed field pickers, comparison operators, numeric inputs, enum value pickers, text values, or custom Simfil expressions. Multiple conditions inside one rule are combined for that rule.
 - **Geom** chooses one or more rendered geometry groups. **Any geometry** and **Label** are exclusive modes; line, surface, polygon, mesh, and point groups can be combined. Geometry rules expose the relevant width, point diameter, label size, and opacity controls for the selection.
 - Automatic styles use a 20 px point rule and a 5 px combined line/surface rule so both geometry families remain legible without duplicating every concrete surface type.
+- Search widths, point diameters, pins and label sizes are screen pixels: zoom and camera tilt change their placement, not their apparent size. Saved search styles retain this billboard behavior.
 - **Labels** can use a selected field or a custom label expression. Common labels are speed-limit values, feature types, validation rule IDs, and issue IDs.
 - **Color** supports solid colors, numeric gradients, and categories for numeric, boolean, or string values. Schema enums can initialize categories immediately; other fields use **Update from data** or manually entered values. In category and gradient modes, **Fallback color** controls how missing or unmatched values are drawn. Uncheck it to omit those values from rendering; the setting survives saving and reopening the stylesheet. Incomplete scales still use a temporary solid colour until valid stops are supplied. **Update from data** uses the Diagnostics/Values summaries from the current result set, collected from the result-only channel independently of rendering rules, including when a category scale has no stops yet.
 
-Auto-created rules prefer fields mentioned by the query. Manual edits stop those rules from being replaced by later query changes.
+Initial automatic rules use schema-declared primary values or fields identified by the chosen meaning. Owners and source layers sharing the same field, compatible value meaning and appearance share one point rule and one line/surface rule. Numeric types must agree on units, ranges and special values. Symbolic enum catalogs combine their labels, even when a newer version adds entries or changes wire ordinals; equal labels keep equal colors. Different field paths or incompatible numeric meanings retain their own guarded rules. If no value field can be selected confidently, they use the search color. Receiving results or opening the Visualization tab does not change the selected field or color mode. Manual edits remain authoritative when a new query is confirmed.
+
+Explicit predicates select compatible fields referenced by the query, rather
+than every field with the same leaf name. For example, a string comparison on
+`**.value` does not create numeric scales for reference IDs. Adding a layer
+whose results are whole features keeps their rules separate from attribute
+results, while equivalent attribute rules continue to be shared across maps.
+
+For example, a query matching both `movableWarningSign` and `warningSign` needs
+four initial rules: two field paths, each with point and line/surface styling.
+Adding a map with another compatible warning-sign catalog extends those rules'
+accepted types and category labels rather than duplicating the rules.
+
+Generated rule filters distinguish appearances within the selected search. For
+example, Road and Lane warning signs can share a rule filtered only by
+`$name == "MOVABLE_WARNING_SIGN"`; the search already supplies their map/layer
+coverage. If every matching context uses one appearance, no extra rule filter
+is needed. Feature, attribute-layer or map conditions remain when they actually
+separate different fields, scales or solid fallbacks. A color's exact type guard
+is preserved: on a mismatch it can still draw the fallback color, so it does not
+replace the rule's applicability conditions.
+
+Field choices follow the search's selected maps, layers and feature types. For
+attribute searches, they use the same resolved attribute owners as query execution.
+Each expression appears once, even when several owners expose it. Automatic rules
+prefer a field explicitly addressed by the query, then the attribute's native
+scalar shorthand (for example, the speed value rather than validity direction).
+
+Feature properties appear once, under `attributes`. Existing expressions using
+`properties` remain valid. Nested array fields use expressions such as
+`attributes.samples.*.reading`. Such an expression can return several values: a
+color or label still needs one result, so use an explicit index or a suitable
+aggregation when necessary. Recursive schema cycles are not expanded indefinitely;
+use the custom expression input and completion for paths beyond a cycle.
+
+Numeric domains keep ordinary values separate from named exceptions. For example,
+a speed type can define `254` as variable and `255` as unlimited; these receive
+editable special colors instead of stretching a gradient. The schema determines
+whether zero is ordinary or exceptional. Unit labels and round gradient steps use
+the type's scale and offset, while saved stops retain the original numeric
+encoding. A computed plain number does not inherit units or exceptions merely
+because its expression mentions a typed field.
+
+Generated scales remember the exact schema/type they describe. When that meaning
+changes, the editor offers **Use current schema** explicitly; saved colors are not
+silently rebound to reused numeric IDs. **Update from data** requires one observed
+domain. Narrow the map/layer scope when Diagnostics shows several incompatible
+meanings. Bitmask fields offer named `hasFlag(...)` choices with boolean colors;
+they do not generate a category for every observed combination of bits.
 
 ![Search visualization rule and its rendered result][search-visualization]
 
@@ -236,7 +311,7 @@ hint: "The Save/Saved styles controls are normal UI actions; no semantic save-se
 
 Use **Save** beside the high-fidelity controls to create a canonical stylesheet. The small save dialog accepts the exact stylesheet name, optional layer affinity, and a checked-by-default **Enable this style upon save** checkbox. Slashes in the name create the same groups used by the normal Styles tree. Empty affinity means any feature layer; selected layer IDs are stored as an escaped exact-match `layer` expression and apply to every map that uses that ID. **Save** creates the style and closes the dialog; **Save and Open** creates it and then opens the ordinary Style Editor. **Cancel** creates nothing. Saving is create-only: an empty rule list or a name/URL collision is rejected without overwriting anything. The generated source has `category: search`, `version: 2`, a root `default` matching the checkbox, one per-layer **Show &lt;stylesheet name&gt;** Boolean option that defaults on, and one flat top-level YAML rule per GUI rule. Every generated rule is gated by that option. The imported style's initial global visible state matches the save checkbox; once active, its per-layer option is available in Maps & Layers.
 
-The dialog captures the resolved feature/attribute scope, normalized query, selected feature types, and visual rules when opened. Saving before scope resolution completes reports a message instead of guessing feature scope. Generated rules retain the query and feature-type restrictions, so the imported style independently matches the search. Attribute styles render matched validity geometry where available; attributes without validities use their feature geometry. Selected layer IDs initialize the affinity picker. Map IDs, result views, tiles, and density controls remain outside the stylesheet. The saved YAML is registered immediately as a normal browser-imported style and appears under **Edit -> Styles Configurator -> Styles** with a **Search** tag.
+The dialog captures the resolved feature/attribute scope, normalized query, selected feature types, and visual rules when opened. Saving before scope resolution completes reports a message instead of guessing feature scope. Generated rules retain the query and feature-type restrictions, so the imported style independently matches the search. Attribute styles render matched validity geometry where available; attributes without validities use their feature geometry. Selected layer IDs initialize the affinity picker. Export adds source guards to preserve the selected maps/layers in the standalone stylesheet; live per-map queries do not need those guards. Result views, tiles, and density controls remain outside it. The saved YAML is registered immediately as a normal browser-imported style and appears under **Edit -> Styles Configurator -> Styles** with a **Search** tag.
 
 ![Save Search Style dialog][10-save-search-style]
 
@@ -270,8 +345,8 @@ require completed, error-free evidence for the requested scope.
 The **Diagnostics** tab explains what the current search did and helps tune queries.
 
 - **Messages** lists backend or parser diagnostics. When a message offers a fix, click **Fix** to rewrite the query in the input.
-- **Query** shows the active query, effective scope, elapsed time, searched feature count, matched result count, and schema-derived notes when they are available.
-- **Values** summarizes result fields and `trace()` output. Cards include sample counts, missing/null counts, kind counts, numeric min/max/average values, histograms, and trace call timings.
+- **Query** shows the active query, effective scope, elapsed time, searched feature count, matched result count, and schema-derived notes when they are available. The execution timer starts after preparation, when the selected interpretation and initial visualization are ready to dispatch.
+- **Values** summarizes result fields and `trace()` output. Cards include sample counts, missing/null counts, kind counts, ordinary numeric min/max/average values, histograms, and trace call timings. Different source types appear in separate cards even for the same expression. Named exceptional values stay in histograms and are counted separately from ordinary measurements; bitmasks retain their exact hexadecimal values.
 
 Values are loaded lazily and may wait until result chunks have finished ingress. Use them when you want to understand the distribution behind a search before creating labels, categories, or gradients. Useful trace expressions include `trace(typeId)`, `trace(**.speedLimitKmh)`, and named traces such as `trace(valueKph, name="speed limits")` when several measurements should appear as separate value cards.
 <!-- --8<-- [end:diagnostics] -->
@@ -311,7 +386,7 @@ Search inputs offer live assistance while you type:
 - **Schema-aware completion** suggests fields, enum-like string constants, and function names. It respects the selected map layers and the selected search scope where possible.
 - **Non-blocking completion** runs outside the main UI path. Suggestions can briefly lag behind datasource metadata changes, but typing and panel interaction should remain responsive.
 - **Wildcard shortcuts** can be expanded through schema metadata. If a datasource schema proves where `speedLimitKmh` exists, a short expression such as `speedLimitKmh > 80` can target the concrete field without forcing you to write the complete path.
-- **Enum constants** are suggested from schema metadata as quoted string literals, for example `"SPEED_LIMIT_END"`. If the same token is also a reachable field, completion prefers the unquoted field form, for example `SPEED_LIMIT_METRIC`.
+- **Enum constants** inside a comparison are suggested as quoted string literals, for example `"SPEED_LIMIT_END"`. Whole-query enum suggestions insert an explicit field predicate; attribute suggestions insert the plain attribute name. Pressing **Enter** on a fully typed symbol submits that text for interpretation; it does not silently accept the first expanded suggestion.
 - **Forced field access** is available when a token could be interpreted several ways. Use `_.FIELD` or `["FIELD"]` to make a name a field access.
 - **Inline diagnostics** appear before or during a search for parse errors, ambiguous schema rewrites, missing fields, and fixable query patterns.
 

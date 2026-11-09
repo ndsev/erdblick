@@ -18,7 +18,7 @@ test.afterEach(async () => {
 
 async function openAuthenticatedViewer(page: Page, subject: string, baseURL: string) {
     closeProxies.push(await proxyBrowserAuthority(page, subject, baseURL));
-    await page.goto('/?v2=1&n=1&vid=left&m=1&f=0&lon=10&lat=40&alt=1000&h=0&p=-1&r=0&px=0&py=0&pz=0&m2d=0&bg=~10&l=');
+    await page.goto('/?v2=1&n=1&vid=0&m=1&f=0&lon=10&lat=40&alt=1000&h=0&p=-1&r=0&px=0&py=0&pz=0&m2d=0&bg=~10&l=');
     await waitForAppReady(page);
     await page.getByTestId('viewer-action-status').click();
     await expect(page.getByTestId('viewer-action-details')).toContainText('MCP controls ready');
@@ -44,13 +44,13 @@ test('native OAuth scopes discovery/control to the authenticated principal', asy
         const spoof = mcpClient(request, { Authorization: bearer(), 'test-subject': 'user-2' });
         expect((await spoof.sessions()).map(value => value.clientId)).toEqual([clientId]);
 
-        const read = await owner.call('viewer_get_controls', { clientId, targets: [{ control: 'view.camera', viewId: 'left' }] });
+        const read = await owner.call('viewer_get_controls', { clientId, targets: [{ control: 'view.camera', viewId: '0' }] });
         expect(read.isError).not.toBe(true);
         const value = {
             destination: { lon: 11, lat: 41, alt: 700 },
             orientation: { heading: 0, pitch: -1, roll: 0 }, position: [0, 0, 0]
         };
-        const write = { clientId, target: { control: 'view.camera', viewId: 'left' }, value };
+        const write = { clientId, target: { control: 'view.camera', viewId: '0' }, value };
         const applied = await owner.call('viewer_set_control', write);
         expect(applied.isError).not.toBe(true);
         expect(applied.structuredContent.status).toBe('applied');

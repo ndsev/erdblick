@@ -26,9 +26,14 @@ import {
 /** Completed incoming context; rows and associations were validated by the native feature model. */
 export interface IncomingInspectionResult {
     model: any[];
+
     /** Canonical target snapshot validated in the same bundle as the source relations. */
     target?: InspectionFeatureTile;
     complete: boolean;
+
+    /** Completeness applies only to the exact provider partitions reported in scope. */
+    status: "no-possible-family" | "complete" | "partial" | "unsupported-scope";
+    scope: string[];
     issues: string[];
     expiresAtMs?: number;
 }
@@ -54,6 +59,11 @@ export class InspectionFeatureTile {
     readonly ttlMs: number | null;
     readonly expiresAtMs: number | null;
 
+    /**
+     * Read metadata while retaining the serialized response. The parser must keep
+     * this tile's schemas and string dictionary installed for later peek() calls.
+     * A failed tile throws TileDeliveryError carrying its expiry, when available.
+     */
     constructor(
         private readonly parser: TileLayerParser,
         readonly blob: Uint8Array
@@ -105,6 +115,11 @@ export class InspectionFeatureTile {
         if (metadata.error) throw new TileDeliveryError(metadata.error, this.expiresAtMs);
     }
 
+    /**
+     * Open a temporary native wrapper for a synchronous callback, then delete it.
+     * Do not retain the wrapper or use it after an await. A missing parsed layer
+     * returns null; parser and callback exceptions propagate after cleanup.
+     */
     peek<T>(callback: (layer: TileFeatureLayer) => T): T | null {
         const layer = uint8ArrayToWasm(
             data => this.parser.readTileFeatureLayer(data),
@@ -126,7 +141,13 @@ export class InspectionFeatureTile {
             stripFeatureInspectionTarget(featureId))) ?? false;
     }
 
-    /** Load a request-local snapshot bundle without delaying or modifying ordinary inspection. */
+    /**
+     * Load a request-local incoming-relation snapshot bundle without delaying or
+     * modifying ordinary inspection. Transport success is required even when the
+     * manifest reports partial scope. More than 64 snapshots or 64 MiB of snapshot
+     * bytes rejects the whole request; cancellation destroys the client and
+     * prevents publication of a late response.
+     */
     async loadIncoming(featureId: string, signal: AbortSignal): Promise<IncomingInspectionResult> {
         signal.throwIfAborted();
         const canonicalId = stripFeatureInspectionTarget(featureId);
@@ -167,12 +188,15 @@ export class InspectionFeatureTile {
             signal.throwIfAborted();
             if (failure || !successful || manifests.length !== 1)
                 throw new Error(failure ?? "Incomplete incoming inspection response.");
+
+            // Validate identity and source ownership together before exposing any rows.
             const manifest = manifests[0];
             const view = new coreLib.IncomingInspection(JSON.stringify(manifest), this.mapTileKey, canonicalId);
             try {
                 for (const snapshot of snapshots) snapshot.peek(layer => view.addSnapshot(layer));
                 return {
                     model: view.inspectionModel(), target: snapshots.find(tile => tile.mapTileKey === this.mapTileKey), complete: manifest.complete,
+                    status: manifest.status, scope: manifest.scope,
                     issues: manifest.issues, expiresAtMs: manifest.expiresAtMs
                 };
             } finally {
@@ -184,6 +208,7 @@ export class InspectionFeatureTile {
         }
     }
 
+    /** Test the owning feature, stripping attribute/relation suffixes from its ID. */
     contains(featureId: string): boolean {
         return this.peek(layer => {
             const feature = layer.find(stripFeatureInspectionTarget(featureId));
@@ -196,7 +221,10 @@ export class InspectionFeatureTile {
     }
 }
 
-/** Memory-safe inspection handle for one feature in a restricted tile value. */
+/**
+ * Inspection handle for one feature in a restricted tile value. Stores serialized
+ * data and opens native feature wrappers only during peek().
+ */
 export class FeatureWrapper implements TileFeatureId {
     constructor(
         readonly featureId: string,
@@ -207,6 +235,10 @@ export class FeatureWrapper implements TileFeatureId {
         return this.featureTile.mapTileKey;
     }
 
+    /**
+     * Borrow a native feature only for this synchronous callback. Missing features
+     * return null; the feature and tile wrappers are deleted before this call returns.
+     */
     peek<T>(callback: (feature: any) => T): T | null {
         return this.featureTile.peek(layer => {
             const feature = layer.find(
@@ -238,6 +270,7 @@ export class FeatureWrapper implements TileFeatureId {
     }
 }
 
+/** Compare unique feature-key lists without regard to order; callers supply set-like lists. */
 export function featureSetsEqual(rhs: TileFeatureId[], lhs: TileFeatureId[]): boolean {
     return rhs.length === lhs.length && rhs.every(candidate =>
         lhs.some(item =>
@@ -247,6 +280,10 @@ export function featureSetsEqual(rhs: TileFeatureId[], lhs: TileFeatureId[]): bo
     );
 }
 
+/**
+ * Test whether every requested key is present. An empty request deliberately
+ * returns false so an empty selection is not treated as an active match.
+ */
 export function featureSetContains(
     container: TileFeatureId[],
     maybeSubset: TileFeatureId[]

@@ -57,7 +57,7 @@ import {
     removeGroupPrefix,
     StyleOptionNode
 } from "./map-tree.controller";
-import { CoverageRectItem, dataSourceCatalogStatus, MapInfoItem } from "./source-catalog.model";
+import { CoverageRectItem, dataSourceReadinessStatus, MapInfoItem } from "./source-catalog.model";
 
 /** One rendered select option in the per-view background-layer dropdown. */
 interface BackgroundLayerOption {
@@ -640,23 +640,27 @@ export class MapPanelComponent {
     );
     private readonly stylePresetProjectionChanges = new BehaviorSubject(0);
     readonly mapTreeView$: Observable<MapPanelTreeView> = combineLatest([
-        this.mapService.maps$,
+        // A catalog refresh replaces the tree after this panel may already be
+        // open. Observe the replacement's completed option updates, rather than
+        // racing its subscriptions to the style and preset catalogs.
+        this.mapService.maps$.pipe(switchMap(tree => tree.styleOptionsChanged.pipe(
+            startWith(undefined),
+            map(() => tree)
+        ))),
         this.appliedMapFilterTextChanges,
-        this.styleService.styleGroups,
         this.stateService.observe(() => ({
             numViews: this.viewSettings.numViews,
             ids: this.viewSettings.viewIds,
             layerPresets: this.layerState.layerPresetSelectionState.appState.value,
             mapPresets: this.layerState.mapPresetSelectionState.appState.value
         }), deepEquals),
-        this.mapPresetService.presets$,
         this.stylePresetProjectionChanges,
         this.mapService.layerStateChanged.pipe(
             filter(reason => reason === "visibility" || reason === "external-state"),
             startWith("visibility")
         )
     ]).pipe(
-        map(([mapTree, filterText, _styleGroups, { numViews }]) => ({
+        map(([mapTree, filterText, { numViews }]) => ({
             size: mapTree.size,
             nodesByView: Array.from(
                 { length: numViews },
@@ -712,7 +716,7 @@ export class MapPanelComponent {
         this.keyboardService.registerShortcut('m', this.toggleLayerDialog.bind(this), true);
 
         this.subscriptions.push(
-            // Rebuild metadata menus recursively and prune when needed.
+            // Replace metadata menus from the current catalog so removed maps disappear.
             this.mapService.maps$.subscribe(mapTree => {
                 this.metadataLayerOptions.clear();
                 for (const [_, mapItem] of mapTree.maps) {
@@ -830,7 +834,10 @@ export class MapPanelComponent {
         this.dialogStack.bringToFront(this.mapLayerDialog);
     }
 
-    /** Applies one presentation filter to the map trees rendered for every view. */
+    /**
+     * Applies one presentation filter to the map trees rendered for every view.
+     * Input is trimmed; nonempty filters are delayed, while clearing applies immediately.
+     */
     updateMapFilter(filterText: string) {
         this.mapFilterText = filterText;
         this.mapFilterTextChanges.next(filterText);
@@ -1015,7 +1022,10 @@ export class MapPanelComponent {
         this.setMapsPanelVisible(!this.layerDialogVisible);
     }
 
-    /** Moves the target view camera to the coverage bounds represented by one tree node. */
+    /**
+     * Moves the target view camera to the coverage bounds represented by one tree node.
+     * Fits nonempty coverage using individual tile boxes and each range's two endpoint boxes.
+     */
     focus(event: any, viewIndex: number, coverages: (number | CoverageRectItem)[]) {
         event.stopPropagation();
         let tileIds = coverages.map(coverage => {
@@ -1320,12 +1330,12 @@ export class MapPanelComponent {
 
     /** Returns the catalog startup status for a map tree entry. */
     dataSourceStatus(mapInfo: MapInfoItem) {
-        return dataSourceCatalogStatus(mapInfo);
+        return dataSourceReadinessStatus(mapInfo);
     }
 
     /** Maps datasource startup status to the small connectivity indicator class. */
     dataSourceStatusClass(mapInfo: MapInfoItem): string {
-        return dataSourceCatalogStatus(mapInfo);
+        return dataSourceReadinessStatus(mapInfo);
     }
 
     /** Returns a concise datasource status tooltip for ready, initializing, and failed entries. */
@@ -1401,7 +1411,7 @@ export class MapPanelComponent {
         this.stylePresetProjectionChanges.next(this.stylePresetProjectionChanges.getValue() + 1);
     }
 
-    /** Returns the distinct style sheets owned by the selected preset for editor shortcuts. */
+    /** Returns the selected preset's single stylesheet for editor shortcuts, or an empty list when no preset resolves. */
     selectedPresetStyleIds(node: LayerPresetNode, viewIndex: number): string[] {
         const preset = node.presets.find(candidate => candidate.key === node.selectedPresetKeys[viewIndex]);
         return preset ? [preset.styleId] : [];

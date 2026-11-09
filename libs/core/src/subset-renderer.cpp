@@ -66,6 +66,10 @@ double lineLength(std::vector<mapget::Point> const& points)
     return result;
 }
 
+/**
+ * Trim a metric planar polyline from its end, interpolating the remaining endpoint.
+ * If the requested distance consumes the line, retain only its first point.
+ */
 std::vector<mapget::Point> trimLineEnd(
     std::vector<mapget::Point> const& points,
     double trimMeters)
@@ -94,6 +98,10 @@ std::vector<mapget::Point> trimLineEnd(
     return {points.front()};
 }
 
+/**
+ * Trim a metric planar polyline from its start while preserving later vertices.
+ * If the requested distance consumes the line, retain only its last point.
+ */
 std::vector<mapget::Point> trimLineStart(
     std::vector<mapget::Point> const& points,
     double trimMeters)
@@ -125,6 +133,10 @@ std::vector<mapget::Point> trimLineStart(
     return {points.back()};
 }
 
+/**
+ * Find the first non-degenerate XY segment from the requested end and return
+ * its unit direction for constructing a smooth connection.
+ */
 std::optional<std::array<double, 2>> terminalDirection(
     std::vector<mapget::Point> const& points,
     bool atEnd)
@@ -155,6 +167,7 @@ std::optional<std::array<double, 2>> terminalDirection(
     return std::nullopt;
 }
 
+/** Evaluate a cubic Bezier connection in the current geometry coordinate space. */
 mapget::Point cubicPoint(
     mapget::Point const& p0,
     mapget::Point const& p1,
@@ -174,6 +187,11 @@ mapget::Point cubicPoint(
     };
 }
 
+/**
+ * Find the smallest pixel-to-world scale at which lateral offset changes would
+ * consume too much forward motion along a sampled transition. Zero means no
+ * finite contraction threshold was found.
+ */
 double transitionOffsetScaleThreshold(
     std::span<mapget::Point const> points,
     std::span<glm::fvec2 const> offsetVectorsPx)
@@ -210,6 +228,10 @@ bool hasLocalOffset(glm::dvec3 const& offset)
     return offset.x != 0.0 || offset.y != 0.0 || offset.z != 0.0;
 }
 
+/**
+ * Decode source rule indices from a planner channel ID suffix such as :2,5.
+ * Malformed or partially parsed indices reject the whole list.
+ */
 std::vector<uint32_t> channelRuleIndices(std::string_view channelId)
 {
     auto const separator = channelId.rfind(':');
@@ -318,6 +340,10 @@ double mercatorWorldX(double longitudeDeg)
         (2.0 * kPi);
 }
 
+/**
+ * Project latitude into Deck's 512-unit Mercator world, clamping near the poles
+ * to avoid the projection singularity.
+ */
 double mercatorWorldY(double latitudeDeg)
 {
     auto const latitudeRad = glm::clamp(
@@ -329,6 +355,10 @@ double mercatorWorldY(double latitudeDeg)
     return (kMercatorTileSize * (kPi + mercatorTerm)) / (2.0 * kPi);
 }
 
+/**
+ * Compute local Mercator scaling for offset geometry. False means the caller
+ * must use its fallback projection because the scale is not finite or usable.
+ */
 bool distanceScalesAt(
     double latitudeDeg,
     double& latitudeCosine,
@@ -761,6 +791,9 @@ void TileSubsetLayerRenderer::run()
             .latitude = coordinateOriginWgs_.y,
             .altitude = coordinateOriginWgs_.z,
         });
+
+    // Size picking storage before emission; all scope-specific rows share one
+    // contribution-local pick index space.
     size_t terminalEntryCount = 0;
     subset_->forEachChannel(
         [&](mapget::model_ptr<mapget::TileSubsetChannel> const& channel) {
@@ -855,6 +888,9 @@ void TileSubsetLayerRenderer::run()
                 return true;
             });
     gpuPacketBuilder_.endContribution();
+
+    // Geometry emission discovers pick identities and issues. Append those
+    // tables after the contribution's physical streams have been finalized.
     for (uint32_t index = 0U; index < pickRefs_.size(); ++index) {
         auto const& pick = pickRefs_[index];
         gpuPacketBuilder_.appendPick({
@@ -1124,7 +1160,7 @@ void TileSubsetLayerRenderer::renderFeature(
         ++index;
     }
     if (hasPointCloudRules_ && selectablePick)
-        bridgePickResults_[*selectablePick].featureId = featureId->toString();
+        bridgePickResults_[*selectablePick].setFeatureId(featureId);
 }
 
 void TileSubsetLayerRenderer::renderFeatureRule(
@@ -1174,7 +1210,7 @@ void TileSubsetLayerRenderer::renderFeatureRule(
         if (!featureId) {
             return;
         }
-        bridgePickResults_[pick].featureId = featureId->toString();
+        bridgePickResults_[pick].setFeatureId(featureId);
     }
 }
 
@@ -1314,7 +1350,7 @@ void TileSubsetLayerRenderer::renderAttribute(
         entryEvalState);
     auto const attributeName = entry->attributeName();
     auto const attributeLayer = entry->attributeLayer();
-    auto const featureIdString = featureId->toString();
+    auto const featureIdString = featureReferenceKey(featureId);
     FeatureStyleRule::MatchContext context{
         .featureType = featureId->typeId(),
         .attributeName = attributeName
@@ -1338,7 +1374,7 @@ void TileSubsetLayerRenderer::renderAttribute(
                 entryOrdinal,
                 0,
                 rule.selectable(),
-                [&] { return pickResult(entry, featureIdString); });
+                [&] { return pickResult(entry, featureId); });
             auto const slotKey =
                 std::to_string(channelOrdinal) + ":" +
                 featureIdString + ":" +
@@ -1561,7 +1597,7 @@ void TileSubsetLayerRenderer::renderRelation(
                 std::optional<std::string> endpointFeatureIdString;
                 auto getEndpointFeatureIdString = [&]() -> std::string const& {
                     if (!endpointFeatureIdString) {
-                        endpointFeatureIdString = endpointFeatureId->toString();
+                        endpointFeatureIdString = featureReferenceKey(endpointFeatureId);
                     }
                     return *endpointFeatureIdString;
                 };
@@ -2077,13 +2113,13 @@ bool TileSubsetLayerRenderer::renderTransitionLine(
     // end of the same road and receives the deliberately compact hairpin
     // construction below.
     auto const uTurn =
-        fromId->toString() == toId->toString() && *fromEnd == *toEnd;
+        featureReferenceKey(fromId) == featureReferenceKey(toId) && *fromEnd == *toEnd;
     constexpr double kTurnSideThreshold = 0.05;
 
     auto legKey = [&](mapget::model_ptr<mapget::FeatureId> const& id,
                       mapget::ValidityData::TransitionEnd end,
                       int canonicalSide) {
-        return stackPrefix + ":" + id->toString() + ":" +
+        return stackPrefix + ":" + featureReferenceKey(id) + ":" +
             (end == mapget::ValidityData::End ? "end" : "start") + ":" +
             (canonicalSide > 0 ? "right" : "left");
     };
@@ -2481,7 +2517,7 @@ bool TileSubsetLayerRenderer::renderTransitionLine(
         // group's bound without imposing its former, overly aggressive 0.9 m
         // trim-radius estimate.
         auto const scaleGroupKey =
-            stackPrefix + ":" + entry->featureId()->toString() + ":turn";
+            stackPrefix + ":" + featureReferenceKey(entry->featureId()) + ":turn";
         scaleGroup = &transitionOffsetScaleGroups_[scaleGroupKey];
         auto const pathScaleThreshold = uTurn
             ? 0.0
@@ -3065,17 +3101,38 @@ void TileSubsetLayerRenderer::recordPickNavigationAltitude(
 TileSubsetLayerRenderer::PickResult
 TileSubsetLayerRenderer::pickResult(
     mapget::model_ptr<mapget::AttributeValidityEntry> const& entry,
-    std::string const& featureId)
+    mapget::model_ptr<mapget::FeatureId> const& featureId)
 {
     PickResult result;
     if (!entry) {
         return result;
     }
-    result.featureId = featureId;
+    result.setFeatureId(featureId);
     result.attributeIndex = entry->attributeIndex();
     result.hasValidity = entry->hasValidity();
     result.validityIndex = entry->validityIndex();
     return result;
+}
+
+void TileSubsetLayerRenderer::PickResult::setFeatureId(
+    mapget::model_ptr<mapget::FeatureId> const& id)
+{
+    featureId.clear();
+    featureReference.reset();
+    if (!id)
+        return;
+    if (id->externalMapId())
+        featureReference = JsValue::fromFeatureId(*id);
+    else
+        featureId = id->toString();
+}
+
+std::string TileSubsetLayerRenderer::featureReferenceKey(
+    mapget::model_ptr<mapget::FeatureId> const& id)
+{
+    // A JSON rendering is sufficient for an internal equality/stack key. It
+    // must not escape as the canonical ID of an unresolved foreign feature.
+    return id->externalMapId() ? "foreign:" + id->toJson().dump() : "local:" + id->toString();
 }
 
 TileSubsetLayerRenderer::PickResult
@@ -3088,7 +3145,7 @@ TileSubsetLayerRenderer::pickResult(
         return result;
     }
     if (representativeFeatureId) {
-        result.featureId = representativeFeatureId->toString();
+        result.setFeatureId(representativeFeatureId);
     }
     auto members = entry->memberFeatureIds();
     // A singleton group is semantically identical to its representative.
@@ -3104,8 +3161,10 @@ TileSubsetLayerRenderer::pickResult(
             ? entry->model().resolve<mapget::FeatureId>(*node)
             : mapget::model_ptr<mapget::FeatureId>{};
         if (member) {
-            result.memberFeatureIds.push_back(
-                member->toString());
+            if (member->externalMapId())
+                result.memberFeatureReferences.push_back(JsValue::fromFeatureId(*member));
+            else
+                result.memberFeatureIds.push_back(member->toString());
         }
     }
     return result;
@@ -3126,10 +3185,13 @@ TileSubsetLayerRenderer::pickResult(
         ? targetFeatureId
         : sourceFeatureId;
     if (endpointFeatureId) {
-        result.featureId = endpointFeatureId->toString();
+        result.setFeatureId(endpointFeatureId);
     }
     if (sourceFeatureId) {
-        result.relationSourceFeatureId = sourceFeatureId->toString();
+        if (sourceFeatureId->externalMapId())
+            result.relationSourceReference = JsValue::fromFeatureId(*sourceFeatureId);
+        else
+            result.relationSourceFeatureId = sourceFeatureId->toString();
     }
     result.relationId = entry->relationId();
     if (!result.relationSourceFeatureId.empty()) {
@@ -3937,6 +3999,8 @@ JsValue TileSubsetLayerRenderer::pickResultsToJs(bool includeReferences) const
         if (!pick.featureId.empty()) {
             item.set("featureId", JsValue(pick.featureId));
         }
+        if (pick.featureReference)
+            item.set("featureReference", *pick.featureReference);
         if (pick.attributeIndex) {
             item.set(
                 "attributeIndex",
@@ -3958,6 +4022,8 @@ JsValue TileSubsetLayerRenderer::pickResultsToJs(bool includeReferences) const
                 "relationSourceFeatureId",
                 JsValue(pick.relationSourceFeatureId));
         }
+        if (pick.relationSourceReference)
+            item.set("relationSourceReference", *pick.relationSourceReference);
         if (pick.relationIndex) {
             item.set(
                 "relationIndex",
@@ -3969,6 +4035,12 @@ JsValue TileSubsetLayerRenderer::pickResultsToJs(bool includeReferences) const
                 members.push(JsValue(member));
             }
             item.set("memberFeatureIds", members);
+        }
+        if (!pick.memberFeatureReferences.empty()) {
+            auto members = JsValue::List();
+            for (auto const& member : pick.memberFeatureReferences)
+                members.push(member);
+            item.set("memberFeatureReferences", members);
         }
         results.push(item);
     }

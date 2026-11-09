@@ -27,7 +27,7 @@ test('MCP setup shows a registered tab and completed real tool calls', async ({ 
     page.on('requestfinished', resource => backgroundRequests.delete(resource));
     page.on('requestfailed', resource => backgroundRequests.delete(resource));
     // Bundled imagery keeps the documentation capture independent of external tile servers.
-    await page.goto('/?v2=1&n=1&vid=overview&m=1&f=0&sync=&lon=11&lat=48&alt=4000000&h=0&p=-1&r=0&px=0&py=0&pz=0&m2d=1&bg=world-overview~100&tb=0&l=');
+    await page.goto('/?v2=1&n=1&vid=0&m=1&f=0&sync=&lon=11&lat=48&alt=4000000&h=0&p=-1&r=0&px=0&py=0&pz=0&m2d=1&bg=world-overview~100&tb=0&l=');
     await waitForAppReady(page);
     await disableUiAnimations(page);
     await dismissSurveyIfPresent(page);
@@ -84,7 +84,7 @@ test('MCP setup shows a registered tab and completed real tool calls', async ({ 
         { locator: tabLabel, label: 'Name the target tab', placement: 'left' },
         {
             locator: details.getByRole('group', { name: 'Copy Add-MCP-Command' }),
-            label: 'Copy a CLI setup command',
+            label: 'Copy a client setup command',
             placement: 'left'
         },
         { locator: stop, label: 'Cancel pending work', placement: 'left' },

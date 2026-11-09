@@ -35,10 +35,16 @@ import {
     viewerClientIdSchema
 } from "../action/viewer-action-relay.contract";
 import { VIEWER_ACTION_INVOCATION_BYTES,VIEWER_ACTION_RESULT_BYTES } from "../action/action.model";
-import { coreLib,uint8ArrayToWasm } from "../integrations/wasm.adapter";
+import { coreLib,uint8ArrayToWasm,uint8ArrayToWasmOrThrow } from "../integrations/wasm.adapter";
 import { FrameBudgetLoop } from "../utils/frame-budget-loop.util";
 const TARGET_TILE_REQUEST_CHUNK_BYTES = 1024 * 1024;
 const MAX_TILE_REQUEST_MESSAGE_BYTES = 9 * 1024 * 1024;
+
+// Browser WebSocket.close() accepts only 1000 or application codes 3000–4999.
+// Wire-protocol codes such as 1002 and 1011 throw before closing the socket,
+// preventing the close callback from restarting a failed payload session.
+const INTERACTIVE_TRANSPORT_FAILURE_CLOSE_CODE = 4000;
+const INTERACTIVE_PROTOCOL_MISMATCH_CLOSE_CODE = 4002;
 
 interface TileRequestChunk {
     index: number;
@@ -56,6 +62,8 @@ interface QueuedTransportFrame {
     bytes: Uint8Array;
     type: number;
     version: {major: number; minor: number; patch: number};
+    /** The last frame releases its batch's backpressure after dispatch. */
+    onConsumed?: () => void;
 }
 
 interface DecodedTransportFrames {
@@ -129,7 +137,11 @@ export abstract class MapTileStreamClientBase {
         return this;
     }
 
-    /** Decode every complete frame and retain a trailing partial frame for streamed HTTP chunks. */
+    /**
+     * Decode every complete frame from streamed HTTP chunks, returning borrowed
+     * slices and the consumed-byte count. The caller owns the backing bytes and
+     * retains any trailing partial frame.
+     */
     protected decodeAvailableFrames(bytes: Uint8Array): DecodedTransportFrames {
         const frames: QueuedTransportFrame[] = [];
         let offset = 0;
@@ -159,7 +171,7 @@ export abstract class MapTileStreamClientBase {
             return true;
         }
         if (type === MAP_TILE_STREAM_TYPE_FIELDS) {
-            uint8ArrayToWasm((wasmBuffer: any) => {
+            uint8ArrayToWasmOrThrow((wasmBuffer: any) => {
                 this.parser.readFieldDictUpdate(wasmBuffer);
             }, bytes);
             this.onFields?.(bytes);
@@ -250,6 +262,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
     private readonly frameLoop = new FrameBudgetLoop<QueuedTransportFrame>(
         frame => {
             this.dispatchFrame(frame);
+            frame.onConsumed?.();
             return true;
         },
         4,
@@ -257,8 +270,9 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
     );
     private pullClientId: string | null = null;
     private sourcesRevision: number | null = null;
-    private pullControllers: AbortController[] = [];
-    private readonly pullParallelism: number = 2;
+    private pullController: AbortController | null = null;
+    /** Closing also releases batches waiting behind a paused frame queue. */
+    private readonly pendingBatchCompletions = new Set<() => void>();
     private readonly pullWaitMs: number = 25000;
     private readonly pullBatchMaxBytesCap: number = 64 * 1024 * 1024;
     private readonly pullBatchMinBytes: number = 64 * 1024;
@@ -390,7 +404,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
     close(code?: number, reason?: string) {
         this.connectionGeneration++;
         this.connecting = null;
-        this.stopPullLoops();
+        this.stopPullLoop();
         this.clearPendingFrames();
         this.pullClientId = null;
         this.lastTilesRequestBody = null;
@@ -419,7 +433,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         this.rejectCompletion(
             error instanceof Error ? error : new Error(message)
         );
-        this.close(1011, "interactive transport failure");
+        this.close(INTERACTIVE_TRANSPORT_FAILURE_CLOSE_CODE, "interactive transport failure");
     }
 
     /** Tears down websocket, pull loops, parser state, and any pending completion promise. */
@@ -444,7 +458,11 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
     clearPendingFrames() {
         this.frameQueueEpoch += 1;
         this.pendingFrameMessages = 0;
+        // A retired Blob read may still be awaiting I/O. It must not hold up
+        // frame decoding on the replacement connection; the epoch discards it.
+        this.frameMessageChain = Promise.resolve();
         this.frameLoop.clear();
+        for (const complete of this.pendingBatchCompletions) complete();
     }
 
     /** Invalidates in-flight payloads after datasource dictionaries have been replaced. */
@@ -989,7 +1007,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                     this.pullClientId = null;
                     this.onClientId?.(null);
                     this.clearPendingFrames();
-                    this.stopPullLoops();
+                    this.stopPullLoop();
                     this.onClose?.(event);
                     if (this.awaitingCompletion) {
                         this.rejectCompletion(event);
@@ -1075,9 +1093,18 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
      * Splits raw websocket/pull messages in arrival order, then queues every
      * contained VTLV frame as one independently budgeted work item.
      */
-    private enqueueFrame(data: ArrayBuffer | Blob) {
+    private enqueueFrame(data: ArrayBuffer | Blob): Promise<void> {
         const epoch = this.frameQueueEpoch;
         const receivedAt = performance.now();
+        let complete!: () => void;
+        const consumed = new Promise<void>(resolve => {
+            complete = () => {
+                this.pendingBatchCompletions.delete(complete);
+                resolve();
+            };
+            this.pendingBatchCompletions.add(complete);
+        });
+        let queued = false;
         this.pendingFrameMessages += 1;
         this.frameMessageChain = this.frameMessageChain
             .then(async () => {
@@ -1102,7 +1129,11 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                         tileFrames.push(frame);
                     }
                 }
-                if (epoch === this.frameQueueEpoch) this.frameLoop.enqueueMany(tileFrames);
+                if (epoch === this.frameQueueEpoch && tileFrames.length) {
+                    tileFrames[tileFrames.length - 1].onConsumed = complete;
+                    queued = true;
+                    this.frameLoop.enqueueMany(tileFrames);
+                }
             })
             .catch(err => {
                 if (epoch !== this.frameQueueEpoch) return;
@@ -1112,11 +1143,13 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                 );
             })
             .finally(() => {
+                if (!queued) complete();
                 if (epoch === this.frameQueueEpoch) {
                     this.pendingFrameMessages =
                         Math.max(0, this.pendingFrameMessages - 1);
                 }
             });
+        return consumed;
     }
 
     /** Test/auxiliary path which immediately dispatches one complete packed message. */
@@ -1203,7 +1236,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         this.rejectCompletion(new Error(
             `Unsupported mapget tile-stream protocol ${version.major}.${version.minor}.${version.patch}; `
             + `expected ${this.protocolVersion.major}.${this.protocolVersion.minor}.x.`));
-        this.close(1002, "unsupported mapget tile-stream protocol");
+        this.close(INTERACTIVE_PROTOCOL_MISMATCH_CLOSE_CODE, "unsupported mapget tile-stream protocol");
     }
 
     /** Dispatches one parsed transport frame to the parser, callbacks, or completion tracking. */
@@ -1249,7 +1282,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                         this.updateSourcesRevision(Number(payload.sourcesRevision), true, reconnected);
                     }
                     this.acceptClientId(payload);
-                    if (this.pullClientId && !this.pullControllers.length) this.startPullLoops();
+                    if (this.pullClientId && !this.pullController) this.startPullLoop();
                 }
                 return;
             }
@@ -1316,33 +1349,35 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         return requestId === this.latestRequestedRequestId;
     }
 
-    /** Restarts the background pull loops when the server advertises pull-based delivery. */
-    private startPullLoops() {
-        this.stopPullLoops();
+    /** Starts one ordered pull stream when the server advertises payload delivery. */
+    private startPullLoop() {
+        this.stopPullLoop();
         if (this.pullClientId === null) {
             return;
         }
-        for (let i = 0; i < this.pullParallelism; ++i) {
-            const controller = new AbortController();
-            this.pullControllers.push(controller);
-            this.runPullLoop(controller).catch(err => {
-                if (!controller.signal.aborted) {
-                    this.failInteractiveConnection("Tile pull loop failed.", err);
-                }
-            });
-        }
+        const controller = new AbortController();
+        this.pullController = controller;
+        this.runPullLoop(controller).catch(err => {
+            if (!controller.signal.aborted) {
+                this.failInteractiveConnection("Tile pull loop failed.", err);
+            }
+        });
     }
 
-    /** Aborts every active `/interactive/payload` pull loop. */
-    private stopPullLoops() {
-        for (const controller of this.pullControllers) {
-            controller.abort();
-        }
-        this.pullControllers = [];
+    /** Aborts the active `/interactive/payload` request, including its body read. */
+    private stopPullLoop() {
+        this.pullController?.abort();
+        this.pullController = null;
     }
 
-    /** Long-polls the active payload endpoint until the server reports the request is gone or the controller aborts. */
+    /**
+     * Fetch complete batches in server dequeue order. A dictionary batch must
+     * finish downloading before a dependent subset batch can be requested.
+     * Fetching overlaps processing, but only one extra batch may wait behind
+     * the frame queue; pausing rendering therefore cannot accumulate payloads.
+     */
     private async runPullLoop(controller: AbortController) {
+        let previousBatchConsumed = Promise.resolve();
         while (!controller.signal.aborted) {
             const clientId = this.pullClientId;
             if (clientId === null) {
@@ -1370,7 +1405,9 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                     this.recordPullTransportSample(response, body.byteLength);
                     const elapsedMs = Math.max(1, performance.now() - startedAt);
                     this.recordDownstreamSample(body.byteLength, elapsedMs);
-                    this.enqueueFrame(body);
+                    await previousBatchConsumed;
+                    if (controller.signal.aborted) return;
+                    previousBatchConsumed = this.enqueueFrame(body);
                     continue;
                 }
 
@@ -1385,10 +1422,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
                     return;
                 }
 
-                if (this.activateLegacyPullFallbackForStatus(
-                    response.status,
-                    pullUrl
-                )) {
+                if (this.activateLegacyPullFallbackForStatus(response.status)) {
                     continue;
                 }
                 this.failInteractiveConnection(
@@ -1439,8 +1473,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
 
     /** Switches payload pulls to `/tiles/next` when a stale proxy rejects `/interactive/payload`. */
     private activateLegacyPullFallbackForStatus(
-        status: number,
-        requestedUrl?: string
+        status: number
     ): boolean {
         if (![404, 405, 501].includes(status)) {
             return false;
@@ -1454,13 +1487,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
             return false;
         }
         if (this.usingLegacyPullFallback) {
-            // Parallel pulls may both have targeted the primary route before
-            // the first 404 enables fallback. Treat those already-issued
-            // primary responses as handled, but fail if the legacy route
-            // itself returns an unsupported-route status.
-            return requestedUrl !== undefined &&
-                new URL(requestedUrl, document.baseURI).pathname !==
-                    new URL(legacyPath, document.baseURI).pathname;
+            return false;
         }
         this.usingLegacyPullFallback = true;
         console.warn(`Fell back to legacy mapget tile payload endpoint ${this.debugPath(this.resolvePullPath())}.`);
@@ -1611,8 +1638,10 @@ export class MapTileStreamClientTiles extends MapTileStreamClientBase {
                 }),
                 signal: controller.signal
             });
+            controller.signal.throwIfAborted();
             if (!response.ok) {
                 const detail = (await response.text()).trim();
+                controller.signal.throwIfAborted();
                 throw new Error(
                     `Tile request failed with HTTP ${response.status}`
                     + (detail ? `: ${detail}` : ".")
@@ -1623,6 +1652,9 @@ export class MapTileStreamClientTiles extends MapTileStreamClientBase {
                 try {
                     while (true) {
                         const {done, value} = await reader.read();
+                        // Abort cannot retract an already-fulfilled read. A
+                        // catalog edit may have retired the parser meanwhile.
+                        controller.signal.throwIfAborted();
                         if (done) {
                             break;
                         }
@@ -1634,7 +1666,9 @@ export class MapTileStreamClientTiles extends MapTileStreamClientBase {
                     reader.releaseLock();
                 }
             } else {
-                this.acceptChunk(new Uint8Array(await response.arrayBuffer()));
+                const body = await response.arrayBuffer();
+                controller.signal.throwIfAborted();
+                this.acceptChunk(new Uint8Array(body));
             }
             if (this.inputLength !== 0) {
                 throw new Error("Tile HTTP response ended inside a VTLV frame.");
@@ -1672,6 +1706,9 @@ export class MapTileStreamClientTiles extends MapTileStreamClientBase {
             this.inputBuffer.subarray(0, this.inputLength)
         );
         for (const frame of decoded.frames) {
+            // A frame callback can synchronously close its inspection owner.
+            // Stop before the next frame touches that owner's released parser.
+            if (this.destroyed) throw new DOMException("Aborted", "AbortError");
             if (this.endOfStreamReceived) {
                 throw new Error("Tile HTTP response contains a frame after EndOfStream.");
             }
@@ -1684,6 +1721,7 @@ export class MapTileStreamClientTiles extends MapTileStreamClientBase {
             if (!this.dispatchDataFrame(frame.bytes, frame.type)) {
                 this.onFrame?.(frame.bytes, frame.type);
             }
+            if (this.destroyed) throw new DOMException("Aborted", "AbortError");
         }
         if (decoded.consumedBytes > 0) {
             this.inputBuffer.copyWithin(

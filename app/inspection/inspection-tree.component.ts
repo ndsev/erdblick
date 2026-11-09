@@ -265,6 +265,8 @@ export class FeatureFilterOptions {
                                            [style.text-overflow]="filterFields.indexOf(col.key) !== -1 ? 'ellipsis' : null"
                                            [innerHTML]="filterFields.indexOf(col.key) !== -1 ? (col.transform(col.key, rowData) | highlight: filterString) : col.transform(col.key, rowData)">
                                         </a>
+                                    } @else if (col.key === "value" && rowData["displayValue"]) {
+                                        <span class="inspection-cell-primary-value">{{ rowData["displayValue"] }}</span>
                                     } @else {
                                         <span class="inspection-cell-primary-value"
                                               (click)="onNodeClick($event, rowData, col.key)"
@@ -367,6 +369,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private activeSoftHoverGroupId?: string;
     private activeStrongHoverGroupId?: string;
     private activeFeatureIdNodeId?: string;
+    private foreignReferenceHover: AbortController | null = null;
+    private foreignReferenceSelection: AbortController | null = null;
     private activeValueBubbleTargetNodeId?: string;
     private activeMapHoverOwner?: string;
     private mapHoverEpoch = 0;
@@ -464,6 +468,11 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     @ViewChild('geoJsonMenu') geoJsonMenu!: Menu;
     geoJsonMenuItems: MenuItem[] = [];
 
+    /**
+     * Bind column visibility, tree replacement and shared filtering to this panel.
+     * Preserve panel-local expansion state across data refreshes, while explicit
+     * expand-by-default changes reset temporary full-expand/full-collapse snapshots.
+     */
     constructor(private cdr: ChangeDetectorRef,
         private clipboardService: ClipboardService,
         public mapService: InspectionSelectionService,
@@ -573,6 +582,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.savePanelExpansionState();
         this.unfreeze();
         this.destroyed = true;
+        this.foreignReferenceHover?.abort();
+        this.foreignReferenceSelection?.abort();
         this.resizeObserver?.disconnect();
         this.resizeObserver = undefined;
         window.removeEventListener("resize", this.onWindowResize);
@@ -1381,10 +1392,18 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Jumps or highlights the feature referenced by a FeatureId cell. */
     onValueClick(event: any, rowData: any) {
         event.stopPropagation();
-        this.jumpService.highlightByJumpTargetFilter(
-            rowData["mapId"],
-            rowData["value"])
-            .catch(error => this.messageService.showError(error instanceof Error ? error.message : String(error)));
+        this.foreignReferenceSelection?.abort();
+        const request = new AbortController();
+        this.foreignReferenceSelection = request;
+        const navigation = rowData["featureReference"]
+            ? this.jumpService.highlightFeatureReference(
+                rowData["featureReference"], coreLib.HighlightMode.SELECTION_HIGHLIGHT, request.signal)
+            : this.jumpService.highlightByJumpTargetFilter(rowData["mapId"], rowData["value"]);
+        navigation.catch(error => {
+            if (!request.signal.aborted) {
+                this.messageService.showError(error instanceof Error ? error.message : String(error));
+            }
+        });
     }
 
     /** Converts the rendered feature-id anchor back into the same value-click behavior. */
@@ -1473,6 +1492,18 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Highlights a referenced feature locally when present and permits the authored remote fallback otherwise. */
     private highlightVisibleFeatureReference(rowData: any): void {
+        if (rowData?.["featureReference"]) {
+            this.foreignReferenceHover?.abort();
+            const request = new AbortController();
+            this.foreignReferenceHover = request;
+            void this.jumpService.highlightFeatureReference(
+                rowData["featureReference"], coreLib.HighlightMode.HOVER_HIGHLIGHT, request.signal
+            ).catch(error => {
+                if (!request.signal.aborted)
+                    console.debug("Referenced feature hover is unavailable.", error);
+            });
+            return;
+        }
         const mapTileKey = rowData?.["mapTileKey"];
         const featureId = rowData?.["value"];
         const valid = typeof mapTileKey === "string" && typeof featureId === "string";
@@ -1500,6 +1531,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
 
     /** Claims map-hover ownership and invalidates every previously deferred leave. */
     private claimMapHover(owner: string): void {
+        this.foreignReferenceHover?.abort();
         this.mapHoverEpoch += 1;
         this.activeMapHoverOwner = owner;
     }
@@ -1530,10 +1562,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
                 !ownerMatches()) {
                 return;
             }
+            this.foreignReferenceHover?.abort();
             transition();
             this.cdr.markForCheck();
         });
     }
+
     /** Returns whether a row's value column stores a FeatureId rather than a plain scalar. */
     protected isFeatureIdValueRow(rowData: any): boolean {
         return rowData?.["type"] === this.InspectionValueType.FEATUREID.value;

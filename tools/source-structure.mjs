@@ -44,7 +44,7 @@ function roleOf(file) {
     return path.basename(file).split(".").at(-2);
 }
 
-/** Extract all statically named module references, including erased type queries. */
+/** Extract literal import/export, require and URL references, including erased type queries. */
 function moduleReferences(source) {
     const references = [];
     const visit = node => {

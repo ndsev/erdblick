@@ -1,3 +1,4 @@
+import type {SearchPreparation} from "./search-preparation.model";
 import type { BehaviorSubject } from "rxjs";
 import type { FeatureSearchResolvedDefinition } from "./feature-search-runtime-state.model";
 import type { FeatureSearchRenderStrategy } from "./search-definition.model";
@@ -40,26 +41,32 @@ export interface FeatureSearchCompletionOptions {
 }
 
 export interface FeatureSearchActionPayload {
-    selectedMapLayers: FeatureSearchMapLayerRef[];
+    selectedMapLayers?: FeatureSearchMapLayerRef[];
+    /** Completion provenance is a fallback, never an explicit source selection. */
+    suggestedMapLayers?: FeatureSearchMapLayerRef[];
     selectedViewIndices?: number[];
     selectedMapLayersManual?: boolean;
+    interpretationIds?: string[];
 }
 
-/** Extracts a compact feature-search payload from a schema completion candidate. */
+/** Keep completion origins as hints: an equal expression can work in other schemas too. */
 export function featureSearchActionPayloadFromCompletion(
     candidate: CompletionCandidate | null | undefined
 ): FeatureSearchActionPayload | undefined {
-    const selectedMapLayers = uniqueFeatureSearchMapLayers(candidate?.originLayers ?? []);
-    return selectedMapLayers.length ? { selectedMapLayers } : undefined;
+    const suggestedMapLayers = uniqueFeatureSearchMapLayers(candidate?.originLayers ?? []);
+    return suggestedMapLayers.length ? {suggestedMapLayers} : undefined;
 }
 
-/** Extracts selected map/layers from a persisted or transient feature-search action payload. */
-export function featureSearchSelectedMapLayersFromPayload(payload: unknown): FeatureSearchMapLayerRef[] | undefined {
+/** Decode explicit source selection or completion hints at the action/history boundary. */
+export function featureSearchMapLayersFromPayload(
+    payload: unknown,
+    field: "selectedMapLayers" | "suggestedMapLayers" = "selectedMapLayers"
+): FeatureSearchMapLayerRef[] | undefined {
     const record = payload && typeof payload === "object" && !Array.isArray(payload)
         ? payload as Record<string, unknown>
         : null;
-    const selectedMapLayers = Array.isArray(record?.["selectedMapLayers"])
-        ? record["selectedMapLayers"]
+    const selectedMapLayers = Array.isArray(record?.[field])
+        ? record[field]
         : [];
     const result = uniqueFeatureSearchMapLayers(selectedMapLayers.flatMap(item => {
         const raw = item && typeof item === "object" && !Array.isArray(item)
@@ -118,7 +125,7 @@ export interface FeatureSearchExportDialogOptions {
 
 export type FeatureSearchRunOptions = Partial<Pick<
     FeatureSearchStateEntry,
-    "scope" | "selectedMapLayers" | "selectedViewIndices" | "selectedMapLayersManual" | "selectedFeatureTypes" | "autoUpdate" | "selectedTileLevels"
+    "interpretationIds" | "scope" | "selectedMapLayers" | "selectedViewIndices" | "selectedMapLayersManual" | "selectedFeatureTypes" | "autoUpdate" | "selectedTileLevels"
 >>;
 
 /** Returns unique feature-search map/layer refs in first-seen order. */
@@ -151,6 +158,7 @@ export interface FeatureSearchSession {
     pointColor: string;
     timeElapsed: string;
     schemaAnalysis: FeatureSearchSessionSchemaAnalysis;
+    preparation?: SearchPreparation;
     lastResolvedDefinition?: FeatureSearchResolvedDefinition;
     lastResolvedDefinitionSignature?: string;
 }
@@ -179,4 +187,3 @@ export function featureSearchMapLayersManualFromPayload(payload: unknown): boole
         ? record["selectedMapLayersManual"]
         : undefined;
 }
-

@@ -16,6 +16,7 @@ import {
 } from "../../../app/mapview/mapview.service";
 import { ViewVisualizationState } from "../../../app/mapview/view.visualization";
 import type { RenderViewCameraState } from "../../../app/mapview/render-view.model";
+import {coreLib} from "../../../app/integrations/wasm.adapter";
 
 /** Builds a complete camera value with explicit target-relative position. */
 function camera(
@@ -48,6 +49,27 @@ function createService(cameras: CameraViewState[], viewSync: string[]) {
 }
 
 describe("MapViewService live camera synchronization", () => {
+    it("keeps search geometry and density detail through a horizon-crossing tilt", () => {
+        const {service} = createService([camera(11.62, 48.21, 1960, 3.38, [0, 0, 0])], []);
+        const state = new ViewVisualizationState();
+        service["visualizationById"].set("0", state);
+        state.canonicalVisibleTileCountPerLevel.set(13, 24);
+        const tile = Number(coreLib.getTileIdFromPosition(11.63, 48.22, 13));
+        for (const span of [0.04, 0.2, 0.9]) {
+            state.viewport = {south: 48.21 - span, west: 11.62 - span, width: span, height: span,
+                camPosLon: 11.62, camPosLat: 48.21, orientation: 0};
+            expect(service.prefersHighFidelityForSearchResultTile(0, tile, 512)).toBe(true);
+            expect(service.searchResultDensityTargetLevel(0, 13, 512)).toBe(13);
+        }
+        // Zooming out still changes detail; changing pitch or the decorative
+        // tile-grid mode does not turn a nearby result into a distant bucket.
+        state.canonicalVisibleTileCountPerLevel.set(13, 2048);
+        state.canonicalVisibleTileCountPerLevel.set(12, 512);
+        expect(service.prefersHighFidelityForSearchResultTile(0, tile, 512)).toBe(false);
+        expect(service.searchResultDensityTargetLevel(0, 13, 512, false)).toBe(12);
+        expect(service.searchResultDensityTargetLevel(0, 13, 512)).toBe(13);
+    });
+
     it("waits for the current camera footprint before reporting search coverage ready", async () => {
         const { service } = createService([camera(11, 48, 1000, 0, [0, 0, 0])], []);
         const state = new ViewVisualizationState();

@@ -166,6 +166,10 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
     private readonly comparisonExpiryOwners =
         new Map<string, ComparisonExpiryOwner>();
 
+    /**
+     * Build columns for the selected comparison and keep labels/colors aligned
+     * with the live inspection selection without replacing its persisted panels.
+     */
     constructor(private tileStream: MapTileStreamService,
         private inspectionSelection: InspectionSelectionService,
         private stateService: AppStateService,
@@ -385,6 +389,10 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         });
     }
 
+    /**
+     * Register one expiry owner per comparison-column/tile pair. Use the earliest
+     * finite deadline among its features, and cancel owners no longer in that column.
+     */
     private reconcileComparisonExpiries(
         column: ComparisonColumn,
         revision: number
@@ -404,6 +412,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
                 this.comparisonExpiryOwners.delete(key);
             }
         }
+
         for (const [mapTileKey, features] of grouped) {
             const key = prefix + mapTileKey;
             let owner = this.comparisonExpiryOwners.get(key);
@@ -439,6 +448,11 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         }
     }
 
+    /**
+     * Renew only the tile belonging to a current comparison and expiry epoch.
+     * Keep existing features visible on failure; a failed tile's expiry can schedule
+     * another renewal. A replaced comparison cannot receive this asynchronous result.
+     */
     private async renewComparisonOwner(
         owner: ComparisonExpiryOwner,
         tokens: ReadonlyArray<{
@@ -475,6 +489,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         if (index < 0) {
             return;
         }
+
         const replacementById = new Map(replacements.map(feature => [
             feature.featureId,
             feature
@@ -498,6 +513,7 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         this.cdr.markForCheck();
     }
 
+    /** Release retained expiry owners when the comparison closes or is replaced. */
     private clearComparisonExpiries(): void {
         for (const owner of this.comparisonExpiryOwners.values()) {
             this.tileStream.cancelRetainedTileExpiries?.(owner);
@@ -540,6 +556,10 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         return await this.tileStream.loadFeatures(entry.featureIds, this.featureLoadController.signal);
     }
 
+    /**
+     * Bind actions to this column's current feature panel; GeoJSON actions remain
+     * disabled until the panel exists, while focusing needs only its first feature.
+     */
     private buildColumnMenuItems(column: ComparisonColumn): MenuItem[] {
         const focusFeature = column.panel.features[0];
         const featurePanel = this.featurePanelForColumn(column.localId);
@@ -603,6 +623,10 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         return true;
     }
 
+    /**
+     * Update comparison colors from their source selections, preserving column
+     * objects whose color did not change so their feature views remain stable.
+     */
     private refreshColumnSelectionColors(): void {
         if (!this.columns.length) {
             return;
@@ -624,6 +648,10 @@ export class InspectionComparisonDialogComponent implements OnDestroy {
         }
     }
 
+    /**
+     * Build a locked, floating panel model local to the comparison; it does not
+     * create another persistent inspection selection.
+     */
     private buildPanel(features: FeatureWrapper[], localId: number): InspectionPanelModel<FeatureWrapper> {
         return {
             id: localId,

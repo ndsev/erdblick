@@ -54,7 +54,7 @@ async function browserActions(page: Page, mismatch = false) {
             }
         });
     });
-    await page.goto('/?v2=1&n=2&vid=left,right&m=1&f=0&sync=&lon=10,20&lat=40,50&alt=500,1000&h=0,0&p=-1,-1&r=0,0&px=0,0&py=0,0&pz=0,0&m2d=0,0&bg=~10,~10&l=');
+    await page.goto('/?v2=1&n=2&vid=0,1&m=1&f=0&sync=&lon=10,20&lat=40,50&alt=500,1000&h=0,0&p=-1,-1&r=0,0&px=0,0&py=0,0&pz=0,0&m2d=0,0&bg=~10,~10&l=');
     await waitForAppReady(page);
     await expect.poll(() => page.evaluate(() => !!window.ebDebug)).toBe(true);
     protocol = await page.evaluate(() => {
@@ -82,7 +82,7 @@ test('browser action adapter reads live views, moves only its target and updates
     const secondPage = await context.newPage();
     const second = await browserActions(secondPage);
     try {
-        const targets = [{ control: 'view.camera', viewId: 'left' }, { control: 'view.camera', viewId: 'right' }];
+        const targets = [{ control: 'view.camera', viewId: '0' }, { control: 'view.camera', viewId: '1' }];
         /** Checks the result boundary as well as successful transport. */
         async function read(adapter: typeof first) {
             const reply = await adapter.invoke('viewer_get_controls', { targets });
@@ -103,6 +103,7 @@ test('browser action adapter reads live views, moves only its target and updates
         await expect(details.getByTestId('viewer-action-copy-codex')).toHaveText('Codex');
         await expect(details.getByTestId('viewer-action-copy-claude')).toHaveText('Claude');
         await expect(details.getByTestId('viewer-action-copy-copilot')).toHaveText('Copilot');
+        await expect(details.getByTestId('viewer-action-copy-cursor')).toHaveText('Cursor');
         await expect(details.getByRole('button', { name: 'Copy MCP URL', exact: true })).toHaveCount(0);
 
         const value = { destination: { lon: 11.5374, lat: 48.1584, alt: 700 }, orientation: { heading: 0, pitch: -1, roll: 0 }, position: [0, 0, 0] };
@@ -203,7 +204,7 @@ for (const darkMode of ['off', 'on'] as const) {
                 expect(overlayBox!.x).toBeGreaterThanOrEqual(0);
                 expect(overlayBox!.x + overlayBox!.width).toBeLessThanOrEqual(width);
                 const buttons = details.getByTestId(/^viewer-action-copy-/).getByRole('button');
-                await expect(buttons).toHaveCount(3);
+                await expect(buttons).toHaveCount(4);
                 await expect(buttons.last()).toBeVisible();
                 const bounds = await buttons.evaluateAll(elements => elements.map(element => {
                     const { top, bottom, left, right } = element.getBoundingClientRect();
@@ -218,11 +219,15 @@ for (const darkMode of ['off', 'on'] as const) {
                 }
                 const label = details.getByText('Copy Add-MCP-Command:', { exact: true });
                 await expect(label).toBeVisible();
-                if (width >= 480) {
-                    const labelBox = await label.boundingBox();
+                const labelBox = await label.boundingBox();
+                // Four client buttons stay together; narrower popovers move the label
+                // above that row instead of squeezing or clipping the copy controls.
+                if (width >= 560) {
                     expect(labelBox!.x + labelBox!.width).toBeLessThan(bounds[0].left);
                     expect(labelBox!.y).toBeGreaterThanOrEqual(bounds[0].top);
                     expect(labelBox!.y + labelBox!.height).toBeLessThanOrEqual(bounds[0].bottom);
+                } else {
+                    expect(labelBox!.y + labelBox!.height).toBeLessThanOrEqual(bounds[0].top);
                 }
                 await page.mouse.move(0, 0);
                 const screenshot = testInfo.outputPath(`mcp-controls-${darkMode}-${width}.png`);
@@ -255,21 +260,21 @@ test('browser actions share settings, view lifecycle, style editing and diagnost
     }
     const initial = viewerActions.viewer_get_controls.outputSchema.parse(await call('viewer_get_controls', {}));
     for (const [target, value] of [
-        [{ control: 'view.background', viewId: 'right' }, { layerId: null, opacity: 50 }],
-        [{ control: 'view.grid', viewId: 'right' }, { visible: true, mode: 'xyz', level: 10, autoLevel: false, color: 'aabbcc', opacity: 20 }],
+        [{ control: 'view.background', viewId: '1' }, { layerId: null, opacity: 50 }],
+        [{ control: 'view.grid', viewId: '1' }, { visible: true, mode: 'xyz', level: 10, autoLevel: false, color: 'aabbcc', opacity: 20 }],
         [{ control: 'app.preferences.hover' }, { enabled: false, fields: [{ expression: 'id', customExpression: false, displayKey: 'Identity' }] }],
         [{ control: 'app.preferences.navigation' }, { zoomStep: 0.2, featureZoomClearance: 12 }],
         [{ control: 'app.marker' }, { enabled: true, position: { lon: 11, lat: 48, alt: 0 } }],
-        [{ control: 'view.projection', viewId: 'right' }, '2d']
+        [{ control: 'view.projection', viewId: '1' }, '2d']
     ] as const) {
         const reply = await call('viewer_set_control', { target, value });
         expect(reply).toMatchObject({ status: 'applied', value });
     }
-    await call('viewer_manage_view', { operation: 'remove', viewId: 'right' });
+    await call('viewer_manage_view', { operation: 'remove', viewId: '1' });
     await expect(page.locator('#mapViewContainer-1')).toHaveCount(0);
     const single = viewerActions.viewer_get_controls.outputSchema.parse(await call('viewer_get_controls', {}));
-    expect(single.values.find(entry => entry.target.control === 'app.views')).toMatchObject({ value: { views: [{ viewId: 'left' }] } });
-    await call('viewer_manage_view', { operation: 'create', viewId: 'left' });
+    expect(single.values.find(entry => entry.target.control === 'app.views')).toMatchObject({ value: { views: [{ viewId: '0' }] } });
+    await call('viewer_manage_view', { operation: 'create', viewId: '0' });
     await expect(page.locator('#mapViewContainer-1 canvas').first()).toBeVisible();
 
     const source = 'version: 2\nname: MCP smoke\nrules:\n  - geometry: [line]\n    color: "#123456"\n';
@@ -285,7 +290,7 @@ test('browser actions share settings, view lifecycle, style editing and diagnost
     expect(catalog.items).toMatchObject([{ id: styleId, visible: true }]);
     await call('viewer_edit_style', { operation: 'delete', styleId });
     expect(await call('viewer_list_styles', { styleId })).toMatchObject({ complete: true, items: [] });
-    const diagnostics = viewerActions.viewer_get_diagnostics.outputSchema.parse(await call('viewer_get_diagnostics', { viewId: 'left', sections: ['workers', 'gpu'] }));
+    const diagnostics = viewerActions.viewer_get_diagnostics.outputSchema.parse(await call('viewer_get_diagnostics', { viewId: '0', sections: ['workers', 'gpu'] }));
     expect(diagnostics.metrics.some(item => item.section === 'workers')).toBe(true);
     expect(diagnostics.unavailable.length).toBeGreaterThan(0);
     expect(adapter.connections).toHaveLength(1);

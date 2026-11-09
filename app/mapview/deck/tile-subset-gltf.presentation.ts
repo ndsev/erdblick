@@ -37,7 +37,7 @@ import type {TileSubsetRenderBridge} from
 const UNSELECTABLE = 0xffffffff;
 const MAX_TILE_SUBSET_RENDER_VERTICES = 20_000_000;
 
-/** A parsed attachment retained while it is still awaiting atomic installation. */
+/** A parsed attachment retained until installation or discard; its recipient owns both references. */
 export interface PreparedTileSubsetGltf {
     asset: DeckTileGltfAsset;
     assetRef: DeckTileGltfAssetRef;
@@ -95,7 +95,12 @@ export class TileSubsetGltfPresentation {
             deckTileGltfAssetStore
     ) {}
 
-    /** Fetches and parses the separately transferred GLB without publishing it. */
+    /**
+     * Fetches and parses the separately transferred GLB without publishing it.
+     * Returns null for absent inputs, failed assets or a lifecycle invalidated by
+     * clear(). Other render-revision checks belong to the caller, which must
+     * install or discard each successful result once.
+     */
     async prepare(
         result: TileSubsetRenderBridge,
         device: Device | null,
@@ -154,7 +159,10 @@ export class TileSubsetGltfPresentation {
         prepared.attachmentRef.release();
     }
 
-    /** Atomically replaces the base node and pick-proxy contributions. */
+    /** Install base nodes and pick proxies, then adopt prepared and release the prior
+     * asset. Registry updates occur in sequence; an exception does not roll back
+     * earlier contributions. A null prepared value removes the base node source.
+     */
     install(
         registry: DeckLayerRegistry,
         result: TileSubsetRenderBridge,
@@ -351,7 +359,12 @@ export class TileSubsetGltfPresentation {
         }
     }
 
-    /** Removes all GLTF presentation state while retaining this owner for reuse. */
+    /**
+     * Removes GLTF presentation state while retaining this owner for reuse.
+     * Invalidates pending prepares and releases active/attachment references;
+     * pending parsed-asset references release when their promises settle. Pass the
+     * registry to remove published layers; null is for one already being discarded.
+     */
     clear(registry: DeckLayerRegistry | null): void {
         this.lifecycleVersion += 1;
         for (const ref of this.pendingAttachmentRefs) {
@@ -370,7 +383,7 @@ export class TileSubsetGltfPresentation {
         this.releaseActive();
     }
 
-    /** Permanently retire this owner and every attachment/shared contribution. */
+    /** Clear this owner during visualization teardown; no separate destroyed guard is set. */
     destroy(registry: DeckLayerRegistry | null): void {
         this.clear(registry);
     }
@@ -462,7 +475,12 @@ export class TileSubsetGltfPresentation {
         );
     }
 
-    /** Validate and materialize the bounded temporary GLTF triangle-pick bridge. */
+    /**
+     * Validate and materialize the temporary GLTF triangle-pick bridge.
+     * Copies usable worker proxy ranges after checking outer array sizes and the
+     * 20-million referenced-vertex limit. Ordered, nonoverlapping ranges are a
+     * worker contract; that limit is not a total-byte budget for arbitrary input.
+     */
     private pickProxyData(
         result: TileSubsetRenderBridge
     ): DeckGltfPickProxyDatum[] {

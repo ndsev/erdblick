@@ -192,6 +192,7 @@ export function createDeckMapViewport(
  * TileLayer still selects its quadtree depth from `zoom`, even when a large center altitude makes
  * the visible ground footprint many levels coarser. Intersecting the camera's center ray with the
  * ground and adapting zoom produces the same projection while returning `position` to zero.
+ * Returns the input unchanged for orthographic views or an unusable ground intersection.
  */
 export function viewStateWithGroundCenter<StateT extends DeckMapCameraState>(
     state: StateT,
@@ -252,6 +253,8 @@ export function navigationAnchorInViewportWorld(
  *
  * This is kept downstream for Erdblick's ground-centred UI commands and orthographic map mode.
  * Perspective feature orbit/zoom uses `WebMercatorViewport#getTargetViewState` below.
+ * Tries up to three corrections and returns the last finite result, without requiring convergence.
+ * A non-finite corrected center returns the original requested state.
  */
 export function viewStateKeepingAnchor<StateT extends DeckMapCameraState>(
     nextState: StateT,

@@ -1,4 +1,4 @@
-import { Component, Input, OnChanges, OnDestroy } from "@angular/core";
+import { ChangeDetectorRef, Component, Input, OnChanges, OnDestroy } from "@angular/core";
 import { TreeNode } from "primeng/api";
 import { Subscription } from "rxjs";
 import { GroupTreeNode, LayerTreeNode, MapTreeNode, removeGroupPrefix } from "../mapdata/map-tree.controller";
@@ -159,9 +159,16 @@ export class SearchScopeComponent implements OnChanges, OnDestroy {
 
     /** Catalog and view changes update this selector without involving the dialog shell. */
     constructor(public searchService: SearchService, public mapService: MapDataService,
-        public readonly viewSettings: MapViewState) {
-        this.subscriptions.add(this.mapService.maps$.subscribe(() => this.refresh()));
-        this.subscriptions.add(this.viewSettings.numViewsState.subscribe(() => this.refresh()));
+        public readonly viewSettings: MapViewState,
+        private readonly changeDetector: ChangeDetectorRef) {
+        const refreshSelectors = () => {
+            this.refresh();
+            // The shell is OnPush: idle or disabled searches have no progress
+            // updates to reveal new catalog entries or a second view selector.
+            this.changeDetector.markForCheck();
+        };
+        this.subscriptions.add(this.mapService.maps$.subscribe(refreshSelectors));
+        this.subscriptions.add(this.viewSettings.numViewsState.subscribe(refreshSelectors));
     }
 
     /** Synchronizes read-only current values, retaining local tree expansion. */
@@ -228,8 +235,6 @@ export class SearchScopeComponent implements OnChanges, OnDestroy {
     private selectedSearchMapLayersCacheSignature = "";
 
     private selectedSearchMapLayersCache: FeatureSearchMapLayerRef[] = [];
-
-    private initializedMapLayerSelectionSessionId = "";
 
     private featureSearchFeatureTypeOptionsSignature = "";
 
@@ -314,8 +319,7 @@ export class SearchScopeComponent implements OnChanges, OnDestroy {
         const layerKeys: string[] = [];
         for (const [mapId, mapInfo] of this.mapService.maps.maps) {
             for (const layer of mapInfo.allFeatureLayers()) {
-                const featureTypeSignature = (layer.info.featureTypes ?? [])
-                    .map(featureType => featureType.name)
+                const featureTypeSignature = this.mapService.featureTypesForLayer(mapId, layer.id)
                     .sort()
                     .join(",");
                 layerKeys.push(`${mapId}:${layer.id}:${featureTypeSignature}`);
@@ -620,19 +624,13 @@ export class SearchScopeComponent implements OnChanges, OnDestroy {
         return JSON.stringify(Array.from(selectedKeys).sort());
     }
 
+    /** Reflect confirmed scope edits, including MCP edits, without losing tree expansion. */
     private syncMapLayerTreeSelection(session: FeatureSearchSession): void {
         this.refreshMapLayerTreeOptions();
-        if (this.initializedMapLayerSelectionSessionId !== session.id) {
-            this.initializedMapLayerSelectionSessionId = session.id;
-            const selectedKeys = new Set(session.definition.selectedMapLayers
-                .map(ref => this.searchLayerKey(ref.mapId, ref.layerId)));
-            this.selectedMapLayersSignature = this.mapLayerKeySignature(selectedKeys);
-            this.setSelectedMapLayerTreeLeafKeys(selectedKeys);
-            return;
-        }
-        const selectedKeys = this.selectedMapLayerKeysFromTreeNodes(this.selectedMapLayerTreeNodes);
+        const selectedKeys = new Set(session.definition.selectedMapLayers
+            .map(ref => this.searchLayerKey(ref.mapId, ref.layerId)));
         this.selectedMapLayersSignature = this.mapLayerKeySignature(selectedKeys);
-        this.setSelectedMapLayerTreeLeafKeys(selectedKeys);
+        this.setSelectedMapLayerTreeLeafKeys(selectedKeys, new Set(this.mapLayerTreeExpandedKeys));
     }
 
     protected onSearchMapLayerTreeNodeToggle(
@@ -723,10 +721,8 @@ export class SearchScopeComponent implements OnChanges, OnDestroy {
             })
             : Array.from(this.mapService.maps.allFeatureLayers());
         for (const layer of layers) {
-            for (const featureType of layer.info.featureTypes ?? []) {
-                if (featureType.name) {
-                    featureTypes.add(featureType.name);
-                }
+            for (const type of this.mapService.featureTypesForLayer(layer.mapId, layer.id)) {
+                featureTypes.add(type);
             }
         }
         return Array.from(featureTypes).sort((lhs, rhs) => lhs.localeCompare(rhs));
@@ -747,8 +743,9 @@ export class SearchScopeComponent implements OnChanges, OnDestroy {
         const availableTypes = new Set(this.featureSearchFeatureTypeOptions.map(option => option.value));
         const persistedTypes = normalizeFeatureSearchFeatureTypes(session.definition.selectedFeatureTypes);
         const persistedSignature = JSON.stringify(persistedTypes);
-        const nextTypes = persistedTypes
-            .filter(type => availableTypes.has(type));
+        const nextTypes = this.mapService.canPruneStateForCurrentCatalog()
+            ? persistedTypes.filter(type => availableTypes.has(type))
+            : persistedTypes;
         const signature = JSON.stringify(nextTypes);
         if (signature === this.selectedFeatureTypesSignature) {
             if (persistedSignature !== signature) {

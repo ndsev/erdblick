@@ -27,6 +27,10 @@ export class InspectionDialogsComponent implements OnDestroy {
 
     private readonly subscriptions = new Subscription();
 
+    /**
+     * Project floating panels and comparison state into this dialog host, explicitly
+     * notifying Angular when their observable sources publish.
+     */
     constructor(private mapService: InspectionSelectionService,
         private stateService: AppStateService,
         private readonly cdr: ChangeDetectorRef,

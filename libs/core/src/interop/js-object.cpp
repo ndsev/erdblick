@@ -1,5 +1,8 @@
 #include "interop/js-object.h"
+#include <stdexcept>
 #include "fmt/core.h"
+#include "mapget/model/featureid.h"
+#include "simfil/model/schema-pool.h"
 
 #if !defined(EMSCRIPTEN)
     #include <stdexcept>
@@ -9,6 +12,165 @@
 
 namespace erdblick
 {
+
+JsValue JsValue::fromFeatureId(mapget::FeatureId const& reference)
+{
+#ifdef EMSCRIPTEN
+    // Native field names are data. A null-prototype dictionary also preserves
+    // names such as '__proto__' when the parts cross into JavaScript.
+    auto parts = JsValue(emscripten::val::global("Object").call<emscripten::val>(
+        "create", emscripten::val::null()));
+#else
+    auto parts = Dict();
+#endif
+    for (auto const& [name, part] : reference.keyValuePairs()) {
+        auto value = std::visit([](auto const& raw) -> JsValue {
+            using T = std::decay_t<decltype(raw)>;
+            if constexpr (std::is_same_v<T, int64_t>) {
+#ifdef EMSCRIPTEN
+                if (raw < -9007199254740991LL || raw > 9007199254740991LL)
+                    return JsValue(emscripten::val::global("BigInt")(std::to_string(raw)));
+                return JsValue(static_cast<double>(raw));
+#else
+                return JsValue(raw);
+#endif
+            }
+            else
+                return JsValue(std::string(raw));
+        }, part);
+        parts.set(std::string(name), value);
+    }
+    return Dict({{"mapId", JsValue(reference.mapId())},
+                 {"typeId", JsValue(std::string(reference.typeId()))},
+                 {"id", parts}});
+}
+
+JsValue JsValue::fromBitmask(simfil::Bitmask const& mask)
+{
+    if (!mask.type)
+        throw std::invalid_argument("Cannot expose a bitmask without its exact type");
+    return Dict(
+        {{"_bitmask", JsValue(true)},
+         {"bits", JsValue(fmt::format("0x{:016x}", mask.bits))},
+         {"schema", JsValue(std::string(mask.type.pool()->identity()))},
+         {"typeId", JsValue(mask.type.id())}});
+}
+
+JsValue JsValue::fromSchema(simfil::SchemaType const& type)
+{
+    if (!type)
+        return Undefined();
+    auto result = Dict(
+        {{"schemaId", JsValue(std::string(type.pool()->identity()))},
+         {"typeId", JsValue(type.id())},
+         {"typeName", JsValue(std::string(type.typeName()))}});
+    // Numeric bounds and named literals may exceed JS's exact integer range.
+    // Their type remains explicit; decimal strings preserve those raw encodings.
+    auto scalar = [](auto const& value)
+    {
+        return std::visit(
+            [](auto const& raw) -> JsValue
+            {
+                using T = std::decay_t<decltype(raw)>;
+                if constexpr (std::is_same_v<T, std::string_view>)
+                    return JsValue(std::string(raw));
+                else if constexpr (std::is_same_v<T, uint64_t>) {
+                    return raw > 9007199254740991ULL ?
+                        JsValue(std::to_string(raw)) :
+                        JsValue(double(raw));
+                }
+                else if constexpr (std::is_same_v<T, int64_t>) {
+                    return raw < -9007199254740991LL || raw > 9007199254740991LL ?
+                        JsValue(std::to_string(raw)) :
+                        JsValue(double(raw));
+                }
+                else
+                    return JsValue(raw);
+            },
+            value);
+    };
+    if (auto numeric = type.numericDomain()) {
+        auto ranges = List();
+        for (auto const& range : numeric->ordinaryRanges)
+            ranges.push(Dict({{"min", scalar(range.min)}, {"max", scalar(range.max)}}));
+        auto metadata = Dict(
+            {{"encoding", JsValue(std::string(numeric->encoding))},
+             {"unit", JsValue(std::string(numeric->unit))},
+             {"ordinaryRanges", ranges},
+             {"scale", JsValue(numeric->scale)},
+             {"offset", JsValue(numeric->offset)},
+             {"complete", JsValue(numeric->complete)}});
+        if (numeric->minimum)
+            metadata.set("minimum", scalar(*numeric->minimum));
+        if (numeric->maximum)
+            metadata.set("maximum", scalar(*numeric->maximum));
+        result.set("numeric", metadata);
+    }
+    auto names = List();
+    type.forEachNamedValue(
+        [&](simfil::SchemaType::NamedValue const& named)
+        {
+            using Named = simfil::SchemaType::NamedValue;
+            auto valueType = std::visit(
+                [](auto const& value) -> std::string
+                {
+                    using T = std::decay_t<decltype(value)>;
+                    if constexpr (std::is_same_v<T, bool>)
+                        return "boolean";
+                    if constexpr (std::is_same_v<T, std::string_view>)
+                        return "string";
+                    if constexpr (std::is_same_v<T, double>)
+                        return "number";
+                    return "integer";
+                },
+                named.value);
+            auto raw = scalar(named.value);
+            if (named.role == Named::Role::Flag) {
+                raw = std::visit(
+                    [](auto const& value) -> JsValue
+                    {
+                        using T = std::decay_t<decltype(value)>;
+                        if constexpr (std::is_same_v<T, uint64_t> || std::is_same_v<T, int64_t>)
+                            return JsValue(fmt::format("0x{:016x}", uint64_t(value)));
+                        throw std::invalid_argument("A named flag must have an exact integer mask");
+                    },
+                    named.value);
+            }
+            std::string role = named.role == Named::Role::Flag ?
+                "flag" :
+                named.role == Named::Role::Special ?
+                "special" :
+                "constant";
+            std::string meaning;
+            switch (named.meaning) {
+            case Named::Meaning::Ordinary: meaning = "ordinary"; break;
+            case Named::Meaning::Unknown: meaning = "unknown"; break;
+            case Named::Meaning::Variable: meaning = "variable"; break;
+            case Named::Meaning::Unbounded: meaning = "unbounded"; break;
+            case Named::Meaning::Saturated: meaning = "saturated"; break;
+            }
+            auto metadata = Dict(
+                {{"name", JsValue(std::string(named.name))},
+                 {"value", raw},
+                 {"valueType", JsValue(valueType)},
+                 {"role", JsValue(role)},
+                 {"meaning", JsValue(meaning)},
+                 {"deprecated", JsValue(named.deprecated)},
+                 {"removed", JsValue(named.removed)}});
+            // Keep the physical ordinal separate from the logical enum value.
+            // Reuse the lossless integer projection for ordinals beyond JS precision.
+            if (named.rawValue)
+                metadata.set("rawValue", scalar(*named.rawValue));
+            names.push(metadata);
+        });
+    result.set("namedValues", names);
+    // Generic types such as Any may contain a mask without declaring one.
+    // Only concrete masks have a width; exporting a generic type's zero
+    // would make the browser reject the entire search-style field catalog.
+    if (type.isBitmask())
+        result.set("bitWidth", JsValue(type.bitWidth()));
+    return result;
+}
 
 namespace {
 
@@ -34,10 +196,13 @@ JsValue makeTypedArray(std::span<const T> data)
 #ifdef EMSCRIPTEN
 /** Tag type naming the JS constructor used by `makeTypedArray`. */
 struct Float32ArrayCtor { static constexpr auto value = "Float32Array"; };
+
 /** Tag type naming the JS constructor used by `makeTypedArray`. */
 struct Float64ArrayCtor { static constexpr auto value = "Float64Array"; };
+
 /** Tag type naming the JS constructor used by `makeTypedArray`. */
 struct Uint32ArrayCtor { static constexpr auto value = "Uint32Array"; };
+
 /** Tag type naming the JS constructor used by `makeTypedArray`. */
 struct Uint8ArrayCtor { static constexpr auto value = "Uint8Array"; };
 #endif

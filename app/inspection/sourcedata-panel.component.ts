@@ -10,7 +10,7 @@ import {
 import { SourceDataAddressFormat } from "build/libs/core/erdblick-core";
 import { TreeTableNode } from "primeng/api";
 import { TileSourceDataLayer } from "../../build/libs/core/erdblick-core";
-import { coreLib, uint8ArrayToWasm } from "../integrations/wasm.adapter";
+import { coreLib, uint8ArrayToWasm, uint8ArrayToWasmOrThrow } from "../integrations/wasm.adapter";
 import { FeatureWrapper } from "../mapdata/feature-inspection.adapter";
 import { MapDataService } from "../mapdata/mapdata.service";
 import {
@@ -116,8 +116,13 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
     @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
     private loadRevision = 0;
+    private loadController = new AbortController();
     private valueEpoch = 0;
 
+    /**
+     * Start a new source-data load revision for each selection and abort the old
+     * request/expiry owner before resetting the displayed tree.
+     */
     constructor(private mapService: MapDataService,
         public stateService: AppStateService,
         private tileStream: MapTileStreamService,
@@ -126,6 +131,8 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
         effect(() => {
             const sourceData = this.panel().sourceData;
             const revision = ++this.loadRevision;
+            this.loadController.abort();
+            this.loadController = new AbortController();
             this.tileStream.cancelRetainedTileExpiries?.(this);
             if (!sourceData) {
                 return;
@@ -146,9 +153,14 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
 
     ngOnDestroy(): void {
         ++this.loadRevision;
+        this.loadController.abort();
         this.tileStream.cancelRetainedTileExpiries?.(this);
     }
 
+    /**
+     * Renew the current source-data snapshot only for its matching value epoch.
+     * Keep the current tree visible while the replacement is being fetched.
+     */
     expireTiles(tokens: ReadonlyArray<{
         tileId: string | number;
         valueVersion: number;
@@ -179,7 +191,7 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
         let loaded: LoadedSourceDataLayer | null = null;
         const finishLoading = this.tileStream.beginInspectionLoad();
         try {
-            loaded = await this.loadSourceDataLayer(mapTileKey);
+            loaded = await this.loadSourceDataLayer(mapTileKey, this.loadController.signal);
             if (revision !== this.loadRevision) {
                 return;
             }
@@ -229,17 +241,13 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
     }
 
     /** Fetches and parses one source-data layer through the bounded POST /tiles endpoint. */
-    async loadSourceDataLayer(mapTileKey: string): Promise<LoadedSourceDataLayer> {
+    async loadSourceDataLayer(mapTileKey: string, signal?: AbortSignal): Promise<LoadedSourceDataLayer> {
         const [mapId, layerId, partition] = parseMapPartitionKey(
             coreLib,
             mapTileKey
         );
-        if (!this.mapService.isMapLayerReady(mapId, layerId)) {
-            const map = this.mapService.maps.maps.get(mapId);
-            throw new Error(map
-                ? this.mapService.dataSourceStatusText(map.info)
-                : "Map layer is not available.");
-        }
+        await this.mapService.waitForMapLayersReady([{mapId, layerId}], signal);
+        signal?.throwIfAborted();
         const requests = [{
             mapId: mapId,
             layerId: layerId,
@@ -249,10 +257,6 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
         let layer: TileSourceDataLayer | null = null;
         let expiresAtMs: number | null = null;
         const transport = new MapTileStreamClientTiles("/tiles");
-        const dataSourceInfoJson = this.mapService.getDataSourceInfoJson();
-        if (dataSourceInfoJson) {
-            transport.setDataSourceInfoJson(dataSourceInfoJson);
-        }
 
         transport.withSourceDataCallback((payload) => {
             const metadata = uint8ArrayToWasm((wasmBlob) =>
@@ -286,8 +290,26 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
             layer = parsedLayer;
         });
 
+        // Closing or replacing the panel also cancels its schema wait and fetch.
+        const abort = () => transport.destroy();
+        signal?.addEventListener("abort", abort, {once: true});
+        const catalogSubscription = this.mapService.dataSourceInfoChanged.subscribe(mapIds => {
+            if (mapIds.includes(mapId)) transport.destroy();
+        });
         try {
+            signal?.throwIfAborted();
+            // This short-lived transport owns a private parser. Install the
+            // ready map's exact graph before registering its source metadata.
+            for (const artifact of this.mapService.getSchemaArtifacts([mapId])) {
+                uint8ArrayToWasmOrThrow(
+                    bytes => transport.parser.installMapSchema(bytes, artifact.schemaId),
+                    artifact.bytes
+                );
+            }
+            const metadata = this.mapService.getDataSourceInfoJson([mapId]);
+            if (metadata) transport.setDataSourceInfoJson(metadata);
             await transport.request(requests);
+            signal?.throwIfAborted();
             if (!layer) {
                 throw new Error(this.noSourceDataMessage(mapTileKey));
             }
@@ -296,6 +318,8 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
             currentLayer?.delete();
             throw err instanceof Error ? err : new Error(`${err}`);
         } finally {
+            catalogSubscription.unsubscribe();
+            signal?.removeEventListener("abort", abort);
             transport.destroy();
         }
 

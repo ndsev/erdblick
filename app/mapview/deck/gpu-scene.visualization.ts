@@ -5,6 +5,7 @@
  */
 import { Texture, type Device } from "@luma.gl/core";
 import type { TileFeatureId } from "../../inspection/inspection.model";
+import { featurePickIdentityKey, type FeaturePickIdentity, type FeaturePickTarget } from "../../inspection/feature-identity.model";
 import { sipHash64Hex } from "../../utils/hash.util";
 import {
     GpuRenderPacketView,
@@ -309,7 +310,7 @@ export interface GpuScenePickReference {
 /** Resolve one picked source row against the exact immutable subset which produced it. */
 export type GpuScenePickResolver = (
   reference: GpuScenePickReference,
-) => string | readonly string[] | undefined;
+) => FeaturePickIdentity | readonly FeaturePickIdentity[] | undefined;
 
 /** Find source rows corresponding to one persisted semantic inspection target. */
 export type GpuScenePickFinder = (
@@ -376,7 +377,11 @@ export interface GpuSceneInteractionPick {
 interface ScenePickRecord {
   contributionIdentity: string;
   mapTileKey: string;
-  featureIds: string | readonly string[];
+  featureIds: readonly FeaturePickIdentity[];
+
+  /** Canonical target-map identities learned after an interacted foreign pick was located. */
+  locatedTargets?: Map<string, TileFeatureId[]>;
+
   /** Exact persisted targets which resolve to this canonical merged scene row. */
   interactionAliases?: Set<string>;
   navigationAltitude?: number;
@@ -1299,7 +1304,7 @@ export class GpuScene {
   }
 
   /** Resolve one Deck scene index into exact feature/validity/relation targets. */
-  resolvePick(globalPickIndex: number): TileFeatureId[] {
+  resolvePick(globalPickIndex: number): FeaturePickTarget[] {
     if (!Number.isInteger(globalPickIndex) || globalPickIndex < 0) {
       return [];
     }
@@ -1307,13 +1312,35 @@ export class GpuScene {
     if (!selected) {
       return [];
     }
-    const featureIds = selected.featureIds;
-    return typeof featureIds === "string"
-      ? [{ mapTileKey: selected.mapTileKey, featureId: featureIds }]
-      : featureIds.map((featureId) => ({
-          mapTileKey: selected.mapTileKey,
-          featureId,
-        }));
+    return selected.featureIds.map(identity => typeof identity === "string"
+      ? {mapTileKey: selected.mapTileKey, featureId: identity}
+      : {mapTileKey: selected.mapTileKey, ...identity});
+  }
+
+  /** Attach target-map aliases only after locate succeeds; no schema lookup runs inside GPU picking. */
+  rememberLocatedPick(pick: FeaturePickTarget, targets: TileFeatureId[]): void {
+    if (!pick.featureReference) return;
+    const key = featurePickIdentityKey(pick);
+    for (const [index, selected] of this.picks) {
+      if (selected.mapTileKey !== pick.mapTileKey || !selected.featureIds.some(identity =>
+        typeof identity !== "string" && featurePickIdentityKey(identity) === key)) continue;
+      const located = selected.locatedTargets ??= new Map<string, TileFeatureId[]>();
+      const previous = located.get(key) ?? [];
+      if (previous.length === targets.length && previous.every((value, i) =>
+        value.mapTileKey === targets[i].mapTileKey && value.featureId === targets[i].featureId)) continue;
+      located.set(key, targets);
+      // Several group members can resolve to the same target. Replacing one
+      // member's location must not remove an alias retained by another member.
+      for (const retired of previous) {
+        const local = selected.mapTileKey === retired.mapTileKey &&
+          (selected.featureIds.includes(retired.featureId) || selected.interactionAliases?.has(retired.featureId));
+        const retained = [...located.values()].some(group => group.some(value =>
+          value.mapTileKey === retired.mapTileKey && value.featureId === retired.featureId));
+        if (!local && !retained) this.removePickIndex(retired.mapTileKey, retired.featureId, index);
+      }
+      for (const target of targets)
+        this.addPickIndex(target.mapTileKey, target.featureId, index);
+    }
   }
 
   /** Return the representative physical altitude of one rendered pick. */
@@ -1478,33 +1505,26 @@ export class GpuScene {
   private cacheScenePick(
     globalPickIndex: number,
     installed: InstalledContribution,
-    featureIds: string | readonly string[] | undefined,
+    featureIds: FeaturePickIdentity | readonly FeaturePickIdentity[] | undefined,
     navigationAltitude: number,
   ): ScenePickRecord | undefined {
-    if (featureIds === undefined || featureIds.length === 0) {
+    if (featureIds === undefined || featureIds === "") {
       return undefined;
     }
+    const identities: readonly FeaturePickIdentity[] = Array.isArray(featureIds)
+      ? featureIds : [featureIds as FeaturePickIdentity];
+    if (identities.length === 0) return undefined;
     const selected: ScenePickRecord = {
       contributionIdentity: installed.identity,
       mapTileKey: installed.mapTileKey,
-      featureIds:
-        typeof featureIds === "string" ? featureIds : [...new Set(featureIds)],
+      featureIds: [...new Map(identities.map(identity => [featurePickIdentityKey(identity), identity])).values()],
       ...(Number.isFinite(navigationAltitude) ? { navigationAltitude } : {}),
     };
     this.picks.set(globalPickIndex, selected);
     installed.resolvedPickIndices.push(globalPickIndex);
-    if (typeof selected.featureIds === "string") {
-      if (selected.featureIds) {
-        this.addPickIndex(
-          selected.mapTileKey,
-          selected.featureIds,
-          globalPickIndex,
-        );
-      }
-    } else {
-      for (const featureId of selected.featureIds) {
+    for (const featureId of selected.featureIds) {
+      if (typeof featureId === "string")
         this.addPickIndex(selected.mapTileKey, featureId, globalPickIndex);
-      }
     }
     return selected;
   }
@@ -1558,9 +1578,7 @@ export class GpuScene {
         if (!selected) {
           continue;
         }
-        const canonicalTarget = typeof selected.featureIds === "string"
-          ? selected.featureIds === target.featureId
-          : selected.featureIds.includes(target.featureId);
+        const canonicalTarget = selected.featureIds.includes(target.featureId);
         if (!canonicalTarget &&
             !selected.interactionAliases?.has(target.featureId)) {
           (selected.interactionAliases ??= new Set()).add(target.featureId);
@@ -2256,36 +2274,32 @@ export class GpuScene {
     if (!selected) {
       return;
     }
-    const canonicalFeatureIds =
-      typeof selected.featureIds === "string"
-        ? [selected.featureIds]
-        : selected.featureIds;
-    const featureIds = selected.interactionAliases
-      ? [...canonicalFeatureIds, ...selected.interactionAliases]
-      : canonicalFeatureIds;
-    const byFeature = this.pickIndicesByTileAndFeature.get(selected.mapTileKey);
-    for (const featureId of featureIds) {
-      if (!featureId || !byFeature) {
-        continue;
-      }
-      const indices = byFeature.get(featureId);
-      if (typeof indices === "number") {
-        if (indices === globalPickIndex) {
-          byFeature.delete(featureId);
-        }
-        continue;
-      }
-      indices?.delete(globalPickIndex);
-      if (!indices?.size) {
-        byFeature.delete(featureId);
-      } else if (indices.size === 1) {
-        byFeature.set(featureId, indices.values().next().value!);
-      }
+    for (const identity of selected.featureIds) {
+      if (typeof identity === "string")
+        this.removePickIndex(selected.mapTileKey, identity, globalPickIndex);
     }
-    if (byFeature?.size === 0) {
-      this.pickIndicesByTileAndFeature.delete(selected.mapTileKey);
+    for (const alias of selected.interactionAliases ?? [])
+      this.removePickIndex(selected.mapTileKey, alias, globalPickIndex);
+    for (const targets of selected.locatedTargets?.values() ?? []) {
+      for (const target of targets)
+        this.removePickIndex(target.mapTileKey, target.featureId, globalPickIndex);
     }
     this.picks.delete(globalPickIndex);
+  }
+
+  /** Remove one reverse lookup, including aliases belonging to a foreign target map. */
+  private removePickIndex(mapTileKey: string, featureId: string, index: number): void {
+    const byFeature = this.pickIndicesByTileAndFeature.get(mapTileKey);
+    const indices = byFeature?.get(featureId);
+    if (!byFeature || indices === undefined) return;
+    if (typeof indices === "number") {
+      if (indices === index) byFeature.delete(featureId);
+    } else {
+      indices.delete(index);
+      if (!indices.size) byFeature.delete(featureId);
+      else if (indices.size === 1) byFeature.set(featureId, indices.values().next().value!);
+    }
+    if (!byFeature.size) this.pickIndicesByTileAndFeature.delete(mapTileKey);
   }
 
   /** Store the overwhelmingly common single pick without allocating a Set. */
@@ -2316,10 +2330,7 @@ export class GpuScene {
     selected: ScenePickRecord,
     globalPickIndex: number,
   ): string {
-    const featureIds =
-      typeof selected.featureIds === "string"
-        ? selected.featureIds
-        : selected.featureIds.join("\n");
+    const featureIds = selected.featureIds.map(featurePickIdentityKey).join("\n");
     return featureIds
       ? `${selected.mapTileKey}\u0000${featureIds}`
       : String(globalPickIndex);

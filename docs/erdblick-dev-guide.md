@@ -1,8 +1,7 @@
 # Erdblick Developer Guide
 
 Erdblick is MapViewer's Angular/Deck.gl browser client plus a C++ core compiled
-to WebAssembly. This guide describes the S4E2 architecture introduced with
-mapget protocol 4.
+to WebAssembly. This guide describes its subset-based rendering architecture.
 
 File roles, dependency rules and the structural lint check are documented in
 [Source roles and dependencies](erdblick-source-structure.md).
@@ -36,41 +35,100 @@ Test sources live under `tests/`; Angular specs mirror `app/` in `tests/app/`.
 See [Test Layout and Commands](../tests/README.md) for the shared helpers,
 browser fixtures and MapViewer integration paths.
 
-Native core:
+Choose validation by semantic impact. Verified comment/whitespace-only changes
+need diff and token/AST checks, including preprocessor continuations and literals;
+they need no build or runtime test by default, even in C++/WASM files.
+Documentation changes need applicable link/example checks. Changes to meaningful
+strings, generated contracts, CSS or templates need validation of their effects.
 
-```bash
-cmake -S . -B build-native -G Ninja
-cmake --build build-native --parallel 8
-ctest --test-dir build-native --output-on-failure --no-tests=error
-```
-
-For changes to the native/WASM core or its mapget/simfil dependencies, use the
-incremental rebuild script. It rebuilds the bindings and both frontend variants:
+Whenever frontend iteration needs a validation build, run the incremental
+wrapper from the erdblick root, including for frontend-only changes:
 
 ```bash
 ./ci/20_linux_rebuild.bash
 ```
 
-WASM exception catching is enabled only for the parser, style validation/loading,
-and packet-error reporting sources listed in `libs/core/CMakeLists.txt`. Keep it
-off globally: Emscripten's emulated catching inserts JavaScript invoke wrappers
-into hot model access. Existing validation errors still need their local catches;
-the WASM style-validation tests check recovery after malformed input.
+It reconfigures the existing WASM build while preserving its cached generator,
+incrementally rebuilds the core and bindings, and builds both frontend variants.
+The default profiling build keeps release optimization, JavaScript identifiers
+and source maps; pass `production` for compact deployment bundles. Direct
+`npm run build` or `build-ui.bash` calls do not replace this validation workflow.
+`./ci/10_linux_build.bash` removes the build tree and is reserved for clean CI
+builds. See [Running from source](erdblick-setup.md#running-from-source) for
+initial toolchain preparation.
 
-With matching WASM artifacts already present, frontend-only validation uses:
+In a shared checkout, coordinate one build owner and keep consumed scripts,
+configuration, source and generator inputs stable through generation, build and
+test. Wait for the process to exit, cancel it with its owner, or use isolated
+inputs and outputs before editing. Even comment-only edits can disrupt a shell
+that resumes reading a running script. Pausing that shell or checking the final
+file with `bash -n` does not prevent this.
+
+### Angular checks
+
+Run lint and tests as appropriate to the change:
 
 ```bash
 npm run lint
 npm run test -- --watch=false
-npm run build -- -c profiling
 ```
+
+Angular tests and `npm start` require generated bindings and WASM in
+`build/libs/core/` matching the checked-out native APIs. Run the wrapper first
+on a clean checkout or after executable native/API changes. Its build does not
+run these unit suites.
 
 For a focused run, add `--include '../tests/app/<domain>/**/*.spec.ts'`.
 Angular resolves that pattern relative to its `app/` source root.
 
 The build, start, watch and unit-test hooks generate the trusted viewer-action
-catalog before compiling. `./ci/10_linux_build.bash` is the clean CI build;
-it removes the existing build tree and is not the routine iteration command.
+catalog before compiling. Keep action declarations stable through generation
+and testing; regenerate if those inputs change between stages.
+
+### Native core
+
+For C++ behavior changes, also run native tests in a separate build tree:
+
+```bash
+cmake -S . -B build-test -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build-test --parallel 8
+ctest --test-dir build-test --output-on-failure --no-tests=error
+```
+
+Record native tests, WASM compilation/linking, frontend bundles and runtime
+tests as separate results. Browser-consumed native changes need the wrapper
+and relevant tests using its fresh WASM. Native tests or frontend tests using
+older WASM do not establish correctness of the changed browser core.
+
+### WASM exception handling
+
+The current build enables Emscripten's JavaScript-based C++ exception support.
+The [root CMake configuration](../CMakeLists.txt) applies `-fexceptions` before
+configuring C++ dependencies; the [core link configuration](../libs/core/CMakeLists.txt)
+uses `-s DISABLE_EXCEPTION_CATCHING=0` and `-s EXCEPTION_STACK_TRACES=1`.
+The native WebAssembly exception backend, selected by `-fwasm-exceptions`, is
+not enabled. See [Emscripten's exception documentation](https://emscripten.org/docs/porting/exceptions.html)
+for the distinction between the two backends.
+
+Mapget and Simfil require catches for legacy schema declarations and RAII
+cleanup for schema-import rollback and construction caches. Compiling catches
+only into selected core files omits required dependency cleanup; enabling
+catching at the final link cannot restore that code. Failed imports can then
+leave cache entries marked as still under construction, breaking later attempts.
+
+Validate exception-policy changes with fresh WASM: repeat an invalid import,
+then confirm a valid import succeeds in the same module. Native tests cannot
+expose missing Emscripten unwind code. Evaluate performance and browser
+compatibility when changing the exception backend or narrowing its coverage,
+while preserving failure/recovery behavior.
+
+### Browser integration
+
+A tile-protocol or static-dictionary change requires compatible native server,
+binary datasource and browser WASM builds. Before integration tests, verify
+the actual running server's process/binary and major/minor stream version;
+rebuilding an executable on disk does not update an already running process.
+Start a matching test server and reload tabs after serving the matching frontend.
 
 The action/transport browser smoke can use a matching native `mapget` executable
 without an installed Python datasource wheel. From the erdblick root:
@@ -156,20 +214,69 @@ The C++ core wraps mapget models and exposes:
 The retired full-feature visualizers and `TileSearchResultLayer` wrappers do
 not coexist with this path.
 
-During nonblocking datasource startup, `MapDataService` retains unchanged layer
-identities and appends newly ready maps through `TileLayerParser.addDataSourceInfo`.
-Existing string dictionaries, style planners, rendered tiles and the interactive
-connection remain live. Catalog status/progress changes are not model changes.
-Replacing or removing installed metadata still uses `setDataSourceInfo` and resets
-the stream dictionaries; the additive API rejects already registered map IDs.
+`MapDataService` applies catalog differences through
+`TileLayerParser.applyDataSourceChanges({removedMapIds, addedSources})`. The native
+parser validates the entire change before updating its catalog and indexes.
+Unchanged maps retain their layer metadata, schema owners and string dictionaries,
+including combined add-on dictionaries recorded when subset metadata is read.
+This matters even after rendering: first hover can decode a retained subset for
+the first time. Catalog status/progress decoration is not a model change.
+
+Before removing or replacing a ready map, the service advances that map's model
+generation, cancels its pending inspections and retires its visualizations. It
+closes the interactive session to discard old queued/in-flight payloads before
+applying the native removal. Unaffected map data and dictionary offsets survive
+the reconnect. A replacement becomes ready only after its exact schema is installed;
+a late artifact from an older catalog cannot revive it. `setDataSourceInfo` remains
+the full installation API for fresh/private parsers and intentionally resets all
+dictionary state.
+
+Canonical catalog entries carry a small `mapFormat` and an exact `schemaId`.
+`MapDataService` fetches the binary artifact from `/schema` using both `sourceId`
+and `schemaId`, coalesces equal artifacts and limits concurrent downloads to two.
+`TileLayerParser.installMapSchema` validates the artifact before that source can
+become locally ready. Backend readiness and browser schema readiness are separate:
+one failed or slow download leaves other ready maps usable, and incomplete catalogs
+must not prune saved layer, style or inspection selections. Each layer lists only
+the feature types it produces. Identity definitions, including reference-only
+targets, belong to the enclosing map schema and are available to every layer for
+decoding IDs. They do not imply that a layer produces or references those targets.
+MCP layer discovery reports produced types; relation declarations describe actual
+relations. Both come from the installed native graph, not duplicate catalog arrays.
+Legacy inline metadata remains an import format.
+
+Each worker has its own WASM heap. Completion installs only the selected scope;
+render workers install only the map required by a task. Both acknowledge successful
+native installation before accepting dependent work. Render parsers use a bounded
+LRU cache; acknowledgements report retained catalogs so a later reinstallation
+also resends an evicted parser's dictionary. Source model generations invalidate
+work only for affected maps. Progress updates and unrelated additions do not retire
+valid searches or rendered scenes. Replaced graphs remain alive while decoded
+values own them; stale bytes cannot silently bind to a replacement graph.
 
 Search completion selects native feature or attribute-query schema IDs from
-mapget's `LayerSchema` and calls simfil's schema-domain completion directly.
+mapget's `LayerSchema` and calls simfil's schema-type completion directly.
 The parser caches one environment/private string namespace per registry, cleared
 when datasource metadata changes. It builds no sample `ModelPool` or frontend
 schema graph. Mapget owns attribute overlay roots such as `$feature` and validity
-metadata; simfil owns array, union and recursive-domain traversal. Candidate
+metadata; simfil owns array, union and recursive-type traversal. Candidate
 merging/type hints remain in erdblick, under one timeout across selected roots.
+
+Scalar type projections preserve the exact schema/type identity together with
+native numeric ranges, units, named special values and flag definitions. They are
+small presentation records, not a TypeScript schema implementation. Values selected
+from a source retain their type; computed plain values do not acquire a unit from
+their expression text. Native subset copying preserves these bindings for both
+projected values and traces. Search summaries group actual values by type; there
+is no inferred output schema or per-result metadata side table.
+
+The projected identity is `{schemaId, typeId}`: `schemaId` is the exact artifact
+token and `typeId` is its numeric local type ID. Search metadata calls this
+record `schemaType`; inspection rows call it `scalarType`, keeping it distinct
+from the raw source-data tree's existing textual `schemaType` column. Named
+enum values can carry an optional `rawValue` ordinal independently of the
+logical label. The WASM bridge uses decimal strings for integers outside
+JavaScript's exact range, including those ordinals.
 
 Subset projected values have two distinct array levels: the outer array aligns
 with the channel's expressions, and each slot contains that expression's ordered
@@ -251,6 +358,12 @@ Worker completion only advances the pending render queue; it does not reconcile
 the full view or rebuild style plans. Jobs dispatch in queue order as worker
 slots become available. Point-cloud ownership and camera scale do not change
 the count-based sampling policy.
+
+GPU buffers follow their scene's presentation lifetime. Replaced buffers remain
+alive until Deck has rebound its models; empty material stores are then destroyed.
+The retired `gpuMemoryManagementEnabled`, `pointCloudWorkingMemoryMiB` and
+`pointCloudGpuMemoryMiB` preferences are ignored when importing existing snapshots
+or deployment defaults.
 
 ### Transport refs
 
@@ -334,6 +447,11 @@ sequenceDiagram
 
 Processing order follows request tile order; stream arrival order may differ.
 The transport supports bounded outgoing queues and adaptive payload batches.
+One payload GET is outstanding at a time, including the body download, so a
+subset cannot overtake its dictionary update. Fetching the next batch overlaps
+FIFO frame processing, with at most one extra batch waiting behind the current
+batch. Pausing frame processing therefore applies backpressure to HTTP fetching.
+Closing the connection also releases these batch waits and discards their bytes.
 `/tiles` and `/tiles/next` remain fallback aliases for stale proxy
 deployments; new clients use `/interactive` and `/interactive/payload`.
 
@@ -711,8 +829,12 @@ Both webapp variants package
 `web-mcp-actions.json` beside `index.html`. Its `catalogId` hashes compact JSON
 with recursively sorted object keys, retained array order and ECMAScript JSON
 scalar encoding; the digest and timestamps are not hash input. Generated files
-under `app/action/generated/` are ignored build outputs. Argument, result,
-relay and connection-info parity fixtures live in `tests/fixtures/viewer-actions/`.
+under `app/action/generated/` are ignored build outputs. Lint regenerates this
+catalog before scanning application sources. Generation also removes the known,
+untracked outputs from the former `app/actions/generated/` location, so reused
+checkouts do not lint obsolete files; tracked files are always preserved.
+Argument, result, relay and connection-info parity fixtures live in
+`tests/fixtures/viewer-actions/`.
 String bounds use Unicode code points, as Draft-07 specifies, not JavaScript's
 UTF-16 length. Use the shared `boundedUnicodeString`/`unicodePrefix` helpers for
 bounded contract strings and text summaries; byte budgets remain UTF-8 byte limits.
@@ -749,7 +871,7 @@ actions using the original contract. A byte-identical rebuild leaves tabs alone.
 The browser registers only when `/mcp/info` advertises an exactly matching trusted
 catalog and the existing interactive connection has its UUID. Server controls use
 VTLV `ActionControl` frame type 9; browser controls use text JSON on that same
-socket. Relay envelope version 1 is independent of tile protocol 5.3. Controls
+socket. Relay envelope version 1 is independent of the tile protocol. Controls
 bypass the pausable tile-data queue without advancing tile request IDs or changing
 dictionary/data order. There is no second WebSocket or mutation replay.
 
@@ -768,8 +890,9 @@ renameable tab label, bounded recent action names/outcomes and Stop current acti
 Stop cancels pending agent work, not completed edits or human searches. Catalog
 mismatch disables agent controls only; ordinary viewing remains available.
 
-The compact Codex, Claude and Copilot buttons copy setup for **Codex CLI**,
-**Claude Code** and **GitHub Copilot CLI**, respectively. They share the label
+The compact Codex, Claude, Copilot and Cursor buttons copy setup for **Codex CLI**,
+**Claude Code**, **GitHub Copilot CLI** and the **Cursor editor**, respectively.
+They share the label
 **Copy Add-MCP-Command:** and stay together in one row (the label can wrap above
 them on narrow screens). They use the server's public connection metadata and fixed, POSIX-shell-quoted command
 syntax. Local mode copies only the add command. For Codex and Claude, OAuth mode
@@ -783,6 +906,12 @@ Copilot with `--additional-mcp-config` for that session only; it does not alter
 the saved configuration. The JSON carries the public client ID and scope array.
 Copilot requires a client ID for explicit scopes; without one, server discovery
 supplies both. Run `/mcp auth mapviewer` inside Copilot if sign-in is required.
+Cursor copies `cursor --open-url` with an MCP installation link, which opens an
+installation confirmation in the editor. The link contains the server URL and,
+when a public client ID is configured, `auth.CLIENT_ID` and optional `auth.scopes`.
+Without that ID, Cursor uses OAuth discovery. Its inherited `--add-mcp` option
+targets the separate VS Code configuration store, so this button uses Cursor's
+own installation flow instead.
 Run the copied snippet in a POSIX shell and complete login in the client; the
 browser UI only copies commands and never handles OAuth credentials. For the
 local server on port 8099 shown above, the basic setup is:
@@ -808,8 +937,10 @@ and its configured public endpoint. Desktop apps and their browser integrations
 need acceptance in their own execution environment; CLI success does not verify
 those surfaces. See the official
 [Codex MCP instructions](https://learn.chatgpt.com/docs/extend/mcp?surface=cli),
-[Claude Code MCP instructions](https://code.claude.com/docs/en/mcp), and the
-[Copilot CLI MCP reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#mcp-server-configuration).
+[Claude Code MCP instructions](https://code.claude.com/docs/en/mcp),
+[Copilot CLI MCP reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#mcp-server-configuration),
+[Cursor installation links](https://cursor.com/docs/mcp/install-links), and
+[Cursor MCP authentication](https://cursor.com/docs/mcp).
 
 ## Render pipeline
 
@@ -1070,7 +1201,8 @@ See [Style System](erdblick-stylesystem.md).
 
 ## Failure and cancellation rules
 
-- Failed buffer allocation or upload releases the attempt's uncommitted resources.
+- GPU buffer allocations are performed by the graphics device, without an
+  application-wide allowance. Failed buffer allocation or upload releases the attempt's uncommitted resources.
   An unchanged failed render signature is not resubmitted on every scheduler tick;
   changed input, style, or a recreated scene can request a new render. Deck's
   presentation/rebind boundary controls safe retirement of installed buffers.
@@ -1089,7 +1221,7 @@ See [Style System](erdblick-stylesystem.md).
 - Long loops check cancellation at feature boundaries and fixed batches.
 - There is no datasource-wide snapshot/revision contract, so independently
   refreshed tiles need not form a transactionally consistent global snapshot.
-- An ambiguous payload fetch, undecodable VTLV message, or failure to install
+- An ambiguous payload fetch, invalid dictionary update, undecodable VTLV message, or failure to install
   a current subset closes the interactive connection. Ordinary reconnect
   starts a fresh mapget session and resends the complete pending snapshot.
 - A VTLV protocol mismatch is terminal for that client rather than retried.
@@ -1097,6 +1229,23 @@ See [Style System](erdblick-stylesystem.md).
   no positive TTL remain durable for the lifetime of their owner.
 
 ## Protocol migration
+
+The current tile-stream format is 6.3.0. Canonical schema field multiplicity
+extends simfil's static dictionary and shifts mapget's static field IDs. Readers
+reject older major/minor stream versions before interpreting payload fields;
+an older dictionary must not decode new payloads, or vice versa. MapSchema codec
+7 and SchemaPool codec 4 use canonical columns and arenas and reject older schema
+artifacts. Rebuild native
+producers and browser WASM together as described under [Build and test](#build-and-test).
+
+Protocol 6.2.0 introduced schema `rawValue` metadata and its corresponding static
+dictionary shift. It is a historical format, not a compatible reader for 6.3
+payloads.
+
+Protocol 6.0.0 requires the exact installed MapSchema for model decoding and
+preserves scalar types through native subset copying. Fetch schema artifacts
+before decoding dependent tiles; older binary frames are incompatible. This does
+not rename persisted AppState, configuration or URL keys.
 
 Protocol 4 and stylesheet schema 2 are clean breaks. Protocol 4 removes subset
 delivery epochs in favor of complete pending snapshots; no epoch-bearing
@@ -1107,7 +1256,7 @@ suffix solely to restore older links.
 
 ## Tile warnings and transient datasource recovery
 
-Protocol 5.4 metadata exposes warnings, errors and ordinary timestamp/TTL pairs for every tile type. Warned subset values remain ready and render normally. Warnings are retained with the current value and each distinct message is emitted once per value into diagnostics logs at warning severity, including map/layer/partition context. Replacing or disposing a value replaces or clears its diagnostics. Feature and source-data inspection also surface warnings without discarding content.
+Tile metadata exposes warnings, errors and ordinary timestamp/TTL pairs for every tile type. Warned subset values remain ready and render normally. Warnings are retained with the current value and each distinct message is emitted once per value into diagnostics logs at warning severity, including map/layer/partition context. Replacing or disposing a value replaces or clears its diagnostics. Feature and source-data inspection also surface warnings without discarding content.
 
 View diagnostics add one point-cloud downsampling warning when backend
 `PointCloud/SourceRecords` exceeds `PointCloud/DeliveredRecords`, or the worker's

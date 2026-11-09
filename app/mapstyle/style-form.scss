@@ -14,7 +14,8 @@ style-record-editor[hidden] { display: none; }
 
   style-record-editor { container: style-record / inline-size; }
   .style-form-body { border: 0; margin: 0; padding: 0; min-width: 0; }
-  button, input, select { font: inherit; }
+  // Native controls share the label font so their text metrics and row heights agree.
+  button, input, select, textarea { font: inherit; }
 
   button {
     display: inline-flex;

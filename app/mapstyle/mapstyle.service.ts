@@ -101,6 +101,7 @@ export class MapStyleService implements AppActionContributor {
     styleGroups: BehaviorSubject<(ErdblickStyleGroup | ErdblickStyle)[]> = new BehaviorSubject<(ErdblickStyleGroup | ErdblickStyle)[]>([]);
     private readonly builtinStyleBaselines = new Map<string, BuiltinStyleBaseline>();
 
+    /** Reapply persisted style visibility/options after application state becomes ready. */
     constructor(private httpClient: HttpClient,
         private stateService: AppStateService,
         private infoMessageService: InfoMessageService,
@@ -1168,6 +1169,7 @@ export class MapStyleService implements AppActionContributor {
         const ungrouped: Array<ErdblickStyle> = [];
 
         let keyCounter = 0;
+
         /** Returns the next unique group key for the style tree. */
         const nextKey = () => (keyCounter++).toString();
 
@@ -1354,6 +1356,7 @@ export class MapStyleService implements AppActionContributor {
         );
         return matchedByUrl;
     }
+
     /** Registers semantic operations and their live omnibar candidates. */
     registerActions(actions: AppActionRegistration): void {
         const text = boundedUnicodeString(4096);
@@ -1487,6 +1490,10 @@ export class MapStyleService implements AppActionContributor {
     }
 
 
+    /**
+     * Page the style catalog, optionally filtering exact style ID or layer affinity.
+     * Visibility and modification flags describe the current browser-owned style state.
+     */
     listStyles(input: { offset?: number; limit?: number; styleId?: string; layerId?: string }) {
         const styles = this.styles.values();
         function* values() {

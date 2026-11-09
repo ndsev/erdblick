@@ -51,7 +51,7 @@ describe("Feature Search style save lifecycle", () => {
             ...createFeatureSearchStateEntry({query: "**.speedLimitKmh", selectedFeatureTypes: ["Road"]}),
             concreteScope: "attribute" as const, backendQuery: "speedLimitKmh", resultFields: ["$name"]
         };
-        Reflect.set(service, "getInternalSession", () => ({id: definition.id}));
+        Reflect.set(service, "getInternalSession", () => ({id: definition.id, preparation: {status: "ready"}}));
         Reflect.set(service, "resolvedDefinitionForSession", () => definition);
         const drafts = structuredClone(RULES);
         const snapshot = service.getStyleExportSnapshot(definition.id, drafts);

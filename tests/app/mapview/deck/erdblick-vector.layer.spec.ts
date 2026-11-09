@@ -135,16 +135,16 @@ describe("ErdblickVectorLayer model order", () => {
 
   it("converts billboard pixel offsets from NDC into clip coordinates", () => {
     expect(SIMPLE_PATH_BILLBOARD_VERTEX_SHADER).toMatch(
-      /project_pixel_size_to_clipspace\(offsetPixels\) \*\s+gl_Position\.w/,
+      /gpuScene_pixelSizeToNdc\(offsetPixels\) \*\s+gl_Position\.w/,
     );
     expect(ARROW_BILLBOARD_VERTEX_SHADER).toMatch(
-      /project_pixel_size_to_clipspace\(triangleOffset\) \*\s+gl_Position\.w/,
+      /gpuScene_pixelSizeToNdc\(triangleOffset\) \*\s+gl_Position\.w/,
     );
     expect(POINT_BILLBOARD_VERTEX_SHADER).toContain(
-      "project_pixel_size_to_clipspace(positions.xy * radius) * gl_Position.w",
+      "gpuScene_pixelSizeToNdc(positions.xy * radius) * gl_Position.w",
     );
     expect(ICON_BILLBOARD_VERTEX_SHADER).toContain(
-      "project_pixel_size_to_clipspace(pixelPosition) * gl_Position.w",
+      "gpuScene_pixelSizeToNdc(pixelPosition) * gl_Position.w",
     );
   });
 

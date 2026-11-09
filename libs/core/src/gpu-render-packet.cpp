@@ -195,7 +195,10 @@ private:
     std::span<std::byte const> bytes_;
 };
 
-/** String interner whose offsets are relative to the packet string table. */
+/**
+ * String interner whose offsets are relative to the packet string table.
+ * Lookup keys borrow source strings for the encoder call.
+ */
 class StringTable
 {
 public:
@@ -1059,6 +1062,7 @@ GpuRenderPacketInfo GpuRenderPacketCodec::validate(
     addTableRange(issues, kRuntimeIssueBytes);
     addTableRange(zIndices, kGpuZIndexEntryBytes);
 
+    // Validate stream descriptors and byte ownership without decoding primitive payloads.
     std::vector<uint32_t> streamRecordCounts;
     streamRecordCounts.reserve(streams.second);
     for (uint32_t index = 0U; index < streams.second; ++index) {

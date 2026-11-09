@@ -22,6 +22,22 @@ import {
 const tileKey = (id: number) => partitionKey(tilePartition(id));
 
 describe("ViewLayerController", () => {
+    it("retires only changed-map owners, including presentation fallbacks", () => {
+        const controller = Object.create(ViewLayerController.prototype) as any;
+        const changed = {layer: {mapgetLayer: {mapId: "Changed"}}};
+        const sibling = {layer: {mapgetLayer: {mapId: "Sibling"}}};
+        const fallback = {layer: {mapgetLayer: {mapId: "Changed"}}};
+        controller.styledLayers = new Map([["changed", changed], ["sibling", sibling]]);
+        controller.retiringRegularLayers = new Map([["old", {owned: fallback}]]);
+        controller.destroyOwnedLayer = vi.fn();
+
+        controller.retireDataSources(["Changed"]);
+
+        expect(controller.destroyOwnedLayer.mock.calls).toEqual([[changed], [fallback]]);
+        expect([...controller.styledLayers.values()]).toEqual([sibling]);
+        expect(controller.retiringRegularLayers.size).toBe(0);
+    });
+
     it("advances pending work on worker completion without replanning the view", () => {
         const idle = new Subject<any>();
         const capacity = new Subject<void>();
@@ -802,6 +818,8 @@ describe("ViewLayerController", () => {
             mapId: "Map",
             layerId: "Road"
         };
+        controller.styledLayers = new Map();
+        controller.retiringRegularLayers = new Map();
         controller.interactionLayerAffinityCache = new WeakMap();
         controller.interactionFilterPlanCache = new WeakMap();
         controller.interactionEffectCache = new WeakMap();
@@ -814,7 +832,7 @@ describe("ViewLayerController", () => {
             mapgetLayer,
             coreLib.HighlightMode.HOVER_HIGHLIGHT
         );
-        controller.resetInteractionStyleCaches();
+        controller.retireDataSources([]);
         controller.interactionFilterPlan(
             style,
             mapgetLayer,

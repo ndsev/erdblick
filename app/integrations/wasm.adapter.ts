@@ -65,7 +65,10 @@ export function normalizeWasmException(exception: unknown): Error {
 }
 
 // Served by Angular as a static asset; see angular.json assets (/bundle/wasm).
-/** Initializes the shared WASM module singleton exactly once. */
+/**
+ * Initializes the shared WASM module singleton. Callers share one attempt,
+ * including its rejected promise if loading fails.
+ */
 export async function initializeLibrary(): Promise<void> {
     // If the real library has already been initialized, simply reuse the existing instance.
     if (coreLib) {
@@ -90,8 +93,9 @@ export async function initializeLibrary(): Promise<void> {
 
 /**
  * Run a WASM function which places data in a SharedUint8Array,
- * and then retrieve this data as a Uint8Array. Will return null
- * if the user function returns false.
+ * and then retrieve this data as a detached Uint8Array copy. Returns null
+ * if the user function returns false. The synchronous callback borrows the native
+ * buffer only for its duration; exceptions propagate.
  */
 export function uint8ArrayFromWasm<T>(fun: (data: SharedUint8Array) => T | false): Uint8Array | null {
     let sharedGlbArray: SharedUint8Array | null = null;
@@ -116,6 +120,7 @@ export function uint8ArrayFromWasm<T>(fun: (data: SharedUint8Array) => T | false
  */
 export function uint8ArrayToWasm<T>(fun: (d: SharedUint8Array) => T, inputData: Uint8Array): T;
 export function uint8ArrayToWasm<T>(fun: (d: SharedUint8Array) => T | false, inputData: Uint8Array): T | null;
+
 /** Copies a JS byte array into WASM memory, runs a callback, and cleans up the shared buffer. */
 export function uint8ArrayToWasm<T>(fun: (d: SharedUint8Array) => T | false, inputData: Uint8Array): T | null {
     try {
@@ -134,10 +139,13 @@ export function uint8ArrayToWasmOrThrow<T>(
     fun: (d: SharedUint8Array) => T | false,
     inputData: Uint8Array
 ): T | null;
+
 /**
  * Strict byte-to-WASM boundary for callers which own an error channel.
  * Native exceptions retain their concrete message instead of becoming a
- * generic null parse result.
+ * generic null parse result. The synchronous callback borrows the copied native
+ * buffer until it returns; false becomes null. Exceptions are translated before
+ * the buffer is released.
  */
 export function uint8ArrayToWasmOrThrow<T>(
     fun: (d: SharedUint8Array) => T | false,
@@ -166,7 +174,12 @@ export function uint8ArrayToWasmOrThrow<T>(
  */
 export function uint8ArrayToWasmAsync<T>(fun: (d: SharedUint8Array) => Promise<T> | T, inputData: Uint8Array): Promise<T>;
 export function uint8ArrayToWasmAsync<T>(fun: (d: SharedUint8Array) => Promise<T | false> | T | false, inputData: Uint8Array): Promise<T | null>;
-/** Async variant of `uint8ArrayToWasm` for callbacks that await additional work. */
+
+/**
+ * Async variant of `uint8ArrayToWasm` for callbacks that await additional work.
+ * Holds the copied native buffer until the callback settles; it must not be
+ * retained afterward.
+ */
 export async function uint8ArrayToWasmAsync<T>(fun: (d: SharedUint8Array) => Promise<T | false> | T | false, inputData: Uint8Array): Promise<T | null> {
     let sharedGlbArray: SharedUint8Array | null = null;
     try {

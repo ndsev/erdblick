@@ -80,6 +80,7 @@ export type FeatureSearchDefinitionExport = Pick<FeatureSearchStateEntry,
     "id"
     | "query"
     | "scope"
+    | "interpretationIds"
     | "autoUpdate"
     | "bookmarked"
     | "enabled"
@@ -123,6 +124,7 @@ export function featureSearchDefinitionExport(definition: FeatureSearchStateEntr
         id: definition.id,
         query: definition.query,
         scope: definition.scope,
+        ...(definition.interpretationIds ? {interpretationIds: [...definition.interpretationIds]} : {}),
         autoUpdate: definition.autoUpdate,
         bookmarked: definition.bookmarked,
         enabled: definition.enabled,

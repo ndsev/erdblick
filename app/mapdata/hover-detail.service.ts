@@ -87,7 +87,11 @@ export class HoverDetailService implements OnDestroy {
         }));
     }
 
-    /** Reconciles visible coverage for one view while retaining geometry-free projected values. */
+    /**
+     * Reconciles visible coverage for one view while retaining geometry-free projected values.
+     * Partition arrays are retained and compared by identity; callers must replace
+     * them when coverage changes.
+     */
     reconcileView(
         viewIndex: number,
         coverage: ReadonlyArray<{
@@ -461,7 +465,10 @@ export class HoverDetailService implements OnDestroy {
         return syntheticStyle;
     }
 
-    /** Formats projected scalar values without turning absent values into misleading text. */
+    /**
+     * Formats projected values without turning absent values into misleading text.
+     * Stringifies scalars and falls back to JSON for structured results.
+     */
     private displayValue(value: unknown): string | null {
         if (value === null || value === undefined) {
             return null;
@@ -496,7 +503,7 @@ export class HoverDetailService implements OnDestroy {
             .join("/");
     }
 
-    /** Builds the small LRU key for one concrete subset generation. */
+    /** Keys one owner/partition cache slot; valueVersion separately rejects stale decoded contents. */
     private decodedTileKey(layer: StyledMapgetLayer, key: string): string {
         return `${layer.ownerId}/${key}`;
     }

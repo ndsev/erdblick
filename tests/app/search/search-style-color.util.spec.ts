@@ -1,4 +1,5 @@
 import {describe, expect, it} from "vitest";
+import type {SchemaScalarType} from "../../../app/mapdata/schema-type.model";
 import {
     autoInitializeSearchStyleColorDraft,
     categoryStopsForEnumValues,
@@ -19,7 +20,64 @@ import {
     sortedGradientStopDrafts
 } from "../../../app/search/search-style-color.util";
 
+/** Two legitimate source types deliberately disagree about raw speed zero. */
+function speedType(classic = false): SchemaScalarType {
+    return {
+        schemaId: classic ? "classic" : "live", typeId: 3, typeName: "Speed",
+        numeric: {encoding: "uint8", unit: classic ? "" : "km/h", minimum: 0, maximum: 255,
+            ordinaryRanges: [{min: classic ? 0 : 1, max: 253}], scale: 1, offset: 0, complete: true},
+        namedValues: [
+            ...(!classic ? [{name: "UNDEFINED", value: 0, meaning: "unknown" as const}] : []),
+            {name: "VARIABLE", value: 254, meaning: "variable" as const},
+            {name: "UNLIMITED", value: 255, meaning: "unbounded" as const}
+        ].map(value => ({...value, valueType: "integer", role: "special", deprecated: false, removed: false}))
+    };
+}
+
 describe("search style color helpers", () => {
+    it.each([false, true])("keeps ordinary speed and named special colors separate (Classic: %s)", classic => {
+        let id = 0;
+        const schemaType = speedType(classic);
+        const result = autoInitializeSearchStyleColorDraft(defaultSearchStyleColorDraft("speed"), {
+            label: "Speed", value: "speed", valueKind: "integer", schemaType,
+            numericRange: {min: classic ? 0 : 1, max: 253}
+        }, () => ++id);
+        expect(result.success).toBe(true);
+        expect(result.draft.gradientStops.map(stop => stop.value)).toEqual([classic ? 0 : 1, 50, 100, 150, 200, 250, 253]);
+        expect(result.draft.specialStops?.map(stop => stop.value)).toEqual(classic ? [254, 255] : [0, 254, 255]);
+        expect(result.draft.schemaTypes).toEqual([{schemaId: schemaType.schemaId, typeId: 3}]);
+        const properties = searchStyleColorProperties({mode: "gradient", field: "speed",
+            stops: serializableGradientStops(result.draft)!, schemaTypes: result.draft.schemaTypes,
+            specials: result.draft.specialStops!.map(stop => ({value: stop.value, color: stop.color}))});
+        expect(properties["color-scale"]).toMatchObject({schemaTypes: result.draft.schemaTypes,
+            specials: result.draft.specialStops!.map(stop => [stop.value, stop.color])});
+    });
+
+    it("chooses round measurement steps while storing the original encoding", () => {
+        let id = 0;
+        const numeric = {...speedType().numeric!, unit: "m", scale: 0.1, offset: 0.5};
+        const stops = gradientStopsForNumericRange({min: 1, max: 100}, () => ++id, numeric);
+        expect(stops.map(stop => stop.value)).toEqual([1, 15, 35, 55, 75, 95, 100]);
+    });
+
+    it("refuses mixed meanings without modifying a manually edited scale", () => {
+        const draft = defaultSearchStyleColorDraft("speed");
+        draft.gradientStops = [{id: 1, value: 80, color: "#123456"}];
+        const result = autoInitializeSearchStyleColorDraft(draft,
+            {label: "Speed", value: "speed", incompatibleTypes: true}, () => 2);
+        expect(result.success).toBe(false);
+        expect(result.draft.gradientStops).toEqual(draft.gradientStops);
+    });
+
+    it("offers boolean flag colors without enumerating mask combinations", () => {
+        const draft = {...defaultSearchStyleColorDraft('hasFlag(access, "CAR")'), mode: "categories" as const};
+        let id = 0;
+        const result = autoInitializeSearchStyleColorDraft(draft,
+            {label: "Car", value: draft.field, valueKind: "boolean"}, () => ++id);
+        expect(result.success).toBe(true);
+        expect(serializableCategoryStops(result.draft).map(stop => stop.value)).toEqual([false, true]);
+        expect(result.draft.schemaTypes).toBeUndefined();
+    });
     it.each(["gradient", "categories"] as const)("omits a disabled %s fallback from generated YAML properties", mode => {
         const properties = searchStyleColorProperties({mode, field: "speed",
             stops: [{value: 10, color: "#123456"}]});
@@ -183,34 +241,27 @@ describe("search style color helpers", () => {
         expect(serializableGradientStops(draft)).toBeNull();
     });
 
-    it("auto-generates bounded lower-half-biased numeric gradients from schema ranges", () => {
+    it("uses round thresholds and exact endpoints for numeric gradients", () => {
         let nextId = 1;
         const stops = gradientStopsForNumericRange({min: 0, max: 255}, () => nextId++);
 
-        expect(stops.map(stop => stop.value)).toEqual([0, 26, 51, 77, 102, 128, 191, 255]);
-        expect(stops.length).toBe(8);
+        expect(stops.map(stop => stop.value)).toEqual([0, 50, 100, 150, 200, 250, 255]);
+        expect(stops.length).toBe(7);
         expect(stops.at(-1)?.value).toBe(255);
         expect(stops.every(stop => /^#[0-9a-f]{6}$/.test(stop.color))).toBe(true);
     });
 
-    it("generates observed-data gradients across the whole measured domain", () => {
+    it("generates observed-data gradients across the whole measured range", () => {
         let nextId = 1;
         const stops = gradientStopsForObservedNumericRange({min: 20, max: 90}, () => nextId++);
 
-        expect(stops.map(stop => stop.value)).toEqual([20, 30, 40, 50, 60, 70, 80, 90]);
-        expect(stops.map(stop => stop.color)).toEqual([
-            "#2149ff",
-            "#567dc4",
-            "#8ab18a",
-            "#bfe54f",
-            "#dede30",
-            "#e99c2d",
-            "#f45929",
-            "#ff1726"
-        ]);
+        expect(stops.map(stop => stop.value)).toEqual([20, 40, 60, 80, 90]);
+        expect(stops[0].color).toBe("#2149ff");
+        expect(stops.at(-1)?.color).toBe("#ff1726");
+        expect(new Set(stops.map(stop => stop.color)).size).toBe(stops.length);
     });
 
-    it("auto-generates deterministic unique category colors for enum values", () => {
+    it("auto-generates deterministic category colors for enum values", () => {
         let nextId = 1;
         const stops = categoryStopsForEnumValues(["A", "B", "C"], () => nextId++);
         let secondNextId = 1;
@@ -219,6 +270,15 @@ describe("search style color helpers", () => {
         expect(stops.map(stop => stop.valueText)).toEqual(["A", "B", "C"]);
         expect(new Set(stops.map(stop => stop.color)).size).toBe(3);
         expect(stops.map(stop => stop.color)).toEqual(repeatedStops.map(stop => stop.color));
+    });
+
+    it("keeps label colors stable when catalogs grow or reorder, including color collisions", () => {
+        const labels = Array.from({length: 2000}, (_, index) => `SIGN_${index}`);
+        const palette = (values: string[]) => Object.fromEntries(categoryStopsForEnumValues(values, () => 1)
+            .map(stop => [stop.valueText, stop.color]));
+        const original = palette(labels);
+        expect(palette([...labels].reverse())).toEqual(original);
+        expect(palette(labels.slice(0, 100))).toEqual(Object.fromEntries(Object.entries(original).slice(0, 100)));
     });
 
     it("auto-initializes categories and reports incompatible gradient fields", () => {

@@ -1,4 +1,26 @@
 import type {PointCloudRenderPolicy} from "../point-cloud-policy.model";
+import type {MapSchemaArtifact} from "../../mapdata/source-catalog.model";
+
+/** Installs one required map and its schema before any dependent render task is admitted. */
+export interface TileSubsetLayerRenderCatalogInstall {
+    type: "TileSubsetLayerRenderCatalogInstall";
+    requestId: string;
+    mapId: string;
+    catalogRevision: number;
+    dataSourceInfoBlob: Uint8Array;
+    schemas: MapSchemaArtifact[];
+}
+
+/** Acknowledges native validation, not merely receipt of the catalog message. */
+export interface TileSubsetLayerRenderCatalogInstalled {
+    type: "TileSubsetLayerRenderCatalogInstalled";
+    requestId: string;
+
+    /** Authoritative retained parser keys after bounded cache eviction. */
+    catalogKeys: string[];
+    error?: string;
+}
+
 /** Scene-owned identity assigned to one subset before worker rendering starts. */
 export interface TileSubsetGpuContribution {
     keyLow: number;
@@ -25,11 +47,13 @@ export interface TileSubsetLayerRenderTask {
     viewIndex: number;
     renderKey: string;
     mapTileKey: string;
+
     /** Omitted for object partitions so WASM uses the model's geometry anchor. */
     coordinateOrigin?: [number, number, number];
     sceneGeneration: number;
     packetSequence: number;
     iconCatalogVersion: number;
+
     /** Present only when this worker has not seen the catalog version yet. */
     iconCatalogEntries?: TileSubsetGpuIconCatalogEntry[];
     originSlot: number;
@@ -38,22 +62,28 @@ export interface TileSubsetLayerRenderTask {
     contribution: TileSubsetGpuContribution;
     mapId: string;
     catalogRevision: number;
+
     /** Present only when this worker has not seen the catalog revision yet. */
     dataSourceInfoBlob?: Uint8Array;
     stringPoolId: string;
+
     /** Present only when this worker needs a newer dictionary snapshot. */
     fieldDictBlob?: Uint8Array;
     subsetBlob: Uint8Array;
+
     /** Exact number of geometry vertices stored in the input subset. */
     inputGeometryVertexCount: number;
     styleKey: string;
+
     /** Present only when this worker has not compiled the style yet. */
     styleSource?: string;
     highlightModeValue: number;
     lod: number;
+
     /** World-space RDP tolerance selected from the current view's pixel scale. */
     lineSimplificationToleranceMeters: number;
     pointCloud?: PointCloudRenderPolicy;
+
     /** Reuse the worker's single immutable point-cloud input, verified by cacheKey. */
     reusePointCloudInput?: boolean;
 }
@@ -61,6 +91,7 @@ export interface TileSubsetLayerRenderTask {
 /** Handshake sent as soon as the worker module is loaded. */
 export interface TileSubsetLayerRenderWorkerReady {
     type: "TileSubsetLayerRenderWorkerReady";
+
     /** Final bundled URL used by the browser, suitable for main-thread caching. */
     scriptUrl: string;
 }
@@ -99,13 +130,16 @@ export interface TileSubsetGltfPickProxyBuffers {
 /** Pick identity retained only for the temporary GLTF bridge. */
 export interface TileSubsetPickResult {
     featureId?: string;
+    featureReference?: NamedFeatureReference;
     attributeIndex?: number;
     hasValidity?: boolean;
     validityIndex?: number;
     relationId?: string;
     relationSourceFeatureId?: string;
+    relationSourceReference?: NamedFeatureReference;
     relationIndex?: number;
     memberFeatureIds?: string[];
+    memberFeatureReferences?: NamedFeatureReference[];
 }
 
 /** Entry-sized point-cloud interaction identity; no point coordinates are copied. */
@@ -149,9 +183,12 @@ export interface TileSubsetLayerRenderResult extends Partial<TileSubsetLayerRend
 }
 
 export type TileSubsetLayerRenderWorkerInbound =
+    TileSubsetLayerRenderCatalogInstall |
     TileSubsetLayerRenderTask |
     TileSubsetLayerRenderWorkerInit;
 
 export type TileSubsetLayerRenderWorkerOutbound =
+    TileSubsetLayerRenderCatalogInstalled |
     TileSubsetLayerRenderResult |
     TileSubsetLayerRenderWorkerReady;
+import type { NamedFeatureReference } from "../../inspection/feature-identity.model";

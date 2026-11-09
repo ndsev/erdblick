@@ -145,6 +145,16 @@ export class SearchState {
                 id: entry.id,
                 query: patch.query ?? entry.query
             });
+            // An unresolved shorthand choice is valid only for the input and
+            // scope where it was offered. Accepted searches contain explicit
+            // query text and no ID, so scope edits simply prepare that text.
+            // A completion may provide a new pending choice atomically.
+            const meaningContextChanged = updated.query !== entry.query || updated.scope !== entry.scope ||
+                JSON.stringify(updated.selectedMapLayers) !== JSON.stringify(entry.selectedMapLayers) ||
+                JSON.stringify(updated.selectedFeatureTypes) !== JSON.stringify(entry.selectedFeatureTypes);
+            if (meaningContextChanged && !Object.hasOwn(patch, "interpretationIds")) {
+                delete updated.interpretationIds;
+            }
             return updated;
         });
         if (updated) {

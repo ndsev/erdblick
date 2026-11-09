@@ -60,6 +60,12 @@ export class ViewVisualizationState {
     tileOrder = new Map<number, number>();
     coverageVersion = 0;
 
+    /**
+     * Recompute viewport coverage for each distinct level, capped by tileLimit.
+     * Canonical camera counts drive style LOD independently of tilted viewport
+     * coverage. Increment coverageVersion only when tile membership or line
+     * simplification changes; search-specific coverage is cleared on every call.
+     */
     recalculateTileIds(
         tileLimit: number,
         levels: Iterable<number>,
@@ -96,6 +102,9 @@ export class ViewVisualizationState {
                 tileOrder.set(tileId, order);
             });
         }
+
+        // Camera motion can change LOD inputs without changing the loaded tiles.
+        // Keep these counts fresh even when no coverage publication is needed.
         const coverageChanged =
             nextLineSimplificationToleranceMeters !==
                 this.lineSimplificationToleranceMeters ||
@@ -113,6 +122,7 @@ export class ViewVisualizationState {
         if (!coverageChanged) {
             return;
         }
+
         this.visibleTileIds = visibleTileIds;
         this.visibleTileIdsPerLevel = visibleTileIdsPerLevel;
         this.visibleTileIdSetsPerLevel = visibleTileIdSetsPerLevel;

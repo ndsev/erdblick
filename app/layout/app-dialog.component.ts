@@ -636,6 +636,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         return overlapWidth >= this.layout.baseFontSize * this.dockDropThresholdEm && overlapHeight > 0;
     }
 
+    /** Rebind the current dialog header after its DOM is created or replaced. */
     private bindDockDropCue(): void {
         this.detachDockCueHeaderDown?.();
         this.detachDockCueHeaderDown = undefined;
@@ -649,6 +650,10 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         this.detachDockCueHeaderDown = this.renderer.listen(header, 'mousedown', () => this.startDockDropCueTracking());
     }
 
+    /**
+     * Track overlap while the floating header is dragged. Mouse and pointer
+     * listeners cover both the dialog library and browser gesture event paths.
+     */
     private startDockDropCueTracking(): void {
         if (!this.dockDropCue) {
             return;
@@ -666,6 +671,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         });
     }
 
+    /** Show the target cue only while this dialog is dragging over a valid dock area. */
     private updateDockDropCue(): void {
         if (!this.dragging || !this.dockDropCue) {
             this.clearDockDropCue();
@@ -674,6 +680,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         this.setDockDropCue(this.overlapsDockDropTarget());
     }
 
+    /** Toggle the dock target's shared visual cue without moving the dialog. */
     private setDockDropCue(active: boolean): void {
         const target = this.dockDropTarget();
         if (!target) {
@@ -694,6 +701,10 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         return document.querySelector(this.dockDropTargetSelector) as HTMLElement | null;
     }
 
+    /**
+     * Remove transient window listeners. Preserve the header listener between
+     * gestures by passing false; teardown also removes the header binding.
+     */
     private detachDockDropCueTracking(clearHeader = true): void {
         if (clearHeader) {
             this.detachDockCueHeaderDown?.();

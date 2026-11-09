@@ -243,6 +243,7 @@ export class InspectionState {
         return this.drillPickRadiusState.getValue();
     }
 
+    /** Normalize the pick radius to supported whole CSS pixels; ignore non-finite edits. */
     set drillPickRadius(val: number) {
         const numeric = Number(val);
         if (!Number.isFinite(numeric)) {

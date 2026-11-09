@@ -69,7 +69,7 @@ describe("deferred incoming inspection", () => {
         expect(loadingTree[0].data.incomingLoading).toBe(true);
         expect(loadingTree[0].data.retryIncoming).toBeUndefined();
         resolve({model: [{key: "Incoming Relations", children: [{mapTileKey: "source", key: "Lane.7"}]}],
-            complete: true, issues: []});
+            complete: true, status: "complete", scope: ["Features:Map:Road:1"], issues: []});
         await Promise.resolve();
         const section = component.incomingSection(feature);
         expect(section.incomingLoading).toBe(false);
@@ -85,7 +85,7 @@ describe("deferred incoming inspection", () => {
         const refreshed = {isNull: () => false, delete: vi.fn(), geojson: () => '{"type":"Feature","id":"Surface.1","properties":{"revision":2}}'};
         const target = {peek: (callback: any) => callback({find: () => refreshed})};
         const tile = {hasIncomingRelations: () => true, loadIncoming: vi.fn().mockResolvedValue({
-            model: [], target, complete: true, issues: []
+            model: [], target, complete: true, status: "complete", scope: ["Features:Map:Road:1"], issues: []
         })};
         const {component, feature} = harness(tile);
         component.selectedFeatures = [feature];
@@ -107,7 +107,7 @@ describe("deferred incoming inspection", () => {
         tile.loadIncoming.mockImplementation(() => new Promise(r => finish = r));
         component.retryIncoming(feature);
         component.ngOnDestroy();
-        finish({model: [], complete: true, issues: []});
+        finish({model: [], complete: true, status: "complete", scope: ["Features:Map:Road:1"], issues: []});
         await Promise.resolve();
         expect(component.incoming.size).toBe(0);
     });
@@ -115,7 +115,7 @@ describe("deferred incoming inspection", () => {
     it("renews finite dependencies while keeping the existing rows available for expansion restoration", async () => {
         vi.useFakeTimers();
         const result = {model: [{key: 'Incoming Relations', children: [{key: 'Lane.7', nodeId: 'owner'}]}],
-            complete: true, issues: [], expiresAtMs: Date.now() + 1000};
+            complete: true, status: "complete", scope: ["Features:Map:Road:1"], issues: [], expiresAtMs: Date.now() + 1000};
         const tile = {hasIncomingRelations: () => true, loadIncoming: vi.fn().mockResolvedValueOnce(result)
             .mockImplementation(() => new Promise(() => {}))};
         const {component, feature} = harness(tile);

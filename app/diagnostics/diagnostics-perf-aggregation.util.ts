@@ -11,17 +11,20 @@ import {
 } from "./diagnostics.constants";
 import type {PerfStat} from "./diagnostics.model";
 
+/** Match a declared unit suffix case-insensitively. */
 function parsePerfUnit(key: string): string | undefined {
     const lower = key.toLowerCase();
     return UNIT_SUFFIXES.find(entry => lower.endsWith(entry.suffix))?.unit;
 }
 
+/** Remove only a known suffix, retaining the metric's original spelling. */
 function stripPerfUnitSuffix(key: string): string {
     const lower = key.toLowerCase();
     const suffix = UNIT_SUFFIXES.find(entry => lower.endsWith(entry.suffix));
     return suffix ? key.slice(0, key.length - suffix.suffix.length) : key;
 }
 
+/** Prefer explicit units; infer counts only for integer samples with count-like keys. */
 function resolvePerfUnit(key: string, values: number[]): string | undefined {
     return parsePerfUnit(key) ??
         (values.every(Number.isInteger) &&
@@ -73,7 +76,10 @@ function accumulatePerfValues(
     statsByKey.set(key, existing);
 }
 
-/** Aggregates only current-generation, already deduplicated diagnostics rows. */
+/**
+ * Aggregate finite samples from ready rows; callers supply current-generation,
+ * deduplicated rows. Averages weight samples equally, rather than weighting tiles.
+ */
 export function buildAggregatedPerfStats(
     tiles: Iterable<SubsetDiagnosticsTile>,
     maxPeakTileIds = 5,

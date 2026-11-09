@@ -47,7 +47,7 @@ export class ExternalViewerService implements AppActionContributor {
         return this.configService.snapshot.externalViewers;
     }
 
-    /** Resolves an explicit point or falls back to the active marker and focused viewport centre. */
+    /** Uses a caller-validated explicit point, otherwise the active marker or focused viewport centre. */
     resolveLocation(explicit?: ExternalViewerLocation): ResolvedExternalViewerLocation {
         if (explicit) {
             return { ...explicit, source: "input" };
@@ -63,7 +63,10 @@ export class ExternalViewerService implements AppActionContributor {
         return { lon: destination.lon, lat: destination.lat, source: "viewport" };
     }
 
-    /** Opens one provider at the supplied WGS84 point in a separate browser tab. */
+    /**
+     * Request a separate browser tab for one configured provider at the supplied
+     * WGS84 point. Invalid coordinates are ignored.
+     */
     open(provider: ExternalViewerProvider, location: ExternalViewerLocation): void {
         if (!isValidExternalViewerLocation(location)) {
             return;
@@ -78,14 +81,14 @@ export class ExternalViewerService implements AppActionContributor {
         window.open(url.toString(), "_blank", "noopener");
     }
 
-    /** Formats the coordinate and fallback source shown below an external-viewer action. */
+    /** Identifies the coordinate source beside an external-viewer's parameter bubbles. */
     private externalViewerLabel(location: ResolvedExternalViewerLocation): string {
         const sourceLabels = {
-            input: "search input",
-            marker: "current marker",
-            viewport: "viewport centre"
+            input: "Input Coordinates",
+            marker: "Current Marker",
+            viewport: "Map Centre"
         } as const;
-        return `lat = ${location.lat} | lon = ${location.lon} | ${sourceLabels[location.source]}`;
+        return sourceLabels[location.source];
     }
 
     /** Resolves valid explicit coordinates or applies the shared marker/viewport fallback. */
@@ -113,6 +116,7 @@ export class ExternalViewerService implements AppActionContributor {
     private looksLikeCoordinateInput(value: string): boolean {
         return (value.match(/-?\d+(?:\.\d+)?/g) ?? []).length >= 2;
     }
+
     /** Registers semantic operations and their live omnibar candidates. */
     registerActions(actions: AppActionRegistration): void {
         actions.registerAction(
@@ -143,9 +147,15 @@ export class ExternalViewerService implements AppActionContributor {
                     name: provider.name,
                     icon: "pi-map-marker",
                     color: "green",
-                    label: location
-                        ? this.externalViewerLabel(location)
-                        : 'lat = ? | lon = ?<br><span class="omnibar-option-warning">Invalid coordinates</span>',
+                    label: "",
+                    // A fallback location is already visible on the map. Its
+                    // source badge is sufficient; typed coordinates retain
+                    // their parameter bubbles for checking the input order.
+                    bubbles: location && location.source !== "input"
+                        ? [{value: this.externalViewerLabel(location)}] : [
+                        {name: "lat", value: location?.lat},
+                        {name: "lon", value: location?.lon}
+                    ],
                     enabled: location !== undefined,
                     acceptsEmptyInput: true,
                     saveToHistory: this.explicitExternalViewerLocation(query) !== undefined,

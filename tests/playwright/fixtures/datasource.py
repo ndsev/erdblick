@@ -20,9 +20,19 @@ def add_base_example_feature(tile: mapget.TileFeatureLayer, featureId = 0) -> No
     geom.append(41.0, 11.0)
     geom.append(Pt(x=42.0, y=12.0, z=506))
 
-    # Assign geometry (high-level)
-    feature.add_point(Pt(42.5, 11.6))
-    feature.add_points([Pt(42.5, 11.6), Pt(42.5, 11.8)])
+    # Point grouping consumes a one-tile halo, so each point must belong to
+    # its source partition. Keep IDs/attributes available in the inspection
+    # anchor tile, but do not duplicate these absolute points into every tile.
+    tile_id = tile.tile_id()
+    point = Pt(42.5, 11.6)
+    if mapget.TileId.from_wgs84(point.x, point.y, tile_id.level()) == tile_id:
+        feature.add_point(point)
+    points = [point for point in [Pt(42.5, 11.6), Pt(42.5, 11.8)]
+              if mapget.TileId.from_wgs84(point.x, point.y, tile_id.level()) == tile_id]
+    if points:
+        feature.add_points(points)
+
+    # Assign the remaining geometry (high-level).
     feature.add_line([Pt(42.5, 11.6), Pt(42.5, 11.7)])
     feature.add_mesh([Pt(42.5, 11.6), Pt(42.5, 11.7), Pt(42.2, 11.7)])
     feature.add_poly([Pt(42.5, 11.6), Pt(42.5, 11.7), Pt(42.2, 11.7), Pt(42.2, 11.3)])
@@ -58,6 +68,14 @@ def add_base_example_feature(tile: mapget.TileFeatureLayer, featureId = 0) -> No
     # attr.set_direction(mapget.Direction.POSITIVE)
     attr.add_field("speedLimitKmh", 50)
 
+    # Two deliberately colliding meanings exercise confirmed search preparation:
+    # an attribute named SPEED_LIMIT and a warning-sign enum with that name.
+    speed = attr_layer.new_attribute("SPEED_LIMIT")
+    speed.add_field("attributeValue", {"speed": 50 + featureId})
+    warning = attr_layer.new_attribute("WARNING_SIGN")
+    warning.add_field("attributeValue", {"warningSign":
+        "SPEED_LIMIT" if featureId == 0 else "ANIMALS" if featureId == 1 else "OTHER"})
+
     # Add a child feature ID
     # TODO: Add Python bindings for relations.
     # feature.children().append(tile.new_feature_id("Way", [("wayId", 10)]))
@@ -79,6 +97,57 @@ ds = mapget.DataSourceServer(
     {
         "layers": {
             "WayLayer": {
+                # Declare a nested field independently of materialized tiles so
+                # browser tests can exercise schema-backed worker completion.
+                # Other example attributes remain open, dynamically typed data.
+                "featureModelSchema": {
+                    "oneOf": [{"$ref": "#/$defs/Way"}],
+                    "$defs": {
+                        "AttributeLayers": {
+                            "type": "object",
+                            "x-mapget": {"metaType": "AttributeLayerMap", "featureType": "Way"},
+                            "properties": {"rules": {"$ref": "#/$defs/Rules"}},
+                        },
+                        "Rules": {
+                            "type": "object", "x-mapget": {"metaType": "AttributeContainer"},
+                            "properties": {
+                                "SPEED_LIMIT": {"$ref": "#/$defs/SpeedLimit"},
+                                "WARNING_SIGN": {"$ref": "#/$defs/WarningSign"},
+                            },
+                        },
+                        "SpeedLimit": {
+                            "type": "object",
+                            "x-mapget": {"metaType": "Attribute", "attributeTypeCode": "SPEED_LIMIT"},
+                            "properties": {"attributeValue": {
+                                "type": "object", "properties": {"speed": {"type": "integer", "minimum": 0, "maximum": 255}},
+                            }},
+                        },
+                        "WarningSign": {
+                            "type": "object",
+                            "x-mapget": {"metaType": "Attribute", "attributeTypeCode": "WARNING_SIGN"},
+                            "properties": {"attributeValue": {
+                                "type": "object", "properties": {"warningSign": {
+                                    "type": "string", "enum": ["SPEED_LIMIT", "ANIMALS", "OTHER"],
+                                }},
+                            }},
+                        },
+                        "Way": {
+                            "type": "object",
+                            "x-mapget": {"metaType": "Feature", "featureType": "Way"},
+                            "properties": {
+                                "typeId": {"const": "Way"},
+                                "properties": {
+                                    "type": "object",
+                                    "x-mapget": {"metaType": "FeatureProperties", "featureType": "Way"},
+                                    "properties": {
+                                        "isBridge": {"type": "boolean"},
+                                        "layer": {"$ref": "#/$defs/AttributeLayers"},
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
                 "featureTypes": [
                     {
                         "name": "Way",

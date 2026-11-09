@@ -4,6 +4,7 @@ import {
     formatFeatureInspectionTarget,
     hasFeatureInspectionValidity,
     isFeatureInspectionSubTarget,
+    namedFeatureReferenceJson,
     parseFeatureInspectionTarget,
     stripFeatureInspectionTarget,
     stripFeatureInspectionValidity,
@@ -16,6 +17,31 @@ const target = (featureId: string, mapTileKey = "Map/Layer/42") => ({
 });
 
 describe("tile feature interaction identity", () => {
+    it("writes named foreign parts without losing integer precision, names or string types", () => {
+        const reference = {
+            mapId: "Target / map", typeId: "Road",
+            id: Object.assign(Object.create(null), {large: 9223372036854775807n,
+                negative: -9223372036854775808n, decimalText: "9223372036854775807", small: 42},
+                JSON.parse('{"__proto__":"literal","quoted\\\"key":"\\\"\\\\"}'))
+        };
+        const json = namedFeatureReferenceJson(reference);
+        expect(json).toContain('"large":9223372036854775807');
+        expect(json).toContain('"negative":-9223372036854775808');
+        expect(json).toContain('"decimalText":"9223372036854775807"');
+        const decoded = JSON.parse(json);
+        expect(decoded.id.__proto__).toBe("literal");
+        expect(decoded.id['quoted"key']).toBe('"\\');
+        expect(decoded.id.small).toBe(42);
+    });
+
+    it("rejects already rounded or out-of-range foreign integer parts", () => {
+        const invalid: Array<Record<string, string | number | bigint>> = [
+            {part: 9007199254740992}, {part: 9223372036854775808n}, {part: 1.5}, {}
+        ];
+        for (const id of invalid) {
+            expect(() => namedFeatureReferenceJson({mapId: "Target", typeId: "Road", id})).toThrow();
+        }
+    });
     it("round-trips canonical attribute and relation targets", () => {
         const attribute = parseFeatureInspectionTarget(
             "Road.7:attribute#2:validity#1"

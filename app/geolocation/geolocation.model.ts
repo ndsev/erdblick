@@ -143,7 +143,10 @@ export const DEFAULT_LOCATION_SEARCH_CONFIG: LocationSearchConfig = {
     debounceMs: 150
 };
 
-/** Normalizes configured location-search providers and behavior knobs. */
+/**
+ * Normalize providers and behavior knobs, keeping the first valid entry per ID.
+ * An empty or fully rejected provider list restores the built-in default provider.
+ */
 export function normalizeLocationSearch(locationSearch: RawLocationSearchConfig | undefined): LocationSearchConfig {
     const rawProviders = Array.isArray(locationSearch?.providers) && locationSearch.providers.length > 0
         ? locationSearch.providers

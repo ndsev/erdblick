@@ -1173,6 +1173,7 @@ void GpuRenderPacketBuilder::appendSurface(
     if (xy == 0.0 && xz == 0.0 && yz == 0.0) {
         return;
     }
+    // Use the largest projected outer-ring area so vertical surfaces also triangulate.
     auto const axes = xy > xz && xy > yz
         ? std::array<uint32_t, 2>{0U, 1U}
         : xz > yz
@@ -1672,6 +1673,8 @@ void GpuRenderPacketBuilder::Impl::emitFragments(
         appendOwnedRecords(source.labels, &GpuRenderPacketData::labels);
         appendOwnedRecords(source.issues, &GpuRenderPacketData::issues);
 
+        // Keep each contribution's z-index table intact. Earlier fragments may refer
+        // to it; the consumer assembles the revision before activating its records.
         auto withZIndices = fragment;
         withZIndices.contributions.front().zIndices = contribution.zIndices;
         if (!fits(withZIndices)) {
@@ -1729,6 +1732,7 @@ void GpuRenderPacketBuilder::Impl::emitFragments(
         auto& fragment = fragments[index];
         fragment.fragmentIndex = index;
         fragment.fragmentCount = fragmentCount;
+        // Only the final fragment commits the assembled revision.
         fragment.flags = index + 1U == fragmentCount
             ? GpuRenderPacketFlag::RevisionComplete
             : GpuRenderPacketFlag::None;

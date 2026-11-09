@@ -100,6 +100,47 @@ Schema analysis normalizes the search query before runtime style compilation.
 Outgoing render and result channels therefore use `rewrite: false`; every
 filter and projected field is still schema-compiled by mapget.
 
+Confirmed shorthand first goes through `LayerSchema::searchInterpretations`.
+Each choice carries an ordinary, editable `expression` and source-local
+execution plans. Choosing it replaces the session query with that expression
+and clears the temporary interpretation ID. Adding maps or changing result
+scope prepares that same text again; it does not re-resolve the old shorthand.
+For example, a warning-sign choice becomes `**.warningSign == "SPEED_LIMIT"`
+regardless of the schema hash or versioned name of the enum that suggested it.
+
+Automatic selection of a unique attribute preserves its original shorthand.
+For example, `SPEED_LIMIT_METRIC` stays in the editor while the attribute-root
+plan executes `$name == "SPEED_LIMIT_METRIC"`. New scope selections recheck
+that shorthand for ambiguity. Disabled searches skip preparation; their tabs
+remain accessible with a static disabled status, even without a prepared plan.
+
+Each plan's `query` evaluates the expression at its concrete feature or
+attribute root. Explicit feature-root attribute paths may need rebasing, while
+recursive field predicates remain unchanged. Inferred owners drive initial
+styling, not persistent query restrictions. Map/layer routing and explicit
+feature-type selection belong to the request; exact schema IDs only validate
+the temporary plan. Standalone stylesheet export adds source guards because
+it no longer has the search's map selector.
+
+Completion origins describe where a suggestion was found; they do not define
+where the accepted expression can run. Omnibar submission starts with active
+layers, falling back to completion origins only when no layers are active.
+Completion within an existing search preserves its explicit source selection.
+
+Style discovery receives all prepared attribute owners together through
+`preparedContexts`. Native discovery visits those exact owners without
+normalizing the predicate again and shares its compact field/type tables across
+sources. One worker request installs the selected schema set once, avoiding
+per-owner installation and repeated metadata transfers. The cache depends on
+the selected schemas and owners, so another predicate over the same owners can
+reuse that inventory. Feature inventories are likewise independent of predicates;
+unresolved attribute expressions still use ordinary native normalization.
+
+The Visualization tab creates its editor on first opening. Collapsed rules retain
+their drafts but release their controls. This keeps large enum palettes out of
+the DOM during preparation and while viewing results; OnPush change detection
+alone would still pay the cost of constructing all those hidden controls.
+
 Recursive paths such as `**.numLanes.normalLanes` participate in Auto scope
 inference through SIMFIL's schema-path analysis. If the schema also exposes a
 matching basic feature property, Auto remains feature-scoped rather than
@@ -266,24 +307,110 @@ Search result subsets never hydrate or share a complete source tile.
 
 ## Completion and schema analysis
 
-Style-field discovery must follow compiled schema aliases when reading JSON
-metadata. In particular, mapget's feature-root `attributes` alias points to
-`properties`; both paths must expose identical numeric bounds and enum symbols.
-This is a schema-identity check, not a global spelling substitution: nested
-source fields literally named `attributes` retain their own metadata.
+Style-field discovery traverses installed native schema types and exports a
+compact inventory. Feature properties appear only under `attributes` in the
+picker; explicit queries and existing styles can still use `properties`. This is
+a feature-root alias rule, not a global spelling substitution: nested fields
+literally named `properties` or `attributes` retain their own metadata.
 
-The completion worker uses datasource `featureModelSchema` plus parser-owned
-string/schema state. It provides:
+`TileLayerParser.searchStyleFieldsForQuery(query, scope, options)` accepts selected
+map/layers, `selectedFeatureTypes`, an optional exact `context`, a semantic `path`,
+`recursive`, and `values: "scalar" | "all"`. Path steps are field-name strings or
+`{elements: true}` for array traversal. Native code resolves each step, including
+all schema alternatives, and produces the corresponding Simfil expression. The
+UI does not maintain a second schema graph or parse field expressions.
+
+The response contains `contexts`, `types`, `fields`, `branches`, `complete` and
+`incompleteReason`. A field holds its expression, one type-table index and all
+context indices in which that meaning applies. Metadata is exported once per
+exact schema/type. Native rows preserve distinct meanings; the editor offers
+one choice per expression and withholds conflicting type metadata rather than
+silently choosing the first owner. Automatic preparation retains each source
+and attribute owner until all sources have contributed their rules. Equal
+appearances then merge, and a discovery condition is removed only when doing
+so admits no prepared context requiring a different appearance. Reduction
+prefers attribute names over source IDs and owner layout; one conjunction
+remains ordinary editable filter rows. Exact color type guards stay intact.
+Mixed feature/attribute roots retain their result scope, while equal rules can
+still merge across sources within that scope. Live rendering and YAML export
+use the same applicability check; optional map/layer selectors retain explicit
+source restrictions. Each
+attribute context may supply `primaryValuePath`,
+the unambiguous native scalar shorthand, so common validity/source metadata does
+not displace the attribute value in automatic coloring.
+
+Prepared attribute owners also carry `queriedPaths`, derived from native
+Simfil references at the branch's actual result root. Positive comparisons
+exclude paths whose declared types cannot match their literal. An explicit
+predicate therefore cannot select unrelated numeric references merely because
+they share a leaf name such as `value`. An empty path list uses solid styling;
+absence permits the primary scalar for a whole-attribute query. Unknown
+metadata remains conservative for search membership, without inventing a
+color scale. These query-specific paths are separate from the cached owner
+inventory, so the field picker still exposes all declared fields.
+
+Scalar requests omit container descriptors while retaining navigable branches.
+`complete` concerns declared paths in the requested subtree, not whether an open
+schema lists every possible runtime field. Recursive cycles are reported and can
+be explored explicitly through the native API. The rule editor requests recursive
+scalar discovery without a separate branch/context UI; custom expressions and
+completion remain available for deeper recursive paths. Attribute discovery uses
+`LayerSchema.normalizeSearchQuery`, exactly as execution does, rather than the
+broader leaf/enum inference used for layer suggestions.
+
+Implicit discovery skips edges marked `Schema::FieldRole::Context`, including
+the owner-feature overlays. Explicit lookup through `$feature`, `$source` and
+`$target` remains valid. Ordinary data fields beginning with `$` are not excluded
+by spelling.
+
+The completion worker installs binary `MapSchema` artifacts and their source
+metadata into parser-owned state. Installation must succeed before a query runs;
+failure is explicit rather than an empty completion result. Requests are serialized
+within a worker lane and checked against their selected maps' model generations
+before installation and after completion. It provides:
 
 - syntax diagnostics;
 - direct/nested field completion;
-- enum values and numeric ranges;
+- enum values, ordinary numeric ranges, named numeric specials and flag types;
 - feature/attribute ownership analysis;
 - candidate label/category/gradient fields.
+
+The omnibar requests completion from all currently ready feature layers, including
+hidden ones. Unavailable sources do not block suggestions from other maps.
+Confirmed-search preparation still checks every explicitly selected source.
+
+Native attribute completions retain the plain name, with any ambiguity resolved
+after confirmation. Enum completions insert predicates. Whole-query completions
+mark `isExactMatch` when the draft already spells
+the symbol fully, before expanding it into a predicate. The editor uses that
+flag to submit a complete name on Enter; partial names still accept the selected
+suggestion first. TypeScript does not parse the suggested expression to recover
+its original symbol.
+
+Feature inventories are cached independently of the predicate, keyed by source
+generation and discovery options. Attribute inventories also retain the query
+because it selects their semantic owners. Concurrent identical requests share
+one result, and the component reuses its dropdown arrays when that inventory is
+unchanged. Failures never become a cached empty inventory.
+
+Performance entries separate native enumeration and validation in the worker
+from delivery, main-thread aggregation and the next animation frame:
+`erdblick.search.style-fields.worker`, `.apply` and `.next-frame`. Worker detail
+contains `nativeMs`, `normalizationMs` and `deliveryMs`. Delivery includes
+structured cloning and queue delay; the next-frame interval is a scheduling
+measurement, not a claim about rendering CPU. Use a browser trace to assess
+layout/paint and retain the selected scope alongside comparative measurements.
 
 This worker is advisory. Backend compilation remains authoritative.
 `rewrite: false` still schema-compiles for correctness and speed; it merely
 skips search-query normalization.
+
+Result and trace summaries retain separate groups for each exact schema/type
+pair, plus a separate unqualified group. Identical expression text does not imply
+identical units or exceptional values. Named sentinels remain in raw histograms
+but do not contribute to ordinary numeric ranges or averages. Trace call counts
+and timings describe the whole trace and are repeated on its type cards; do not
+sum those cards to obtain a total trace duration.
 
 ## Diagnostics
 

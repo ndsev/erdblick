@@ -31,7 +31,11 @@ export interface ConfigDefaultStateMeta {
     entries: Record<string, ConfigDefaultStateMetaEntry>;
 }
 
-/** Produces a detached clone suitable for app-state snapshots and comparisons. */
+/**
+ * Produces a detached clone suitable for app-state snapshots and comparisons.
+ * Handles acyclic arrays, own enumerable object fields and Dates; object prototypes
+ * are discarded.
+ */
 export function cloneStateValue<T>(value: T): T {
     if (value === null || typeof value !== 'object') {
         return value;
@@ -49,7 +53,7 @@ export function cloneStateValue<T>(value: T): T {
     return result as T;
 }
 
-/** Serializes state values with deterministic key ordering. */
+/** Serialize acyclic JSON-like state with sorted object keys and an explicit undefined sentinel. */
 export function stableSerializeStateValue(value: unknown): string {
     if (value === null) {
         return "null";
@@ -74,7 +78,7 @@ export function stableSerializeStateValue(value: unknown): string {
     return JSON.stringify(value);
 }
 
-/** Computes a stable hash for a state value. */
+/** Compute a stable 32-bit state fingerprint; equal hashes do not prove equal values. */
 export function hashStateValue(value: unknown): string {
     const serialized = stableSerializeStateValue(value);
     let hash = 0x811c9dc5;

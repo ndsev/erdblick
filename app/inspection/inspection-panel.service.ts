@@ -47,6 +47,10 @@ import { InspectionState } from "./inspection.state";
  */
 @Injectable({ providedIn: "root" })
 export class InspectionPanelService implements AppActionContributor {
+    /**
+     * Assign live panel lifetime tokens and prune layout/tree state when selections
+     * retire, so delayed actions cannot target a new panel reusing the same numeric ID.
+     */
     constructor(private readonly persistence: AppStateService,
         private readonly layout: LayoutService,
         private readonly infoMessageService: InfoMessageService,
@@ -762,6 +766,7 @@ export class InspectionPanelService implements AppActionContributor {
             others
         };
     }
+
     /** Registers semantic operations and their live omnibar candidates. */
     registerActions(actions: AppActionRegistration): void {
         actions.registerAction(
@@ -888,6 +893,10 @@ export class InspectionPanelService implements AppActionContributor {
         this.persistence.transaction(() => this.unsetPanel(panelId));
     }
 
+    /**
+     * Publish the inspection preference form as one persisted change so selection
+     * limits and tree presentation observers see a consistent set of values.
+     */
     setInspectionPreferences(value: {
         limit: number;
         drillPickRadius: number;
@@ -906,6 +915,7 @@ export class InspectionPanelService implements AppActionContributor {
         });
     }
 
+    /** Read the action-facing presentation state of a live panel; reject retired IDs. */
     panelPresentation(panelId: number) {
         const panel = this.state.selection.find((panel) => panel.id === panelId);
         if (!panel) rejectAction("The inspection no longer exists");
@@ -917,6 +927,10 @@ export class InspectionPanelService implements AppActionContributor {
         };
     }
 
+    /**
+     * Validate the docked/locked invariant before changing any panel fields, then
+     * publish the complete edit in one persistence transaction.
+     */
     setPanelPresentation(
         panelId: number,
         value: { locked: boolean; undocked: boolean; focused: boolean; color: string }

@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, Input, OnChanges, OnDestroy } from "@angular/core";
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, OnChanges, OnDestroy } from "@angular/core";
 import { OverlayOptions } from "primeng/api";
 import { Subscription } from "rxjs";
 import { InfoMessageService } from "../diagnostics/info.service";
@@ -10,9 +10,7 @@ import { MapViewState } from "../mapview/mapview.state";
 import type { FeatureSearchAutoStyleOption } from "./feature-search-auto-style.util";
 import {
     defaultSearchStyleFieldOptionsForAnalysis,
-    preferredSearchAutoStyleField,
-    searchAutoStyleFieldOptions,
-    searchAutoStyleFieldOptionsArePortable
+    preferredSearchAutoStyleField
 } from "./feature-search-auto-style.util";
 import type { FeatureSearchResolvedDefinition } from "./feature-search-runtime-state.model";
 import { FeatureSearchSchemaService } from "./feature-search-schema.service";
@@ -47,7 +45,9 @@ import {
     projectStyleSourceForSearch,
     SearchStyleApplicationProjection
 } from "./search-style-sheet.converter";
-import type { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldCandidate } from "./search.model";
+import type { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldCandidate, FeatureSearchStyleFieldContext, FeatureSearchStyleFieldInventory } from "./search.model";
+import {searchStyleFieldCandidates} from "./search.model";
+import {schemaScalarMeaning} from "../mapdata/schema-type.model";
 import { SearchValueSummariesState, SearchValueSummary } from "./search.model";
 import { SearchService } from "./search.service";
 
@@ -61,7 +61,7 @@ interface FeatureSearchSavedStyleOption {
     projection?: SearchStyleApplicationProjection;
 }
 /** Owns one search's visualization drafts, schema field requests, and save workflow. */
-@Component({selector: "search-visualization", standalone: false, host: {style: "display:contents"}, template: `                        <div class="feature-search-style-rules" data-testid="feature-search-style-rules">
+@Component({selector: "search-visualization", changeDetection: ChangeDetectionStrategy.OnPush, standalone: false, host: {style: "display:contents"}, template: `                        <div class="feature-search-style-rules" data-testid="feature-search-style-rules">
                             <section class="feature-search-visualization-controls">
                                 <div class="feature-search-style-control-group feature-search-density-map">
                                     <div class="feature-search-style-control-header feature-search-density-header">
@@ -188,6 +188,11 @@ interface FeatureSearchSavedStyleOption {
                                     {{ searchStyleApplicationMessage }}
                                 </div>
                             }
+                            @if (styleAttributeOptionsError) {
+                                <div class="feature-search-style-application-message warning" role="status">
+                                    {{ styleAttributeOptionsError }}
+                                </div>
+                            }
                             <search-style-rule-editor
                                 [drafts]="styleRuleDrafts"
                                 (draftsChange)="onSharedStyleRuleDraftsChange($event)"
@@ -235,14 +240,17 @@ export class SearchVisualizationComponent implements OnChanges, OnDestroy {
         private readonly styleEditorRequestService: StyleEditorRequestService,
         private readonly infoMessageService: InfoMessageService, public readonly viewSettings: MapViewState,
         private readonly changeDetector: ChangeDetectorRef) {
-        this.subscriptions.add(this.styleService.styleGroups.subscribe(() => this.scheduleRefresh()));
+        this.subscriptions.add(this.styleService.styleGroups.subscribe(() => {
+            this.searchStyleOptionsScope = undefined;
+            this.scheduleRefresh();
+        }));
         this.subscriptions.add(this.mapService.maps$.subscribe(() => {
             this.styleAttributeOptionsSessionSignature = "";
             this.scheduleRefresh();
         }));
     }
 
-    /** Defers auto-rule commits until the current Angular input check has finished. */
+    /** Defers editor draft synchronization until the current Angular input check has finished. */
     ngOnChanges(): void { this.scheduleRefresh(); }
 
     /** Retires pending field responses and local editor schedules together. */
@@ -253,28 +261,25 @@ export class SearchVisualizationComponent implements OnChanges, OnDestroy {
         if (this.styleAttributeOptionsRefreshTimer !== null) clearTimeout(this.styleAttributeOptionsRefreshTimer);
         this.styleAttributeOptionsSessionSignature = "";
     }
-
-    /** Coalesces session/catalog changes without rebuilding drafts on every streamed result. */
+    /** Updates editor drafts only when their definition or catalog changes, never on pan progress. */
     private scheduleRefresh(): void {
         if (this.destroyed || this.refreshTimer !== null) return;
         this.refreshTimer = setTimeout(() => {
             this.refreshTimer = null;
             const session = this.session;
             if (this.destroyed || !session || session.id !== this.searchId) return;
-            this.changeDetector.markForCheck();
-            this.refreshSearchStyleOptions();
+            if (this.searchStyleOptionsScope !== this.resolvedStyleSearchScope()) {
+                this.refreshSearchStyleOptions();
+            }
             const signature = this.staticSessionSyncSignatureFor(session);
-            const changed = signature !== this.staticSessionSyncSignature;
-            if (changed) {
+            if (signature !== this.staticSessionSyncSignature) {
                 this.staticSessionSyncSignature = signature;
                 this.syncStyleRulesFromSession(session.definition.searchStyleRules ?? []);
             }
-            const hasRules = (session.definition.searchStyleRules?.length ?? 0) > 0;
-            const fieldsScheduled = this.refreshStyleAttributeOptionsIfNeeded(session, hasRules);
-            if (changed && !fieldsScheduled) {
-                if (hasRules && this.applyDefaultStyleFieldIfMissing()) this.onStyleRulesChanged();
-                else if (!hasRules) this.tryCreateAutoStyleRule(session);
-            }
+            // Automatic rules are prepared before backend execution; opening this
+            // editor only loads fields and must never generate another rule set.
+            this.refreshStyleAttributeOptionsIfNeeded(session);
+            this.changeDetector.markForCheck();
         }, 0);
     }
 
@@ -311,7 +316,7 @@ export class SearchVisualizationComponent implements OnChanges, OnDestroy {
     /** Limits automatic defaults to fields that belong to the resolved query scope. */
     private defaultStyleFieldOptionsForSession(session: FeatureSearchSession | undefined): FeatureSearchStyleOption[] {
         return defaultSearchStyleFieldOptionsForAnalysis(
-            this.styleScalarAttributeOptions,
+            this.styleAttributeOptions.filter(option => this.isScalarStyleField(option)),
             session?.schemaAnalysis);
     }
 
@@ -329,7 +334,7 @@ export class SearchVisualizationComponent implements OnChanges, OnDestroy {
     }
 
     private styleFieldOption(field: string): FeatureSearchStyleOption | undefined {
-        return this.styleAttributeOptions.find(option => option.value === field);
+        return this.styleScalarAttributeOptions.find(option => option.value === field);
     }
 
     styleAttributeOptions: FeatureSearchStyleOption[] = [];
@@ -374,7 +379,7 @@ export class SearchVisualizationComponent implements OnChanges, OnDestroy {
 
     /** Chooses the initial color mode from schema metadata. */
     private defaultColorModeForField(fieldOption: FeatureSearchStyleOption | null | undefined): "solid" | "gradient" | "categories" {
-        if (fieldOption?.valueKind === "enum") {
+        if (fieldOption?.valueKind === "enum" || fieldOption?.valueKind === "boolean") {
             return "categories";
         }
         if (isNumericStyleValueKind(fieldOption?.valueKind)) {
@@ -592,6 +597,7 @@ export class SearchVisualizationComponent implements OnChanges, OnDestroy {
     /** Rebuilds dropdown compatibility from the current authoritative imported YAML sources. */
     private refreshSearchStyleOptions(): void {
         const scope = this.resolvedStyleSearchScope();
+        this.searchStyleOptionsScope = scope;
         const searchStyles: ErdblickStyle[] = [...this.styleService.styles.values()]
             .filter(style => style.category === "search")
             .sort((left, right) => left.id.localeCompare(right.id));
@@ -838,22 +844,28 @@ export class SearchVisualizationComponent implements OnChanges, OnDestroy {
      */
     private refreshStyleAttributeOptions(session: FeatureSearchSession, patchMissingFields = true): void {
         const signature = this.styleAttributeOptionsSessionSignature;
-        this.searchSchema.requestSearchStyleFields(
-            session.definition.query,
-            this.styleFieldRequestScope(session),
-            session.definition.selectedMapLayers
-        ).then(rawOptions => {
-            if (this.destroyed || this.session?.id !== session.id || signature !== this.styleAttributeOptionsSessionSignature) {
+        this.searchSchema.requestPreparedSearchStyleFields(session.preparation?.branches ?? [], {
+            selectedFeatureTypes: session.definition.selectedFeatureTypes, recursive: true, values: "scalar"
+        }).then(inventory => {
+            if (this.destroyed || signature !== this.styleAttributeOptionsSessionSignature) {
                 return;
             }
             const currentSession = this.session?.id === session.id
                 ? this.session
                 : this.searchService.getSession(session.id);
-            if (this.destroyed || !currentSession) {
+            if (!currentSession) {
                 this.styleAttributeOptionsLoading = false;
+                this.changeDetector.markForCheck();
                 return;
             }
-            this.applyStyleAttributeOptions(currentSession, rawOptions, patchMissingFields);
+            this.styleAttributeOptionsError = "";
+            this.applyStyleAttributeOptions(currentSession, inventory, patchMissingFields);
+            this.changeDetector.markForCheck();
+        }).catch(error => {
+            if (this.destroyed || signature !== this.styleAttributeOptionsSessionSignature) return;
+            this.styleAttributeOptionsLoading = false;
+            this.styleAttributeOptionsError = `Schema fields are unavailable. ${String(error)}`;
+            // Retain manual rules and the last choices; failure is not an empty schema.
             this.changeDetector.markForCheck();
         });
     }
@@ -872,103 +884,46 @@ export class SearchVisualizationComponent implements OnChanges, OnDestroy {
     /** Applies worker-produced schema field candidates to the style-field dropdowns. */
     private applyStyleAttributeOptions(
         session: FeatureSearchSession,
-        rawOptions: FeatureSearchStyleFieldCandidate[],
-        patchMissingFields: boolean
+        inventory: FeatureSearchStyleFieldInventory,
+        _patchMissingFields: boolean
     ): void {
-        const activeOptions = rawOptions.filter(option => this.isStyleFieldCandidateActive(option.mapId, option.layerId));
-        const sourceOptions = activeOptions.length ? activeOptions : rawOptions;
-        const byValue = new Map<string, { option: FeatureSearchStyleOption, contexts: Set<string> }>();
-        for (const option of sourceOptions) {
-            const key = this.searchStyleFieldAggregationKey(option);
-            let entry = byValue.get(key);
-            if (!entry) {
-                entry = {
-                    option: {
-                        label: option.path,
-                        value: option.path,
-                        mapId: option.mapId,
-                        layerId: option.layerId,
-                        attrName: option.attrName,
-                        attrLayerName: option.attrLayerName,
-                        featureType: option.featureType,
-                        valueKind: option.valueKind,
-                        enumValues: option.enumValues,
-                        numericRange: option.numericRange,
-                        mapLayers: [{
-                            mapId: option.mapId,
-                            layerId: option.layerId
-                        }]
-                    },
-                    contexts: new Set<string>()
-                };
-                byValue.set(key, entry);
-            }
-            this.mergeSearchStyleFieldMetadata(entry.option, option);
-            const context = this.searchStyleFieldContextLabel(option);
-            if (context) {
-                entry.contexts.add(context);
-            }
-        }
-        const nextOptions = Array.from(byValue.values())
-            .map(entry => ({
-                ...entry.option,
-                label: this.searchStyleFieldOptionLabel(entry.option.value, entry.contexts)
-            }))
-            .sort((lhs, rhs) =>
-                this.searchStyleFieldSortRank(lhs) - this.searchStyleFieldSortRank(rhs)
-                || lhs.label.localeCompare(rhs.label));
-        if (JSON.stringify(nextOptions) !== JSON.stringify(this.styleAttributeOptions)) {
-            this.styleAttributeOptions = nextOptions;
-        }
-        const nextScalarOptions = nextOptions.filter(option => this.isScalarStyleField(option));
-        if (JSON.stringify(nextScalarOptions) !== JSON.stringify(this.styleScalarAttributeOptions)) {
-            this.styleScalarAttributeOptions = nextScalarOptions;
+        if (this.appliedStyleFieldInventory !== inventory) {
+            this.updateStyleFieldOptions(inventory);
+            this.appliedStyleFieldInventory = inventory;
         }
         this.styleAttributeOptionsLoading = false;
-        if (this.shouldRefreshAutoStyleRule()) {
-            this.refreshAutoStyleRule(session);
-            return;
-        }
-        if ((session.definition.searchStyleRules?.length ?? 0) === 0) {
-            this.tryCreateAutoStyleRule(session);
-            return;
-        }
-        if (patchMissingFields
-            && (session.definition.searchStyleRules?.length ?? 0) > 0
-            && this.applyDefaultStyleFieldIfMissing()) {
-            this.onStyleRulesChanged();
-        }
-    }
 
-    /** Returns whether a field candidate belongs to a currently visible map/layer context. */
-    private isStyleFieldCandidateActive(mapId: string, layerId: string): boolean {
-        for (let viewIndex = 0; viewIndex < this.viewSettings.numViews; ++viewIndex) {
-            if (this.mapService.maps.getMapLayerVisibility(viewIndex, mapId, layerId)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /** Merges the same semantic attribute field across attribute and source layers. */
-    private searchStyleFieldAggregationKey(option: FeatureSearchStyleFieldCandidate): string {
-        return option.attrName
-            ? [
-                option.path,
-                option.attrName
-            ].join("\n")
-            : option.path;
     }
 
     /** Merges schema metadata from every selected layer that exposes the same result-field path. */
     private mergeSearchStyleFieldMetadata(
         target: FeatureSearchStyleOption,
-        source: FeatureSearchStyleFieldCandidate
+        source: FeatureSearchStyleFieldCandidate,
+        context: FeatureSearchStyleFieldContext
     ): void {
-        target.valueKind = this.mergedStyleFieldValueKind(target.valueKind, source.valueKind);
-        const enumValues = new Set([...(target.enumValues ?? []), ...(source.enumValues ?? [])]);
-        target.enumValues = Array.from(enumValues).sort();
-        if (source.numericRange) {
+        const sourceType = source.schemaType;
+        const newType = !!sourceType && !target.schemaTypes?.some(type =>
+            type.schemaId === sourceType.schemaId && type.typeId === sourceType.typeId);
+        const sameType = (target.schemaType?.schemaId === source.schemaType?.schemaId &&
+            target.schemaType?.typeId === source.schemaType?.typeId) ||
+            (!!target.schemaType && !!source.schemaType &&
+                schemaScalarMeaning(target.schemaType) === schemaScalarMeaning(source.schemaType));
+        target.primaryValue &&= context.primaryValuePath === source.path;
+        target.incompatibleTypes ||= !sameType;
+        if (source.schemaType && !target.incompatibleTypes) {
+            const type = source.schemaType;
+            target.schemaTypes ??= [];
+            if (!target.schemaTypes.some(candidate => candidate.schemaId === type.schemaId && candidate.typeId === type.typeId)) {
+                target.schemaTypes.push({schemaId: type.schemaId, typeId: type.typeId});
+            }
+        }
+        // Repeated owners of one exact type already share their enum array.
+        // Compatible versions can add labels; retain their union in the picker.
+        if (!target.incompatibleTypes && target.enumValues !== source.enumValues && (!source.schemaType || newType)) {
+            target.valueKind = this.mergedStyleFieldValueKind(target.valueKind, source.valueKind);
+            target.enumValues = [...new Set([...(target.enumValues ?? []), ...source.enumValues])].sort();
+        }
+        if (!source.schemaType && source.numericRange) {
             target.numericRange = target.numericRange
                 ? {
                     min: Math.min(target.numericRange.min, source.numericRange.min),
@@ -976,19 +931,29 @@ export class SearchVisualizationComponent implements OnChanges, OnDestroy {
                 }
                 : { ...source.numericRange };
         }
-        if (target.featureType !== source.featureType) {
+        if (target.incompatibleTypes) {
+            target.schemaType = undefined;
+            target.schemaTypes = undefined;
+            target.numericRange = undefined;
+            target.enumValues = [];
+            target.valueKind = "unknown";
+        }
+        if (target.featureType !== (context.featureType || undefined)) {
             // A shared path across feature types cannot use one portable type
             // guard; retain no misleading source-specific discriminator.
             target.featureType = undefined;
         }
-        if (target.attrLayerName !== source.attrLayerName) {
+        if (target.attrLayerName !== (context.attrLayerName || undefined)) {
             target.attrLayerName = undefined;
+        }
+        if (target.attrName !== (context.attrName || undefined)) {
+            target.attrName = undefined;
         }
         const mapLayers = target.mapLayers ?? [];
         if (!mapLayers.some(ref =>
-            ref.mapId === source.mapId &&
-            ref.layerId === source.layerId)) {
-            mapLayers.push({ mapId: source.mapId, layerId: source.layerId });
+            ref.mapId === context.mapId &&
+            ref.layerId === context.layerId)) {
+            mapLayers.push({ mapId: context.mapId, layerId: context.layerId });
             mapLayers.sort((left, right) =>
                 left.mapId.localeCompare(right.mapId) ||
                 left.layerId.localeCompare(right.layerId));
@@ -1013,171 +978,9 @@ export class SearchVisualizationComponent implements OnChanges, OnDestroy {
         return lhs === "unknown" ? rhs : lhs;
     }
 
-    /** Returns the attribute context suffix shown in search-style field pickers. */
-    private searchStyleFieldContextLabel(option: FeatureSearchStyleFieldCandidate): string {
-        if (!option.attrName) {
-            return "";
-        }
-        const layerPrefix = option.attrLayerName ? `${option.attrLayerName}.` : "";
-        return option.featureType
-            ? `${layerPrefix}${option.attrName}/${option.featureType}`
-            : `${layerPrefix}${option.attrName}`;
-    }
-
-    /** Builds a field-picker label that makes multi-attribute scope explicit. */
-    private searchStyleFieldOptionLabel(path: string, contexts: Set<string>): string {
-        if (contexts.size === 0) {
-            return path;
-        }
-        const sortedContexts = Array.from(contexts).sort();
-        if (sortedContexts.length === 1) {
-            return `${path} (${sortedContexts[0]})`;
-        }
-        return `${path} (${sortedContexts.length} scopes)`;
-    }
-
     /** Keeps generated `$...` overlay fields below native schema fields in dropdowns. */
     private searchStyleFieldSortRank(option: FeatureSearchStyleOption): number {
         return option.value.startsWith("$") ? 1 : 0;
-    }
-
-    /** Returns whether all existing style rules still belong to automatic query-derived styling. */
-    private shouldRefreshAutoStyleRule(): boolean {
-        return this.styleRuleDrafts.length > 0 && this.styleRuleDrafts.every(rule => rule.autoGenerated === true);
-    }
-
-    /** Rebuilds automatic rules after the query or selected layer context changes. */
-    private refreshAutoStyleRule(session: FeatureSearchSession): boolean {
-        if (!this.shouldRefreshAutoStyleRule()) {
-            return false;
-        }
-        const existingIds = this.styleRuleDrafts.map(rule => rule.id);
-        this.styleRuleDrafts = this.createAutoStyleRules(session, existingIds);
-        this.styleRuleAccordionValue = [];
-        this.onStyleRulesChanged();
-        return true;
-    }
-
-    /**
-     * Creates point and non-point variants for each differentiated auto style,
-     * or two generic variants matching the search color when no field is safe.
-     */
-    private createAutoStyleRules(session: FeatureSearchSession, existingIds: number[] = []): FeatureSearchStyleRuleDraft[] {
-        const fieldOptions = this.autoStyleFieldOptions(session);
-        const portableFieldOptions = fieldOptions.length > 0
-            && searchAutoStyleFieldOptionsArePortable(fieldOptions, session.schemaAnalysis)
-            ? fieldOptions
-            : [null];
-        const rules: FeatureSearchStyleRuleDraft[] = [];
-        for (const fieldOption of portableFieldOptions) {
-            const pointRule = fieldOption
-                ? this.createAutoStyleRule(existingIds[rules.length] ?? this.nextStyleRuleId++, fieldOption)
-                : this.createSolidAutoStyleRule(existingIds[rules.length] ?? this.nextStyleRuleId++, session);
-            pointRule.name += " (points)";
-            pointRule.visualization = ["point"];
-            pointRule.pointRadius = 20;
-            rules.push(pointRule);
-
-            const geometryRule = fieldOption
-                ? this.createAutoStyleRule(existingIds[rules.length] ?? this.nextStyleRuleId++, fieldOption)
-                : this.createSolidAutoStyleRule(existingIds[rules.length] ?? this.nextStyleRuleId++, session);
-            geometryRule.name += " (lines/surfaces)";
-            geometryRule.visualization = ["line", "surface"];
-            geometryRule.lineWidth = 5;
-            rules.push(geometryRule);
-        }
-        return rules;
-    }
-
-    /** Selects all schema fields that should get an automatically generated style rule. */
-    private autoStyleFieldOptions(session: FeatureSearchSession): FeatureSearchStyleOption[] {
-        return searchAutoStyleFieldOptions(this.styleScalarAttributeOptions, session.schemaAnalysis);
-    }
-
-    /** Creates one collapsed automatic style rule for the selected schema field. */
-    private createAutoStyleRule(id: number, fieldOption: FeatureSearchStyleOption): FeatureSearchStyleRuleDraft {
-        const rule = this.createStyleRule(id, fieldOption);
-        rule.name = this.autoStyleRuleName(fieldOption);
-        rule.autoGenerated = true;
-        if (fieldOption.attrName) {
-            rule.filters = [{
-                id: this.nextStyleConditionId++,
-                attributeField: "$name",
-                customExpression: false,
-                operator: "=",
-                filterValue: fieldOption.attrName
-            }];
-            if (fieldOption.featureType) {
-                rule.filters.push({
-                    id: this.nextStyleConditionId++,
-                    attributeField: `$feature.typeId == ${JSON.stringify(fieldOption.featureType)}`,
-                    customExpression: true,
-                    operator: "=",
-                    filterValue: true
-                });
-            }
-        }
-        return rule;
-    }
-
-    /** Returns a portable user-facing name without embedding a source map or layer identity. */
-    private autoStyleRuleName(fieldOption: FeatureSearchStyleOption): string {
-        const context = fieldOption.attrName
-            ? `${fieldOption.attrName}.${fieldOption.value}`
-            : fieldOption.value;
-        return `Auto: ${context}`;
-    }
-
-    /** Creates one generic auto-generated rule that does not depend on schema field enumeration. */
-    private createSolidAutoStyleRule(id: number, session: FeatureSearchSession): FeatureSearchStyleRuleDraft {
-        const rule = this.createStyleRule(id, null);
-        const solidColor = this.searchColorForAutoStyle(session);
-        rule.name = "Auto: solid";
-        rule.autoGenerated = true;
-        rule.color = {
-            ...rule.color,
-            mode: "solid",
-            solidColor,
-            fallbackColor: solidColor
-        };
-        return rule;
-    }
-
-    /** Returns the color shared by density markers, pins, and generic automatic style rules. */
-    private searchColorForAutoStyle(session: FeatureSearchSession): string {
-        return normalizeHexColor(session.pointColor || session.definition.pinColor, DEFAULT_SEARCH_STYLE_SOLID_COLOR);
-    }
-
-    /** Creates the initial schema-backed style rule for a search that has no explicit rules yet. */
-    private tryCreateAutoStyleRule(session: FeatureSearchSession): boolean {
-        if (!this.shouldAttemptAutoStyleRule(session)) {
-            return false;
-        }
-        this.autoStyleRuleAttemptSignatures.add(this.autoStyleRuleAttemptSignature(session));
-        this.styleRuleDrafts = this.createAutoStyleRules(session);
-        this.styleRuleAccordionValue = [];
-        this.onStyleRulesChanged();
-        return true;
-    }
-
-    /** Returns whether this session still needs its one-shot automatic style rule attempt. */
-    private shouldAttemptAutoStyleRule(session: FeatureSearchSession): boolean {
-        return (session.definition.searchStyleRules?.length ?? 0) === 0
-            && session.schemaAnalysis.status === "ready"
-            && !this.autoStyleRuleAttemptSignatures.has(this.autoStyleRuleAttemptSignature(session));
-    }
-
-    private readonly autoStyleRuleAttemptSignatures = new Set<string>();
-
-    /** Signature for the user-visible query scope that an automatic style rule would represent. */
-    private autoStyleRuleAttemptSignature(session: FeatureSearchSession): string {
-        return [
-            session.id,
-            session.id,
-            session.definition.query,
-            session.definition.scope,
-            this.selectedSearchMapLayerSignature(session.definition.selectedMapLayers)
-        ].join("\n");
     }
 
     /** Builds a stable signature for selected search map/layer references. */
@@ -1246,68 +1049,14 @@ export class SearchVisualizationComponent implements OnChanges, OnDestroy {
         return changed;
     }
 
-    /** Refreshes schema-backed fields when the editor or automatic rules need them. */
+    /** Field browsing is an editor operation; initial styling belongs to preparation. */
     private refreshStyleAttributeOptionsIfNeeded(session: FeatureSearchSession, patchMissingFields = true): boolean {
-        if (session.schemaAnalysis.status !== "ready") {
-            return false;
-        }
-        if (session.schemaAnalysis.rewriteSuppressed) {
-            this.styleAttributeOptionsSessionSignature = [
-                session.definition.query,
-                session.definition.scope,
-                "rewrite-suppressed",
-                session.schemaAnalysis.rewriteSuppressionReason,
-                this.selectedSearchMapLayerSignature(session.definition.selectedMapLayers)
-            ].join("\n");
-            if (this.styleAttributeOptionsRefreshTimer) {
-                clearTimeout(this.styleAttributeOptionsRefreshTimer);
-                this.styleAttributeOptionsRefreshTimer = null;
-            }
-            this.styleAttributeOptionsRefreshPatchMissing = false;
-            this.styleAttributeOptionsLoading = false;
-            this.styleAttributeOptions = [];
-            this.styleScalarAttributeOptions = [];
-            if (this.shouldAttemptAutoStyleRule(session)) {
-                this.tryCreateAutoStyleRule(session);
-            } else if (this.shouldRefreshAutoStyleRule()) {
-                this.refreshAutoStyleRule(session);
-            }
-            return false;
-        }
-        // Paint a generic result immediately. Schema-field enumeration may be
-        // delayed behind a broad Classic query; once it completes below, the
-        // auto-generated solid rule is replaced with the richer field rule.
-        if (this.styleAttributeOptions.length === 0 &&
-            this.shouldAttemptAutoStyleRule(session)) {
-            this.tryCreateAutoStyleRule(session);
-        }
-        if (!this.active
-            && session.schemaAnalysis.concreteScope !== "attribute") {
-            return false;
-        }
-        if (!this.active
-            && this.styleAttributeOptions.length === 0
-            && !this.shouldAttemptAutoStyleRule(session)
-            && !this.shouldRefreshAutoStyleRule()) {
-            return false;
-        }
-        const signature = [
-            session.id,
-            session.definition.query,
-            session.definition.scope,
-            this.styleFieldRequestScope(session),
-            session.schemaAnalysis.status,
-            session.schemaAnalysis.normalizedQuery,
-            this.attributeScopeSyncSignature(session.schemaAnalysis.attributeScopes),
-            this.selectedSearchMapLayerSignature(session.definition.selectedMapLayers),
-            this.visibleMapLayerSignature()
-        ].join("\n");
-        if (signature === this.styleAttributeOptionsSessionSignature) {
-            if (this.styleAttributeOptionsRefreshTimer && patchMissingFields) {
-                this.styleAttributeOptionsRefreshPatchMissing = true;
-            }
+        if (session.schemaAnalysis.status !== "ready" || !this.active) return false;
+        const signature = [session.definition.query, session.schemaAnalysis.signature,
+            JSON.stringify(session.definition.interpretationIds), this.styleFieldRequestScope(session),
+            JSON.stringify(session.definition.selectedFeatureTypes)].join("\n");
+        if (signature === this.styleAttributeOptionsSessionSignature)
             return !!this.styleAttributeOptionsRefreshTimer || this.styleAttributeOptionsLoading;
-        }
         this.styleAttributeOptionsSessionSignature = signature;
         this.scheduleStyleAttributeOptionsRefresh(session.id, patchMissingFields);
         return true;
@@ -1328,21 +1077,6 @@ export class SearchVisualizationComponent implements OnChanges, OnDestroy {
         ].join("/")).sort().join("|");
     }
 
-    /** Returns a compact signature for map/layer visibility that affects preferred field-picker ordering. */
-    private visibleMapLayerSignature(): string {
-        const visibleLayerKeys: string[] = [];
-        for (const [mapId, mapInfo] of this.mapService.maps.maps) {
-            for (const layer of mapInfo.allFeatureLayers()) {
-                for (let viewIndex = 0; viewIndex < this.viewSettings.numViews; ++viewIndex) {
-                    if (this.mapService.maps.getMapLayerVisibility(viewIndex, mapId, layer.id)) {
-                        visibleLayerKeys.push(`${viewIndex}:${mapId}:${layer.id}`);
-                    }
-                }
-            }
-        }
-        return visibleLayerKeys.sort().join("|");
-    }
-
     /** Defers expensive WASM-backed field enumeration until the browser can paint the style tab. */
     private scheduleStyleAttributeOptionsRefresh(sessionId: string, patchMissingFields: boolean): void {
         if (this.styleAttributeOptionsRefreshTimer) {
@@ -1359,41 +1093,16 @@ export class SearchVisualizationComponent implements OnChanges, OnDestroy {
                 : this.searchService.getSession(sessionId);
             if (!session) {
                 this.styleAttributeOptionsLoading = false;
+                this.changeDetector.markForCheck();
                 return;
             }
             this.refreshStyleAttributeOptions(session, shouldPatchMissingFields);
         }, 0);
     }
 
-    /** Keeps generic automatic rules visually tied to the density-map/pin color while user-edited rules stay stable. */
-    private syncAutoGeneratedSolidRulesToSearchColor(color: string): boolean {
-        let changed = false;
-        this.styleRuleDrafts = this.styleRuleDrafts.map(rule => {
-            if (!rule.autoGenerated || rule.color.mode !== "solid") {
-                return rule;
-            }
-            if (rule.color.solidColor === color && rule.color.fallbackColor === color) {
-                return rule;
-            }
-            changed = true;
-            return {
-                ...rule,
-                color: {
-                    ...rule.color,
-                    solidColor: color,
-                    fallbackColor: color
-                }
-            };
-        });
-        return changed;
-    }
-
     protected onSearchColorChange(color: string) {
         if (this.session) {
             const normalizedColor = normalizeHexColor(color, DEFAULT_SEARCH_STYLE_SOLID_COLOR);
-            if (this.syncAutoGeneratedSolidRulesToSearchColor(normalizedColor)) {
-                this.onStyleRulesChanged();
-            }
             this.searchService.setSearchColor(this.session.id, normalizedColor);
         }
     }
@@ -1404,9 +1113,12 @@ export class SearchVisualizationComponent implements OnChanges, OnDestroy {
         if (!trimmedExpression || this.valueSummaries.status !== "ready") {
             return undefined;
         }
-        return this.valueSummaries.resultFields.find(field =>
+        const matches = this.valueSummaries.resultFields.filter(field =>
             field.expression.trim() === trimmedExpression
-        )?.summary;
+        );
+        // Choosing the first group would silently pick one unit or format.
+        // Auto-coloring requires one unambiguous observed value type.
+        return matches.length === 1 ? matches[0].summary : undefined;
     }
 
     protected readonly valueSummaryForStyleExpressionCallback = (expression: string) =>
@@ -1447,4 +1159,93 @@ export class SearchVisualizationComponent implements OnChanges, OnDestroy {
     protected readonly featureSearchColorPickerOverlayOptions: OverlayOptions = {
         styleClass: "feature-search-colorpicker-overlay"
     };
+
+    styleAttributeOptionsError = "";
+
+    private appliedStyleFieldInventory: FeatureSearchStyleFieldInventory | null = null;
+
+    private searchStyleOptionsScope?: "feature" | "attribute";
+
+
+    /** Aggregate one new inventory; feature-predicate cache hits reuse these dropdown arrays. */
+    private updateStyleFieldOptions(inventory: FeatureSearchStyleFieldInventory): void {
+        const started = performance.now();
+        const sourceOptions = searchStyleFieldCandidates(inventory);
+        // Automatic rules need an attribute owner for their $name guard. The
+        // editor stores only an expression, so repeating it once per owner
+        // creates indistinguishable choices whose selection has no effect.
+        const byOwner = new Map<string, FeatureSearchStyleOption>();
+        const byExpression = new Map<string, FeatureSearchStyleOption>();
+        const contribute = (
+            target: Map<string, FeatureSearchStyleOption>,
+            key: string,
+            source: FeatureSearchStyleFieldCandidate,
+            context: FeatureSearchStyleFieldContext
+        ): void => {
+            let option = target.get(key);
+            if (!option) {
+                option = {
+                    label: source.path,
+                    value: source.path,
+                    mapId: context.mapId,
+                    layerId: context.layerId,
+                    attrName: context.attrName || undefined,
+                    attrLayerName: context.attrLayerName || undefined,
+                    featureType: context.featureType || undefined,
+                    primaryValue: context.primaryValuePath === source.path,
+                    valueKind: source.valueKind,
+                    enumValues: source.enumValues,
+                    numericRange: source.numericRange,
+                    schemaType: source.schemaType,
+                    mapLayers: []
+                };
+                target.set(key, option);
+            }
+            this.mergeSearchStyleFieldMetadata(option, source, context);
+        };
+        for (const option of sourceOptions) {
+            for (const context of option.contexts) {
+                if (context.attrName) {
+                    contribute(byOwner, `${option.path}\n${context.attrName}`, option, context);
+                }
+                contribute(byExpression, option.path, option, context);
+            }
+        }
+        const choices = (options: Iterable<FeatureSearchStyleOption>): FeatureSearchStyleOption[] =>
+            Array.from(options).flatMap(option => {
+                // A flag is a boolean question answered by native type-aware
+                // hasFlag, including zero/composite masks. Never enumerate all
+                // combinations or use a raw numeric mask as an enum category.
+                if (option.valueKind !== "bitmask" || option.incompatibleTypes) return [option];
+                return [option, ...(option.schemaType?.namedValues ?? [])
+                    .filter(flag => flag.role === "flag" && !flag.removed && !flag.deprecated)
+                    .map(flag => ({...option,
+                        label: `${option.label} · ${flag.name}`,
+                        value: `hasFlag(${option.value}, ${JSON.stringify(flag.name)})`,
+                        primaryValue: false,
+                        valueKind: "boolean" as const,
+                        schemaType: undefined,
+                        schemaTypes: undefined,
+                        numericRange: undefined,
+                        enumValues: ["false", "true"]
+                    }))];
+            }).sort((lhs, rhs) =>
+                this.searchStyleFieldSortRank(lhs) - this.searchStyleFieldSortRank(rhs)
+                || lhs.label.localeCompare(rhs.label));
+        this.styleScalarAttributeOptions = choices(byExpression.values())
+            .filter(option => this.isScalarStyleField(option));
+        // Feature inventories have no separate attribute guards. Reuse their
+        // picker array; wide Classic schemas can contain tens of thousands of
+        // paths even though the native type descriptors are shared.
+        this.styleAttributeOptions = byOwner.size
+            ? choices(byOwner.values()) : this.styleScalarAttributeOptions;
+        const applied = performance.now();
+        performance.clearMeasures("erdblick.search.style-fields.apply");
+        performance.measure("erdblick.search.style-fields.apply", {start: started, end: applied,
+            detail: {fields: inventory.fields.length, choices: this.styleScalarAttributeOptions.length}});
+        requestAnimationFrame(() => {
+            performance.clearMeasures("erdblick.search.style-fields.next-frame");
+            performance.measure("erdblick.search.style-fields.next-frame", {start: applied, end: performance.now()});
+        });
+    }
 }

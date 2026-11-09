@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "erdblick/layer.h"
+#include "erdblick/inspection.h"
 #include "erdblick/parser.h"
 #include "mapget/model/info.h"
 #include "mapget/model/feature.h"
@@ -8,6 +9,54 @@
 #include "mapget/model/sourcedatalayer.h"
 #include "mapget/model/stringpool.h"
 #include "nlohmann/json.hpp"
+
+TEST_CASE("Inspection preserves extern byte payloads instead of displaying NULL", "[erdblick.inspection][MAPV-555]")
+{
+    // The customer's seven-byte DrivingAutomationSystemConstraints.data payload.
+    auto const bytes = simfil::ByteArray::fromHex("03001808c08990");
+    REQUIRE(bytes);
+    auto info = mapget::LayerInfo::fromJson(nlohmann::json::parse(R"({"layerId":"Lane","type":"Features",
+        "featureTypes":[{"name":"Lane","uniqueIdCompositions":[[{"partId":"id","datatype":"U32"}]]}]})"));
+    auto strings = std::make_shared<mapget::StringPool>("ExternInspection");
+    auto tile = std::make_shared<mapget::TileFeatureLayer>(mapget::TileId{}, "ExternInspection", "TestMap", info, strings);
+    auto feature = tile->newFeature("Lane", {{"id", int64_t{116}}});
+    auto constraints = tile->newObject();
+    constraints->addField("data", tile->newValue(*bytes));
+    constraints->addField("system", int64_t{1});
+    feature->attributes()->addField("drivingAutomationSystemConstraints", constraints);
+    auto inspection = *erdblick::InspectionConverter().convert(feature);
+    std::function<void(nlohmann::json const&)> checkData;
+    size_t found = 0;
+    checkData = [&](nlohmann::json const& node) {
+        if (node.is_array()) {
+            for (auto const& child : node) checkData(child);
+            return;
+        }
+        if (node.value("key", std::string{}) == "data") {
+            CHECK(node.at("value") == "844528156182928");
+            CHECK(node.at("type") == static_cast<int>(erdblick::InspectionConverter::ValueType::String));
+            ++found;
+        }
+        if (node.contains("children")) checkData(node.at("children"));
+    };
+    checkData(inspection);
+    CHECK(found == 1);
+
+    auto rawInfo = mapget::LayerInfo::fromJson({{"layerId", "Raw"}, {"type", "SourceData"}});
+    auto raw = std::make_shared<mapget::TileSourceDataLayer>(mapget::TileId{}, "ExternInspection", "TestMap", rawInfo, strings);
+    auto root = raw->newCompound(1);
+    root->object()->addField("data", raw->newValue(*bytes));
+    raw->addRoot(root);
+    checkData(erdblick::TileSourceDataLayer(raw).toObject());
+    CHECK(found == 2);
+
+    // Large externs cannot be represented as an int64; their hex must remain visible.
+    auto large = simfil::ByteArray::fromHex("010203040506070809");
+    REQUIRE(large);
+    erdblick::InspectionConverter::InspectionNode scalar;
+    REQUIRE(scalar.setScalarValue(simfil::Value(*large)));
+    CHECK(scalar.value_.toString() == "0x010203040506070809");
+}
 
 TEST_CASE(
     "SourceData inspection reuses propagated feature summaries",
@@ -93,29 +142,40 @@ TEST_CASE("Incoming inspection preserves the source owner and relation ordinal",
     auto info = LayerInfo::fromJson(nlohmann::json::parse(R"({"layerId":"Surface","type":"Features",
         "featureTypes":[{"name":"Surface","uniqueIdCompositions":[[{"partId":"id","datatype":"U64"}]]},
                         {"name":"Lane","uniqueIdCompositions":[[{"partId":"id","datatype":"U64"}]]}]})"));
-    auto sourceInfo = std::make_shared<LayerInfo>(*info);
-    sourceInfo->layerId_ = "Lane";
+    auto sourceInfo =
+        LayerInfo::fromJson(nlohmann::json::parse(R"({"layerId":"Lane","type":"Features",
+        "featureTypes":[{"name":"Surface","uniqueIdCompositions":[[{"partId":"id","datatype":"U64"}]]},
+                        {"name":"Lane","uniqueIdCompositions":[[{"partId":"id","datatype":"U64"}]]}]})"));
     auto strings = std::make_shared<StringPool>("IncomingInspection");
     auto target = std::make_shared<mapget::TileFeatureLayer>(TileId::fromTileXY(1,1,2),
         "IncomingInspection", "Map", info, strings);
     auto source = std::make_shared<mapget::TileFeatureLayer>(target->partitionId(),
         "IncomingInspection", "Map", sourceInfo, strings);
     target->newFeature("Surface", {{"id", int64_t{1}}});
-    auto providerJson = sourceInfo->toJson();
-    providerJson["incomingRelationTargetTypes"] = {"Surface"};
     erdblick::TileLayerParser parser;
-    auto catalog = nlohmann::json::array({{{"mapId", "Map"}, {"stringPoolId", "IncomingInspection"},
-        {"layers", {{"Surface", info->toJson()}, {"Lane", providerJson}}}}});
-    parser.setDataSourceInfo(erdblick::SharedUint8Array(catalog.dump()));
+    auto catalog = nlohmann::json::array(
+        {{{"mapId", "Map"},
+          {"stringPoolId", "IncomingInspection"},
+          {"layers",
+           {{"Surface",
+             {{"incomingRelationTargetTypes", {"Surface"}},
+              {"incomingRelationCoverageUnknown", false}}}}}}});
+    parser.setIncomingRelationHints(erdblick::SharedUint8Array(catalog.dump()));
     CHECK(parser.hasIncomingRelations(erdblick::TileFeatureLayer(target), "Surface.1"));
-    parser.setDataSourceInfo(erdblick::SharedUint8Array("[]"));
+    catalog[0]["layers"]["Surface"]["incomingRelationTargetTypes"] = nlohmann::json::array();
+    parser.setIncomingRelationHints(erdblick::SharedUint8Array(catalog.dump()));
     CHECK_FALSE(parser.hasIncomingRelations(erdblick::TileFeatureLayer(target), "Surface.1"));
+    parser.setDataSourceInfo(erdblick::SharedUint8Array("[]"));
+    CHECK(parser.hasIncomingRelations(
+        erdblick::TileFeatureLayer(target),
+        "Surface.1"));  // Missing means unknown.
     auto lane = source->newFeature("Lane", {{"id", int64_t{7}}});
     lane->addRelation("ordinary", "Surface", {{"id", int64_t{1}}});
     lane->addRelation("visible", "Surface", {{"id", int64_t{1}}});
     IncomingRelationCollection collection;
     collection.target_ = target->id(); collection.featureId_ = "Surface.1";
     collection.snapshots_ = {target->id(), source->id()};
+    collection.scope_ = {source->id()};
     collection.relations_ = {{source->id(), "Lane.7", 1, "visible", "Surface.1"}};
     erdblick::IncomingInspection inspection(collection.toJson().dump(), target->id().toString(), "Surface.1");
     inspection.addSnapshot(erdblick::TileFeatureLayer(target));

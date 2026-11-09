@@ -40,6 +40,10 @@ const setHighlightedLine = StateEffect.define<number | null>();
 
 const highlightedLineField = StateField.define<DecorationSet>({
     create: () => Decoration.none,
+    /**
+     * Carry highlights through text edits, then apply an explicit line selection
+     * or clear effect against the transaction's updated document.
+     */
     update(highlights, transaction) {
         highlights = highlights.map(transaction.changes);
         for (const effect of transaction.effects) {

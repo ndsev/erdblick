@@ -43,7 +43,7 @@ import {
     RenderRectangle,
     RenderViewCameraState
 } from "./render-view.model";
-import { autoTileGridLevel, coarsenedTileLevel, tileGridVisibleCellCount } from "./tile-grid-visibility.util";
+import { autoTileGridLevel } from "./tile-grid-visibility.util";
 import { ViewVisualizationState } from "./view.visualization";
 
 export enum ViewRecalculationReason {
@@ -409,18 +409,12 @@ export class MapViewService implements AppActionContributor {
     }
 
     /** Returns whether search-result geometry should be rendered for one visible source tile. */
-    prefersHighFidelityForSearchResultTile(viewIndex: number, searchId: string, tileId: number, maxVisibleTiles: number): boolean {
-        return this.visibleSearchGridCellCountForLevel(viewIndex, tileId) <= maxVisibleTiles;
-    }
-
-    /** Counts actual visible grid cells at the tile's level for search-specific fidelity decisions. */
-    visibleSearchGridCellCountForLevel(viewIndex: number, tileId: number): number {
-        const viewState = this.viewVisualizationState[viewIndex];
-        if (!viewState) {
-            return Number.MAX_SAFE_INTEGER;
-        }
-        const level = Number(coreLib.getTileLevel(tileId));
-        return tileGridVisibleCellCount(level, viewState.viewport, this.mapInfo.maps.getViewTileGridMode(viewIndex));
+    prefersHighFidelityForSearchResultTile(viewIndex: number, tileId: number, maxVisibleTiles: number): boolean {
+        // Like ordinary style LOD, search detail follows camera scale. Near the
+        // horizon the ground footprint grows abruptly; using its area here
+        // hides nearby geometry and moves density markers to distant tile
+        // centres even though those results are still clearly visible.
+        return this.styleVisibleTileCount(viewIndex, Number(coreLib.getTileLevel(tileId))) <= maxVisibleTiles;
     }
 
     /** Returns viewport tile ids for one level, even when no currently visible map layer uses that level. */
@@ -456,7 +450,7 @@ export class MapViewService implements AppActionContributor {
     }
 
     /**
-     * Selects a low-fidelity search density level from the same visible grid-cell budget used by tile-grid overlays.
+     * Selects a search density level from the same tilt-independent camera scale as ordinary map styles.
      *
      * Search dots are cheaper than full result geometry, so the caller may request a one-level finer aggregate than
      * the strict coarsened level while still capping the result at the source tile level.
@@ -475,12 +469,10 @@ export class MapViewService implements AppActionContributor {
             return Math.max(0, Math.floor(sourceLevel));
         }
         const normalizedLevel = Math.max(0, Math.floor(sourceLevel));
-        const coarsenedLevel = coarsenedTileLevel(
-            normalizedLevel,
-            viewState.viewport,
-            maxVisibleCells,
-            this.mapInfo.maps.getViewTileGridMode(viewIndex)
-        );
+        let coarsenedLevel = normalizedLevel;
+        while (coarsenedLevel > 0 && this.styleVisibleTileCount(viewIndex, coarsenedLevel) > maxVisibleCells) {
+            coarsenedLevel--;
+        }
         return Math.min(normalizedLevel, coarsenedLevel + (preferOneLevelFiner ? 1 : 0));
     }
 

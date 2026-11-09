@@ -153,7 +153,10 @@ export class StyledMapgetLayer {
         );
     }
 
-    /** Replace exact tagged partition demand without duplicating object associations. */
+    /**
+     * Replace exact tagged partition demand. Copies requested coverage and retires
+     * values whose partitions were removed.
+     */
     setPartitionCoverage(
         partitions: readonly PartitionId[],
         priorityPartitions: readonly PartitionId[] = [],
@@ -293,7 +296,9 @@ export class StyledMapgetLayer {
     }
 
     /**
-     * Pins immutable subset bytes while an in-flight visualization owns them.
+     * Retain a tile state while an in-flight visualization owns it, protecting it
+     * against off-coverage disposal. Deliveries may still replace its installed
+     * value, and disposing this presentation releases even pinned states.
      */
     retainTileState(state: FilterTileState): void {
         this.assertLive();
@@ -355,7 +360,7 @@ export class StyledMapgetLayer {
         ) as StyleFilterPlan;
     }
 
-    /** Materialize the immutable filter definition from the validated plan. */
+    /** Project the validated plan and a copy of current bindings into the request definition. */
     private filterDefinition(): FilterSubscriptionDefinition {
         return {
             mapId: this.mapgetLayer.mapId,
@@ -424,7 +429,7 @@ export class StyledMapgetLayer {
         }
     }
 
-    /** Mark all current outputs failed without discarding their last ready bytes. */
+    /** Record errors on currently pending outputs while retaining previously installed bytes. */
     private acceptError(message: string): void {
         for (const state of this.tileStates.values()) {
             state.fail(this.generation, message);

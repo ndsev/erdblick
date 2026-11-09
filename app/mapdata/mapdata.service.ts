@@ -3,10 +3,13 @@ import { HttpClient } from "@angular/common/http";
 import { Injectable } from "@angular/core";
 import {
     BehaviorSubject,
+    EMPTY,
     filter,
     firstValueFrom,
+    fromEvent,
     Subject,
-    take
+    take,
+    takeUntil
 } from "rxjs";
 import { z } from "zod";
 import type { FeatureLayerStyle, TileLayerParser } from "../../build/libs/core/erdblick-core";
@@ -40,9 +43,11 @@ import {
 } from "./map-tree.controller";
 import {
     dataSourceCatalogStatus,
+    dataSourceReadinessStatus,
     dataSourceProgressPercent,
     isDataSourceCatalogEntryReady,
     MapInfoItem,
+    MapSchemaArtifact,
     sortDataSourceCatalogEntries
 } from "./source-catalog.model";
 import { MapgetLayer } from "./mapget-layer.model";
@@ -82,33 +87,72 @@ export class MapDataService implements AppActionContributor {
     public readonly legalInformationUpdated = new Subject<boolean>();
     public readonly layerStateChanged = new Subject<string>();
     public readonly styleOptionsChanged = new Subject<StyleOptionChange[]>();
-    /** Emits on replacement/removal, requiring a stream reset; additions leave existing consumers live. */
-    public readonly dataSourceInfoChanged = new Subject<void>();
+
+    /**
+     * Fences old transport/work before retiring these maps' native metadata.
+     * Unlisted maps keep their dictionaries, layers and retained presentations.
+     */
+    public readonly dataSourceInfoChanged = new Subject<readonly string[]>();
     public readonly maps$: BehaviorSubject<MapLayerTree>;
 
     /** Shared parser instance whose datasource metadata is populated from `/sources`. */
     private parserInstance: TileLayerParser | null = null;
-    /** Full-schema style planners created only for maps which are actually presented. */
-    private readonly styleParsersByMapId = new Map<string, TileLayerParser>();
+
     /** Raw datasource metadata retained for diagnostics/debug export. */
     private dataSourceInfoJson: string | null = null;
+
     /** UTF-8 form of ready datasource metadata shared with render workers. */
     private dataSourceInfoBlobValue: Uint8Array | null = null;
+
     /** Installed ready metadata keyed by JSON content, excluding catalog progress/status decoration. */
     private readySourceMetadata = new Map<string, MapInfoItem>();
-    /** Schema-free, map-local parser metadata used only by subset render workers. */
+
+    /** Server-ready metadata awaiting or retaining its local schema installation. */
+    private catalogMetadata = new Map<string, MapInfoItem>();
+
+    /** Coalesces binary downloads before allocating another copy of the same schema. */
+    private readonly schemaRequests = new Map<string, {
+        sourceId: string;
+        promise: Promise<MapSchemaArtifact>;
+    }>();
+    private readonly schemaArtifacts = new Map<string, MapSchemaArtifact>();
+
+    /** Limit simultaneous downloads/decodes without making readiness an all-source barrier. */
+    private activeSchemaDownloads = 0;
+    private readonly waitingSchemaDownloads: Array<() => void> = [];
+
+    /** One initialization per exact source snapshot; late completions cannot publish a replacement. */
+    private readonly sourceHydrations = new Map<string, Promise<void>>();
+    private catalogLoadSerial = 0;
+    private catalogChangeSerial = 0;
+
+    /** Per-map model generations exclude progress updates and other maps becoming ready. */
+    private readonly mapMetadataGenerations = new Map<string, number>();
+    private nextMetadataGeneration = 0;
+
+    /** Map-local parser metadata used only by subset render workers. */
     private readonly renderDataSourceInfoBlobCache = new Map<string, Uint8Array>();
+
     /** Complete dictionary snapshots reused until the stream appends new fields. */
     private readonly fieldDictBlobCache = new Map<string, Uint8Array>();
+
     /** Latest datasource-catalog revision advertised by `/sources`, if the backend supports it. */
     private sourceCatalogRevisionValue: number | null = null;
+
     /** True while at least one catalog entry is not ready; used to avoid pruning recoverable state. */
     private catalogHasNonReadyEntries = false;
+
     /** Last catalog snapshot, including initializing/failed entries that are not passed to the parser. */
     private sourceCatalogEntries: MapInfoItem[] = [];
+
     /** Immutable feature-layer identities rebuilt from the current source catalog. */
     private mapgetLayersByKey = new Map<string, MapgetLayer>();
 
+    /**
+     * Create an empty catalog tree before asynchronous initialization. Reapply its
+     * view/style projection after imported state is published and defer pruning
+     * until both state and a usable catalog are available.
+     */
     constructor(
         private readonly httpClient: HttpClient,
         private readonly stateService: AppStateService,
@@ -145,8 +189,20 @@ export class MapDataService implements AppActionContributor {
     }
 
     /** Returns datasource metadata as a JSON string for diagnostics and debug views. */
-    getDataSourceInfoJson(): string | null {
-        return this.dataSourceInfoJson;
+    getDataSourceInfoJson(mapIds?: readonly string[]): string | null {
+        return mapIds
+            ? JSON.stringify([...this.readySourceMetadata.values()].filter(source => mapIds.includes(source.mapId)))
+            : this.dataSourceInfoJson;
+    }
+
+    /** Reports incomplete schema scope explicitly; an empty type list would imply false absence. */
+    schemaReadinessError(mapIds?: readonly string[]): string | undefined {
+        const sources = this.sourceCatalogEntries.filter(source => !mapIds || mapIds.includes(source.mapId));
+        if (mapIds?.some(id => !sources.some(source => source.mapId === id))) {
+            return "A requested map is no longer present in the datasource catalog.";
+        }
+        const pending = sources.find(source => !isDataSourceCatalogEntryReady(source));
+        return pending ? `${pending.mapId}: ${this.dataSourceStatusText(pending)}` : undefined;
     }
 
     /** Returns immutable ready datasource metadata for worker-local parsers. */
@@ -155,12 +211,9 @@ export class MapDataService implements AppActionContributor {
     }
 
     /**
-     * Plans one stylesheet against the full schema of its exact map only.
-     *
-     * Tile transport and feature-id lookup use the shared schema-free parser.
-     * Keeping schema construction here makes the expensive completion model
-     * lazy per presented map instead of blocking startup on every configured
-     * datasource.
+     * Plans against the same immutable schema used to decode this map's tiles.
+     * Local readiness guarantees that the shared parser already owns the graph;
+     * style planning no longer constructs a second schema parser per map.
      */
     planStyleFilter(
         style: FeatureLayerStyle,
@@ -169,7 +222,10 @@ export class MapDataService implements AppActionContributor {
         highlightMode: number,
         lod: number
     ): unknown {
-        return this.styleParserForMap(mapId).planStyleFilter(
+        if (!this.isMapLayerReady(mapId, layerId)) {
+            throw new Error(`Datasource '${mapId}' is not ready for style planning.`);
+        }
+        return this.tileLayerParser.planStyleFilter(
             style,
             mapId,
             layerId,
@@ -179,14 +235,9 @@ export class MapDataService implements AppActionContributor {
     }
 
     /**
-     * Returns the minimal datasource metadata needed to deserialize one map's
-     * subset layers in a render worker.
-     *
-     * Rendering consumes LayerInfo identity, versions, feature-id
-     * compositions, and geometry metadata, but it does not compile SIMFIL or
-     * provide completion. Keeping featureModelSchema out of this payload
-     * avoids parsing the complete completion catalog independently in every
-     * renderer.
+     * Returns one map's small catalog metadata for worker-local decoding.
+     * Its referenced binary schema is installed separately before task admission.
+     * Legacy inline input remains intact until native import normalizes it.
      */
     getRenderDataSourceInfoBlob(mapId: string): Uint8Array | null {
         const cached = this.renderDataSourceInfoBlobCache.get(mapId);
@@ -194,12 +245,8 @@ export class MapDataService implements AppActionContributor {
             return cached;
         }
 
-        const sources = this.schemaFreeDataSourceInfo(
-            this.sourceCatalogEntries
-                .filter(source =>
-                    source.mapId === mapId &&
-                    isDataSourceCatalogEntryReady(source))
-        );
+        const sources = [...this.readySourceMetadata.values()]
+            .filter(source => source.mapId === mapId);
         if (!sources.length) {
             return null;
         }
@@ -207,6 +254,42 @@ export class MapDataService implements AppActionContributor {
         const blob = new TextEncoder().encode(JSON.stringify(sources));
         this.renderDataSourceInfoBlobCache.set(mapId, blob);
         return blob;
+    }
+
+    /** Returns only the schema artifacts required by the selected ready maps. */
+    getSchemaArtifacts(mapIds?: readonly string[]): MapSchemaArtifact[] {
+        const artifacts = new Map<string, MapSchemaArtifact>();
+        for (const source of this.readySourceMetadata.values()) {
+            if (mapIds && !mapIds.includes(source.mapId)) continue;
+            const artifact = source.schemaId ? this.schemaArtifacts.get(source.schemaId) : undefined;
+            if (artifact) artifacts.set(artifact.schemaId, artifact);
+        }
+        return [...artifacts.values()];
+    }
+
+    /** Model generation used by isolated decoders; catalog status has no effect on it. */
+    mapMetadataGeneration(mapId: string): number {
+        return this.mapMetadataGenerations.get(mapId) ?? 0;
+    }
+
+    /**
+     * Identifies the model snapshots a schema request actually depends on.
+     * A progress update or another map becoming ready leaves a selected scope
+     * unchanged. Removal, loss of readiness or replacement invalidates it.
+     */
+    schemaScopeSignature(mapIds?: readonly string[]): string {
+        const scope = [...new Set(mapIds ?? this.sourceCatalogEntries.map(source => source.mapId))].sort();
+        return JSON.stringify(scope.map(mapId => [mapId, this.mapMetadataGeneration(mapId), this.isMapReady(mapId)]));
+    }
+
+    /** Enumerates the selected layer's produced feature types from its installed schema. */
+    featureTypesForLayer(mapId: string, layerId: string): string[] {
+        if (!this.isMapLayerReady(mapId, layerId)) return [];
+        const types: unknown = this.tileLayerParser.featureTypes(mapId, layerId);
+        if (!Array.isArray(types) || !types.every(type => typeof type === "string")) {
+            throw new Error(`Invalid native feature types for '${mapId}/${layerId}'.`);
+        }
+        return types;
     }
 
     /**
@@ -258,6 +341,43 @@ export class MapDataService implements AppActionContributor {
         return !!map?.layers.has(layerId) && isDataSourceCatalogEntryReady(map.info);
     }
 
+    /**
+     * Restored inspections can start while this map's schema is still loading.
+     * Wait for its installed metadata before requesting bytes that need that
+     * schema to decode. Other maps may remain loading; cancellation releases
+     * the catalog subscription when an inspection is closed or replaced.
+     */
+    async waitForMapLayersReady(
+        layers: readonly {mapId: string; layerId: string}[],
+        signal?: AbortSignal
+    ): Promise<void> {
+        signal?.throwIfAborted();
+        try {
+            await firstValueFrom(this.maps$.pipe(
+                filter(tree => {
+                    let ready = true;
+                    for (const {mapId, layerId} of layers) {
+                        const map = tree.maps.get(mapId);
+                        if (!map) throw new Error(`Datasource '${mapId}' is unavailable.`);
+                        const status = dataSourceReadinessStatus(map.info);
+                        if (status === "failed") throw new Error(this.dataSourceStatusText(map.info));
+                        if (status !== "ready") {
+                            ready = false;
+                        } else if (!map.layers.has(layerId)) {
+                            throw new Error(`Layer '${mapId}/${layerId}' is unavailable.`);
+                        }
+                    }
+                    return ready;
+                }),
+                take(1),
+                takeUntil(signal ? fromEvent(signal, "abort") : EMPTY)
+            ));
+        } catch (error) {
+            signal?.throwIfAborted();
+            throw error;
+        }
+    }
+
     /** Returns the immutable catalog identity for one feature layer. */
     mapgetLayer(mapId: string, layerId: string): MapgetLayer | undefined {
         return this.mapgetLayersByKey.get(`${mapId}/${layerId}`);
@@ -271,18 +391,24 @@ export class MapDataService implements AppActionContributor {
     /** Returns whether a map catalog entry is currently initializing. */
     isMapInitializing(mapId: string): boolean {
         const map = this.maps.maps.get(mapId);
-        return !!map && dataSourceCatalogStatus(map.info) === "initializing";
+        return !!map && dataSourceReadinessStatus(map.info) === "initializing";
     }
 
     /** Returns whether a map catalog entry failed during datasource startup. */
     isMapFailed(mapId: string): boolean {
         const map = this.maps.maps.get(mapId);
-        return !!map && dataSourceCatalogStatus(map.info) === "failed";
+        return !!map && dataSourceReadinessStatus(map.info) === "failed";
     }
 
     /** Formats the current datasource state for map-tree tooltips. */
     dataSourceStatusText(mapInfo: MapInfoItem): string {
         const status = dataSourceCatalogStatus(mapInfo);
+        if (status === "ready" && mapInfo.schemaStatus === "loading") {
+            return "Datasource ready; loading its schema in this browser.";
+        }
+        if (status === "ready" && mapInfo.schemaStatus === "failed") {
+            return `Datasource ready; schema installation failed. ${mapInfo.schemaMessage || ""}`.trim();
+        }
         const progress = dataSourceProgressPercent(mapInfo);
         const progressText = progress === null ? "" : ` (${progress}%)`;
         const message = typeof mapInfo.statusMessage === "string" && mapInfo.statusMessage.trim().length
@@ -304,76 +430,223 @@ export class MapDataService implements AppActionContributor {
         return dataSourceProgressPercent(mapInfo);
     }
 
-    /** Reloads `/sources`, rebuilds the map tree from the catalog snapshot, and refreshes ready parser metadata. */
+    /**
+     * Publishes catalog rows immediately and initializes each source independently.
+     * Awaiting this method never waits for all schemas: one slow or broken source
+     * must not block the application, MCP, or another map becoming usable.
+     */
     async reloadDataSources(): Promise<boolean> {
+        const serial = ++this.catalogLoadSerial;
+        const changeSerial = this.catalogChangeSerial;
         try {
             const response = await firstValueFrom(this.httpClient.get<Array<MapInfoItem>>("/sources?blocking=false", {
-                // Catalog validators from older mapget servers can collide after a restart.
-                // Fetching the authoritative snapshot must therefore bypass the HTTP cache.
                 cache: "no-store",
                 observe: "response"
             }));
-            const result = Array.isArray(response.body) ? response.body : [];
+            if (serial !== this.catalogLoadSerial) return true;
+            const revision = this.parseSourceCatalogRevision(response.headers.get("X-Mapget-Sources-Revision"));
+            if (changeSerial !== this.catalogChangeSerial &&
+                (revision === null || this.sourceCatalogRevisionValue === null || revision < this.sourceCatalogRevisionValue)) {
+                // A newer stream notification arrived while HTTP was in flight.
+                // Preserve it and fetch a fresh snapshot, including for direct UI reloads.
+                void this.reloadDataSources();
+                return true;
+            }
             const nextMetadata = new Map<string, MapInfoItem>();
-            const catalog = this.normalizeSourceCatalogEntries(result).map(source => {
-                if (!isDataSourceCatalogEntryReady(source)) {
-                    return source;
-                }
-                const metadata = { ...source };
-                for (const field of ["status", "statusMessage", "progress", "configIndex"]) {
-                    delete metadata[field];
-                }
+            const result = Array.isArray(response.body) ? response.body : [];
+            this.sourceCatalogEntries = this.normalizeSourceCatalogEntries(result).map(source => {
+                if (dataSourceCatalogStatus(source) !== "ready") return source;
+                const metadata = this.sourceMetadata(source);
                 const signature = JSON.stringify(metadata);
                 const retained = this.readySourceMetadata.get(signature) ?? metadata;
                 nextMetadata.set(signature, retained);
-                // HTTP decoding creates fresh objects. Preserve unchanged layer
-                // identities so scene reconciliation does not retire their tiles.
+                // Preserve existing layer identities across fresh HTTP objects.
                 return { ...source, layers: retained.layers };
             });
-            this.sourceCatalogRevisionValue = this.parseSourceCatalogRevision(
-                response.headers.get("X-Mapget-Sources-Revision")
-            );
-            const configStatus = response.headers.get("X-Mapget-Sources-Config-Status");
-            const configMessage = response.headers.get("X-Mapget-Sources-Config-Message");
-            if (configStatus === "error") {
-                const message = configMessage || "Datasource configuration contains errors.";
-                console.warn("Datasource config status:", message);
+            this.catalogMetadata = nextMetadata;
+            this.sourceCatalogRevisionValue = revision;
+            if (response.headers.get("X-Mapget-Sources-Config-Status") === "error") {
+                console.warn("Datasource config status:", response.headers.get("X-Mapget-Sources-Config-Message")
+                    || "Datasource configuration contains errors.");
             }
-
-            const replaced = [...this.readySourceMetadata.keys()].some(key => !nextMetadata.has(key));
-            const added = [...nextMetadata].filter(([key]) => !this.readySourceMetadata.has(key)).map(([, source]) => source);
-            if (replaced || added.length || this.dataSourceInfoJson === null) {
-                const readyEntries = [...nextMetadata.values()];
-                const parserJson = JSON.stringify(this.schemaFreeDataSourceInfo(replaced ? readyEntries : added));
-                uint8ArrayToWasmOrThrow(wasmBuffer => {
-                    if (replaced) {
-                        this.tileLayerParser.setDataSourceInfo(wasmBuffer);
-                    } else {
-                        this.tileLayerParser.addDataSourceInfo(wasmBuffer);
-                    }
-                }, new TextEncoder().encode(parserJson));
-                this.readySourceMetadata = nextMetadata;
-                this.dataSourceInfoJson = JSON.stringify(readyEntries);
-                this.dataSourceInfoBlobValue = new TextEncoder().encode(this.dataSourceInfoJson);
-                if (replaced) {
-                    this.invalidateFieldDictBlobCache();
-                    this.renderDataSourceInfoBlobCache.clear();
-                    this.clearStyleParsers();
+            this.reconcileReadySources(result);
+            this.messageService.clearBackendConnectionError();
+            for (const [signature, source] of nextMetadata) {
+                if (source.schemaId && !this.readySourceMetadata.has(signature) && !this.sourceHydrations.has(signature)) {
+                    const hydration = this.hydrateSourceSchema(signature, source);
+                    this.sourceHydrations.set(signature, hydration);
+                    void hydration.finally(() => {
+                        if (this.sourceHydrations.get(signature) === hydration) this.sourceHydrations.delete(signature);
+                    });
                 }
             }
-            // Install parser metadata before publishing layers which can request
-            // it. Only actual replacement invalidates dictionaries and transport.
-            this.messageService.clearBackendConnectionError();
-            this.publishSourceCatalogTree(catalog);
-            if (replaced) {
-                this.dataSourceInfoChanged.next();
-            }
-            this.layerStateChanged.next("datasources");
             return true;
         } catch (err) {
+            if (serial !== this.catalogLoadSerial) return false;
             console.error("Failed to load data source info.", err);
             this.messageService.showBackendConnectionError("Could not connect to the map backend to load datasource metadata.");
             return false;
+        }
+    }
+
+    /** Removes lifecycle decoration from the metadata identity and native input. */
+    private sourceMetadata(source: MapInfoItem): MapInfoItem {
+        const metadata = { ...source };
+        for (const field of ["status", "statusMessage", "progress", "configIndex", "retrying", "schemaStatus", "schemaMessage"]) {
+            delete metadata[field];
+        }
+        metadata.layers = Object.fromEntries(Object.entries(metadata.layers).map(([id, layer]) => {
+            const model = { ...layer };
+            delete model["incomingRelationTargetTypes"];
+            delete model["incomingRelationCoverageUnknown"];
+            return [id, model];
+        }));
+        return metadata;
+    }
+
+    /**
+     * Installs complete source snapshots before publishing ready rows.
+     * Additions preserve dictionaries and live scenes. Only actual replacement
+     * or removal resets the stream, independently of schema download completion.
+     */
+    private reconcileReadySources(catalogHints?: MapInfoItem[]): void {
+        const retired = [...this.readySourceMetadata]
+            .filter(([signature]) => !this.catalogMetadata.has(signature));
+        if (retired.length) {
+            const mapIds = retired.map(([, source]) => source.mapId);
+            for (const mapId of mapIds) {
+                // Invalidate pending work now, including while the replacement
+                // schema is still downloading. Readiness is published below.
+                this.mapMetadataGenerations.set(mapId, ++this.nextMetadataGeneration);
+                this.renderDataSourceInfoBlobCache.delete(mapId);
+            }
+            this.dataSourceInfoChanged.next(mapIds);
+            this.applyNativeCatalogChanges(mapIds, []);
+            for (const [signature] of retired) this.readySourceMetadata.delete(signature);
+            const retainedPools = this.tileLayerParser.getFieldDictOffsets();
+            for (const poolId of this.fieldDictBlobCache.keys()) {
+                if (!Object.hasOwn(retainedPools, poolId)) this.fieldDictBlobCache.delete(poolId);
+            }
+        }
+        this.sourceCatalogEntries = this.sourceCatalogEntries.map(source => {
+            if (dataSourceCatalogStatus(source) !== "ready") return source;
+            const signature = JSON.stringify(this.sourceMetadata(source));
+            const metadata = this.catalogMetadata.get(signature);
+            if (!metadata) return source;
+            if (!this.readySourceMetadata.has(signature)) {
+                if (metadata.schemaId && !this.schemaArtifacts.has(metadata.schemaId)) {
+                    if (source.schemaStatus === "failed") return source;
+                    return { ...source, schemaStatus: "loading", schemaMessage: undefined };
+                }
+                try {
+                    const artifact = metadata.schemaId ? this.schemaArtifacts.get(metadata.schemaId) : undefined;
+                    if (artifact) {
+                        uint8ArrayToWasmOrThrow(bytes => this.tileLayerParser.installMapSchema(bytes, artifact.schemaId), artifact.bytes);
+                    }
+                    this.applyNativeCatalogChanges([], [metadata]);
+                    this.readySourceMetadata.set(signature, metadata);
+                    this.mapMetadataGenerations.set(metadata.mapId, ++this.nextMetadataGeneration);
+                    this.renderDataSourceInfoBlobCache.delete(metadata.mapId);
+                } catch (error) {
+                    return { ...source, schemaStatus: "failed", schemaMessage: String(error) };
+                }
+            }
+            return { ...source, schemaStatus: "ready", schemaMessage: undefined };
+        });
+        if (catalogHints) {
+            uint8ArrayToWasmOrThrow(buffer => this.tileLayerParser.setIncomingRelationHints(buffer),
+                new TextEncoder().encode(JSON.stringify(catalogHints)));
+        }
+        const referencedIds = new Set([...this.catalogMetadata.values()].map(source => source.schemaId));
+        for (const schemaId of this.schemaArtifacts.keys()) {
+            if (!referencedIds.has(schemaId)) this.schemaArtifacts.delete(schemaId);
+        }
+        this.dataSourceInfoJson = JSON.stringify([...this.readySourceMetadata.values()]);
+        this.dataSourceInfoBlobValue = new TextEncoder().encode(this.dataSourceInfoJson);
+        this.publishSourceCatalogTree(this.sourceCatalogEntries);
+        this.layerStateChanged.next("datasources");
+    }
+
+    /** Apply the same explicit catalog delta to the native metadata/dictionary owner. */
+    private applyNativeCatalogChanges(removedMapIds: readonly string[], addedSources: readonly MapInfoItem[]): void {
+        uint8ArrayToWasmOrThrow(
+            bytes => this.tileLayerParser.applyDataSourceChanges(bytes),
+            new TextEncoder().encode(JSON.stringify({removedMapIds, addedSources}))
+        );
+    }
+
+    /** Completes one exact catalog snapshot; a replaced source cannot be revived by a late response. */
+    private async hydrateSourceSchema(signature: string, source: MapInfoItem): Promise<void> {
+        try {
+            await this.loadMapSchema(source);
+            if (this.catalogMetadata.has(signature)) this.reconcileReadySources();
+        } catch (error) {
+            if (!this.catalogMetadata.has(signature)) return;
+            this.sourceCatalogEntries = this.sourceCatalogEntries.map(entry =>
+                JSON.stringify(this.sourceMetadata(entry)) === signature
+                    ? { ...entry, schemaStatus: "failed", schemaMessage: String(error) }
+                    : entry
+            );
+            this.publishSourceCatalogTree(this.sourceCatalogEntries);
+            this.layerStateChanged.next("datasources");
+        }
+    }
+
+    /**
+     * Coalesces downloads and native validation by exact artifact identity.
+     * The public endpoint authorizes the source before serving its schema. A
+     * failed fetch or identity check leaves no cached success and can be retried.
+     */
+    private loadMapSchema(source: MapInfoItem): Promise<MapSchemaArtifact> {
+        const schemaId = source.schemaId!;
+        const cached = this.schemaArtifacts.get(schemaId);
+        if (cached) return Promise.resolve(cached);
+        const pending = this.schemaRequests.get(schemaId);
+        if (pending) {
+            return pending.promise.catch(error => {
+                // A shared graph can be served by several authorized sources.
+                // Failure of the first provider must not strand another one.
+                if (pending.sourceId === source.sourceId) throw error;
+                return this.loadMapSchema(source);
+            });
+        }
+        const request = this.downloadMapSchema(source).finally(() => {
+            if (this.schemaRequests.get(schemaId)?.promise === request) this.schemaRequests.delete(schemaId);
+        });
+        this.schemaRequests.set(schemaId, {sourceId: source.sourceId, promise: request});
+        return request;
+    }
+
+    /** Downloads and validates one live artifact while holding a bounded download slot. */
+    private async downloadMapSchema(source: MapInfoItem): Promise<MapSchemaArtifact> {
+        if (this.activeSchemaDownloads >= 2) {
+            await new Promise<void>(resolve => this.waitingSchemaDownloads.push(resolve));
+        } else {
+            ++this.activeSchemaDownloads;
+        }
+        try {
+            const schemaId = source.schemaId!;
+            const stillReferenced = () => [...this.catalogMetadata.values()].some(entry => entry.schemaId === schemaId);
+            if (!stillReferenced()) throw new Error("Datasource schema was replaced before its download started.");
+            const buffer = await firstValueFrom(this.httpClient.get("/schema", {
+                params: {sourceId: source.sourceId, schemaId},
+                responseType: "arraybuffer"
+            }));
+            if (!stillReferenced()) throw new Error("Datasource schema was replaced during its download.");
+            const bytes = new Uint8Array(buffer);
+            if (!bytes.byteLength || bytes.byteLength > 64 * 1024 * 1024) {
+                throw new Error("Map schema artifact is empty or exceeds the 64 MiB limit.");
+            }
+            uint8ArrayToWasmOrThrow(data => this.tileLayerParser.installMapSchema(data, schemaId), bytes);
+            const artifact = {schemaId, bytes};
+            this.schemaArtifacts.set(schemaId, artifact);
+            return artifact;
+        } finally {
+            // Hand the occupied slot directly to the next waiter. Decrementing
+            // first would let a new arrival overtake it and exceed the limit.
+            const next = this.waitingSchemaDownloads.shift();
+            if (next) next();
+            else --this.activeSchemaDownloads;
         }
     }
 
@@ -386,6 +659,7 @@ export class MapDataService implements AppActionContributor {
         if (index < 0) {
             return false;
         }
+        ++this.catalogChangeSerial;
         const updatedEntry: MapInfoItem = {
             ...this.sourceCatalogEntries[index],
             retrying: update.retrying === true,
@@ -393,6 +667,10 @@ export class MapDataService implements AppActionContributor {
         };
         if (typeof update.status === "string") {
             updatedEntry.status = update.status;
+        }
+        if (dataSourceCatalogStatus(updatedEntry) === "ready" &&
+            !this.readySourceMetadata.has(JSON.stringify(this.sourceMetadata(updatedEntry)))) {
+            updatedEntry.schemaStatus = "loading";
         }
         updatedEntry.statusMessage = typeof update.statusMessage === "string"
             ? update.statusMessage
@@ -433,7 +711,7 @@ export class MapDataService implements AppActionContributor {
             ? dataSourceCatalogStatus({ status: update.status })
             : dataSourceCatalogStatus(entry);
         const hasLayerMetadata = !!entry.layers && Object.keys(entry.layers).length > 0;
-        return nextStatus === "ready" && (!isDataSourceCatalogEntryReady(entry) || !hasLayerMetadata);
+        return nextStatus === "ready" && (dataSourceCatalogStatus(entry) !== "ready" || !hasLayerMetadata);
     }
 
     /** Normalizes a full catalog snapshot and clears unsupported loading percentages. */
@@ -493,58 +771,6 @@ export class MapDataService implements AppActionContributor {
             }
         }
         return result;
-    }
-
-    /** Returns a lazily initialized full-schema parser for one presented map. */
-    private styleParserForMap(mapId: string): TileLayerParser {
-        const cached = this.styleParsersByMapId.get(mapId);
-        if (cached) {
-            return cached;
-        }
-        const sources = this.sourceCatalogEntries.filter(source =>
-            source.mapId === mapId &&
-            isDataSourceCatalogEntryReady(source)
-        );
-        if (!sources.length) {
-            throw new Error(`Datasource '${mapId}' is not ready for style planning.`);
-        }
-        const parser = new coreLib.TileLayerParser() as TileLayerParser;
-        try {
-            const json = new TextEncoder().encode(JSON.stringify(sources));
-            uint8ArrayToWasmOrThrow(
-                wasmBuffer => parser.setDataSourceInfo(wasmBuffer),
-                json
-            );
-        } catch (error) {
-            parser.delete();
-            throw error;
-        }
-        this.styleParsersByMapId.set(mapId, parser);
-        return parser;
-    }
-
-    /** Releases full-schema planners before installing a changed catalog. */
-    private clearStyleParsers(): void {
-        for (const parser of this.styleParsersByMapId.values()) {
-            parser.delete();
-        }
-        this.styleParsersByMapId.clear();
-    }
-
-    /** Removes completion schemas while retaining all transport/model identity metadata. */
-    private schemaFreeDataSourceInfo(
-        sources: readonly MapInfoItem[]
-    ): MapInfoItem[] {
-        return sources.map(source => ({
-            ...source,
-            layers: Object.fromEntries(
-                Object.entries(source.layers ?? {}).map(([layerId, layer]) => {
-                    const parserLayer = { ...layer };
-                    delete parserLayer["featureModelSchema"];
-                    return [layerId, parserLayer];
-                })
-            )
-        }));
     }
 
     /** Converts absent/null/invalid source progress to the UI's "no percentage available" state. */
@@ -971,6 +1197,7 @@ export class MapDataService implements AppActionContributor {
         }
         return isMetadata ? match[2] : `${match[1]}`.replace('-', '.');
     }
+
     /** Registers semantic operations and their live omnibar candidates. */
     registerActions(actions: AppActionRegistration): void {
         actions.registerAction(
@@ -992,9 +1219,10 @@ export class MapDataService implements AppActionContributor {
                 name: "viewer_list_layers",
                 mutation: false,
                 description:
-                    "List map layers, supported zoom levels and schema-owning feature types. Features are the " +
-                    "default; use layerType=SourceData for raw tables. featureTypes may also contain reference-only " +
-                    "types. Optional viewId adds the current visibility, without changing defaults or loading data.",
+                    "List map layers, supported zoom levels and produced feature types. Features are the " +
+                    "default; use layerType=SourceData for raw tables. featureTypes is absent until the " +
+                    "source's schema is ready. " +
+                    "Optional viewId adds the current visibility, without changing defaults or loading data.",
                 inputSchema: z.strictObject({
                     mapId: identifierSchema.optional(),
                     layerId: identifierSchema.optional(),
@@ -1010,8 +1238,9 @@ export class MapDataService implements AppActionContributor {
                         available: z.boolean(),
                         visible: z.boolean().optional(),
                         zoomLevels: z.array(z.number().int().min(0).max(15)).max(16),
-                        featureTypes: z.array(identifierSchema).max(1000),
-                        schemaFeatureTypes: z.array(identifierSchema).max(1000),
+                        featureTypes: z.array(identifierSchema).max(1000).optional(),
+                        schemaStatus: z.enum(["loading", "ready", "failed"]),
+                        schemaId: identifierSchema.optional(),
                         partitionKind: z.enum(["tile", "object"])
                     })
                 )
@@ -1250,6 +1479,11 @@ export class MapDataService implements AppActionContributor {
         return { ...config };
     }
 
+    /**
+     * Collect current layer settings within the action reader's limits. Without a
+     * map selector, include visible layers only; explicit selectors can inspect hidden
+     * layers. The returned collection reports truncation through context.collect().
+     */
     layerSummary(target: { viewId: string; mapId?: string; layerId?: string }, context: ControlReadContext) {
         const index = this.controlViewIndex(target.viewId);
         if (target.layerId && !target.mapId) rejectAction("layerId requires mapId", "invalid_arguments");
@@ -1268,6 +1502,10 @@ export class MapDataService implements AppActionContributor {
         return context.collect(layers());
     }
 
+    /**
+     * Resolve an externally editable option by owning map/layer/style identity;
+     * internal style options are unavailable to the action/control API.
+     */
     private requirePublicOption(target: {
         viewId: string;
         mapId: string;
@@ -1283,6 +1521,10 @@ export class MapDataService implements AppActionContributor {
         return option;
     }
 
+    /**
+     * Require a value of the declared option's runtime type, then update one view
+     * and apply any option synchronization in a single persistence transaction.
+     */
     assignStyleOption(
         target: { viewId: string; mapId: string; layerId: string; styleId: string; optionId: string },
         value: string | number | boolean
@@ -1299,6 +1541,7 @@ export class MapDataService implements AppActionContributor {
         });
     }
 
+    /** Page catalog maps, including entries whose metadata or schema is still loading. */
     listMaps(input: { offset?: number; limit?: number }) {
         const maps = this.maps.maps.values();
         const available = (mapId: string) => this.isMapReady(mapId);
@@ -1308,6 +1551,11 @@ export class MapDataService implements AppActionContributor {
         return catalogPage(values(), input);
     }
 
+    /**
+     * Page the selected catalog layers, optionally annotating visibility for one view.
+     * Produced feature types are exposed only after that map is locally schema-ready;
+     * map-wide reference identities are not layer production declarations.
+     */
     listLayers(input: {
         layerType: "Features" | "SourceData" | "all";
         offset?: number;
@@ -1321,10 +1569,12 @@ export class MapDataService implements AppActionContributor {
         const maps = input.mapId ? [this.requireMap(input.mapId)] : this.maps.maps.values();
         const layer = input.layerId ? this.requireLayer(input.mapId!, input.layerId) : undefined;
         const available = (mapId: string) => this.isMapReady(mapId);
+        const featureTypes = (mapId: string, layerId: string) => this.featureTypesForLayer(mapId, layerId);
         function* values() {
             for (const map of maps)
                 for (const child of layer ? [layer] : map.layers.values()) {
                     if (input.layerType !== "all" && child.type !== input.layerType) continue;
+                    const produced = available(map.id) ? featureTypes(map.id, child.id) : undefined;
                     yield {
                         id: child.id,
                         mapId: map.id,
@@ -1334,8 +1584,9 @@ export class MapDataService implements AppActionContributor {
                             ? {}
                             : { visible: child.viewConfig[index]?.visible ?? false }),
                         zoomLevels: child.info.zoomLevels,
-                        featureTypes: child.info.featureTypes.map((type) => type.name),
-                        schemaFeatureTypes: child.info.schemaFeatureTypes ?? [],
+                        ...(produced ? { featureTypes: produced } : {}),
+                        schemaStatus: map.info.schemaStatus ?? (available(map.id) ? "ready" : "loading"),
+                        ...(map.info.schemaId ? { schemaId: map.info.schemaId } : {}),
                         partitionKind: child.info.partitionKind ?? ("tile" as const)
                     };
                 }
@@ -1343,6 +1594,10 @@ export class MapDataService implements AppActionContributor {
         return catalogPage(values(), input);
     }
 
+    /**
+     * Page public style options and their current value in one view. Each row
+     * contains the fully qualified control target needed to write that same option.
+     */
     listStyleOptions(input: {
         mapId: string;
         layerId: string;
@@ -1380,6 +1635,10 @@ export class MapDataService implements AppActionContributor {
         return catalogPage(values(), input);
     }
 
+    /**
+     * Page layer presets or map presets. For a selected view, map availability
+     * accounts for conflicts with its enabled cross-layer option synchronization.
+     */
     listPresets(input: {
         mapId: string;
         offset?: number;

@@ -4,11 +4,22 @@
  * component is mounted and no user's storage or deployment config is loaded.
  */
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { compile } from 'json-schema-to-typescript';
 import { build } from 'esbuild';
 import { JSDOM } from 'jsdom';
 import { resolve } from 'node:path';
+
+// Reused checkouts can retain ignored output from before actions/ became
+// action/. Remove only the old generator's known files before Angular scans
+// app/. A tracked file belongs to the checkout and must never be cleaned here.
+for (const name of ['catalog-id.ts', 'viewer-contract.d.ts', 'web-mcp-actions.json']) {
+    const obsolete = `app/actions/generated/${name}`;
+    const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '--', obsolete], {
+        stdio: 'ignore'
+    });
+    if (tracked.status === 1) rmSync(obsolete, {force: true});
+}
 
 const compiled = spawnSync(process.execPath, ['node_modules/@angular/compiler-cli/bundles/src/bin/ngc.js', '-p', 'tsconfig.viewer-actions.json'], {
     stdio: 'inherit', env: process.env

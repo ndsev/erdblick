@@ -99,6 +99,10 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     private detachDialogDragEndListener?: () => void;
     private dialogDragActive = false;
 
+    /**
+     * Install application-wide dialog behavior, diagnostics and debug access on
+     * the root component; domain startup remains in the app initializer.
+     */
     constructor(public stateService: AppStateService,
         private httpClient: HttpClient,
         private mapInfo: MapDataService,

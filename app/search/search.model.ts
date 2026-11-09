@@ -3,6 +3,8 @@
  * These contracts describe delivered data without constructing SearchService,
  * opening a filter subscription or retaining rendered result presentations.
  */
+import {z} from "zod";
+import {schemaScalarTypeSchema, type SchemaScalarType} from "../mapdata/schema-type.model";
 import type {FeatureSearchMapLayerRef} from "./search-definition.model";
 
 /** Counts of scalar and placeholder value kinds observed in a search value stream. */
@@ -14,6 +16,7 @@ export interface SearchValueKindCounts {
     object: number;
     list: number;
     blob: number;
+    bitmask: number;
     unknown: number;
 }
 
@@ -34,9 +37,13 @@ export interface SearchValueHistogramBucket {
 
 /** Aggregated value summary for one withFields expression or one trace expression. */
 export interface SearchValueSummary {
+    /** Exact source meaning; unqualified calculations remain a separate group. */
+    schemaType?: SchemaScalarType;
     count: number;
     missing: number;
     nulls: number;
+    /** Named sentinels remain in raw histograms but are excluded from numeric aggregates. */
+    specials: number;
     kinds: SearchValueKindCounts;
     numeric?: SearchValueNumericSummary;
     histogram: SearchValueHistogramBucket[];
@@ -93,6 +100,8 @@ export interface CompletionCandidate {
     query: string;
     source: string;
     hint: string;
+    /** The input already spells this native symbol fully, before predicate expansion. */
+    isExactMatch?: boolean;
     originLayers?: FeatureSearchMapLayerRef[];
 }
 
@@ -141,6 +150,8 @@ export interface SearchResultTileEntry {
 
 /** Compact list-ingestion payload derived from an immutable search subset. */
 export interface SearchResultTilePayload {
+    /** Distinguishes feature and attribute outputs for one source partition. */
+    presentationKey?: string;
     searchId: string;
     refresh: number;
     mapId: string;
@@ -171,6 +182,12 @@ export interface FeatureSearchAttributeScopeCandidate {
     featureType: string;
     mapId: string;
     layerId: string;
+    /**
+     * Native references in the accepted predicate, relative to this owner.
+     * An empty list requests solid styling; absence allows the primary scalar
+     * of a whole-attribute query such as WARNING_SIGN. Never execution scope.
+     */
+    queriedPaths?: string[];
 }
 
 export type FeatureSearchStyleValueKind =
@@ -179,19 +196,101 @@ export type FeatureSearchStyleValueKind =
     | "string"
     | "boolean"
     | "enum"
+    | "bitmask"
     | "object"
     | "array"
     | "unknown";
 
-/** Schema-backed result-value field candidate for search-result style rules. */
-export interface FeatureSearchStyleFieldCandidate {
-    path: string;
+/** A schema owner in which a style expression has one concrete meaning. */
+export interface FeatureSearchStyleFieldContext {
     mapId: string;
     layerId: string;
     attrName?: string;
     attrLayerName?: string;
     featureType?: string;
+    /** Native scalar shorthand for this attribute, excluding validity/source metadata. */
+    primaryValuePath?: string;
+}
+
+/** Shared metadata for one exact schema/type, exported once by the native walker. */
+export interface FeatureSearchStyleFieldMetadata {
     valueKind: FeatureSearchStyleValueKind;
     enumValues: string[];
     numericRange?: {min: number; max: number};
+    schemaType?: SchemaScalarType;
+}
+
+/** A path and its distinct meaning; context owners share the same metadata object. */
+export interface FeatureSearchStyleFieldCandidate extends FeatureSearchStyleFieldMetadata {
+    path: string;
+    contexts: FeatureSearchStyleFieldContext[];
+}
+
+/** A field name or an array-element edge; native code renders the corresponding Simfil expression. */
+export const featureSearchStylePathStepSchema = z.union([
+    z.string(),
+    z.strictObject({elements: z.literal(true)})
+]);
+export type FeatureSearchStylePathStep = z.infer<typeof featureSearchStylePathStepSchema>;
+
+/**
+ * Semantic discovery controls. Names and array-element edges are explicit so
+ * JavaScript never has to parse expressions or reconstruct the schema graph.
+ * Direct-child mode supports browsing; recursive mode includes the subtree.
+ */
+export interface FeatureSearchStyleFieldOptions {
+    selectedFeatureTypes?: string[];
+    path?: FeatureSearchStylePathStep[];
+    recursive?: boolean;
+    values?: "scalar" | "all";
+    context?: FeatureSearchStyleFieldContext;
+
+    /** Exact attribute owners already resolved during confirmed search preparation. */
+    preparedContexts?: FeatureSearchAttributeScopeCandidate[];
+}
+
+/** Validate shared type descriptors once, then retain compact integer references. */
+export const featureSearchStyleFieldInventorySchema = z.object({
+    contexts: z.array(z.object({
+        mapId: z.string().min(1), layerId: z.string().min(1),
+        featureType: z.string().optional(), attrName: z.string().optional(), attrLayerName: z.string().optional(),
+        primaryValuePath: z.string().optional()
+    })),
+    types: z.array(z.object({
+        valueKind: z.enum(["number", "integer", "string", "boolean", "enum", "bitmask", "object", "array", "unknown"]),
+        enumValues: z.array(z.string()),
+        numericRange: z.object({min: z.number(), max: z.number()}).optional(),
+        schemaType: schemaScalarTypeSchema.nullish().transform(value => value ?? undefined)
+    })),
+    fields: z.array(z.object({
+        path: z.string().min(1), metadata: z.number().int().nonnegative(),
+        contexts: z.array(z.number().int().nonnegative())
+    })),
+    branches: z.array(z.object({
+        path: z.array(featureSearchStylePathStepSchema), label: z.string(), contexts: z.array(z.number().int().nonnegative())
+    })),
+    complete: z.boolean(),
+    incompleteReason: z.string()
+}).superRefine((inventory, context) => {
+    for (const field of inventory.fields) {
+        if (field.metadata >= inventory.types.length || field.contexts.some(index => index >= inventory.contexts.length)) {
+            context.addIssue({code: "custom", message: "Style field references an unknown type or context"});
+            return;
+        }
+    }
+    if (inventory.branches.some(branch => branch.contexts.some(index => index >= inventory.contexts.length))) {
+        context.addIssue({code: "custom", message: "Style branch references an unknown context"});
+    }
+});
+
+/** Compact worker result; complete refers to the requested semantic scope, never to loaded data. */
+export type FeatureSearchStyleFieldInventory = z.infer<typeof featureSearchStyleFieldInventorySchema>;
+
+/** Resolve table references without cloning shared type metadata or expanding one row per owner. */
+export function searchStyleFieldCandidates(inventory: FeatureSearchStyleFieldInventory): FeatureSearchStyleFieldCandidate[] {
+    return inventory.fields.map(field => ({
+        path: field.path,
+        ...inventory.types[field.metadata],
+        contexts: field.contexts.map(index => inventory.contexts[index])
+    }));
 }

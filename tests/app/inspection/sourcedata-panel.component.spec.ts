@@ -1,9 +1,108 @@
-import {describe, expect, it} from "vitest";
+import {afterEach, describe, expect, it, vi} from "vitest";
+import {Subject} from "rxjs";
 import {TreeTableNode} from "primeng/api";
+import {SourceDataPanelComponent} from "../../../app/inspection/sourcedata-panel.component";
+import {MapTileStreamClientTiles} from "../../../app/mapdata/map-tile-stream.client";
+import {coreLib} from "../../../app/integrations/wasm.adapter";
 import {
     expandSingleChildSourceDataPaths,
     sourceDataTreePresentation
 } from "../../../app/inspection/sourcedata-tree.presentation";
+
+describe("source-data inspection schema readiness", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    /** Exercise the loader without Angular's template; it still owns a real WASM parser. */
+    function fixture() {
+        const component = Object.create(SourceDataPanelComponent.prototype) as any;
+        component.loadController = new AbortController();
+        component.loadRevision = 0;
+        const finishLoading = vi.fn();
+        component.tileStream = {
+            beginInspectionLoad: () => finishLoading,
+            cancelRetainedTileExpiries: vi.fn()
+        };
+        const mapTileKey = coreLib.getSourceDataLayerKey("Map", "Source", Number(coreLib.getTileIdFromPosition(10, 48, 13)));
+        return {component, mapTileKey, finishLoading};
+    }
+
+    it("installs the ready map's schema in its private parser before decoding source data", async () => {
+        const {component, mapTileKey} = fixture();
+        let ready!: () => void;
+        component.mapService = {
+            dataSourceInfoChanged: new Subject<readonly string[]>(),
+            waitForMapLayersReady: () => new Promise<void>(resolve => {ready = resolve;}),
+            getSchemaArtifacts: () => [{schemaId: "source-schema", bytes: new Uint8Array([1])}],
+            getDataSourceInfoJson: () => "source metadata"
+        };
+        const install = vi.spyOn((coreLib.TileLayerParser as any).prototype, "installMapSchema")
+            .mockImplementation(() => {});
+        const register = vi.spyOn(MapTileStreamClientTiles.prototype, "setDataSourceInfoJson")
+            .mockImplementation(function (this: MapTileStreamClientTiles) {
+                expect(install).toHaveBeenCalledWith(expect.anything(), "source-schema");
+                return this;
+            });
+        const layer = {getError: () => "", delete: vi.fn()};
+        let parser: any;
+        const request = vi.spyOn(MapTileStreamClientTiles.prototype, "request")
+            .mockImplementation(async function (this: MapTileStreamClientTiles) {
+                expect(register).toHaveBeenCalledWith("source metadata");
+                parser = this.parser;
+                vi.spyOn(parser, "readTileLayerMetadata").mockReturnValue({});
+                vi.spyOn(parser, "readTileSourceDataLayer").mockReturnValue(layer);
+                this.onSourceData!(new Uint8Array([2]));
+            });
+        const loading = component.loadSourceDataLayer(mapTileKey);
+        expect(request).not.toHaveBeenCalled();
+        ready();
+        expect((await loading).layer).toBe(layer);
+        expect(request).toHaveBeenCalledOnce();
+        expect(parser.isDeleted()).toBe(true);
+        expect(layer.delete).not.toHaveBeenCalled();
+    });
+
+    it("releases the inspection loading indicator when the panel closes during schema loading", async () => {
+        const {component, mapTileKey, finishLoading} = fixture();
+        component.mapService = {
+            dataSourceInfoChanged: new Subject<readonly string[]>(),
+            waitForMapLayersReady: (_layers: unknown, signal: AbortSignal) => new Promise<void>((_, reject) => {
+                signal.addEventListener("abort", () => reject(signal.reason), {once: true});
+            })
+        };
+        const request = vi.spyOn(MapTileStreamClientTiles.prototype, "request");
+        const loading = component.refreshSourceData(mapTileKey, undefined, 0, false);
+        component.ngOnDestroy();
+        await loading;
+        expect(finishLoading).toHaveBeenCalledOnce();
+        expect(request).not.toHaveBeenCalled();
+    });
+
+    it("aborts a pending source-data body when its datasource retires", async () => {
+        const {component, mapTileKey} = fixture();
+        const changes = new Subject<readonly string[]>();
+        component.mapService = {
+            dataSourceInfoChanged: changes,
+            waitForMapLayersReady: async () => {},
+            getSchemaArtifacts: () => [],
+            getDataSourceInfoJson: () => "[]"
+        };
+        let fetchSignal: AbortSignal | undefined;
+        vi.stubGlobal("fetch", vi.fn((_url, init: RequestInit) => new Promise((_resolve, reject) => {
+            fetchSignal = init.signal!;
+            fetchSignal.addEventListener("abort", () => reject(fetchSignal!.reason), {once: true});
+        })));
+        try {
+            const loading = component.loadSourceDataLayer(mapTileKey);
+            const cancelled = expect(loading).rejects.toMatchObject({name: "AbortError"});
+            await vi.waitFor(() => expect(fetchSignal).toBeDefined());
+            changes.next(["Sibling"]);
+            expect(fetchSignal!.aborted).toBe(false);
+            changes.next(["Map"]);
+            expect(fetchSignal!.aborted).toBe(true);
+            await cancelled;
+        } finally {vi.unstubAllGlobals();}
+    });
+});
 
 describe("sourceDataTreePresentation", () => {
     it("extracts an SQL query and flattens result rows into named sections", () => {

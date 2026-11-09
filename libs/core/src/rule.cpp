@@ -1,13 +1,14 @@
 #include "rule.h"
-#include "mapget/model/hash.h"
 #include <algorithm>
-#include <charconv>
 #include <cctype>
+#include <charconv>
 #include <cmath>
 #include <iostream>
 #include <limits>
-#include "simfil/value.h"
+#include "mapget/model/hash.h"
 #include "search.h"
+#include "simfil/model/schema-pool.h"
+#include "simfil/value.h"
 
 namespace erdblick
 {
@@ -188,6 +189,24 @@ std::optional<double> numericColorScaleKey(
         return *number;
     }
     return std::nullopt;
+}
+
+/** Compare typed scale literals without rounding a large integer through a double. */
+bool colorScaleKeysEqual(
+    FeatureStyleRule::ColorScaleStop::Key const& left,
+    FeatureStyleRule::ColorScaleStop::Key const& right)
+{
+    if (left.index() == right.index())
+        return left == right;
+    auto integer = std::get_if<int64_t>(&left);
+    auto number = std::get_if<double>(&right);
+    if (!integer || !number) {
+        integer = std::get_if<int64_t>(&right);
+        number = std::get_if<double>(&left);
+    }
+    return integer && number && *number >= -9223372036854775808.0 &&
+        *number < 9223372036854775808.0 && std::trunc(*number) == *number &&
+        *integer == static_cast<int64_t>(*number);
 }
 
 /** Convert a SIMFIL integer or float into a finite double. */
@@ -431,6 +450,32 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             ? ColorScale::Mode::Categorical
             : ColorScale::Mode::Linear;
         scale.expression = scaleYaml["expression"].as<std::string>();
+        // Saved styles used singular schemaType, and earlier domain/domainId.
+        // Normalize those spellings at the YAML boundary only.
+        if (auto types = scaleYaml["schemaTypes"]; types.IsDefined()) {
+            for (auto const& type : types) {
+                scale.schemaTypes.push_back(
+                    {type["schemaId"].as<std::string>(), type["typeId"].as<simfil::TypeId>()});
+            }
+        }
+        else {
+            auto const hasCanonicalType = scaleYaml["schemaType"].IsDefined();
+            if (auto type = scaleYaml[hasCanonicalType ? "schemaType" : "domain"]; type.IsDefined())
+            {
+                scale.schemaTypes.push_back(
+                    {type["schemaId"].as<std::string>(),
+                     type[hasCanonicalType ? "typeId" : "domainId"].as<simfil::TypeId>()});
+            }
+        }
+        if (auto specials = scaleYaml["specials"]; specials.IsDefined()) {
+            for (auto const& stopYaml : specials) {
+                auto key = parseColorScaleKey(stopYaml[0]);
+                scale.specials.push_back(
+                    {key,
+                     Color(stopYaml[1].as<std::string>()).toFVec4(),
+                     numericColorScaleKey(key)});
+            }
+        }
         for (auto const& stopYaml : scaleYaml["stops"]) {
             auto key = parseColorScaleKey(stopYaml[0]);
             scale.stops.push_back(ColorScaleStop{
@@ -680,9 +725,8 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         relationTargetStyle_->parse(yaml["relation-target-style"]);
     }
     if (yaml["relation-recursive"].IsDefined()) {
-        // Parse whether relations should be resolved recursively.
-        // This is only done if mode==Highlight, and only works for
-        // relations within the same layer.
+        // Parse whether relations should be resolved recursively by the backend
+        // relation channel.
         relationRecursive_ = yaml["relation-recursive"].as<bool>();
     }
     if (yaml["relation-merge-twoway"].IsDefined()) {
@@ -721,6 +765,7 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         else
             std::cout << "Unsupported validity requirement: " << reqValidityStr << std::endl;
     }
+
     /////////////////////////////////////
     /// Label Rule Fields
     /////////////////////////////////////
@@ -839,6 +884,7 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     if (yaml["label-max-width"].IsDefined()) {
         labelMaxWidth_ = yaml["label-max-width"].as<float>();
     }
+
     /////////////////////////////////////
     /// Sub-Rule Fields
     /////////////////////////////////////
@@ -851,7 +897,8 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         branchMode_ = mode;
         subRules_.clear();
         for (auto yamlSubRule : yaml[key]) {
-            // The sub-rule adopts all attributes except gates and branch state.
+            // Children inherit presentation and relation/attribute gates. Only the
+            // feature type/filter and existing branch state are cleared.
             auto& subRule = subRules_.emplace_back(*this, true);
             subRule.parse(yamlSubRule);
         }
@@ -1131,7 +1178,8 @@ FeatureStyleRule::expressionUses() const
 std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) const
 {
     if (colorScale_) {
-        auto fallback = [&]() -> std::optional<glm::fvec4> {
+        auto fallback = [&]() -> std::optional<glm::fvec4>
+        {
             if (!colorScale_->fallback) {
                 return std::nullopt;
             }
@@ -1140,38 +1188,96 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
             return color;
         };
         auto const evaluated = evalFun.evaluate(colorScale_->expression);
-        if (colorScale_->mode == ColorScale::Mode::Categorical &&
-            colorScale_->denseIntegerStops)
-        {
+        auto const type = evaluated.schemaType();
+        if (!colorScale_->schemaTypes.empty()) {
+            if (!type ||
+                std::none_of(
+                    colorScale_->schemaTypes.begin(),
+                    colorScale_->schemaTypes.end(),
+                    [&](auto const& accepted) {
+                        return type.id() == accepted.typeId &&
+                            type.pool()->identity() == accepted.schemaId;
+                    }))
+                return fallback();
+        }
+        // Special overrides precede clamping/interpolation. A computed plain
+        // number has no source type and cannot acquire a sentinel meaning here.
+        auto const value = colorScaleKey(evaluated);
+        if (!value)
+            return fallback();
+        for (auto const& stop : colorScale_->specials) {
+            if (colorScaleKeysEqual(*value, stop.key)) {
+                auto color = stop.color;
+                color.a *= color_.a;
+                return color;
+            }
+        }
+        auto input = numericColorScaleKey(*value);
+        if (input && !colorScale_->schemaTypes.empty()) {
+            // Generated type-bound scales cover ordinary measurements only.
+            // Deleting a special override exposes fallback, never a high-end
+            // gradient or ordinary category color for an exceptional code.
+            if (!type)
+                return fallback();
+            bool special = false;
+            type.forEachNamedValue(
+                [&](simfil::SchemaType::NamedValue const& named)
+                {
+                    if (named.role != simfil::SchemaType::NamedValue::Role::Special)
+                        return;
+                    std::visit(
+                        [&](auto raw)
+                        {
+                            using T = decltype(raw);
+                            if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, double>)
+                                special |= colorScaleKeysEqual(*value, ColorScaleStop::Key{raw});
+                            else if constexpr (std::is_same_v<T, uint64_t>) {
+                                if (raw <= uint64_t(std::numeric_limits<int64_t>::max()))
+                                    special |= colorScaleKeysEqual(
+                                        *value,
+                                        ColorScaleStop::Key{int64_t(raw)});
+                            }
+                        },
+                        named.value);
+                });
+            if (special)
+                return fallback();
+            if (auto numeric = type.numericDomain(); numeric && !numeric->ordinaryRanges.empty()) {
+                auto ordinary = std::ranges::any_of(
+                    numeric->ordinaryRanges,
+                    [&](auto const& range)
+                    {
+                        auto low = std::visit(
+                            [](auto bound) { return static_cast<long double>(bound); },
+                            range.min);
+                        auto high = std::visit(
+                            [](auto bound) { return static_cast<long double>(bound); },
+                            range.max);
+                        return *input >= low && *input <= high;
+                    });
+                if (!ordinary)
+                    return fallback();
+            }
+        }
+        if (colorScale_->mode == ColorScale::Mode::Categorical && colorScale_->denseIntegerStops) {
             auto const key = integerScaleKey(evaluated);
             if (!key || *key < colorScale_->denseIntegerStops->minimum) {
                 return fallback();
             }
             auto const index = static_cast<uint64_t>(*key) -
-                static_cast<uint64_t>(
-                    colorScale_->denseIntegerStops->minimum);
+                static_cast<uint64_t>(colorScale_->denseIntegerStops->minimum);
             if (index >= colorScale_->denseIntegerStops->values.size() ||
-                !colorScale_->denseIntegerStops->values[
-                    static_cast<size_t>(index)])
+                !colorScale_->denseIntegerStops->values[static_cast<size_t>(index)])
             {
                 return fallback();
             }
-            auto color = *colorScale_->denseIntegerStops->values[
-                static_cast<size_t>(index)];
+            auto color = *colorScale_->denseIntegerStops->values[static_cast<size_t>(index)];
             color.a *= color_.a;
             return color;
         }
-        auto const value = colorScaleKey(evaluated);
-        if (!value) {
-            return fallback();
-        }
         if (colorScale_->mode == ColorScale::Mode::Categorical) {
-            auto const valueNumber = numericColorScaleKey(*value);
             for (auto const& stop : colorScale_->stops) {
-                auto const equal = valueNumber
-                    ? stop.numericKey && *valueNumber == *stop.numericKey
-                    : !stop.numericKey && *value == stop.key;
-                if (equal) {
+                if (colorScaleKeysEqual(*value, stop.key)) {
                     auto color = stop.color;
                     color.a *= color_.a;
                     return color;
@@ -1180,7 +1286,6 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
             return fallback();
         }
 
-        auto input = numericColorScaleKey(*value);
         if (!input || colorScale_->stops.empty()) {
             return fallback();
         }
@@ -1206,10 +1311,8 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
                 continue;
             }
             auto const t = static_cast<float>((*input - *lower) / (*upper - *lower));
-            auto color = glm::mix(
-                colorScale_->stops[index - 1].color,
-                colorScale_->stops[index].color,
-                t);
+            auto color =
+                glm::mix(colorScale_->stops[index - 1].color, colorScale_->stops[index].color, t);
             color.a *= color_.a;
             return color;
         }

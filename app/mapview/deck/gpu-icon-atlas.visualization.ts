@@ -47,6 +47,8 @@ interface DeviceAtlasPage {
  * Resource coordinates never move. Workers receive the small immutable
  * catalog only when its version changes; vector packets reference an atlas
  * page and can therefore upload directly without consulting image state.
+ * Each icon is limited to 512 pixels per side, but the catalog and number of
+ * 2048-pixel atlas pages have no total cap. Decoded images remain for its lifetime.
  */
 export class GpuIconAtlas {
     private readonly resourcesByUri = new Map<string, IconResource>();
@@ -57,7 +59,10 @@ export class GpuIconAtlas {
     private nextResourceId = 1;
     private _catalogVersion = 0;
 
-    /** Load and append one URL exactly once, reporting whether it became usable. */
+    /**
+     * Load a trimmed URL once, sharing concurrent loads and reporting whether it became usable.
+     * A failed URL remains unavailable for this catalog's lifetime; later calls do not retry it.
+     */
     ensureResource(uri: string): Promise<boolean> {
         const normalized = uri.trim();
         if (!normalized || this.failedUris.has(normalized)) {
@@ -92,7 +97,10 @@ export class GpuIconAtlas {
         }));
     }
 
-    /** Resolve and lazily synchronize one fixed atlas page for a Deck device. */
+    /**
+     * Resolve and lazily synchronize one fixed atlas page for a Deck device.
+     * Uploads newly appended images before returning.
+     */
     texture(device: Device, atlasPage: number): Texture {
         let pages = this.devicePages.get(device);
         if (!pages) {

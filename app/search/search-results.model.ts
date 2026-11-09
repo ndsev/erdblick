@@ -1,3 +1,4 @@
+import {schemaScalarTypeSchema, type SchemaScalarType} from "../mapdata/schema-type.model";
 import type {
     DiagnosticsMessage,
     FeatureSearchResultEntry,
@@ -200,7 +201,6 @@ export class SearchResults {
         if (this.retired || this.runId !== runId || !this.searchResultTilesBySourceKey.delete(sourceTileKey)) return false;
         this.searchResultDensityIndex.removeContribution(sourceTileKey);
         this.markValueSummariesDirty();
-        this.updateSearchResultIngressProgress();
         this.rebuildPending = true;
         return true;
     }
@@ -235,7 +235,6 @@ export class SearchResults {
         if (completed > 0 || total > 0) {
             this.progressDone = Math.min(this.progressTotal, Math.max(this.progressDone, completed));
         }
-        this.updateSearchResultIngressProgress();
     }
 
     /** Returns true once all expected search-result tile layers have entered the UI service. */
@@ -243,19 +242,12 @@ export class SearchResults {
         return this.complete
             && this.resultTileIngressDone >= this.resultTileIngressTotal;
     }
-
-    /** Updates result-tile ingress counters from current coverage and accepted contributions. */
-    updateSearchResultIngressProgress(): void {
-        const progressEntries = Array.from(this.progressByRequestKey.values());
-        const reportedChunkTotal = progressEntries
-            .filter(item => item.chunksReported)
-            .reduce((sum, item) => sum + item.chunksEmitted, 0);
-        this.resultTileIngressTotal = Math.max(reportedChunkTotal, this.searchResultTilesBySourceKey.size);
-        this.resultTileIngressDone = Math.min(
-            this.resultTileIngressTotal,
-            this.searchResultTilesBySourceKey.size
-        );
+    /** The presentation owner supplies current required/fully ingested tiles, not cumulative emitted chunks. */
+    updateSearchResultIngressProgress(total: number, done: number): void {
+        this.resultTileIngressTotal = total;
+        this.resultTileIngressDone = done;
     }
+
 
     /** Recomputes the externally visible completion state after backend status or result ingress changes. */
     updateSessionCompletion(paused: boolean): boolean {
@@ -272,7 +264,7 @@ export class SearchResults {
         }
         const ingressComplete = this.resultTileIngressTotal === 0
             || this.resultTileIngressDone >= this.resultTileIngressTotal;
-        this.complete = this.backendComplete && ingressComplete;
+        this.complete = this.backendComplete && ingressComplete && !this.rebuildPending;
         return this.complete && !wasComplete;
     }
 
@@ -405,7 +397,7 @@ export class SearchResults {
         if (pointsChanged || densityChanged) {
             this.searchResultPointsCacheDirty = this.searchResultPointsCacheDirty || pointsChanged;
             this.searchResultPointsVersion += 1;
-            }
+        }
     }
 
     /** Appends large result batches without using spread syntax, which can exceed V8's argument limit. */
@@ -472,7 +464,6 @@ export class SearchResults {
                 this.progressByRequestKey.delete(key);
             }
         }
-        this.updateSearchResultIngressProgress();
     }
 
     /** Creates a blank summary state with stable empty arrays for Angular templates. */
@@ -548,9 +539,11 @@ export class SearchResults {
         const kindsRecord = this.recordFromUnknown(record?.["kinds"]);
         const histogramValue = Array.isArray(record?.["histogram"]) ? record["histogram"] : [];
         const summary: SearchValueSummary = {
+            ...(record?.["schemaType"] ? {schemaType: schemaScalarTypeSchema.parse(record["schemaType"])} : {}),
             count: SearchResults.nonNegativeNumber(record?.["count"], 0),
             missing: SearchResults.nonNegativeNumber(record?.["missing"], 0),
             nulls: SearchResults.nonNegativeNumber(record?.["nulls"], 0),
+            specials: SearchResults.nonNegativeNumber(record?.["specials"], 0),
             kinds: this.normalizeKindCounts(kindsRecord),
             histogram: histogramValue
                 .map(item => this.normalizeHistogramBucket(item))
@@ -575,6 +568,7 @@ export class SearchResults {
             object: SearchResults.nonNegativeNumber(record?.["object"], 0),
             list: SearchResults.nonNegativeNumber(record?.["list"], 0),
             blob: SearchResults.nonNegativeNumber(record?.["blob"], 0),
+            bitmask: SearchResults.nonNegativeNumber(record?.["bitmask"], 0),
             unknown: SearchResults.nonNegativeNumber(record?.["unknown"], 0)
         };
     }
@@ -615,14 +609,15 @@ export class SearchResults {
         tileSummary: SearchTileValueSummaries
     ): void {
         for (const resultField of tileSummary.resultFields) {
-            const key = `${resultField.index}\n${resultField.expression}`;
+            const schemaType = resultField.summary.schemaType;
+            const key = JSON.stringify([resultField.index, resultField.expression, schemaType?.schemaId, schemaType?.typeId]);
             let target = resultFieldsByKey.get(key);
             if (!target) {
                 target = {
                     source: "resultField",
                     index: resultField.index,
                     expression: resultField.expression,
-                    summary: this.emptyValueSummary()
+                    summary: this.emptyValueSummary(schemaType)
                 };
                 resultFieldsByKey.set(key, target);
             }
@@ -630,16 +625,18 @@ export class SearchResults {
         }
 
         for (const trace of tileSummary.traces) {
-            let target = tracesByName.get(trace.name);
+            const schemaType = trace.summary.schemaType;
+            const key = JSON.stringify([trace.name, schemaType?.schemaId, schemaType?.typeId]);
+            let target = tracesByName.get(key);
             if (!target) {
                 target = {
                     source: "trace",
                     name: trace.name,
                     calls: 0,
                     totalus: 0,
-                    summary: this.emptyValueSummary()
+                    summary: this.emptyValueSummary(schemaType)
                 };
-                tracesByName.set(trace.name, target);
+                tracesByName.set(key, target);
             }
             target.calls += trace.calls;
             target.totalus += trace.totalus;
@@ -648,11 +645,13 @@ export class SearchResults {
     }
 
     /** Creates a zeroed mutable summary accumulator. */
-    private emptyValueSummary(): SearchValueSummary {
+    emptyValueSummary(schemaType?: SchemaScalarType): SearchValueSummary {
         return {
+            schemaType,
             count: 0,
             missing: 0,
             nulls: 0,
+            specials: 0,
             kinds: this.normalizeKindCounts(null),
             histogram: [],
             otherCount: 0,
@@ -665,6 +664,7 @@ export class SearchResults {
         target.count += source.count;
         target.missing += source.missing;
         target.nulls += source.nulls;
+        target.specials += source.specials;
         target.kinds.integer += source.kinds.integer;
         target.kinds.number += source.kinds.number;
         target.kinds.boolean += source.kinds.boolean;
@@ -672,6 +672,7 @@ export class SearchResults {
         target.kinds.object += source.kinds.object;
         target.kinds.list += source.kinds.list;
         target.kinds.blob += source.kinds.blob;
+        target.kinds.bitmask += source.kinds.bitmask;
         target.kinds.unknown += source.kinds.unknown;
         target.otherCount += source.otherCount;
         target.distinctLimitReached = target.distinctLimitReached || source.distinctLimitReached;

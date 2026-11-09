@@ -3,10 +3,64 @@ import {describe, expect, it} from "vitest";
 import {
     createFeatureSearchStateEntry,
     defaultFeatureSearchViewIndicesForMapLayers,
-    normalizeFeatureSearchState
+    normalizeFeatureSearchState,
+    searchStyleRuleAppliesTo
 } from "../../../app/search/search-definition.model";
 
 describe("FeatureSearchState", () => {
+    it("persists shared result scopes without admitting rules at another evaluation root", () => {
+        const [entry] = normalizeFeatureSearchState([{
+            query: "true",
+            searchStyleRules: [{
+                applicability: {scope: "attribute"},
+                geometry: ["line"], filter: [], color: {mode: "solid", color: "#123456"}
+            }]
+        }]);
+        const rule = entry.searchStyleRules[0];
+        expect(rule.applicability).toEqual({scope: "attribute"});
+        for (const mapId of ["First", "Second"]) {
+            expect(searchStyleRuleAppliesTo(rule, {mapId, layerId: "Road", scope: "attribute"})).toBe(true);
+            expect(searchStyleRuleAppliesTo(rule, {mapId, layerId: "POI", scope: "feature"})).toBe(false);
+        }
+        const restricted = {...rule, applicability: {...rule.applicability!, mapId: "First", layerId: "Road"}};
+        expect(searchStyleRuleAppliesTo(restricted, {mapId: "Second", layerId: "Road", scope: "attribute"})).toBe(false);
+        expect(searchStyleRuleAppliesTo(restricted, {mapId: "First", layerId: "Lane", scope: "attribute"})).toBe(false);
+    });
+
+    it("migrates saved scalar guards without dropping their special colors", () => {
+        const [entry] = normalizeFeatureSearchState([{
+            query: "true",
+            searchStyleRules: [{
+                geometry: ["line"], filter: [],
+                color: {
+                    mode: "gradient", field: "speed",
+                    stops: [{value: 1, color: "#0000ff"}, {value: 253, color: "#ff0000"}],
+                    domain: {schemaId: "saved-graph", domainId: 7},
+                    specials: [{value: 255, color: "#00ffff"}]
+                }
+            }]
+        }]);
+        expect(entry.searchStyleRules[0].color).toMatchObject({
+            schemaTypes: [{schemaId: "saved-graph", typeId: 7}],
+            specials: [{value: 255, color: "#00ffff"}]
+        });
+        expect(entry.searchStyleRules[0].color).not.toHaveProperty("domain");
+        expect(normalizeFeatureSearchState([entry])[0].searchStyleRules).toEqual(entry.searchStyleRules);
+    });
+
+    it("uses fallback instead of reviving a legacy guard when the current guard is invalid", () => {
+        const [entry] = normalizeFeatureSearchState([{
+            query: "true",
+            searchStyleRules: [{geometry: ["line"], filter: [], color: {
+                mode: "gradient", field: "speed", stops: [], fallbackColor: "#abcdef",
+                schemaType: {schemaId: "current", typeId: 0},
+                domain: {schemaId: "legacy", domainId: 7},
+                specials: [{value: 255, color: "#00ffff"}]
+            }}]
+        }]);
+        expect(entry.searchStyleRules[0].color).toEqual({mode: "solid", color: "#abcdef"});
+    });
+
     it("normalizes Simfil equality into the GUI operator without dropping the comparison", () => {
         const entry = createFeatureSearchStateEntry({query: "true", searchStyleRules: [{
             geometry: ["line"], filter: [{field: "_.id", op: "==", value: "Lane.1"}],

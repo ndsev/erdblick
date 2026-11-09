@@ -48,7 +48,10 @@ export class GpuPrimitiveStore {
     private uploadCount = 0;
     private growthCount = 0;
 
-    /** Create an initially empty material store with a hard allocation ceiling. */
+    /**
+     * Create an empty store with a byte ceiling for each physical buffer.
+     * Growth temporarily retains both generations; the ceiling is not a total device-memory budget.
+     */
     constructor(
         private readonly device: Device,
         readonly materialKey: bigint,
@@ -77,7 +80,10 @@ export class GpuPrimitiveStore {
         }
     }
 
-    /** Upload one packet stream into its pre-reserved range without repacking. */
+    /**
+     * Upload one packet stream into a caller-owned live range without repacking.
+     * Checks byte length and buffer bounds; the caller must track allocation ownership.
+     */
     write(range: GpuRecordRange, records: Uint8Array): void {
         const expectedBytes = range.recordCount * this.recordStride;
         if (records.byteLength !== expectedBytes) {
@@ -103,7 +109,7 @@ export class GpuPrimitiveStore {
         this.allocator.release(range);
     }
 
-    /** Destroy the physical buffer and reset all range ownership. */
+    /** Destroy all retained buffers and reset range ownership, keeping cumulative upload/growth counters. */
     destroy(): void {
         const buffers = new Set<Buffer>();
         if (this.gpuBuffer) {
@@ -113,7 +119,7 @@ export class GpuPrimitiveStore {
             buffers.add(this.renderBuffer);
         }
         this.retiredBuffers.forEach(buffer => buffers.add(buffer));
-        buffers.forEach(buffer => this.destroyBuffer(buffer));
+        buffers.forEach(buffer => buffer.destroy());
         this.gpuBuffer = null;
         this.renderBuffer = null;
         this.retiredBuffers.length = 0;
@@ -124,7 +130,10 @@ export class GpuPrimitiveStore {
         this.renderHighWaterRecord = 0;
     }
 
-    /** Publish the latest allocation while retaining one old generation for in-flight draws. */
+    /**
+     * Publish the latest allocation, retaining superseded render buffers for
+     * in-flight draws until releaseRetiredBuffers().
+     */
     publish(): void {
         this.renderBuffer = this.allocator.highWaterRecord > 0
             ? this.gpuBuffer
@@ -135,7 +144,7 @@ export class GpuPrimitiveStore {
 
     /** Destroy superseded allocations after every model has rebound to the published buffer. */
     releaseRetiredBuffers(): void {
-        this.retiredBuffers.forEach(buffer => this.destroyBuffer(buffer));
+        this.retiredBuffers.forEach(buffer => buffer.destroy());
         this.retiredBuffers.length = 0;
     }
 
@@ -169,12 +178,15 @@ export class GpuPrimitiveStore {
         return this.renderHighWaterRecord;
     }
 
-    /** Number of live instances, excluding cleared holes below the draw bound. */
+    /** Number of live instances, excluding released holes below the draw bound. */
     get activeRecordCount(): number {
         return this.allocator.highWaterRecord - this.allocator.fragmentedRecords;
     }
 
-    /** Return stable diagnostics without reading GPU memory back to JavaScript. */
+    /**
+     * Return diagnostics without reading GPU memory back to JavaScript.
+     * allocatedBytes counts the current buffer, excluding retained older generations.
+     */
     snapshot(): GpuPrimitiveStoreSnapshot {
         return {
             materialKey: this.materialKey,
@@ -262,7 +274,7 @@ export class GpuPrimitiveStore {
             } else {
                 // A staging-only generation was never visible to a model and
                 // can be released as soon as its GPU copy has been submitted.
-                this.destroyBuffer(this.gpuBuffer);
+                this.gpuBuffer.destroy();
             }
         }
         this.gpuBuffer = next;

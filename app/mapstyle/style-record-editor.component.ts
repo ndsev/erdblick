@@ -177,12 +177,16 @@ export class StyleRecordEditorComponent implements OnChanges {
             presentFields: fields.filter(field => field.present), optionalFields: fields.filter(field => !field.present)}));
         this.unknownKeys = this.model.keys(this.path).filter(key => !fields[key]);
     }
+
     /** Locates a field relative to this record. */
     fieldPath(key: string): StylePath { return [...this.path, key]; }
+
     /** Locates an ordered record item. */
     itemPath(key: string, index: number): StylePath { return [...this.path, key, index]; }
+
     /** Supplies stable list indices without deserializing record content. */
     indices(key: string): number[] { return Array.from({length: this.model.length(this.fieldPath(key))}, (_, i) => i); }
+
     /** Gives list entries a readable authored identity when one exists. */
     itemTitle(item: FormField, index: number): string {
         const path = this.itemPath(item.key, index);
@@ -191,13 +195,16 @@ export class StyleRecordEditorComponent implements OnChanges {
         const record = item.definition.record ?? "item";
         return `${record.charAt(0).toUpperCase() + record.slice(1)} ${index + 1}${label ? ': ' + label : ''}`;
     }
-    /** Opens the first rule initially and retains the user's expansion choices across edits. */
+
+    /** Keep expansion by list position; each list's first item is open by default. */
     itemOpen(key: string, index: number): boolean { return this.expandedItems.get(`${key}:${index}`) ?? index === 0; }
+
     /** Expands one record without opening every nested branch. */
     toggleItem(key: string, index: number): void {
         this.visitedItems.add(`${key}:${index}`);
         this.expandedItems.set(`${key}:${index}`, !this.itemOpen(key, index));
     }
+
     /** Lazily creates advanced controls when their group is expanded. */
     toggleGroup(name: string, event: Event): void {
         if ((event.target as HTMLDetailsElement).open) {
@@ -206,6 +213,7 @@ export class StyleRecordEditorComponent implements OnChanges {
         }
         else this.expandedGroups.delete(name);
     }
+
     /** Initializes a field only after the user explicitly chooses Set. */
     addField(item: FormField): void {
         const field = item.definition;
@@ -236,6 +244,7 @@ export class StyleRecordEditorComponent implements OnChanges {
         }
         this.edit.emit({op: "set", path: this.fieldPath(item.key), value, remove: field.exclusive});
     }
+
     /** Appends a seeded record; nested rules intentionally start with inherited fields unset. */
     append(item: FormField): void {
         const index = this.model.length(this.fieldPath(item.key));
@@ -244,6 +253,7 @@ export class StyleRecordEditorComponent implements OnChanges {
             ? {} : this.catalog.seeds[item.definition.record!] ?? {};
         this.edit.emit({op: "append", path: this.fieldPath(item.key), value});
     }
+
     /** Reorders existing rule/option/preset AST nodes instead of serializing reduced objects. */
     move(key: string, index: number, to: number): void { this.edit.emit({op: "move", path: this.fieldPath(key), index, to}); }
 }

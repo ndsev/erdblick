@@ -1,4 +1,5 @@
 import {
+    ChangeDetectionStrategy,
     AfterViewInit,
     ChangeDetectorRef,
     Component,
@@ -44,7 +45,7 @@ interface FeatureSearchResultTreeItem {
     hoverFeatureId: string;
 }
 /** A bounded result tree owns its append cursor, grouping, hover and resize lifetime. */
-@Component({selector: "search-results", standalone: false,
+@Component({selector: "search-results", changeDetection: ChangeDetectionStrategy.OnPush, standalone: false,
     host: {style: "display:flex; flex:1; flex-direction:column; min-height:0; min-width:0"},
     template: `                        <div class="feature-search-results-panel">
                             <div style="width: 100%; display: flex; gap: 0.25em; flex-direction: row; align-items: center; padding: 0.25em 0">
@@ -60,7 +61,7 @@ interface FeatureSearchResultTreeItem {
                                                [maxSelectedLabels]="5"
                                                display="chip"
                                                optionLabel="name">
-                                </p-multiSelect> 
+                                </p-multiSelect>
                             </div>
 
                             <div #featureSearchTreeHost class="feature-search-tree-host">
@@ -474,14 +475,15 @@ export class SearchResultsComponent implements OnChanges, AfterViewInit, OnDestr
 
     /** Schedules another frame-budgeted streamed result-tree append pass. */
     private scheduleResultTreeAppend(): void {
-        if (this.destroyed || this.resultTreeAppendRaf !== null) {
+        if (this.resultTreeAppendRaf !== null) {
             return;
         }
         this.resultTreeAppendRaf = this.ngZone.runOutsideAngular(() =>
             requestAnimationFrame(() => {
                 this.resultTreeAppendRaf = null;
+                if (this.destroyed) return;
                 this.appendStreamingResultsChunk();
-                this.ngZone.run(() => this.changeDetector.markForCheck());
+                this.changeDetector.detectChanges();
             })
         );
     }
@@ -701,10 +703,14 @@ export class SearchResultsComponent implements OnChanges, AfterViewInit, OnDestr
             this.layout.baseFontSize * 6,
             Math.floor(hostHeight - filterHeight - treeVerticalPadding)
         );
-        this.scrollHeight = `${nextHeight}px`;
+        const scrollHeight = `${nextHeight}px`;
+        if (this.scrollHeight !== scrollHeight) {
+            this.scrollHeight = scrollHeight;
+            this.changeDetector.markForCheck();
+        }
 
         if (this.scrollerResizeRaf !== undefined) return;
-        this.scrollerResizeRaf = window.requestAnimationFrame(() => {
+        this.scrollerResizeRaf = this.ngZone.runOutsideAngular(() => requestAnimationFrame(() => {
             this.scrollerResizeRaf = undefined;
             if (this.destroyed) return;
             const scroller = (this.tree as any)?.scroller as Scroller | undefined;
@@ -712,7 +718,7 @@ export class SearchResultsComponent implements OnChanges, AfterViewInit, OnDestr
                 scroller.scrollHeight = this.scrollHeight;
                 scroller.calculateAutoSize?.();
             }
-        });
+        }));
     }
 
     /** Keeps PrimeNG's virtual scroller synchronized with actual panel layout changes. */
@@ -720,10 +726,10 @@ export class SearchResultsComponent implements OnChanges, AfterViewInit, OnDestr
         if (this.treeScrollHeightRaf !== undefined) {
             return;
         }
-        this.treeScrollHeightRaf = window.requestAnimationFrame(() => {
+        this.treeScrollHeightRaf = this.ngZone.runOutsideAngular(() => requestAnimationFrame(() => {
             this.treeScrollHeightRaf = undefined;
-            this.syncTreeScrollHeight();
-        });
+            if (!this.destroyed) this.syncTreeScrollHeight();
+        }));
     }
 
     /** Observes the elements whose size changes affect the tree viewport. */

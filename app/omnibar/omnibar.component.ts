@@ -8,9 +8,19 @@ import {
     Renderer2,
     ViewChild
 } from "@angular/core";
-import { debounceTime, delay, distinctUntilChanged, map, of, Subject, Subscription, switchMap, timer } from "rxjs";
+import {
+    delay,
+    map,
+    of,
+    debounceTime,
+    distinctUntilChanged,
+    Subject,
+    Subscription,
+    switchMap,
+    timer
+} from "rxjs";
+import { AppActionBubble, RegisteredActionCandidate } from "../action/action.model";
 import { AppActionRegistry } from "../action/action-registry.service";
-import { RegisteredActionCandidate } from "../action/action.model";
 import { InfoMessageService } from "../diagnostics/info.service";
 import { GeolocationService, isSupportedLocationSearchQuery } from "../geolocation/geolocation.service";
 import { KeyboardService } from "../keyboard/keyboard.service";
@@ -37,7 +47,8 @@ import {
 import { OmnibarState } from "./omnibar.state";
 
 interface OmnibarHistoryViewEntry extends OmnibarHistoryEntry {
-    label: string;
+    name: string;
+    bubbles: AppActionBubble[];
 }
 
 interface OmnibarResizeSession {
@@ -54,7 +65,7 @@ interface OmnibarResizeSession {
 @Component({
     selector: 'omnibar-panel',
     template: `
-        <div class="omnibar-wrapper">
+        <div class="omnibar-wrapper" [class.is-open]="state.isOpen">
             <div class="omnibar-input">
                 <!-- Expand on dialog show and collapse on dialog hide -->
                 <textarea #textarea class="single-line" pTextarea rows="1"
@@ -89,57 +100,25 @@ interface OmnibarResizeSession {
                           [baseZIndex]="actionsBaseZIndex"
                           [focusOnShow]="false"
                           [draggable]="false" [resizable]="false" [closeOnEscape]="false">
-                    <div data-testid="omnibar-menu-panel">
-                        <div class="omnibar-menu" *ngFor="let item of activeCandidates">
+                    <div class="omnibar-menu-panel" data-testid="omnibar-menu-panel" (keydown)="onActionMenuKeydown($event)">
+                        <div class="omnibar-menu" *ngFor="let item of activeCandidates; trackBy: actionCandidateId">
                             <div onEnterClick (click)="onActionClick($event, item)" class="omnibar-option-wrapper"
                                data-testid="omnibar-action" [attr.data-action-id]="item.id"
-                               [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
-                                <span class="icon-circle {{ item.color }}">
-                                    @if (item.iconType === 'material') {
-                                        <span class="material-symbols-outlined">{{ item.icon }}</span>
-                                    } @else {
-                                        <i class="pi {{ item.icon }}"></i>
-                                    }
-                                </span>
-                                <div class="omnibar-option">
-                                    <span class="omnibar-option-name">{{ item.name }}</span>
-                                    <br>
-                                    <span [innerHTML]="item.label"></span>
-                                </div>
+                               role="button" tabindex="0">
+                                <ng-container *ngTemplateOutlet="actionContent; context: {$implicit: item}" />
                             </div>
                         </div>
 
                         <div class="omnibar-menu" *ngFor="let item of visibleHistory" >
-                            <div onEnterClick (click)="selectHistoryEntry(item)" class="omnibar-option-wrapper" tabindex="0"
-                                 data-testid="omnibar-history-action" [attr.data-action-id]="item.actionId">
-                                <div class="icon-circle violet">
-                                    <i class="pi pi-history"></i>
-                                </div>
-                                <div class="omnibar-option-container">
-                                    <div class="omnibar-option">
-                                        <span class="omnibar-option-name">{{ item.input }}</span>
-                                        <br>
-                                        <span [innerHTML]="item.label"></span>
-                                    </div>
-                                    <p-button (click)="removeHistoryEntry(item, $event)" icon="pi pi-times" tabindex="-1"></p-button>
-                                </div>
+                            <div onEnterClick (click)="selectHistoryEntry(item)" class="omnibar-option-wrapper history-entry" tabindex="0"
+                                 role="button" data-testid="omnibar-history-action" [attr.data-action-id]="item.actionId">
+                                <ng-container *ngTemplateOutlet="actionContent; context: {$implicit: item, history: true}" />
                             </div>
                         </div>
-                        <div class="omnibar-menu" *ngFor="let item of inactiveCandidates; let i = index">
-                            <div onEnterClick (click)="targetToHistory(item)" class="omnibar-option-wrapper"
-                                 [ngClass]="{'item-disabled': !item.enabled }" tabindex="0">
-                                <span class="icon-circle grey">
-                                    @if (item.iconType === 'material') {
-                                        <span class="material-symbols-outlined">{{ item.icon }}</span>
-                                    } @else {
-                                        <i class="pi {{ item.icon }}"></i>
-                                    }
-                                </span>
-                                <div class="omnibar-option">
-                                    <span class="omnibar-option-name">{{ item.name }}</span>
-                                    <br>
-                                    <span [innerHTML]="item.label"></span>
-                                </div>
+                        <div class="omnibar-menu" *ngFor="let item of inactiveCandidates; trackBy: actionCandidateId">
+                            <div class="omnibar-option-wrapper item-disabled" role="button" aria-disabled="true" tabindex="-1"
+                                 data-testid="omnibar-inactive-action" [attr.data-action-id]="item.id">
+                                <ng-container *ngTemplateOutlet="actionContent; context: {$implicit: item}" />
                             </div>
                         </div>
                     </div>
@@ -158,7 +137,49 @@ interface OmnibarResizeSession {
                 }
             </div>
         </div>
-        
+
+        <!-- Every row reserves the same right-hand space for history removal.
+             Bubbles shrink inside the remaining width; full values stay in tooltips. -->
+        <ng-template #actionContent let-item let-history="history">
+            <span class="action-icon" [ngClass]="history ? 'violet' : item.color">
+                @if (history) {
+                    <i class="pi pi-history"></i>
+                } @else if (item.iconType === 'material') {
+                    <span class="material-symbols-outlined">{{ item.icon }}</span>
+                } @else {
+                    <i class="pi {{ item.icon }}"></i>
+                }
+            </span>
+            <span class="omnibar-option-name" [title]="item.name">{{ item.name }}</span>
+            <span class="omnibar-bubbles">
+                @for (bubble of item.bubbles ?? []; track $index) {
+                    <span class="omnibar-bubble" data-testid="omnibar-bubble"
+                          [attr.data-parameter-name]="bubble.name"
+                          [class.bubble-error]="bubble.tone === 'error'"
+                          [class.bubble-missing]="bubble.value === undefined || bubble.value === '?'"
+                          [title]="(bubble.name ? bubble.name + (bubble.optional ? ' (optional)' : '') + ': ' : '') + (bubble.value ?? '?')">
+                        @if (bubble.name) {
+                            <span class="omnibar-bubble-name">{{ bubble.name }}</span>
+                        }
+                        <span class="omnibar-bubble-value">{{ bubble.value ?? '?' }}</span>
+                    </span>
+                }
+                @if (!item.bubbles?.length && item.label) {
+                    <span class="omnibar-bubble omnibar-description" [innerHTML]="item.label"></span>
+                }
+            </span>
+            <span class="omnibar-row-end">
+                @if (history) {
+                    <button type="button" class="omnibar-remove-button" tabindex="-1"
+                            title="Remove from history" aria-label="Remove from history"
+                            (keydown.enter)="$event.stopPropagation()"
+                            (click)="removeHistoryEntry(item, $event)">
+                        <i class="pi pi-times"></i>
+                    </button>
+                }
+            </span>
+        </ng-template>
+
         <app-dialog header="Which map is the feature located in?" [(visible)]="mapSelectionVisible" [position]="'center'"
                   [resizable]="false" [modal]="true" class="map-selection-dialog">
             <div *ngFor="let map of mapSelection; let i = index" style="width: 100%">
@@ -206,6 +227,9 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
         zIndex: OmnibarComponent.ACTIONS_BASE_Z_INDEX + 2000,
     };
     private acceptedCompletionCandidate: CompletionCandidate | null = null;
+    /** A recognized schema draft keeps feature search first even after the popup loses focus. */
+    private schemaInput = "";
+    private completionSelectionExplicit = false;
     private dismissedCompletionSignature: string | null = null;
     private destroyed = false;
     private resizeSession?: OmnibarResizeSession;
@@ -219,16 +243,11 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
 
     cursorPosition: number = 0;
 
-    // Selection state preservation for text selection across focus changes
-    private savedSelectionStart: number = 0;
-    private savedSelectionEnd: number = 0;
-    private savedSelectionDirection: 'forward' | 'backward' | 'none' = 'none';
-
     /**
      * Wires the omnibar to global keyboard shortcuts, jump-target updates, history persistence, and completion streams.
      */
     constructor(private readonly searchCompletion: FeatureSearchSchemaService, private renderer: Renderer2,
-        private elRef: ElementRef,
+        private elRef: ElementRef<HTMLElement>,
         private keyboardService: KeyboardService,
         private messageService: InfoMessageService,
         private jumpService: JumpTargetService,
@@ -312,7 +331,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
                 this.changeDetectorRef.markForCheck();
                 return;
             }
-            this.completionItems = value.filter((item, index, array) => {
+            this.completionItems = value.filter(item => {
                 // Discard any candidate that is equal to the current input
                 // or does not relate to the current input (e.g. delayed results).
                 return item.query !== this.inputValue && item.source === this.inputValue;
@@ -325,21 +344,18 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
                 this.completion.selectionIndex = length - 1;
             }
 
-            // Only show the pop-up if the pop-up was prev. hidden
-            // or the currently focused element is the query input.
-            // This is to prevent the pop-up showing if the user quickly
-            // tabs out of the query input before the first completion
-            // items are ready.
-            const textarea = this.textarea?.nativeElement;
-            const focusValid =
-                this.completion.visible ||
-                this.completion.pending ||
-                textarea === document.activeElement;
+            // Replies may arrive after the user has moved to the action menu.
+            // Only the focused input can reopen its completion popup.
+            const focusValid = this.state.isOpen && this.textarea?.nativeElement === document.activeElement;
 
             if (length > 0 && focusValid) {
                 this.refreshOverlayZIndices();
             }
             this.completion.visible = length > 0 && focusValid;
+            if (this.searchCompletion.hasExactCompletionCandidate(this.inputValue)) {
+                this.schemaInput = this.inputValue;
+                this.refreshActionMenu();
+            }
             this.changeDetectorRef.markForCheck();
         }));
 
@@ -350,11 +366,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
                 this.changeDetectorRef.markForCheck();
                 return;
             }
-            const textarea = this.textarea?.nativeElement;
-            const focusValid =
-                this.completion.visible ||
-                pending ||
-                textarea === document.activeElement;
+            const focusValid = this.state.isOpen && this.textarea?.nativeElement === document.activeElement;
 
             this.completion.pending = pending && focusValid;
             if (this.completion.pending) {
@@ -367,6 +379,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
         }));
 
         this.subscriptions.add(this.inputChanged.pipe(debounceTime(this.completion.completionDelay)).subscribe(() => {
+            this.updateCursor();
             this.completeQuery(this.inputValue, this.cursorPosition);
         }));
     }
@@ -381,14 +394,16 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
 
         this.subscriptions.add(this.dialog.onShow.subscribe(() => {
             setTimeout(() => {
+                if (this.destroyed || !this.state.isOpen) return;
                 this.expandTextarea();
                 this.refreshOverlayZIndices();
             }, 10);
         }));
 
         this.subscriptions.add(this.dialog.onHide.subscribe(() => {
+            this.resetCompletion();
             setTimeout(() => {
-                this.shrinkTextarea();
+                if (!this.destroyed && !this.state.isOpen) this.shrinkTextarea();
             }, 10);
         }));
     }
@@ -487,8 +502,9 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
     private executeHistoryEntry(entry: OmnibarHistoryEntry): void {
         this.inputValue = entry.input;
         this.runTarget(entry);
-        this.dialog?.close(new Event("close-on-execute"));
+        this.closeActionOverlay(new Event("close-on-execute"));
     }
+
     /** Choices are regenerated by the same registered owners that execute them. */
     private candidatesForInput(value: string): RegisteredActionCandidate[] {
         return this.actions.getCandidates(value);
@@ -499,6 +515,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
     private setCurrentCandidates(actionCandidates: RegisteredActionCandidate[]): void {
         this.actionCandidates = actionCandidates;
     }
+
     /** Resolve live identities and saved payloads afresh; stale displayed choices are never reused. */
     private resolveTargetForEntry(entry: OmnibarHistoryEntry): RegisteredActionCandidate | undefined {
         return this.actions.getCandidates(entry.input, { id: entry.actionId, payload: entry.payload })
@@ -554,7 +571,8 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
         const resolvedEntry = target ? withOmnibarHistoryActionName(entry, target.name) : entry;
         return {
             ...resolvedEntry,
-            label: target?.name ?? entry.actionName ?? "Omnibar action is no longer available"
+            name: target?.name ?? entry.actionName ?? "Unavailable action",
+            bubbles: target?.bubbles?.length ? target.bubbles : [{value: entry.input}]
         };
     }
 
@@ -657,7 +675,9 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
     }
 
     /**
-     * Keeps the completion popup just above the PrimeNG action dialog without hardcoding a global z-index.
+     * The completion popup is mounted under body, outside the omnibar's stacking
+     * context. PrimeNG's dialog can report a small local z-index despite that
+     * outer context; honor both levels so suggestions remain visible/clickable.
      */
     private refreshOverlayZIndices() {
         const container = this.dialog?.container();
@@ -665,9 +685,11 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
         const computedZIndex = container
             ? Number.parseInt(window.getComputedStyle(container).zIndex, 10)
             : Number.NaN;
-        const dialogZIndex = Number.isFinite(inlineZIndex)
-            ? inlineZIndex
-            : (Number.isFinite(computedZIndex) ? computedZIndex : OmnibarComponent.ACTIONS_BASE_Z_INDEX);
+        const dialogZIndex = Math.max(
+            OmnibarComponent.ACTIONS_BASE_Z_INDEX,
+            Number.isFinite(inlineZIndex) ? inlineZIndex : 0,
+            Number.isFinite(computedZIndex) ? computedZIndex : 0
+        );
         this.resizeHandleZIndex = dialogZIndex + 1;
         this.completion.zIndex = dialogZIndex + 2000;
         this.changeDetectorRef.markForCheck();
@@ -679,6 +701,8 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
     setInputValue(value: string) {
         if (value !== this.inputValue) {
             this.dismissedCompletionSignature = null;
+            this.schemaInput = "";
+            this.inputChanged.next();
         }
         this.inputValue = value;
         if (this.acceptedCompletionCandidate?.query.trim() !== value.trim()) {
@@ -716,7 +740,26 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
                 this.inactiveCandidates.push(candidate);
             }
         }
+        // For a typed draft, commands that require input precede commands
+        // that can act on the current viewport without using that draft.
+        if (this.inputValue.trim()) {
+            this.activeCandidates.sort((left, right) =>
+                Number(left.acceptsEmptyInput === true) - Number(right.acceptsEmptyInput === true));
+        }
+        // Completing schema text is a feature-search intent. Keep that action
+        // visibly first, so Enter cannot launch a viewport-based external map.
+        if (this.schemaInput && this.schemaInput === this.inputValue) {
+            const featureIndex = this.activeCandidates.findIndex(candidate => candidate.id === "features");
+            if (featureIndex > 0) {
+                this.activeCandidates.unshift(...this.activeCandidates.splice(featureIndex, 1));
+            }
+        }
         this.refreshVisibleHistory();
+    }
+
+    /** Preserve focused action rows when asynchronous suggestions update the menu. */
+    actionCandidateId(_index: number, candidate: RegisteredActionCandidate): string {
+        return candidate.id;
     }
 
     /** Refreshes the history suggestions shown in the action menu. */
@@ -767,7 +810,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
             input: this.inputValue.trim(),
             actionName: target.name
         });
-        this.dialog?.close(new Event("close-on-execute"));
+        this.closeActionOverlay(new Event("close-on-execute"));
     }
 
     /** Source/license links are independently actionable inside a location-result row. */
@@ -780,6 +823,11 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
     private canRunTarget(target: RegisteredActionCandidate, input: string): boolean {
         return (!!input.trim() || target.acceptsEmptyInput === true) && target.enabled;
     }
+
+    /**
+     * Resolve a history entry against today's registered actions before dispatch;
+     * cancel an older location navigation even when the saved action has disappeared.
+     */
     runTarget(entry: OmnibarHistoryEntry): void {
         this.locationNavigation.cancel();
         const item = this.resolveTargetForEntry(entry);
@@ -789,6 +837,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
         }
         this.executeResolvedTarget(item, entry);
     }
+
     /** The UI supplies presentation/history; argument validation and dispatch stay in AppActionRegistry. */
     private executeResolvedTarget(item: RegisteredActionCandidate, entry: OmnibarHistoryEntry): void {
         this.locationNavigation.cancel();
@@ -832,77 +881,43 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
         event.preventDefault();
     }
 
-    /**
-     * Hides completion asynchronously and remembers the text selection for later restoration.
-     */
+    /** Moving into the action menu cancels completion without closing the menu. */
     onBlur() {
-        this.savedSelectionStart = this.textarea.nativeElement.selectionStart || 0;
-        this.savedSelectionEnd = this.textarea.nativeElement.selectionEnd || 0;
-        this.savedSelectionDirection = (this.textarea.nativeElement.selectionDirection as 'forward' | 'backward' | 'none') || 'none';
-
-        setTimeout(() => {
-            this.completion.visible = false;
-            this.completion.pending = false;
-        }, 0);
+        this.dismissCompletionForCurrentInput();
     }
 
-    /**
-     * Restores the saved selection if the field regains focus after a popup interaction.
-     */
+    /** Keyboard focus opens the same palette as a pointer click, retaining the native caret. */
     onFocus() {
-        if (!this.completion.visible) {
-            setTimeout(() => {
-                this.textarea.nativeElement.setSelectionRange(
-                    this.savedSelectionStart,
-                    this.savedSelectionEnd,
-                    this.savedSelectionDirection
-                );
-            }, 0);
-        }
+        this.showActionOverlay();
     }
 
     /**
-     * Triggers completion requests for text-changing keys after updating the caret position.
+     * Refreshes the caret after native keyboard editing; input changes schedule completion.
      */
-    onKeyup(event: KeyboardEvent) {
+    onKeyup(_event: KeyboardEvent) {
         this.updateCursor();
-
-        const ignoredKeys = [
-            'Home', 'End', 'PageUp', 'PageDown', 'Escape',
-            'Enter', 'Tab', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'
-        ]
-        if (ignoredKeys.indexOf(event.key) == -1) {
-            this.dismissedCompletionSignature = null;
-            this.inputChanged.next();
-        }
     }
 
     /**
      * Handles omnibar keyboard behavior, including completion navigation and dialog dismissal.
      */
     onKeydown(event: KeyboardEvent) {
+        if (event.isComposing) return;
         const textarea = this.textarea.nativeElement;
         const dismissCompletionKeys = [
             'Home', 'End', 'PageUp', 'PageDown', 'ArrowLeft', 'ArrowRight', 'Delete'
         ]
 
-        // Dismiss the completion pop-up for control-keys
-        if (dismissCompletionKeys.indexOf(event.key) >= 0) {
-            if (this.completion.visible)
-                event.preventDefault();
-            this.hideCompletionPopup();
-            textarea.focus();
-        }
-
-        // Prevent defaults if completion is active
-        if (this.completion.visible) {
-            if (['ArrowUp', 'ArrowDown', 'Tab'].indexOf(event.key) >= 0) {
-                event.preventDefault();
-            }
+        // Caret movement and deletion retain their native textarea behavior.
+        // Retire in-flight replies so they cannot reopen the dismissed popup.
+        if (dismissCompletionKeys.includes(event.key)) {
+            this.dismissCompletionForCurrentInput();
+            return;
         }
 
         if (event.key === 'Enter') {
             event.preventDefault();
+            event.stopPropagation();
 
             if (this.shouldApplyCompletionOnEnter()) {
                 this.applyCompletion();
@@ -916,6 +931,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
             this.resetCompletion();
             textarea.blur();
         } else if (event.key === 'Escape') {
+            event.preventDefault();
             event.stopPropagation();
             if (this.completion.visible || this.completion.pending || this.completionItems.length > 0) {
                 this.dismissCompletionForCurrentInput();
@@ -925,21 +941,66 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
                 this.resetCompletion();
                 return;
             } else {
-                this.dialog.close(event);
+                this.closeActionOverlay(event);
+                textarea.blur();
                 return;
             }
         } else if (event.key === 'Tab') {
-            if (this.shouldApplyCompletionOnEnter()) {
-                this.applyCompletion();
+            event.preventDefault();
+            event.stopPropagation();
+            if (!event.shiftKey && this.completion.visible && this.completionItems.length) {
+                this.applyCompletion(this.completionItems[this.completion.selectionIndex]);
+            } else {
+                this.dismissCompletionForCurrentInput();
+                const rows = this.actionMenuRows();
+                this.focusActionRow(event.shiftKey ? rows.at(-1) : rows[0]);
             }
-        } else if (event.key === 'ArrowDown') {
-            if (this.completion.visible) {
-                this.selectNextCompletion(true);
+        } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            event.stopPropagation();
+            if (this.completion.visible && this.completionItems.length) {
+                this.selectNextCompletion(event.key === 'ArrowDown');
+            } else {
+                const rows = this.actionMenuRows();
+                this.dismissCompletionForCurrentInput();
+                this.focusActionRow(event.key === 'ArrowDown' ? rows[0] : rows.at(-1));
             }
-        } else if (event.key === 'ArrowUp') {
-            if (this.completion.visible) {
-                this.selectNextCompletion(false);
-            }
+        }
+    }
+
+    /** Enabled actions and history are keyboard destinations after dismissing completion. */
+    private actionMenuRows(): HTMLElement[] {
+        return [...this.elRef.nativeElement.querySelectorAll<HTMLElement>(
+            '[data-testid="omnibar-menu-panel"] .omnibar-option-wrapper:not(.item-disabled)'
+        )];
+    }
+
+    /** Keep the keyboard destination visible inside a long, scrolling action list. */
+    private focusActionRow(row: HTMLElement | undefined): void {
+        if (!row) return;
+        row.focus({preventScroll: true});
+        row.scrollIntoView({block: "nearest", inline: "nearest"});
+    }
+
+    /**
+     * Tab and arrows follow the same enabled rows. The input lives outside the
+     * dialog, so native Shift-Tab would be caught by PrimeNG's focus trap.
+     * Handle the boundary explicitly and retain the draft on return.
+     */
+    onActionMenuKeydown(event: KeyboardEvent): void {
+        if (!['ArrowDown', 'ArrowUp', 'Tab', 'Escape'].includes(event.key)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const rows = this.actionMenuRows();
+        const current = event.target instanceof Element
+            ? event.target.closest<HTMLElement>('.omnibar-option-wrapper') : null;
+        const index = current ? rows.indexOf(current) : -1;
+        const backwards = event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey);
+        const afterLast = event.key === 'Tab' && !event.shiftKey && index === rows.length - 1;
+        if (event.key === 'Escape' || (backwards && index <= 0) || afterLast) {
+            this.textarea.nativeElement.focus();
+        } else {
+            this.focusActionRow(rows[(index + (backwards ? -1 : 1) + rows.length) % rows.length]);
         }
     }
 
@@ -953,23 +1014,25 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
                 this.textarea.nativeElement.focus();
             } else {
                 const item = completion ?? this.completionItems[this.completion.selectionIndex];
-                if (!item || (!completion && !this.shouldApplyCompletionOnEnter())) {
+                if (!item) {
                     return;
                 }
                 this.setInputValue(item.query);
                 this.acceptedCompletionCandidate = item;
+                this.schemaInput = item.query;
 
-                let cursor = item.begin + item.text.length
+                const cursor = item.begin + item.text.length;
+                this.cursorPosition = cursor;
                 setTimeout(() => {
+                    if (this.destroyed || this.inputValue !== item.query) return;
+                    this.textarea.nativeElement.focus();
                     this.textarea.nativeElement.setSelectionRange(
                         cursor, cursor, "forward");
                 }, 0);
             }
 
-            this.completionItems = [];
-            this.completion.visible = false;
-            this.completion.pending = false;
-            this.dismissedCompletionSignature = null;
+            this.dismissCompletionForCurrentInput();
+            this.refreshActionMenu();
         }
     }
 
@@ -978,7 +1041,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
         return this.completion.visible
             && this.completionItems.length > 0
             && !this.isCompletionDismissedFor(this.inputValue, this.cursorPosition)
-            && !this.searchCompletion.hasExactCompletionCandidate(this.inputValue);
+            && (this.completionSelectionExplicit || !this.searchCompletion.hasExactCompletionCandidate(this.inputValue));
     }
 
     /**
@@ -1005,6 +1068,7 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
             index = 0
 
         this.completion.selectionIndex = index;
+        this.completionSelectionExplicit = true;
         this.completion.visible = count > 0;
     }
 
@@ -1023,14 +1087,12 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
     }
 
     /**
-     * Expands and focuses the omnibar when the action dialog opens.
+     * Expands the input without stealing focus from an action chosen during opening.
      */
     expandTextarea() {
         this.renderer.setAttribute(this.textarea.nativeElement, 'rows', '3');
         this.renderer.removeClass(this.textarea.nativeElement, 'single-line');
-        setTimeout(() => {
-            this.textarea.nativeElement.focus();
-        }, 100)
+        this.updateCursor();
     }
 
     /**
@@ -1087,15 +1149,15 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
 
     /** Closes the action dialog and detached completion popup together. */
     private closeActionOverlay(event: Event): void {
-        this.completion.visible = false;
-        this.completion.pending = false;
-        this.dialog?.close(new MouseEvent(event.type));
+        this.resetCompletion();
+        this.dialog?.close(event);
     }
 
     /**
      * Starts a new completion request for the current query and cursor position.
      */
     completeQuery(query: string, point: number | undefined) {
+        if (this.destroyed || !this.state.isOpen || this.textarea?.nativeElement !== document.activeElement) return;
         if (!query) {
             this.completion.visible = false;
             this.completion.pending = false;
@@ -1111,18 +1173,20 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
 
         this.searchCompletion.completeQuery(query, point ?? query.length);
         this.completion.selectionIndex = 0;
+        this.completionSelectionExplicit = false;
     }
 
     /**
      * Clears both local popup state and the feature-search service's outstanding completion job.
      */
     resetCompletion() {
-        this.completeQuery("", undefined);
+        this.searchCompletion.clearCurrentCompletion();
         this.completion.selectionIndex = 0;
         this.completionItems = [];
         this.completion.visible = false;
         this.completion.pending = false;
         this.dismissedCompletionSignature = null;
+        this.completionSelectionExplicit = false;
     }
 
     /** Hides the popup locally without invalidating typed text or suppressing future completion requests. */
@@ -1133,12 +1197,20 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
 
     /** Dismisses the current completion generation until the query text or caret changes. */
     dismissCompletionForCurrentInput(): void {
+        // Native input/paste can move the caret before the debounced request
+        // has observed it. An accepted candidate instead supplies its new caret
+        // before Angular has written that replacement into the textarea.
+        const textarea = this.textarea?.nativeElement;
+        if (textarea?.value === this.inputValue) {
+            this.cursorPosition = textarea.selectionStart;
+        }
         this.dismissedCompletionSignature = this.completionSignature(
             this.inputValue,
-            this.cursorPosition || this.inputValue.length
+            this.cursorPosition
         );
         this.searchCompletion.clearCurrentCompletion();
         this.completion.selectionIndex = 0;
+        this.completionSelectionExplicit = false;
         this.completionItems = [];
         this.hideCompletionPopup();
     }

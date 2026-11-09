@@ -85,7 +85,7 @@ test('owner controls preserve view identity, tab isolation, retained cameras and
         const ids = value.views.map(view => view.viewId);
         expect(new Set(ids).size).toBe(ids.length);
         expect(ids).toContain(value.focusedViewId);
-        for (const id of ids) expect(id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
+        for (const id of ids) expect(id).toMatch(/^(0|[1-9]\d*)$/);
         return value;
     }
 
@@ -133,6 +133,8 @@ test('owner controls preserve view identity, tab isolation, retained cameras and
         expect(secondViews.views).toHaveLength(2);
         const firstIds = firstViews.views.map(view => view.viewId);
         const secondIds = secondViews.views.map(view => view.viewId);
+        expect(firstIds).toEqual(['0', '1']);
+        expect(secondIds).toEqual(['0', '1']);
         const before = await cameras(firstClient, firstIds);
         const otherBefore = await cameras(secondClient, secondIds);
 
@@ -167,7 +169,7 @@ test('owner controls preserve view identity, tab isolation, retained cameras and
         }
 
         // Removing the first positional view must retain the second logical view
-        // and its camera. An old ID must never begin targeting its replacement.
+        // and its camera. The removed ID stays unavailable until explicitly reused.
         await call(firstClient, 'viewer_manage_view', {operation: 'remove', viewId: firstIds[0]});
         expect((await views(firstClient)).views.map(view => view.viewId)).toEqual([firstIds[1]]);
         expect((await cameras(firstClient, [firstIds[1]]))[0].destination.lon)
@@ -181,9 +183,8 @@ test('owner controls preserve view identity, tab isolation, retained cameras and
 
         await call(firstClient, 'viewer_manage_view', {operation: 'create', viewId: firstIds[1]});
         const currentIds = (await views(firstClient)).views.map(view => view.viewId);
-        expect(currentIds).toHaveLength(2);
-        expect(currentIds[0]).toBe(firstIds[1]);
-        expect(currentIds).not.toContain(firstIds[0]);
+        // A new view claims the smallest unused integer; the survivor keeps its ID.
+        expect(currentIds).toEqual([firstIds[1], firstIds[0]]);
         await cameras(firstClient, currentIds);
 
         const shared = await call(firstClient, 'viewer_get_share_link');

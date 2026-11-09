@@ -1,7 +1,8 @@
 /**
- * Loads deployment configuration, merges server overrides and publishes one
- * normalized snapshot. Domain schemas remain pure imports: loading config does
- * not construct map renderers, transport, preferences or action controllers.
+ * Loads deployment configuration, merges server overrides and publishes the
+ * normalized snapshot, with later preset refreshes. Domain schemas remain pure
+ * imports: loading config does not construct map renderers, transport, preferences
+ * or action controllers.
  */
 import { HttpClient } from "@angular/common/http";
 import { Injectable } from "@angular/core";
@@ -57,7 +58,7 @@ function isMeaningfulValue(value: unknown): boolean {
     return false;
 }
 
-/** Merges meaningful object values while preserving existing defaults. */
+/** Shallowly replace meaningful override fields; empty values retain the base field. */
 function mergeMeaningfulObjectValues(
     base: Record<string, unknown>,
     override: Record<string, unknown>
@@ -94,7 +95,11 @@ export class AppConfigService {
         return this.configSubject.asObservable();
     }
 
-    /** Loads `/static-config/config.json` once and caches the normalized result for the rest of the session. */
+    /**
+     * Loads `/static-config/config.json` and server configuration once, sharing the
+     * initialization promise. Later preset refreshes update snapshot/config$
+     * without replacing this promise.
+     */
     async load(): Promise<AppConfig> {
         if (this.loadPromise !== null) {
             return this.loadPromise;
@@ -289,7 +294,10 @@ export class AppConfigService {
         return { serverConfig, erdblickConfig };
     }
 
-    /** Parses raw configuration text into an object. */
+    /**
+     * Validate an already decoded configuration payload. A present but non-array
+     * mapPresets value becomes [] with _mapPresetsInvalid set to true.
+     */
     private parseRawConfig(rawConfig: unknown, sourceLabel: string): RawAppConfig {
         const mapPresetsPresent = isPlainObject(rawConfig)
             && Object.prototype.hasOwnProperty.call(rawConfig, "mapPresets");
@@ -546,7 +554,8 @@ export class AppConfigService {
     /** Computes a stable hash for configured state. */
     private hashConfigState(state: Record<string, unknown> | null): string {
         const serialized = this.stableSerialize(state ?? {});
-        // FNV-1a 32-bit
+        // Keep the existing Number multiplication in this FNV-style fingerprint:
+        // changing its rounding would invalidate persisted configuration hashes.
         let hash = 0x811c9dc5;
         for (let i = 0; i < serialized.length; i++) {
             hash ^= serialized.charCodeAt(i);

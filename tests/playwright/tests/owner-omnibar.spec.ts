@@ -22,7 +22,7 @@ test('owner commands navigate, replay history and close the chosen live inspecti
     await page.unroute('**/locate');
 
     const mcp = mcpClient(request);
-    await page.goto('/?v2=1&n=1&vid=omnibar&f=0&sync=&lon=10&lat=40&alt=500'
+    await page.goto('/?v2=1&n=1&vid=0&f=0&sync=&lon=10&lat=40&alt=500'
         + '&h=0&p=-1&r=0&px=0&py=0&pz=0&m2d=0&bg=~10&l=');
     await waitForAppReady(page);
     await expect.poll(async () => (await mcp.sessions()).length).toBe(1);
@@ -36,7 +36,7 @@ test('owner commands navigate, replay history and close the chosen live inspecti
 
     async function camera() {
         const result = await call('viewer_get_controls', {
-            targets: [{control: 'view.camera', viewId: 'omnibar'}]
+            targets: [{control: 'view.camera', viewId: '0'}]
         });
         return result.values[0]?.value;
     }
@@ -65,26 +65,31 @@ test('owner commands navigate, replay history and close the chosen live inspecti
     // control again proves that replay updates the durable owner, not just Deck.
     const previous = await camera();
     await call('viewer_set_control', {
-        target: {control: 'view.camera', viewId: 'omnibar'},
+        target: {control: 'view.camera', viewId: '0'},
         value: {...previous, destination: {lon: 10, lat: 40, alt: 500}}
     });
     await openOmnibar(page, '');
-    await page.getByTestId('omnibar-history-action')
-        .filter({has: page.getByText('48,11', {exact: true})}).click();
+    const coordinateHistory = page.getByTestId('omnibar-history-action')
+        .and(page.locator('[data-action-id="j:wgs84-lat-lon"]'));
+    await expect(coordinateHistory.locator('[data-parameter-name="lat"] .omnibar-bubble-value'))
+        .toHaveText('48');
+    await expect(coordinateHistory.locator('[data-parameter-name="lon"] .omnibar-bubble-value'))
+        .toHaveText('11');
+    await coordinateHistory.click();
     await expect.poll(async () => (await camera())?.destination?.lon).toBeCloseTo(11, 5);
 
     // Use the real synthetic datasource and search service to obtain a feature.
     // The inspection therefore has the same lifecycle as an ordinary map pick.
     const layer = {mapId: TEST_MAP_NAMES[0], layerId: TEST_LAYER_NAMES[0]};
     await call('viewer_set_control', {
-        target: {control: 'view.layer', viewId: 'omnibar', ...layer},
+        target: {control: 'view.layer', viewId: '0', ...layer},
         value: {visible: true, level: 13, autoLevel: false}
     });
     const started = await call('viewer_start_search', {
         query: 'true',
         scope: 'feature',
         mapLayers: [layer],
-        viewIds: ['omnibar'],
+        viewIds: ['0'],
         tileLevels: [13],
         autoUpdate: false
     });

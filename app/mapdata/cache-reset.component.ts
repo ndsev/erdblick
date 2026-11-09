@@ -178,6 +178,7 @@ export class CacheResetComponent {
         }
     }
 
+    /** Distinguish lost session capability and a removed map from a general reset failure. */
     private resetErrorMessage(mapId: string, error: unknown): string {
         if (error instanceof HttpErrorResponse) {
             if (error.status === 403) {

@@ -12,6 +12,7 @@ import {
 } from "@deck.gl/core";
 import { BehaviorSubject } from "rxjs";
 import { TileFeatureId } from "../../inspection/inspection.model";
+import type { FeaturePickTarget } from "../../inspection/feature-identity.model";
 import { featureSetsEqual } from "../../mapdata/feature-inspection.adapter";
 import { RenderedFeaturePickResult, RenderNavigationTarget } from "../render-view.model";
 import { ErdblickVectorLayer } from "./erdblick-vector.layer";
@@ -34,8 +35,10 @@ export type DeckPickingSurface = Pick<DeckGlDeck<DeckMercatorView | DeckFirstPer
 /** Live renderer resources are read lazily so replacement invalidates pending samples. */
 export interface DeckPickingContext {
     deck(): DeckPickingSurface | null;
-    scene(): Pick<GpuScene, "resolvePick" | "pickOrder"> | null;
+    scene(): Pick<GpuScene, "resolvePick" | "pickOrder" | "rememberLocatedPick"> | null;
     viewport(): WebMercatorViewport | null;
+    cachedFeaturePicks(targets: FeaturePickTarget[]): TileFeatureId[];
+    resolveFeaturePicks(targets: FeaturePickTarget[]): Promise<TileFeatureId[]>;
 }
 
 /** Application preferences projected onto picking, without an inspection controller dependency. */
@@ -138,16 +141,16 @@ export class DeckPicking {
     }
 
     /** Resolves the top rendered object; touch performs one bounded pick only after a tap. */
-    click(info: PickingInfo, pointerType?: string): DeckClickResult {
+    async click(info: PickingInfo, pointerType?: string): Promise<DeckClickResult> {
         const screenPosition = {x: info.x, y: info.y};
         const options = this.options();
         const useDesktopDrillPick = this.desktopDrillPickingEnabled
             && (!pointerType || pointerType === "mouse");
         let featureIds = useDesktopDrillPick
-            ? this.drillPickFeatures(screenPosition, options.radius, options.maxObjects).topFeatureIds
-            : this.featurePickResultFromPickingInfos([info]).topFeatureIds;
+            ? (await this.drillPickFeatures(screenPosition, options.radius, options.maxObjects)).topFeatureIds
+            : (await this.featurePickResultFromPickingInfos([info])).topFeatureIds;
         if (!featureIds.length && !useDesktopDrillPick) {
-            featureIds = this.drillPickFeatures(screenPosition, options.radius, 1).topFeatureIds;
+            featureIds = (await this.drillPickFeatures(screenPosition, options.radius, 1)).topFeatureIds;
         }
         // Grouped points retain every semantic member; lower objects are context-menu results.
         const markerPosition = featureIds.length
@@ -213,7 +216,7 @@ export class DeckPicking {
         const picked = pickNavigationAnchor(
             this.deck,
             [screenPos.x, screenPos.y],
-            pickingInfo => this.featureIdsFromPickingInfo(pickingInfo),
+            pickingInfo => this.knownFeatureIdsFromPickingInfo(pickingInfo),
             (first, second) => first.length > 0 && second.length > 0 &&
                 first.some(firstId => second.some(secondId =>
                     firstId.mapTileKey === secondId.mapTileKey
@@ -292,11 +295,11 @@ export class DeckPicking {
      * Resolves every eligible rendered feature returned by one bounded point drill-pick.
      * Layer filtering happens before the pick so excluded representations cannot consume depth.
      */
-    drillPickFeatures(
+    async drillPickFeatures(
         screenPos: { x: number; y: number },
         radius: number,
         maxObjects: number
-    ): RenderedFeaturePickResult {
+    ): Promise<RenderedFeaturePickResult> {
         if (!this.deck) {
             return { topFeatureIds: [], featureIds: [] };
         }
@@ -352,10 +355,10 @@ export class DeckPicking {
     }
 
     /** Orders picks, preserving the first render object's atomic feature group while flattening all hits. */
-    private featurePickResultFromPickingInfos(
+    private async featurePickResultFromPickingInfos(
         pickedObjects: PickingInfo[],
         maxFeatures = Number.POSITIVE_INFINITY
-    ): RenderedFeaturePickResult {
+    ): Promise<RenderedFeaturePickResult> {
         let topFeatureIds: TileFeatureId[] = [];
         const featureIds: TileFeatureId[] = [];
         const seen = new Set<string>();
@@ -377,7 +380,7 @@ export class DeckPicking {
                 : orderedVectorPicks[vectorPickIndex++].picked;
             const groupFeatureIds: TileFeatureId[] = [];
             const groupSeen = new Set<string>();
-            for (const featureId of this.featureIdsFromPickingInfo(picked)) {
+            for (const featureId of await this.resolvePickedFeatures(this.featureIdsFromPickingInfo(picked))) {
                 const identity = `${featureId.mapTileKey}\u0000${featureId.featureId}`;
                 if (!groupSeen.has(identity)) {
                     groupSeen.add(identity);
@@ -426,7 +429,7 @@ export class DeckPicking {
     }
 
     /** Resolves feature ids from metadata already returned by a deck picking operation. */
-    private featureIdsFromPickingInfo(picked: PickingInfo): TileFeatureId[] {
+    private featureIdsFromPickingInfo(picked: PickingInfo): FeaturePickTarget[] {
         const globalPickIndex = Number(
             (picked.object as { globalPickIndex?: unknown } | undefined)
                 ?.globalPickIndex ?? picked.index
@@ -597,8 +600,11 @@ export class DeckPicking {
                 return;
             }
             const topFeatureIds = topPick
-                ? this.featureIdsFromPickingInfo(topPick)
+                ? await this.resolvePickedFeatures(this.featureIdsFromPickingInfo(topPick))
                 : [];
+            if (deck !== this.deck || generation !== this.hoverPickGeneration ||
+                !this.deckCanvasPointerInside || this.isCameraInteracting ||
+                !this.isHoverSampleLocal(position, radius)) return;
             this.topHoverFeatureIds = topFeatureIds;
             this.topHoverFeatureGeneration = generation;
             // Do not make the visible highlight wait for the more expensive drill pass.
@@ -695,10 +701,13 @@ export class DeckPicking {
                 !this.isHoverSampleLocal(position, radius)) {
                 return;
             }
-            const featureIds = this.featurePickResultFromPickingInfos(
+            const featureIds = (await this.featurePickResultFromPickingInfos(
                 picked,
                 DeckPicking.HOVER_PICK_MAX_OBJECTS
-            ).featureIds;
+            )).featureIds;
+            if (deck !== this.deck || generation !== this.hoverPickGeneration ||
+                !this.deckCanvasPointerInside || this.isCameraInteracting ||
+                !this.isHoverSampleLocal(position, radius)) return;
             const topFeatureIds = generation === this.topHoverFeatureGeneration
                 ? this.topHoverFeatureIds
                 : [];
@@ -808,9 +817,29 @@ export class DeckPicking {
 
     /** Returns whether one Deck pick resolves to the exact supplied tile-feature identity. */
     private pickingInfoContainsFeature(picked: PickingInfo, target: TileFeatureId): boolean {
-        return this.featureIdsFromPickingInfo(picked).some(featureId =>
+        return this.knownFeatureIdsFromPickingInfo(picked).some(featureId =>
             featureId.mapTileKey === target.mapTileKey
             && featureId.featureId === target.featureId
         );
     }
+
+    /** Keep navigation synchronous; foreign identity becomes available after an interacted locate. */
+    private knownFeatureIdsFromPickingInfo(picked: PickingInfo): TileFeatureId[] {
+        const targets = this.featureIdsFromPickingInfo(picked);
+        if (targets.every(target => !target.featureReference)) return targets as TileFeatureId[];
+        return this.surface.cachedFeaturePicks(targets);
+    }
+
+    /** Resolve interacted references and teach the sparse mask index their canonical aliases. */
+    private async resolvePickedFeatures(targets: FeaturePickTarget[]): Promise<TileFeatureId[]> {
+        if (targets.every(target => !target.featureReference)) return targets as TileFeatureId[];
+        const resolved = await this.surface.resolveFeaturePicks(targets);
+        for (const target of targets) {
+            if (target.featureReference) {
+                this.gpuScene?.rememberLocatedPick(target, this.surface.cachedFeaturePicks([target]));
+            }
+        }
+        return resolved;
+    }
+
 }

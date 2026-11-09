@@ -1,4 +1,4 @@
-import { ChangeDetectorRef, Component, Input, NgZone, OnChanges, OnDestroy } from "@angular/core";
+import { ChangeDetectionStrategy, ChangeDetectorRef, Component, Input, NgZone, OnChanges, OnDestroy } from "@angular/core";
 import type { MeterItem } from "primeng/types/metergroup";
 import type { FeatureSearchScope } from "./search-definition.model";
 import type { FeatureSearchSession } from "./search-session.model";
@@ -14,7 +14,7 @@ import { SearchService } from "./search.service";
 const INTERNAL_SEARCH_RESULT_FIELDS = new Set(["$layer", "$name", "$validityCount", "$validityIndex"]);
 
 /** Presents search diagnostics or its compact progress strip without owning summary computation. */
-@Component({selector: "search-diagnostics", standalone: false, host: {style: "display:contents"},
+@Component({selector: "search-diagnostics", changeDetection: ChangeDetectionStrategy.OnPush, standalone: false, host: {style: "display:contents"},
     template: `@if (mode === 'progress') {            <div class="feature-search-controls">
                 <div class="feature-search-progress-meter" [title]="progressTooltip">
                     <p-metergroup [value]="progressMeterItems"
@@ -103,7 +103,7 @@ const INTERNAL_SEARCH_RESULT_FIELDS = new Set(["$layer", "$name", "$validityCoun
                                         <div class="feature-search-values-empty">No user-visible style or trace values available.</div>
                                     } @else {
                                         <div class="feature-search-value-card-grid">
-                                            @for (field of diagnosticsVisibleResultFields(); track field.index + ':' + field.expression) {
+                                            @for (field of diagnosticsVisibleResultFields(); track field.index + ':' + field.expression + ':' + (field.summary.schemaType?.schemaId ?? '') + ':' + (field.summary.schemaType?.typeId ?? '')) {
                                                 <article class="feature-search-value-card">
                                                     <header>
                                                         <span>Field</span>
@@ -137,6 +137,12 @@ const INTERNAL_SEARCH_RESULT_FIELDS = new Set(["$layer", "$name", "$validityCoun
                                     <span>Samples</span>
                                     <strong>{{ summary.count }}</strong>
                                 </div>
+                                @if (summary.schemaType) {
+                                    <div class="feature-search-value-summary-row" [title]="summary.schemaType.schemaId + ':' + summary.schemaType.typeId">
+                                        <span>Type</span>
+                                        <strong>{{ summary.schemaType.typeName || 'Qualified value' }}</strong>
+                                    </div>
+                                }
                                 @if (summary.numeric) {
                                     <div class="feature-search-value-summary-row">
                                         <span>Numeric</span>
@@ -322,9 +328,11 @@ export class SearchDiagnosticsComponent implements OnChanges, OnDestroy {
         if (!summary.numeric) {
             return "";
         }
-        return `min ${this.formatSummaryNumber(summary.numeric.min)}, `
-            + `max ${this.formatSummaryNumber(summary.numeric.max)}, `
-            + `avg ${this.formatSummaryNumber(summary.numeric.average)}`;
+        const numeric = summary.schemaType?.numeric;
+        const display = (raw: number) => this.formatSummaryNumber(raw * (numeric?.scale ?? 1) + (numeric?.offset ?? 0));
+        return `min ${display(summary.numeric.min)}, `
+            + `max ${display(summary.numeric.max)}, `
+            + `avg ${display(summary.numeric.average)}${numeric?.unit ? ` ${numeric.unit}` : ""}`;
     }
 
     /** Returns non-zero kind counters in display order. */
@@ -337,6 +345,8 @@ export class SearchDiagnosticsComponent implements OnChanges, OnDestroy {
             { label: "object", count: summary.kinds.object },
             { label: "list", count: summary.kinds.list },
             { label: "blob", count: summary.kinds.blob },
+            { label: "bitmask", count: summary.kinds.bitmask },
+            { label: "special", count: summary.specials },
             { label: "null", count: summary.nulls },
             { label: "missing", count: summary.missing },
             { label: "unknown", count: summary.kinds.unknown }
@@ -374,6 +384,25 @@ export class SearchDiagnosticsComponent implements OnChanges, OnDestroy {
 
     /** Updates the compact multi-phase progress display from the current session and tree state. */
     private refreshProgressDisplay(session: FeatureSearchSession): void {
+        // Disabled searches are not prepared on restore. Their saved settings
+        // remain inspectable, without suggesting that background work is running.
+        if (!session.definition.enabled) {
+            this.progressLabel = "Search disabled";
+            this.progressTooltip = "Enable this search to run it. Its saved settings remain available below.";
+            this.progressMeterItems = [];
+            this.progressDisplayPercent = 0;
+            return;
+        }
+        if (session.preparation?.status !== "ready") {
+            const status = session.preparation?.status;
+            this.progressLabel = status === "needs-choice" ? "Choose an interpretation"
+                : status === "waiting-for-schema" ? "Waiting for schema"
+                : status === "invalid" ? "Preparation failed" : "Preparing search";
+            this.progressTooltip = session.preparation?.error ?? "Scope and initial visualization are resolved before searching.";
+            this.progressMeterItems = [];
+            this.progressDisplayPercent = 0;
+            return;
+        }
         this.percentDone = this.progressPercent(session.results.progressDone, session.results.progressTotal);
         this.totalTiles = session.results.progressTotal;
         this.doneTiles = session.results.progressDone;
@@ -433,6 +462,13 @@ export class SearchDiagnosticsComponent implements OnChanges, OnDestroy {
      * turn. Coalescing here keeps the meter, label, and tooltip on one session
      * snapshot and prevents a late child lifecycle hook from changing one of these
      * bindings between Angular's check and check-no-changes passes.
+     *
+     * Streaming search results must not check every open panel on every frame.
+     * Like the coordinate HUD, check only this component. markForCheck would
+     * also mark its ancestors and schedule an application pass, including with
+     * Angular 21's default zoneless scheduling.
+     * OnPush also keeps idle searches out of checks triggered elsewhere in the UI;
+     * user events and the catalog subscriptions still notify Angular normally.
      */
     private scheduleProgressDisplayRefresh(session: FeatureSearchSession): void {
         this.pendingProgressDisplaySession = session;
@@ -440,21 +476,16 @@ export class SearchDiagnosticsComponent implements OnChanges, OnDestroy {
             return;
         }
         this.progressDisplayRefreshQueued = true;
-        queueMicrotask(() => {
+        this.ngZone.runOutsideAngular(() => queueMicrotask(() => {
             this.progressDisplayRefreshQueued = false;
             const pendingSession = this.pendingProgressDisplaySession;
             this.pendingProgressDisplaySession = undefined;
             if (this.destroyed || !pendingSession || pendingSession !== this.session) {
                 return;
             }
-            this.ngZone.run(() => {
-                if (this.destroyed || pendingSession !== this.session) {
-                    return;
-                }
-                this.refreshProgressDisplay(pendingSession);
-                this.changeDetector.markForCheck();
-            });
-        });
+            this.refreshProgressDisplay(pendingSession);
+            this.changeDetector.detectChanges();
+        }));
     }
 
     /** Tracks how far the PrimeNG result tree has consumed the streamed result array. */
@@ -469,6 +500,11 @@ export class SearchDiagnosticsComponent implements OnChanges, OnDestroy {
     /** Refreshes the compact scope label from the same schema metadata used by the style field picker. */
     private refreshFeatureSearchScopeSummary(session: FeatureSearchSession): void {
         const analysis = session.schemaAnalysis;
+        if (new Set(session.preparation?.branches.map(branch => branch.scope)).size > 1) {
+            this.featureSearchScopeSummary = "Mixed feature and attribute contexts";
+            this.featureSearchScopeSummaryTitle = "Each selected interpretation uses its own source and evaluation context.";
+            return;
+        }
         if (analysis.status === "pending") {
             this.featureSearchScopeSummary = "Auto: resolving scope...";
             this.featureSearchScopeSummaryTitle = "Schema analysis is running in the background.";

@@ -469,7 +469,10 @@ export function isDeckInteractionMaskLayer(layerId: string): boolean {
     return layerId.startsWith(MASK_LAYER_PREFIX);
 }
 
-/** Normalizes a style interaction material into bounded pixel-space shader inputs. */
+/**
+ * Convert an already finite interaction effect to shader inputs in drawing-buffer
+ * pixels. Colors and opacities are clamped; stripe dimensions have no upper bound.
+ */
 export function deckInteractionOutlineUniforms(
     effect: DeckInteractionEffect,
     textureSize: [number, number] = [1, 1],
@@ -491,7 +494,7 @@ export function deckInteractionOutlineUniforms(
         haloColor: normalizedColor(effect.haloColor),
         stripeColor: normalizedColor(stripeColor),
         // Angle is the visible stripe direction in screen coordinates. This
-        // normalized perpendicular axis makes spacing and width true pixels.
+        // normalized perpendicular axis measures spacing and width in drawing-buffer pixels.
         stripeAxis: [
             Math.sin(stripeRadians),
             Math.cos(stripeRadians)
@@ -527,8 +530,8 @@ export function deckInteractionHaloUsesCoverage(
 /**
  * Projects one stable WGS84 anchor into drawing-buffer coordinates.
  *
- * The hatch remains screen-space (constant pixel width and spacing), while
- * subtracting this moving origin pins its phase to the map during a pan.
+ * The hatch remains screen-space (constant drawing-buffer pixel width and spacing),
+ * while subtracting this moving origin pins its phase to the map during a pan.
  */
 export function deckInteractionStripeOrigin(
     viewport: PreRenderOptions["viewports"][number],
@@ -610,8 +613,8 @@ class DeckInteractionOutlineLayer extends Layer<Required<OutlineLayerProps>> {
 
 /**
  * Per-view owner of the path/point/surface mask passes and their fullscreen
- * interaction compositor. No framebuffer or mask draw exists until at least
- * one visualization contributes a selected vector primitive.
+ * interaction compositor, including authored style glows. Group render targets
+ * are allocated only when a registered mask layer is present in a render frame.
  */
 export class DeckInteractionOutline implements Effect {
     readonly id = "deck-interaction-outline-service";
@@ -646,7 +649,11 @@ export class DeckInteractionOutline implements Effect {
         });
     }
 
-    /** Allocates one stable non-zero RGB identity within an interaction material group. */
+    /**
+     * Return a stable non-zero RGB identity for this key until its group is removed.
+     * Identities are not recycled within a group; more than 0xffffff distinct keys
+     * throws. The group retains the effect object supplied by the caller.
+     */
     identityColor(
         groupId: string,
         identityKey: string,
@@ -722,7 +729,11 @@ export class DeckInteractionOutline implements Effect {
         return true;
     }
 
-    /** Renders stable feature identities into a group-local coverage source. */
+    /**
+     * Renders stable feature identities into a group-local coverage source.
+     * Only registered mask layers present in this frame are rendered, then each
+     * group's blur fields are built. Stripe phase uses the first viewport's projection.
+     */
     preRender(options: PreRenderOptions): void {
         if (options.isPicking || !this.context || !this.maskPass ||
             this.groups.size === 0) {
@@ -772,7 +783,11 @@ export class DeckInteractionOutline implements Effect {
         }
     }
 
-    /** Supplies the current textures and resolved material to the fullscreen layer. */
+    /**
+     * Supplies the current textures and resolved material to the fullscreen layer.
+     * Textures are borrowed, or null is returned before allocation. Resizing,
+     * removing the group, or cleanup can invalidate them.
+     */
     screenInput(groupId: string): {
         identityTexture: Texture;
         blurTexture: Texture;
@@ -796,7 +811,10 @@ export class DeckInteractionOutline implements Effect {
         };
     }
 
-    /** Destroy every framebuffer, pass, model, and generated registry entry. */
+    /**
+     * Destroy owned GPU resources and forget groups. Registry entries remain;
+     * the owning view must discard them when retiring this effect.
+     */
     cleanup(): void {
         for (const [groupId, group] of this.groups) {
             this.destroyGroup(groupId, group);
@@ -809,7 +827,7 @@ export class DeckInteractionOutline implements Effect {
         this.context = null;
     }
 
-    /** Resolve or create one bounded material group and update its authored effect. */
+    /** Resolve or create a material group and retain its current authored effect. */
     private ensureGroup(
         groupId: string,
         effect: DeckInteractionEffect,
@@ -1017,7 +1035,10 @@ export class DeckInteractionOutline implements Effect {
     }
 }
 
-/** Create one outline target with optional linear filtering and no depth buffer. */
+/**
+ * Create an owned RGBA target: nearest-filtered identities have depth, while
+ * linearly filtered blur targets omit the depth attachment.
+ */
 function createOutlineFramebuffer(
     context: EffectContext,
     id: string,
@@ -1044,7 +1065,7 @@ function createOutlineFramebuffer(
     });
 }
 
-/** Bound edge anti-aliasing so pathological styles cannot explode blur cost. */
+/** Clamp the edge blur extent to 1–12 drawing-buffer pixels for the fixed kernel. */
 function interactionEdgeBlurRadius(effect: DeckInteractionEffect): number {
     return Math.max(1, Math.min(
         MAX_BLUR_RADIUS_PX,
@@ -1052,7 +1073,7 @@ function interactionEdgeBlurRadius(effect: DeckInteractionEffect): number {
     ));
 }
 
-/** Bound authored halo spread to the compositor's fixed kernel budget. */
+/** Clamp the halo extent to 1–12 drawing-buffer pixels for the fixed kernel. */
 function interactionHaloBlurRadius(effect: DeckInteractionEffect): number {
     return Math.max(1, Math.min(
         MAX_BLUR_RADIUS_PX,

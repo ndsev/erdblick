@@ -223,6 +223,10 @@ export class AppSurfaceHeaderComponent implements OnDestroy {
         }));
     }
 
+    /**
+     * Focus the surface first, then begin a primary-button drag from non-control
+     * header areas. Title drags additionally suppress the click generated on release.
+     */
     protected onPointerDown(event: PointerEvent): void {
         this.focusRequest.emit(event);
         const target = event.target as HTMLElement | null;
@@ -243,6 +247,10 @@ export class AppSurfaceHeaderComponent implements OnDestroy {
         this.extraActionsMenu?.toggle(event);
     }
 
+    /**
+     * Run an enabled action with an anchor that remains meaningful after a popup
+     * menu closes: menu actions use its trigger, inline actions use the clicked control.
+     */
     protected emitExtraAction(action: AppSurfaceHeaderAction, event: MouseEvent, source: 'inline' | 'menu'): void {
         event.stopPropagation();
         if (action.disabled) {
@@ -288,6 +296,7 @@ export class AppSurfaceHeaderComponent implements OnDestroy {
         this.closeRequest.emit(event);
     }
 
+    /** Consume the synthetic click after a title drag; ordinary clicks reach the owner. */
     protected handleTitleClick(event: MouseEvent): void {
         if (this.suppressNextTitleClick) {
             this.suppressNextTitleClick = false;
@@ -305,6 +314,10 @@ export class AppSurfaceHeaderComponent implements OnDestroy {
         }
     }
 
+    /**
+     * Keep nested form controls and action buttons operable without starting a drag.
+     * The title is deliberately a drag surface even when it has click behavior.
+     */
     private isInteractiveTarget(target: HTMLElement | null): boolean {
         if (!target) {
             return false;

@@ -24,7 +24,7 @@ import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, PREFERENCES_DIALOG_LAYOUT_ID } f
 import { LayoutService } from "../layout/layout.service";
 import { DialogStackService } from "../layout/dialog-stack.service";
 import { MapDataService } from "../mapdata/mapdata.service";
-import type { FeatureSearchStyleFieldCandidate } from "../search/search.model";
+import { searchStyleFieldCandidates, type FeatureSearchStyleFieldCandidate } from "../search/search.model";
 import {
     getTileSubsetLayerRenderAutoWorkerCount
 } from "../mapview/deck/tile-subset-layer-render.service";
@@ -366,6 +366,9 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                                                           appendTo="body"
                                                           placeholder="Select field">
                                                 </p-select>
+                                                @if (hoverLabelSchemaError) {
+                                                    <small role="status">{{ hoverLabelSchemaError }}</small>
+                                                }
                                             }
                                             <input class="hover-label-display-key"
                                                    type="text"
@@ -691,6 +694,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     inspectionValuePresentationSelection: string[] = [];
     sourceDataColumnSelection: string[] = [];
     hoverLabelFields: HoverLabelFieldConfig[] = [];
+    hoverLabelSchemaError = "";
     hoverLabelFieldOptions: Array<{ label: string; value: string }> = [{
         label: "Feature ID",
         value: "id"
@@ -944,7 +948,12 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     /** Loads unique scalar feature fields from the shared schema worker. */
     private refreshHoverLabelFieldOptions(): void {
         this.searchSchema.requestSearchStyleFields("true", "feature")
-            .then(options => this.applyHoverLabelFieldOptions(options));
+            .then(options => {
+                this.hoverLabelSchemaError = "";
+                this.applyHoverLabelFieldOptions(searchStyleFieldCandidates(options));
+            }).catch(error => {
+                this.hoverLabelSchemaError = `Schema fields are unavailable. ${String(error)}`;
+            });
     }
 
     /** Merges per-layer schema candidates into the concise hover-field picker. */
@@ -1006,7 +1015,10 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.styleService.clearStorageForImportedStyles();
     }
 
-    /** Restores built-in styles by dropping locally modified overrides. */
+    /**
+     * Restore built-in styles by reloading modified entries and clearing their
+     * stored overrides. Starts reloads without awaiting completion.
+     */
     clearModifiedStyles() {
         for (let [styleId, style] of this.styleService.styles) {
             if (!style.imported && style.modified) {
@@ -1066,7 +1078,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.lod3TileThresholdChanged = false;
     }
 
-    /** Keep draft sampling preferences separate until the edit is applied. */
+    /** Reports whether the detached policy draft differs from its persisted value. */
     get pointCloudPolicyChanged(): boolean {
         return JSON.stringify(this.pointCloudPolicyDraft) !== JSON.stringify(this.mapService.state.pointCloudPolicy);
     }

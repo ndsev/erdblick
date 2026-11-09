@@ -35,8 +35,11 @@ interface RegisteredControl {
 }
 
 /**
- * Explicit boundary dispatch, schema checks and response bounds. Owners register
- * ordinary methods; this service neither discovers stored values nor owns domains.
+ * Register and dispatch the actions and controls exposed by domain controllers.
+ * MCP and omnibar calls use the same argument/result checks and bound callbacks.
+ * Owners register ordinary methods; this service neither discovers stored values
+ * nor owns domains. It owns registration and the generic describe/read/write
+ * operations for public controls.
  */
 @Injectable({ providedIn: "root" })
 export class AppActionRegistry implements AppActionRegistration {
@@ -83,7 +86,7 @@ export class AppActionRegistry implements AppActionRegistration {
         });
     }
 
-    /** Queries live owner choices without running an action or loading network data. */
+    /** Queries live owner choices for the omnibar and enforces unique candidate IDs. */
     getCandidates(query: string, history?: ActionCandidateHistory): RegisteredActionCandidate[] {
         const candidates: RegisteredActionCandidate[] = [];
         const ids = new Set<string>();
@@ -102,6 +105,7 @@ export class AppActionRegistry implements AppActionRegistration {
     /**
      * Binds an explicit public value to owner readers/writers. Default targets
      * select the bounded overview; they do not discover or register stored slots.
+     * defaultTargets supplies selectors when getControls omits targets.
      * A writable declaration must have exactly one owner write binding.
      */
     registerControl<Selector extends z.ZodObject, Value extends z.ZodType>(
@@ -172,7 +176,11 @@ export class AppActionRegistry implements AppActionRegistration {
         };
     }
 
-    /** Local omnibar and remote adapters share validation and owner dispatch. */
+    /**
+     * Local omnibar and remote adapters share validation and owner dispatch.
+     * Abort is checked before dispatch; asynchronous owners must observe it during
+     * their work. Output validation can fail after an owner has already applied effects.
+     */
     execute(name: string, input: unknown, signal?: AbortSignal): unknown {
         if (signal?.aborted) {
             rejectAction("Action cancelled", "cancelled");
@@ -200,7 +208,10 @@ export class AppActionRegistry implements AppActionRegistration {
         return result instanceof Promise ? result.then(validate) : validate(result);
     }
 
-    /** Returns declaration metadata without reading live owners or materializing defaults. */
+    /**
+     * Returns declaration metadata without reading live owners or materializing defaults.
+     * Descriptions can be filtered by exact names and/or a name prefix.
+     */
     private describe(input: ControlInput<"describeControls">) {
         return {
             observedAt: new Date().toISOString(),
@@ -215,8 +226,10 @@ export class AppActionRegistry implements AppActionRegistration {
     }
 
     /**
-     * Reads explicit targets or the owners' default overview within one response
-     * budget. Unavailable values and omitted entries remain visible to callers.
+     * Read explicit control targets, or the registered defaults when targets is absent.
+     * Return up to VIEWER_ACTION_TARGET_LIMIT entries within the shared response byte
+     * cap. Each unavailable value or shortened/omitted entry makes complete=false
+     * and carries a reason so callers can request a narrower result.
      */
     private read(
         input: ControlInput<"getControls">
@@ -231,6 +244,7 @@ export class AppActionRegistry implements AppActionRegistration {
         const targets = requested.slice(0, VIEWER_ACTION_TARGET_LIMIT);
         const values: ControlOutput<"getControls">["values"] = [];
         const omissions: ControlOutput<"getControls">["omissions"] = [];
+        // Reserve 48 KiB for target selectors, omission details and the reply envelope.
         let budget = VIEWER_ACTION_RESULT_BYTES - 48 * 1024;
         if (requested.length > targets.length) {
             omissions.push({
@@ -239,11 +253,13 @@ export class AppActionRegistry implements AppActionRegistration {
                 omittedCount: requested.length - targets.length
             });
         }
+
         for (const target of targets) {
             if (budget < 1024) {
                 omissions.push({ target, reason: "byte_limit" });
                 continue;
             }
+
             const { binding, selector } = this.resolve(target);
             const context = new ControlReadContext(budget);
             let entry: ControlOutput<"getControls">["values"][number];
@@ -263,6 +279,7 @@ export class AppActionRegistry implements AppActionRegistration {
                         ? reason : "target_unavailable"
                 };
             }
+
             const bytes = jsonByteLength(entry);
             if (bytes > budget) {
                 omissions.push({ target, reason: "byte_limit" });
@@ -274,6 +291,7 @@ export class AppActionRegistry implements AppActionRegistration {
                 omissions.push({ target, reason: context.reason });
             }
         }
+
         return {
             observedAt: new Date().toISOString(),
             values,
@@ -294,8 +312,9 @@ export class AppActionRegistry implements AppActionRegistration {
         }
         const context = new ControlReadContext(VIEWER_ACTION_RESULT_BYTES);
         const before = deepCopy(binding.read(selector, context));
-        // This generic boundary makes compound control assignments coherent; owner
-        // methods also use transactions for their ordinary application workflows.
+        // Publish all AppState changes from this assignment together, so observers
+        // of a compound value (for example a view configuration) see its final state.
+        // Owner methods also use transactions for their ordinary application workflows.
         this.persistence.transaction(() => {
             binding.write!(selector, binding.declaration.valueSchema.parse(input.value));
         });

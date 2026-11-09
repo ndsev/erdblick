@@ -22,7 +22,7 @@ export interface DebugWindow extends Window {
 
 /** Stable browser-console facade for renderer, camera, and transport diagnostics. */
 export class ErdblickDebugApi {
-    /** Bind supported debug operations without exposing service internals directly. */
+    /** Binds the live application services used by console and test operations. */
     constructor(
         private readonly tileStream: MapTileStreamService,
         private readonly subsetRenderer: TileSubsetLayerRenderService,
@@ -37,7 +37,7 @@ export class ErdblickDebugApi {
         return this.actions.execute(name, input);
     }
 
-    /** Apply one serialized camera state after validating its logical view index. */
+    /** Applies serialized camera state; the caller supplies a nonnegative integer view index. */
     setCamera(viewIndex: number, cameraInfoStr: string): void {
         if (viewIndex >= this.viewSettings.numViews) {
             console.error(
@@ -100,7 +100,10 @@ export class ErdblickDebugApi {
         return this.subsetRenderer.currentFrameTimeMs();
     }
 
-    /** Construct a canonical feature-layer key through the authoritative WASM API. */
+    /**
+     * Construct a canonical feature-layer key through the authoritative WASM API.
+     * tileId must be exactly representable as a Number.
+     */
     mapTileKey(
         mapId: string,
         layerId: string,
@@ -113,46 +116,52 @@ export class ErdblickDebugApi {
         ) as string;
     }
 
-    /** Loads one exact feature through the inspection-only restricted `/tiles` path. */
-    async featureInspectionHoverSummary(
+    /** Reads the same detached native tree as the panel, including raw values and their types. */
+    async featureInspectionModel(
         mapTileKey: string,
-        featureId: string,
-        keyFilter = ""
-    ): Promise<Record<string, unknown>> {
+        featureId: string
+    ): Promise<unknown[] | {error: string}> {
         const [wrapper] = await this.tileStream.loadFeatures([
             { mapTileKey, featureId }
         ]);
         if (!wrapper) {
             return { error: `Feature ${featureId} was not found in ${mapTileKey}.` };
         }
-        return wrapper.peek(feature => {
-            const root = feature.inspectionModel();
-            const hits: Record<string, unknown>[] = [];
-            const walk = (node: any, path: string[]): void => {
-                if (!node || typeof node !== "object") {
-                    return;
-                }
-                const nodeKey = String(node.key ?? "");
-                const nextPath = [...path, nodeKey];
-                if (typeof node.hoverId === "string" &&
-                    (!keyFilter || nodeKey.includes(keyFilter))) {
-                    hits.push({
-                        key: node.key,
-                        value: node.value,
-                        hoverId: node.hoverId,
-                        path: nextPath.join(" > ")
-                    });
-                }
-                if (Array.isArray(node.children)) {
-                    node.children.forEach((child: unknown) =>
-                        walk(child, nextPath)
-                    );
-                }
-            };
-            if (Array.isArray(root)) {
-                root.forEach((node: unknown) => walk(node, []));
+        const root = wrapper.peek(feature => feature.inspectionModel());
+        return Array.isArray(root) ? root : {
+            error: `Feature ${featureId} could not be parsed.`
+        };
+    }
+
+    /** Summarizes hover targets without exposing the owning tile or parser lifetime. */
+    async featureInspectionHoverSummary(
+        mapTileKey: string,
+        featureId: string,
+        keyFilter = ""
+    ): Promise<Record<string, unknown>> {
+        const root = await this.featureInspectionModel(mapTileKey, featureId);
+        if (!Array.isArray(root)) return root;
+        const hits: Record<string, unknown>[] = [];
+        const walk = (node: any, path: string[]): void => {
+            if (!node || typeof node !== "object") {
+                return;
             }
-            return { mapTileKey, featureId, hitCount: hits.length, hits };
-        }) ?? { error: `Feature ${featureId} could not be parsed.` };
+            const nodeKey = String(node.key ?? "");
+            const nextPath = [...path, nodeKey];
+            if (typeof node.hoverId === "string" &&
+                (!keyFilter || nodeKey.includes(keyFilter))) {
+                hits.push({
+                    key: node.key,
+                    value: node.value,
+                    hoverId: node.hoverId,
+                    path: nextPath.join(" > ")
+                });
+            }
+            if (Array.isArray(node.children)) {
+                node.children.forEach((child: unknown) => walk(child, nextPath));
+            }
+        };
+        root.forEach((node: unknown) => walk(node, []));
+        return { mapTileKey, featureId, hitCount: hits.length, hits };
     }
 }

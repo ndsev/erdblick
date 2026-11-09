@@ -1,7 +1,11 @@
+import type {SearchPreparation, SearchInterpretation} from "./search-preparation.model";
+import {combinePreparedSearchAutoStyles, preparedSearchAutoStyleRules} from "./feature-search-auto-style.util";
 import { Injectable } from "@angular/core";
 import { BehaviorSubject, Subject, take } from "rxjs";
 import { filter } from "rxjs/operators";
 import { z } from "zod";
+import {schemaTypeIdentitySchema} from "../mapdata/schema-type.model";
+
 import { AppActionContributor, AppActionRegistration } from "../action/action-contributor.model";
 import {
     AppActionCandidate,
@@ -64,7 +68,7 @@ import type {
 } from "./search-session.model";
 import {
     featureSearchMapLayersManualFromPayload,
-    featureSearchSelectedMapLayersFromPayload,
+    featureSearchMapLayersFromPayload,
     featureSearchSelectedViewIndicesFromPayload,
     uniqueFeatureSearchMapLayers,
     type FeatureSearchExportDialogOptions,
@@ -206,8 +210,9 @@ export class SearchService implements AppActionContributor {
         });
         this.mapInfo.layerStateChanged.subscribe((reason) => {
             if (reason === "datasources" && this.stateService.ready.getValue()) {
-                this.invalidateAllSchemaAnalysis();
-                this.reconcilePersistedFeatureSearchState(this.state.featureSearches);
+                if (this.invalidateChangedSchemaAnalysis()) {
+                    this.reconcilePersistedFeatureSearchState(this.state.featureSearches);
+                }
             }
         });
         this.installFeatureSearchDiagnostics();
@@ -314,7 +319,7 @@ export class SearchService implements AppActionContributor {
             throw new Error("The search is no longer available.");
         }
         const resolved = this.resolvedDefinitionForSession(session);
-        if (!resolved) {
+        if (!resolved || session.preparation?.status !== "ready") {
             throw new Error(session.schemaAnalysis.error
                 || "Search scope is still being resolved. Please save again when the search is ready.");
         }
@@ -505,13 +510,24 @@ export class SearchService implements AppActionContributor {
             : "feature";
         const previousFields = featureSearchResultFields(previous, concreteScope);
         const nextFields = featureSearchResultFields(definition, concreteScope);
-        const searchGenerationChanged = previous.query !== definition.query
+        const searchGenerationChanged = JSON.stringify(previous.interpretationIds) !== JSON.stringify(definition.interpretationIds)
+            || previous.query !== definition.query
             || previous.scope !== definition.scope
             || selectedLayersChanged
             || selectedTileLevelsChanged
             || selectedFeatureTypesChanged
             || JSON.stringify(previousFields) !== JSON.stringify(nextFields);
 
+        if (searchGenerationChanged && this.searchScopeAnalysisSignature(previous) !== this.searchScopeAnalysisSignature(definition)) {
+            // A confirmed replacement is prepared while the previous result is
+            // retained. Preparation is never triggered by editor keystrokes.
+            session.definition = definition;
+            session.schemaAnalysis = this.initialSchemaAnalysis(definition);
+            session.preparation = undefined;
+            this.progress.next(session);
+            this.syncSearchRequestsToMapService();
+            return;
+        }
         if (searchGenerationChanged) {
             this.resetSessionSearch(session, definition);
             this.updateSessionColor(session, normalizedColor);
@@ -620,7 +636,14 @@ export class SearchService implements AppActionContributor {
 
     /** Starts a feature search from the compact payload stored on search actions/history entries. */
     runFromActionPayload(query: string, payload?: unknown): FeatureSearchSession {
-        const selectedMapLayers = featureSearchSelectedMapLayersFromPayload(payload);
+        let selectedMapLayers = featureSearchMapLayersFromPayload(payload);
+        if (!selectedMapLayers) {
+            // The viewport expresses the user's current source choice. A
+            // completion batch is bounded and its origins are not an inventory
+            // of every map that can evaluate the accepted portable expression.
+            const active = this.activeFeatureSearchLayers();
+            selectedMapLayers = active.length ? active : featureSearchMapLayersFromPayload(payload, "suggestedMapLayers");
+        }
         const record = payload && typeof payload === "object" && !Array.isArray(payload) ? payload as Record<string, unknown> : undefined;
         const ids = record?.["selectedViewIds"];
         if (ids !== undefined && (!Array.isArray(ids) || ids.some(id => typeof id !== "string" || !this.viewSettings.viewIds.includes(id)))) {
@@ -630,7 +653,10 @@ export class SearchService implements AppActionContributor {
             ? ids.map(id => this.viewSettings.indexOfView(id))
             : featureSearchSelectedViewIndicesFromPayload(payload);
         const selectedMapLayersManual = featureSearchMapLayersManualFromPayload(payload);
+        const interpretationIds = Array.isArray(record?.["interpretationIds"])
+            ? record["interpretationIds"].filter((id): id is string => typeof id === "string") : undefined;
         return this.run(query, {
+            ...(interpretationIds ? {interpretationIds} : {}),
             ...(selectedMapLayers ? { selectedMapLayers } : {}),
             ...(selectedViewIndices ? { selectedViewIndices } : {}),
             ...(selectedMapLayersManual !== undefined ? { selectedMapLayersManual } : {})
@@ -642,12 +668,13 @@ export class SearchService implements AppActionContributor {
         const selectedMapLayers =
             options.selectedMapLayers === undefined
                 ? this.activeFeatureSearchLayers()
-                : this.mapLayersForSearchContext(options.selectedMapLayers);
+                : uniqueFeatureSearchMapLayers(options.selectedMapLayers);
         const selectedViewIndices =
             options.selectedViewIndices ?? this.activeFeatureSearchViewIndices(selectedMapLayers);
         const entry = this.state.addFeatureSearch({
             query,
             ...(options.scope ? { scope: options.scope } : {}),
+            ...(options.interpretationIds ? {interpretationIds: options.interpretationIds} : {}),
             ...(options.autoUpdate === undefined ? {} : { autoUpdate: options.autoUpdate }),
             pinColor: this.nextDefaultSearchColor(),
             selectedMapLayers,
@@ -672,6 +699,7 @@ export class SearchService implements AppActionContributor {
         const entry = this.state.addFeatureSearch({
             query: imported.query,
             scope: imported.scope,
+            interpretationIds: imported.interpretationIds,
             autoUpdate: imported.autoUpdate,
             bookmarked: imported.bookmarked,
             enabled: true,
@@ -702,7 +730,8 @@ export class SearchService implements AppActionContributor {
             return;
         }
         this.pendingForcedGenerationIds.add(session.id);
-        const patched = this.state.patchFeatureSearch(sessionId, { query, paused: false });
+        // Completion changes the expression, not the layer selector beside it.
+        const patched = this.state.patchFeatureSearch(sessionId, {query, paused: false, interpretationIds: undefined});
         if (patched) {
             return;
         }
@@ -846,7 +875,9 @@ export class SearchService implements AppActionContributor {
         if (!session) {
             return;
         }
-        if (!this.state.patchFeatureSearch(sessionId, { pinColor: color })) {
+        if (!this.state.patchFeatureSearch(sessionId, {pinColor: color,
+            searchStyleRules: session.definition.searchStyleRules.map(rule => rule.autoGenerated && rule.color.mode === "solid"
+                ? {...rule, color: {mode: "solid" as const, color}} : rule)})) {
             this.updateSessionColor(session, color);
         }
     }
@@ -981,13 +1012,12 @@ export class SearchService implements AppActionContributor {
         if (!normalizedTypes.length) {
             return [];
         }
+        // Pending schema installation is not evidence that a saved type vanished.
+        if (!this.mapInfo.canPruneStateForCurrentCatalog()) return normalizedTypes;
         const availableTypes = new Set<string>();
         for (const ref of selectedMapLayers) {
-            const layer = this.mapInfo.maps.maps.get(ref.mapId)?.layers.get(ref.layerId);
-            for (const featureType of layer?.info.featureTypes ?? []) {
-                if (featureType.name) {
-                    availableTypes.add(featureType.name);
-                }
+            for (const type of this.mapInfo.featureTypesForLayer(ref.mapId, ref.layerId)) {
+                availableTypes.add(type);
             }
         }
         return normalizedTypes.filter(type => availableTypes.has(type));
@@ -1033,6 +1063,7 @@ export class SearchService implements AppActionContributor {
         const definition = session.definition;
         const entry = this.state.addFeatureSearch({
             query: definition.query,
+            interpretationIds: definition.interpretationIds ? [...definition.interpretationIds] : undefined,
             scope: definition.scope,
             autoUpdate: definition.autoUpdate,
             bookmarked: definition.bookmarked,
@@ -1292,7 +1323,6 @@ export class SearchService implements AppActionContributor {
             !strategy.showLowFiDots ||
             this.viewState.prefersHighFidelityForSearchResultTile(
                 viewIndex,
-                session.id,
                 partition.id,
                 strategy.highFidelityMaxVisibleTiles
             );
@@ -1324,7 +1354,16 @@ export class SearchService implements AppActionContributor {
     ): void {
         this.searchRenderDecisionCache.clear();
         const desiredKeys = new Set<string>();
-        for (const definition of definitions) {
+        const prepared = definitions.flatMap(definition => definition.branches?.filter(branch => !definition.selectedFeatureTypes.length || !branch.featureTypes.length ||
+            branch.featureTypes.some(type => definition.selectedFeatureTypes.includes(type))).map(branch => ({
+            ...definition, branchKey: branch.scope, concreteScope: branch.scope, backendQuery: branch.query, schemaId: branch.schemaId,
+            selectedMapLayers: [{mapId: branch.mapId, layerId: branch.layerId}],
+            selectedFeatureTypes: definition.selectedFeatureTypes.length
+                ? definition.selectedFeatureTypes.filter(type => !branch.featureTypes.length || branch.featureTypes.includes(type))
+                : branch.featureTypes,
+            resultFields: featureSearchResultFields(definition, branch.scope)
+        })) ?? [definition]);
+        for (const definition of prepared) {
             for (const ref of definition.selectedMapLayers) {
                 const mapgetLayer = this.mapInfo.mapgetLayer(ref.mapId, ref.layerId);
                 if (!mapgetLayer) {
@@ -1337,7 +1376,7 @@ export class SearchService implements AppActionContributor {
                 if (featureTypes === null) {
                     continue;
                 }
-                const key = this.searchPresentationKey(definition.id, mapgetLayer);
+                const key = this.searchPresentationKey(definition.id, mapgetLayer) + "\n" + (definition.branchKey ?? "");
                 desiredKeys.add(key);
                 const definitionSignature = JSON.stringify({
                     query: definition.backendQuery,
@@ -1436,8 +1475,7 @@ export class SearchService implements AppActionContributor {
         presentation.destroy();
         const session = this.getInternalSession(presentation.sessionId);
         if (session) {
-            // Replacement styles get a new filter ID. Its predecessor must not
-            // keep contributing expected chunks after its tiles are discarded.
+            // Retire predecessor status together with its tiles so diagnostics describe current work.
             session.results.clearFilterSearchProgress(presentation.styledLayer.filterRef.filterId);
         }
         for (const sourceTileKey of [
@@ -1446,7 +1484,7 @@ export class SearchService implements AppActionContributor {
             const contribution =
                 session?.results.searchResultTilesBySourceKey.get(sourceTileKey);
             if (contribution?.sourceMapId === presentation.mapgetLayer.mapId &&
-                contribution.sourceLayerId === presentation.mapgetLayer.layerId) {
+                contribution.sourceLayerId === presentation.mapgetLayer.layerId && sourceTileKey.startsWith(presentation.key + "\n")) {
                 this.removeServerSearchResultTile({
                     searchId: presentation.sessionId,
                     sourceTileKey
@@ -1500,9 +1538,7 @@ export class SearchService implements AppActionContributor {
         definition: FeatureSearchResolvedDefinition,
         layer: MapgetLayer
     ): string[] | null {
-        const layerTypes = (layer.info.featureTypes ?? [])
-            .map(featureType => featureType.name)
-            .filter((name): name is string => !!name);
+        const layerTypes = this.mapInfo.featureTypesForLayer(layer.mapId, layer.layerId);
         if (!definition.selectedFeatureTypes.length) {
             return layerTypes;
         }
@@ -1531,8 +1567,8 @@ export class SearchService implements AppActionContributor {
         session.results.progressTotal = Math.max(1, total);
         session.results.progressDone = total === 0 ? 1 : completed;
         session.results.backendComplete = session.paused || completed >= total;
-        session.results.updateSearchResultIngressProgress();
-        session.results.updateSessionCompletion(session.paused);
+        this.updateSearchResultIngressProgress(session);
+        this.updateSessionCompletion(session);
         this.progress.next(session);
     }
     /** Clears result ownership without changing the persisted definition or UI surface. */
@@ -1562,6 +1598,7 @@ export class SearchService implements AppActionContributor {
     private resetSessionSearch(session: RuntimeSearchSession, definition: FeatureSearchStateEntry): void {
         session.definition = definition;
         session.schemaAnalysis = this.initialSchemaAnalysis(definition);
+        session.preparation = undefined;
         session.lastResolvedDefinition = undefined;
         session.lastResolvedDefinitionSignature = undefined;
         this.clearSessionResultData(session);
@@ -1603,35 +1640,31 @@ export class SearchService implements AppActionContributor {
         };
     }
 
-    /** Drops schema-analysis caches for live sessions after datasource metadata changed. */
-    private invalidateAllSchemaAnalysis(): void {
-        this.pendingSchemaAnalysisSignatures.clear();
+    /** Invalidates only sessions whose selected source models changed, preserving unrelated live searches. */
+    private invalidateChangedSchemaAnalysis(): boolean {
+        let changed = false;
         for (const session of this.searchSessions) {
+            if (session.schemaAnalysis.signature === this.searchScopeAnalysisSignature(session.definition)) continue;
             session.schemaAnalysis = this.initialSchemaAnalysis(session.definition);
+            changed = true;
         }
+        return changed;
     }
 
     /** Returns the resolved definition consumed by MapTileStreamService, keeping the previous one during same-signature re-analysis. */
     private resolvedDefinitionForSession(session: RuntimeSearchSession): FeatureSearchResolvedDefinition | null {
         const signature = this.searchScopeAnalysisSignature(session.definition);
-        if (!this.ensureSessionSchemaAnalysis(session, signature)) {
-            if (session.lastResolvedDefinitionSignature !== signature || !session.lastResolvedDefinition) {
-                return null;
-            }
-            const concreteScope = session.lastResolvedDefinition.concreteScope;
-            return {
-                ...session.definition,
-                concreteScope,
-                backendQuery: session.lastResolvedDefinition.backendQuery,
-                resultFields: featureSearchResultFields(session.definition, concreteScope)
-            };
+        if (!this.ensureSessionSchemaAnalysis(session, signature) || session.preparation?.status !== "ready") {
+            // The old presentation remains recognizable while a confirmed
+            // replacement needs a choice or schema. Do not dispatch the draft.
+            return session.lastResolvedDefinition ? {...session.lastResolvedDefinition, autoUpdate: false, paused: true} : null;
         }
         const concreteScope = session.schemaAnalysis.concreteScope;
         const resolved = {
-            ...session.definition,
-            concreteScope,
-            backendQuery: session.schemaAnalysis.normalizedQuery || session.definition.query,
-            resultFields: featureSearchResultFields(session.definition, concreteScope)
+            ...session.definition, concreteScope,
+            backendQuery: session.schemaAnalysis.normalizedQuery,
+            resultFields: featureSearchResultFields(session.definition, concreteScope),
+            branches: session.preparation.branches
         };
         session.lastResolvedDefinition = resolved;
         session.lastResolvedDefinitionSignature = signature;
@@ -1643,6 +1676,8 @@ export class SearchService implements AppActionContributor {
         if (session.schemaAnalysis.signature === signature && session.schemaAnalysis.status === "ready") {
             return true;
         }
+        if (session.schemaAnalysis.signature === signature && session.preparation?.signature === signature &&
+            session.preparation.status !== "preparing") return false;
         if (session.schemaAnalysis.signature === signature && session.schemaAnalysis.status === "pending") {
             this.requestSessionSchemaAnalysis(session, signature);
             return false;
@@ -1661,50 +1696,184 @@ export class SearchService implements AppActionContributor {
             return;
         }
         this.pendingSchemaAnalysisSignatures.add(requestKey);
+        session.preparation = {signature, status: "preparing", phase: "interpretation", interpretations: [], selectedIds: [], branches: [], initialStyles: []};
         this.searchSchema.requestSearchScopeAnalysis(
             session.definition.query,
             session.definition.scope,
-            session.definition.selectedMapLayers
+            session.definition.selectedMapLayers,
+            session.definition.selectedFeatureTypes
         ).then(analysis => {
-            this.pendingSchemaAnalysisSignatures.delete(requestKey);
-            this.applySearchScopeAnalysis(session.id, analysis);
+            void this.applySearchScopeAnalysis(session.id, {...analysis, signature})
+                .finally(() => this.pendingSchemaAnalysisSignatures.delete(requestKey));
         });
     }
 
     /** Applies a completed async schema-analysis result if the session still represents the same definition. */
-    private applySearchScopeAnalysis(sessionId: string, analysis: FeatureSearchScopeAnalysis): void {
+    private async applySearchScopeAnalysis(sessionId: string, analysis: FeatureSearchScopeAnalysis): Promise<void> {
         const session = this.getInternalSession(sessionId);
-        if (!session) {
-            return;
+        if (!session || analysis.signature !== this.searchScopeAnalysisSignature(session.definition)) return;
+        const preparation = session.preparation!;
+        try {
+            if (analysis.error) throw new Error(analysis.error);
+            if (!analysis.interpretations) throw new Error("Schema worker returned no search interpretations.");
+            const interpretations = new Map<string, SearchInterpretation>();
+            for (const branch of analysis.interpretations) {
+                let meaning = interpretations.get(branch.id);
+                if (!meaning) {
+                    meaning = {id: branch.id, label: branch.label, kind: branch.kind, query: branch.expression, branches: []};
+                    interpretations.set(branch.id, meaning);
+                }
+                meaning.branches.push(branch);
+            }
+            preparation.interpretations = [...interpretations.values()];
+            if (!interpretations.size) throw new Error("No declared search meaning in the selected layers. Use an explicit field predicate.");
+            const selected = session.definition.interpretationIds ?? [];
+            if (selected.length > 1) {
+                preparation.status = "needs-choice";
+                preparation.error = "Choose exactly one interpretation. Combined interpretations are not supported.";
+                this.progress.next(session);
+                return;
+            }
+            // Scope edits clear the previous binding in SearchState. A single
+            // remaining meaning then needs no extra confirmation. A stale
+            // saved binding still requires a deliberate choice.
+            const selectedId = selected[0] ?? (interpretations.size === 1 ? [...interpretations.keys()][0] : undefined);
+            const meaning = selectedId ? interpretations.get(selectedId) : undefined;
+            if (!meaning) {
+                preparation.status = "needs-choice";
+                if (selected.length) preparation.error = "The saved interpretation is no longer declared. Choose an interpretation again.";
+                this.progress.next(session);
+                return;
+            }
+            preparation.selectedIds = [meaning.id];
+            // One meaning may occur in several layers; that is source coverage,
+            // never permission to combine different semantic interpretations.
+            preparation.branches = structuredClone(meaning.branches);
+            preparation.phase = "style";
+            this.progress.next(session);
+            const automatic = !session.definition.searchStyleRules.some(rule => !rule.autoGenerated);
+            const branchStyles: FeatureSearchStyleRule[][] = [];
+            if (automatic) {
+                const attributeBranches = preparation.branches.filter(branch => branch.scope === "attribute");
+                const inventory = attributeBranches.length
+                    ? await this.searchSchema.requestPreparedSearchStyleFields(attributeBranches, {recursive: true, values: "scalar"})
+                    : undefined;
+                for (const branch of preparation.branches) {
+                    const attributeScopes = branch.attributeScopes;
+                    const branchAnalysis = {
+                        ...analysis,
+                        rewriteSuppressed: false,
+                        status: "ready" as const,
+                        concreteScope: branch.scope,
+                        attributeScopes,
+                        matchedFieldNames: branch.matchedFieldNames ?? analysis.matchedFieldNames,
+                        matchedEnumValues: branch.matchedEnumValues ?? analysis.matchedEnumValues
+                    };
+                    branchStyles.push(preparedSearchAutoStyleRules(
+                        branch.scope === "attribute" ? inventory : undefined,
+                        branchAnalysis,
+                        session.definition.pinColor,
+                        {mapId: branch.mapId, layerId: branch.layerId, scope: branch.scope}
+                    ));
+                }
+            }
+            if (analysis.signature !== this.searchScopeAnalysisSignature(session.definition) || session.preparation !== preparation) return;
+            // Compare every source before reducing owner filters. Equal
+            // appearances share a rule; different scales keep the conditions
+            // that distinguish where each one applies.
+            const styles = combinePreparedSearchAutoStyles(branchStyles);
+            // A unique attribute name already identifies its meaning. Keep the
+            // user's shorthand (e.g. SPEED_LIMIT_METRIC); the prepared branch
+            // supplies the concrete attribute-root predicate for execution.
+            // Explicit ambiguity choices still write their distinguishing text.
+            const query = meaning.kind === "attribute" && interpretations.size === 1 && !selected.length
+                ? session.definition.query
+                : meaning.query;
+            const definition = {
+                ...session.definition,
+                query,
+                interpretationIds: undefined,
+                // A shorthand choice can narrow the initial map selection.
+                // Once explicit, the query follows subsequent user selection
+                // edits, including maps where a field is currently absent.
+                selectedMapLayers: meaning.query !== session.definition.query
+                    ? uniqueFeatureSearchMapLayers(meaning.branches)
+                    : session.definition.selectedMapLayers,
+                ...(automatic ? {searchStyleRules: styles} : {})
+            };
+            const resolvedSignature = this.searchScopeAnalysisSignature(definition);
+            if (definition.searchStyleRules.length > 50)
+                throw new Error("This selection requires more than 50 distinct style rules. Narrow the selected layers or supply explicit styles.");
+            preparation.initialStyles = definition.searchStyleRules;
+            preparation.status = "ready";
+            preparation.signature = resolvedSignature;
+            // Commit definition, initial styling and resolved membership as one
+            // activation. No first request can race the style component.
+            this.resetSessionSearch(session, definition);
+            // Preparation clears the previous run. Start its replacement's
+            // clock before publishing state can dispatch any result requests;
+            // leaving startTime at zero reports time since the Unix epoch.
+            this.resetServerSearchProgress(session, 0);
+            session.preparation = preparation;
+            const scopes = preparation.branches.flatMap(branch => branch.attributeScopes);
+            session.schemaAnalysis = {
+                ...analysis,
+                signature: resolvedSignature,
+                status: "ready",
+                rewriteSuppressed: false,
+                rewriteSuppressionReason: "",
+                concreteScope: preparation.branches.every(branch => branch.scope === "attribute") ? "attribute" : "feature",
+                normalizedQuery: [...new Set(preparation.branches.map(branch => branch.query))].join(" or "),
+                attributeScopes: scopes,
+                attributeScopeCandidateCount: scopes.length,
+                matchedFeatureTypes: [...new Set(preparation.branches.flatMap(branch => branch.featureTypes))]
+            };
+            session.definition = definition;
+            // Publish the effective scope with its chosen meaning. The map
+            // selector and persisted state must describe what is being run,
+            // including when a sole interpretation was selected automatically.
+            this.state.patchFeatureSearch(session.id, {
+                query: definition.query,
+                interpretationIds: definition.interpretationIds,
+                selectedMapLayers: definition.selectedMapLayers,
+                ...(automatic ? {searchStyleRules: styles} : {})
+            });
+            this.progress.next(session);
+            this.syncSearchRequestsToMapService({forceGenerationIds: [session.id]});
+        } catch (error) {
+            if (analysis.signature !== this.searchScopeAnalysisSignature(session.definition) || session.preparation !== preparation) return;
+            preparation.status = analysis.waitingForSchema ? "waiting-for-schema" : "invalid";
+            preparation.error = String(error);
+            session.schemaAnalysis = {...session.schemaAnalysis, status: analysis.waitingForSchema ? "pending" : "error", error: String(error)};
+            this.progress.next(session);
         }
-        const currentSignature = this.searchScopeAnalysisSignature(session.definition);
-        if (analysis.signature !== currentSignature) {
-            return;
-        }
-        this.applyReadySearchScopeAnalysis(session, analysis);
     }
 
-    /** Installs a completed selected-layer scope analysis and lets backend search requests proceed. */
-    private applyReadySearchScopeAnalysis(session: RuntimeSearchSession, analysis: FeatureSearchScopeAnalysis): void {
-        if (this.applyInferredSearchMapLayers(session, analysis.inferredMapLayers)) {
-            return;
-        }
-        session.schemaAnalysis = {
-            signature: analysis.signature,
-            status: "ready",
-            concreteScope: analysis.concreteScope,
-            normalizedQuery: analysis.normalizedQuery || session.definition.query,
-            attributeScopes: analysis.attributeScopes,
-            attributeScopeCandidateCount: analysis.attributeScopeCandidateCount,
-            rewriteSuppressed: analysis.rewriteSuppressed,
-            rewriteSuppressionReason: analysis.rewriteSuppressionReason,
-            matchedFieldNames: analysis.matchedFieldNames,
-            matchedEnumValues: analysis.matchedEnumValues,
-            matchedFeatureTypes: analysis.matchedFeatureTypes,
-            ...(analysis.error ? { error: analysis.error } : {})
-        };
+    /** Retry schema preparation after a reported metadata failure. */
+    retrySearchPreparation(searchId: string): void {
+        const session = this.requireSearchSession(searchId);
+        session.preparation = undefined;
+        session.schemaAnalysis = this.initialSchemaAnalysis(session.definition);
+        this.syncSearchRequestsToMapService();
         this.progress.next(session);
-        this.syncSearchRequestsToMapService({ forceGenerationIds: [session.id] });
+    }
+
+    /**
+     * Accept one visible rewrite as ordinary query text. Its discovery ID is
+     * not persisted: adding maps prepares the accepted expression afresh.
+     */
+    chooseSearchInterpretations(searchId: string, ids: string[]): void {
+        const session = this.requireSearchSession(searchId);
+        const available = session.preparation?.interpretations ?? [];
+        const selected = ids.length === 1 ? available.find(candidate => candidate.id === ids[0]) : undefined;
+        if (!selected)
+            rejectAction("Choose exactly one of the available interpretations", "invalid_arguments");
+        this.state.patchFeatureSearch(searchId, {
+            query: selected.query,
+            interpretationIds: undefined,
+            selectedMapLayers: uniqueFeatureSearchMapLayers(selected.branches),
+            selectedMapLayersManual: true
+        });
     }
 
     /** Returns the schema-analysis identity used to guard resolved-definition reuse. */
@@ -1713,21 +1882,7 @@ export class SearchService implements AppActionContributor {
             definition.query,
             definition.scope,
             definition.selectedMapLayers
-        );
-    }
-
-    /** Narrows source layers to the query-compatible subset inferred from all known schemas. */
-    private applyInferredSearchMapLayers(
-        session: RuntimeSearchSession,
-        inferredMapLayers: FeatureSearchMapLayerRef[]
-    ): boolean {
-        if (session.definition.selectedMapLayersManual) {
-            return false;
-        }
-        const selectedMapLayers = this.mapLayersForSearchContext(inferredMapLayers, session.definition.selectedMapLayers);
-        return selectedMapLayers.length
-            ? this.applySearchMapLayerSelection(session, selectedMapLayers)
-            : false;
+        ) + "\n" + JSON.stringify(definition.interpretationIds ?? []) + "\n" + JSON.stringify(definition.selectedFeatureTypes);
     }
 
     /** Applies detected schema-context layers to a search using the same source-layer selection rule as auto-scope. */
@@ -1966,7 +2121,7 @@ export class SearchService implements AppActionContributor {
             for (const sourceTileKey of removedTileKeys) {
                 this.removeServerSearchResultTile({
                     searchId: session.id,
-                    sourceTileKey
+                    sourceTileKey: `${presentation.key}\n${sourceTileKey}`
                 });
             }
             this.applySearchCoverageSnapshot(session.id);
@@ -2032,6 +2187,7 @@ export class SearchService implements AppActionContributor {
             ?? Number.MAX_SAFE_INTEGER;
         const payloadBase: SearchResultTilePayload = {
             searchId: session.id,
+            presentationKey: presentation.key,
             refresh: session.refresh,
             mapId: state.mapId,
             layerId: state.layerId,
@@ -2142,6 +2298,7 @@ export class SearchService implements AppActionContributor {
         }
         this.addServerSearchResultTile({
             searchId: session.id,
+            presentationKey: presentation.key,
             refresh: session.refresh,
             mapId: task.state.mapId,
             layerId: task.state.layerId,
@@ -2233,8 +2390,8 @@ export class SearchService implements AppActionContributor {
             (sum, item) => sum + item.matches,
             0
         );
-        session.results.updateSearchResultIngressProgress();
-        const becameComplete = session.results.updateSessionCompletion(session.paused);
+        this.updateSearchResultIngressProgress(session);
+        const becameComplete = this.updateSessionCompletion(session);
         if (becameComplete) {
             session.endTime = Date.now();
             session.timeElapsed = this.formatTime(
@@ -2267,6 +2424,7 @@ export class SearchService implements AppActionContributor {
         const results: FeatureSearchResultEntry[] = [];
         const points: SearchResultPoint[] = [];
         const resultFields = payload.resultFields ?? [];
+        const contributionKey = payload.presentationKey ? `${payload.presentationKey}\n${sourceTileKey}` : sourceTileKey;
         const sourceMapLayerIds = this.parseMapLayerIds(sourceTileKey);
         const fallbackTileCenter = payload.entries.some(entry => !entry.position)
             ? coreLib.getTilePosition(payload.sourceTileId)
@@ -2276,7 +2434,7 @@ export class SearchService implements AppActionContributor {
                 ? sourceMapLayerIds
                 : this.parseMapLayerIds(entry.mapTileKey);
             const resultIndex = this.entryResultIndex(entry, results.length);
-            const resultKey = this.searchResultEntryKey(sourceTileKey, entry.mapTileKey, resultIndex);
+            const resultKey = this.searchResultEntryKey(contributionKey, entry.mapTileKey, resultIndex);
             const hoverFeatureId = this.searchResultHoverFeatureId(entry.featureId, entry);
             const point = this.makeSearchResultPoint(
                 sourceTileKey,
@@ -2317,7 +2475,7 @@ export class SearchService implements AppActionContributor {
 
         const contribution: SearchResultTileContribution = {
             refresh,
-            sourceTileKey,
+            sourceTileKey: contributionKey,
             sourceMapId: payload.sourceMapId,
             sourceLayerId: payload.sourceLayerId,
             sourceTileId: payload.sourceTileId,
@@ -2337,7 +2495,7 @@ export class SearchService implements AppActionContributor {
         const emitProgressNow = outcome !== "replaced" && payload.entryOffset === undefined;
         if (outcome === "replaced") this.scheduleSessionResultDataRebuild(session);
         session.results.applyProgressSnapshot(payload.tilesConsidered, payload.tilesCompleted);
-        const becameComplete = session.results.updateSessionCompletion(session.paused);
+        const becameComplete = this.updateSessionCompletion(session);
 
         session.endTime = Date.now();
         session.timeElapsed = this.formatTime(session.endTime - session.startTime);
@@ -2351,7 +2509,7 @@ export class SearchService implements AppActionContributor {
     private removeServerSearchResultTile(payload: {searchId: string; sourceTileKey: string}): void {
         const session = this.getInternalSession(payload.searchId);
         if (!session || !session.results.remove(session.runId, payload.sourceTileKey)) return;
-        session.results.updateSessionCompletion(session.paused);
+        this.updateSessionCompletion(session);
         this.scheduleSessionResultDataRebuild(session);
     }
 
@@ -2367,8 +2525,42 @@ export class SearchService implements AppActionContributor {
             : fallback;
     }
 
+    /**
+     * Count the outputs this search currently needs, not the backend's history
+     * of emitted chunks. Moving the viewport or replacing a tile can emit the
+     * same partition again; those frames are not additional results to await.
+     * A received header is insufficient: its current rows must also have
+     * finished entering the result list before the search is complete.
+     */
+    private updateSearchResultIngressProgress(session: RuntimeSearchSession): void {
+        let total = 0;
+        let done = 0;
+        for (const presentation of this.searchPresentations.values()) {
+            if (presentation.sessionId !== session.id) continue;
+            for (const state of presentation.styledLayer.tileStates.values()) {
+                ++total;
+                const contribution = session.results.searchResultTilesBySourceKey.get(presentation.key ? `${presentation.key}\n${state.mapTileKey}` : state.mapTileKey);
+                if (!state.backendPending &&
+                    state.deliveredGeneration === presentation.styledLayer.generation &&
+                    contribution && contribution.layerBlob === state.subsetBlob &&
+                    contribution.results.length === contribution.resultCount) {
+                    ++done;
+                }
+            }
+        }
+        session.results.updateSearchResultIngressProgress(total, done);
+    }
+    /** Refresh current presentation ingress before asking the result owner whether its run is complete. */
+    private updateSessionCompletion(session: RuntimeSearchSession): boolean {
+        this.updateSearchResultIngressProgress(session);
+        return session.results.updateSessionCompletion(session.paused);
+    }
+
+
+
     /** Schedules one result-data rebuild after a burst of source-tile replacement or eviction events. */
     private scheduleSessionResultDataRebuild(session: RuntimeSearchSession): void {
+        session.results.rebuildPending = true;
         this.pendingResultDataRebuildSessionIds.add(session.id);
         if (this.resultDataRebuildRaf !== null) {
             return;
@@ -2389,6 +2581,9 @@ export class SearchService implements AppActionContributor {
                 continue;
             }
             session.results.rebuildSessionResultData();
+            if (this.updateSessionCompletion(session)) {
+                this.updateDiagnosticsForCompletedSearch(session);
+            }
             this.progress.next(session);
         }
     }
@@ -2674,7 +2869,9 @@ export class SearchService implements AppActionContributor {
                 name: "viewer_start_search",
                 description:
                     "Start an ordinary visible simfil search with explicit layers/views and bounded viewport " +
-                    "coverage. Auto-update defaults to false. Returns searchId. For ad-hoc labels, highlighting or " +
+                    "coverage. Auto-update defaults to false. Returns searchId while browser preparation resolves schema " +
+                    "meaning and initial styling. Read viewer_get_search.preparation: needs-choice requires " +
+                    "viewer_choose_search_interpretations before any backend search runs. For ad-hoc labels, highlighting or " +
                     "colors from actual data fields, configure searchStyleRules with viewer_set_search; stock style " +
                     "toggles are not required. Cancelling this completed call does not stop the search. Use " +
                     "viewer_control_search for lifecycle control.",
@@ -2682,6 +2879,7 @@ export class SearchService implements AppActionContributor {
                 inputSchema: z.strictObject({
                     query: boundedUnicodeString(4096, true),
                     scope: z.enum(["auto", "feature", "attribute"]).optional(),
+                    interpretationIds: z.array(identifierSchema).length(1).optional(),
                     mapLayers: z.array(mapLayerSchema).min(1).max(100),
                     viewIds: z.array(viewIdSchema).min(1).max(32),
                     tileLevels: z.array(z.number().int().min(0).max(15)).max(16).optional(),
@@ -2690,6 +2888,19 @@ export class SearchService implements AppActionContributor {
                 outputSchema: z.strictObject({ status: z.literal("applied"), searchId: identifierSchema })
             },
             (input) => this.startSearch(input)
+        );
+        actions.registerAction(
+            {
+                name: "viewer_choose_search_interpretations",
+                description: "Choose exactly one meaning from viewer_get_search.preparation.interpretations. " +
+                    "This accepts its query as editable, portable Simfil and updates Map Layers to its initial sources. " +
+                    "Adding maps later prepares the same expression against their schemas. Initial styling finishes " +
+                    "before dispatch. Interpretations cannot be combined.",
+                mutation: true,
+                inputSchema: z.strictObject({searchId: identifierSchema, interpretationIds: z.array(identifierSchema).length(1)}),
+                outputSchema: appliedSchema
+            },
+            input => { this.chooseSearchInterpretations(input.searchId, input.interpretationIds); return applied(); }
         );
         actions.registerAction(
             {
@@ -2725,6 +2936,14 @@ export class SearchService implements AppActionContributor {
                     ...observed,
                     responseComplete: z.boolean(),
                     searchComplete: z.boolean(),
+                    preparation: z.object({
+                        status: z.enum(["preparing", "waiting-for-schema", "needs-choice", "ready", "invalid"]),
+                        error: text.optional(), activeQuery: text.optional(),
+                        selectedIds: z.array(identifierSchema).max(1),
+                        interpretations: z.array(z.object({id: identifierSchema, label: text, kind: text, query: text,
+                            contexts: z.array(z.object({mapId: identifierSchema, layerId: identifierSchema,
+                                scope: z.enum(["feature", "attribute"])}))}))
+                    }),
                     reason: bounded.reason,
                     settings: searchSettingsSchema,
                     status: z.strictObject({
@@ -2741,7 +2960,7 @@ export class SearchService implements AppActionContributor {
                     }),
                     schemaAnalysis: z.strictObject({
                         status: z.enum(["pending", "ready", "error"]),
-                        concreteScope: z.enum(["feature", "attribute"]),
+                        concreteScope: z.enum(["feature", "attribute", "mixed"]),
                         normalizedQuery: boundedUnicodeString(4096),
                         rewriteSuppressed: z.boolean(),
                         rewriteSuppressionReason: boundedUnicodeString(1024),
@@ -2948,12 +3167,14 @@ export class SearchService implements AppActionContributor {
         mapLayers: { mapId: string; layerId: string }[];
         viewIds: string[];
         scope?: "auto" | "feature" | "attribute";
+        interpretationIds?: string[];
         tileLevels?: number[];
         autoUpdate?: boolean;
     }) {
         this.checkSearchTargets(input.mapLayers, input.viewIds);
         const session = this.run(input.query, {
             scope: input.scope,
+            interpretationIds: input.interpretationIds,
             selectedMapLayers: input.mapLayers,
             selectedMapLayersManual: true,
             selectedViewIndices: input.viewIds.map((id) => this.viewState.requireViewIndex(id)),
@@ -3022,7 +3243,8 @@ export class SearchService implements AppActionContributor {
         };
         const schemaAnalysis = {
             status: analysis.status,
-            concreteScope: analysis.concreteScope,
+            concreteScope: new Set(session.preparation?.branches.map(branch => branch.scope)).size > 1
+                ? "mixed" as const : analysis.concreteScope,
             normalizedQuery: boundedText(analysis.normalizedQuery, 4096),
             rewriteSuppressed: analysis.rewriteSuppressed,
             rewriteSuppressionReason: boundedText(analysis.rewriteSuppressionReason, 1024),
@@ -3049,13 +3271,23 @@ export class SearchService implements AppActionContributor {
         if (!parsedSettings.success)
             rejectAction("Search settings exceed the public contract; narrow them in the UI first");
         // No submitted backend requests during pending analysis is not an empty completed search.
-        const searchComplete = session.results.complete && analysis.status !== "pending";
+        const searchComplete = session.results.complete && analysis.status === "ready" && session.preparation?.status === "ready";
         return {
             observedAt: new Date().toISOString(),
             settings: parsedSettings.data,
             schemaAnalysis,
             responseComplete: errors.complete && !textOmitted,
             searchComplete,
+            preparation: {
+                status: session.preparation?.status ?? "preparing",
+                error: session.preparation?.error,
+                activeQuery: session.lastResolvedDefinition?.query,
+                selectedIds: session.preparation?.selectedIds ?? [],
+                interpretations: (session.preparation?.interpretations ?? []).map(meaning => ({
+                    id: meaning.id, label: meaning.label, kind: meaning.kind, query: meaning.query,
+                    contexts: meaning.branches.map(branch => ({mapId: branch.mapId, layerId: branch.layerId, scope: branch.scope}))
+                }))
+            },
             reason: errors.reason ?? (textOmitted ? ("text_limit" as const) : undefined),
             status: {
                 searchId: session.id,
@@ -3088,10 +3320,11 @@ export class SearchService implements AppActionContributor {
         });
         this.checkSearchTargets(settings.selectedMapLayers, settings.selectedViewIds);
         const changed = !deepEquals(current, settings);
-        const { selectedViewIds, ...patch } = settings;
+        const { selectedViewIds, interpretationIds, ...patch } = settings;
         if (changed)
             this.state.patchFeatureSearch(session.id, {
                 ...patch,
+                ...(Object.hasOwn(input.settings, "interpretationIds") ? {interpretationIds} : {}),
                 selectedViewIndices: selectedViewIds.map((id) => this.viewState.requireViewIndex(id)),
                 ...(input.settings.selectedMapLayers === undefined ? {} : { selectedMapLayersManual: true })
             });
@@ -3128,7 +3361,7 @@ export class SearchService implements AppActionContributor {
             }
         };
         const result = boundedCollection(source(), input.limit);
-        const searchComplete = session.results.complete && session.schemaAnalysis.status !== "pending";
+        const searchComplete = session.results.complete && session.schemaAnalysis.status === "ready" && session.preparation?.status === "ready";
         return {
             observedAt: new Date().toISOString(),
             searchId: session.id,
@@ -3193,29 +3426,26 @@ export class SearchService implements AppActionContributor {
         return payload;
     }
 
-    /** The same search owner parses the omnibar expression and runs its selected completion scope. */
+    /** The search owner validates the omnibar expression and resolves its explicit scope or hints. */
     private searchInputCandidates(
         query: string,
         payload?: unknown
     ): AppActionCandidate<{ query: string; payload?: unknown }>[] {
+        if (!query.trim()) return [];
+        // Keep an invalid draft visible with its native syntax explanation,
+        // while other actions (for example coordinate jumps) remain usable.
+        const error: string = coreLib.simfilQueryError(query);
         // Old positional history is migrated on first resolution; new entries capture IDs when saved.
         payload = this.actionPayloadForHistory(payload);
-        let error = "";
-        try {
-            coreLib.validateSimfilQuery(query);
-        } catch (cause) {
-            error = cause instanceof Error ? cause.message : String(cause);
-        }
         return [
             {
                 id: "features",
                 icon: "pi-bolt",
                 color: "blue",
                 name: "Search Features and Attributes",
-                label:
-                    "Match features with a filter expression" +
-                    (error ? '<br><span class="omnibar-option-warning">' + error + "</span>" : ""),
-                enabled: !error && !!query.trim(),
+                label: "Match features with a filter expression",
+                bubbles: error ? [{value: error, tone: "error"}] : [{name: "Filter", value: query}],
+                enabled: !error,
                 input: { query, payload },
                 payload
             }
@@ -3240,9 +3470,17 @@ const bounded = {
 
 const mapLayerSchema = z.strictObject({ mapId: identifierSchema, layerId: identifierSchema });
 
+/** Ordinary stops and named exceptions share the same bounded public color/value representation. */
+const searchColorStopsSchema = z.array(z.strictObject({
+    color: colorSchema,
+    value: z.union([text, z.number(), z.boolean(), z.null()])
+})).max(512);
+
 const searchStyleRuleSchema = z.strictObject({
     name: text.optional(),
     autoGenerated: z.boolean().optional(),
+    applicability: z.strictObject({mapId: identifierSchema.optional(), layerId: identifierSchema.optional(),
+        scope: z.enum(["feature", "attribute"])}).optional(),
     geometry: z
         .array(z.enum(["any", "point", "line", "surface", "polygon", "mesh", "label"]))
         .min(1)
@@ -3263,14 +3501,12 @@ const searchStyleRuleSchema = z.strictObject({
             mode: z.enum(["gradient", "categories"]),
             field: text,
             customField: z.boolean().optional(),
-            stops: z
-                .array(
-                    z.strictObject({
-                        color: colorSchema,
-                        value: z.union([text, z.number(), z.boolean(), z.null()])
-                    })
-                )
-                .max(512),
+            stops: searchColorStopsSchema,
+            // Schema-generated numeric styles retain their exact meaning and
+            // exceptional values when read or edited through MCP, just as in
+            // the UI. Omitting these keys rejected ordinary speed gradients.
+            schemaTypes: z.array(schemaTypeIdentitySchema.extend({schemaId: identifierSchema}).strict()).min(1).max(100).optional(),
+            specials: searchColorStopsSchema.optional(),
             fallbackColor: colorSchema.optional()
         })
     ]),
@@ -3283,6 +3519,7 @@ const searchStyleRuleSchema = z.strictObject({
 });
 
 const searchSettingsSchema = z.strictObject({
+    interpretationIds: z.array(identifierSchema).length(1).optional(),
     scope: z.enum(["auto", "feature", "attribute"]),
     autoUpdate: z.boolean(),
     bookmarked: z.boolean(),

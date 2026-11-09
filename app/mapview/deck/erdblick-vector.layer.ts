@@ -72,12 +72,13 @@ const MASK_NO_DEPTH_PARAMETERS: RenderPipelineParameters = {
   depthCompare: "always",
   depthWriteEnabled: false,
 };
-// WebGL presents a 24-bit depth buffer. Four quantized depth values separate
-// primitive kinds inside the vector pass without changing physical deck order.
+// For a 24-bit depth buffer, this clip-space bias becomes four quantized depth
+// values after the [-1, 1] to [0, 1] depth mapping. It separates primitive kinds
+// inside the vector pass without changing physical Deck layer order.
 const PRIMITIVE_DEPTH_BIAS_STEP = 8 / 0x00ff_ffff;
-// Drill picking disables every object already returned by the picker. Keep
-// this above the configurable inspection limit so overlapping vector objects
-// cannot reappear before Deck finishes one drill-pick operation.
+// Drill picking disables every object already returned by the picker so it
+// cannot reappear in the same operation. The shader has room for 64 suppressed
+// scene-global indices; callers must keep their hit budget within this capacity.
 const MAX_DISABLED_PICK_INDICES = 64;
 
 const POINT_LAYOUT: BufferLayout[] = [
@@ -615,9 +616,11 @@ function primitiveProgram(source: GpuSceneMaterialStore): {
 /**
  * Draws every ordinary Erdblick vector contribution through persistent luma models.
  *
- * The layer object and model count stay stable while packets overwrite ranges in
- * the scene-owned buffers. Deck still installs projection and picking uniforms;
- * this class only binds scene lookup tables and direct interleaved instance data.
+ * The layer shell survives while packets overwrite ranges in the scene-owned
+ * buffers. Material models are retained while their stores remain eligible and
+ * added or removed as scene materials change. Deck still installs projection and
+ * picking uniforms; this class only binds scene lookup tables and direct
+ * interleaved instance data.
  */
 export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
   static override layerName = "ErdblickVectorLayer";
@@ -685,7 +688,10 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
     this.setNeedsRedraw();
   }
 
-  /** Bind the completed support-group texture consumed by the overlay pass. */
+  /**
+   * Borrow the completed support-group texture for the overlay pass. The producer
+   * must keep it alive until consumers have rebound or the layer is finalized.
+   */
   setSemanticSupportTexture(texture: Texture | null): void {
     if (this.semanticSupportTexture === texture) {
       return;
@@ -709,7 +715,11 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
     };
   }
 
-  /** Temporarily suppress one scene-global object index during drill picking. */
+  /**
+   * Temporarily suppress one scene-global object index during drill picking.
+   * Accepts non-negative integer indices. Once 64 indices are retained, further
+   * requests are ignored until restoration.
+   */
   override disablePickingIndex(objectIndex: number): void {
     if (
       Number.isInteger(objectIndex) &&
@@ -729,7 +739,7 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
     }
   }
 
-  /** Bind compact scene tables and issue exactly one draw per material model. */
+  /** Bind scene tables and attempt one draw per material with presented records. */
   override draw({ renderPass }: { renderPass: unknown }): void {
     if (!this.bindSceneShaderProps()) {
       return;
@@ -943,7 +953,11 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
   }
 }
 
-/** Mutable state for one bounded mask layer over the scene's shared buffers. */
+/**
+ * Mutable state for one mask layer over the scene's shared buffers.
+ * Neither the target texture nor material-key set is copied or owned by the mask
+ * layer.
+ */
 export interface ErdblickVectorMaskConfiguration {
   targetTexture: Texture;
   mode: GpuSceneMaskMode;
@@ -962,8 +976,8 @@ export type ErdblickVectorMaskLayerProps = LayerProps & {
  * Reprojects existing persistent primitive stores into a sparse interaction mask.
  *
  * This layer owns pipelines and static unit meshes only. Its instance buffers
- * are the ordinary visible scene buffers; target changes update one compact
- * texture and never copy paths, triangles, points, or arrows.
+ * are the ordinary visible scene buffers. Target changes rebind the supplied
+ * texture without copying paths, triangles, points, or arrows.
  */
 export class ErdblickVectorMaskLayer extends Layer<ErdblickVectorMaskLayerProps> {
   static override layerName = "ErdblickVectorMaskLayer";
@@ -1010,7 +1024,11 @@ export class ErdblickVectorMaskLayer extends Layer<ErdblickVectorMaskLayerProps>
       .map((item) => item.model);
   }
 
-  /** Replace sparse target/union state without replacing the Deck layer object. */
+  /**
+   * Replace sparse target/union state without replacing the Deck layer object.
+   * Retains the supplied configuration. Call this after changing borrowed inputs
+   * so revision checks refresh material selection and texture bindings.
+   */
   configure(configuration: ErdblickVectorMaskConfiguration): void {
     this.configuration = configuration;
     this.configurationRevision += 1;

@@ -64,6 +64,7 @@ bool Wgs84AABB::valid() const
 {
     return size_.x >= 0 && size_.y >= 0 && size_.x <= 360. && size_.y <= 180.;
 }
+
 Wgs84Point Wgs84AABB::sw() const
 {
     return {sw_.x, sw_.y, .0};
@@ -178,6 +179,9 @@ void Wgs84AABB::tileIdsWithPriority(
     auto minPoint = sw_;
     auto maxPoint = ne();
     auto remainingCapacity = tileIdsResult.capacity() - tileIdsResult.size();
+
+    // Nudge exact boundaries inward so a box starting on a grid line does not
+    // include the neighboring tile solely because of boundary rounding.
     if (std::fmod(minPoint.x, tileWidth) == 0)
         minPoint.x += epsilon;
     if (std::fmod(minPoint.y, tileWidth) == 0)

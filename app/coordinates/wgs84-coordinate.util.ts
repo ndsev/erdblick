@@ -1,4 +1,7 @@
-/** Parses decimal or degree-minute-second WGS84 text, with an optional tile level. */
+/**
+ * Parse decimal or degree-minute-second WGS84 text. Missing tile level yields
+ * zero; an explicit level is clamped to 1..14. Invalid coordinates yield undefined.
+ */
 export function parseWgs84CoordinateString(coordinateString: string, isLonLat = false): { lat: number; lon: number; level: number } | undefined {
     let lon = 0;
     let lat = 0;

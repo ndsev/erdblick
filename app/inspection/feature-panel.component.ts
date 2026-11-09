@@ -44,6 +44,8 @@ interface InspectionModelData {
     key: string;
     type: number;
     value: any;
+    displayValue?: string;
+    scalarType?: unknown;
     info?: string;
     hoverId?: string;
     geoJsonPath?: string;
@@ -108,6 +110,7 @@ export class FeaturePanelComponent implements OnDestroy {
         { key: "value", header: "Value", width: '0*', transform: this.formatData.bind(this) }
     ];
     filterOptions = new FeatureFilterOptions();
+
     /** Serialize complete geometry only when the user requests an export. */
     geoJson = (): string => this.exportGeoJson();
     featureIds: string[] = [];
@@ -133,6 +136,10 @@ export class FeaturePanelComponent implements OnDestroy {
 
     @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
+    /**
+     * Invalidate incoming-relation requests on catalog changes and queue a tree
+     * rebuild for catalog or panel changes; old snapshots must not survive new metadata.
+     */
     constructor(private cdr: ChangeDetectorRef,
         private ngZone: NgZone,
         mapInfo: MapDataService) {
@@ -285,10 +292,14 @@ export class FeaturePanelComponent implements OnDestroy {
         };
         return {
             ...section, nodeId: "incoming-relations", incomingLoading: state.loading,
-            value: state.loading ? "Loading…" : state.error ?? (result?.complete
-                ? (section.children?.length ? "" : "No matching relations in this partition")
-                : "Partial result"),
-            info: state.error ?? result?.issues.join("\n") ?? section.info,
+            value: state.loading ? "Loading…" : state.error ?? (
+                result?.status === "no-possible-family" ? "No possible incoming family in the available sources"
+                    : result?.status === "unsupported-scope" ? "Incoming search is unsupported for this scope"
+                    : result?.complete ? (section.children?.length ? "" : "No matching relations in the searched scope")
+                    : "Partial result in the searched scope"),
+            info: state.error ?? (result
+                ? [`Searched scope: ${result.scope.join(", ") || "no provider partitions"}`, ...result.issues].join("\n")
+                : section.info),
             retryIncoming: !state.loading ? () => this.retryIncoming(feature) : undefined
         };
     }
@@ -577,6 +588,8 @@ export class FeaturePanelComponent implements OnDestroy {
                 node.data = {
                     key: data?.key ?? "",
                     value: value ?? "",
+                    displayValue: data?.displayValue,
+                    scalarType: data?.scalarType,
                     type: valueType,
                     mapTileKey: data?.mapTileKey ?? context.mapTileKey,
                     incomingLoading: data?.incomingLoading,

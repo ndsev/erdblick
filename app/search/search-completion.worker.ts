@@ -1,14 +1,13 @@
-import {coreLib, initializeLibrary, uint8ArrayToWasm} from "../integrations/wasm.adapter";
+import {preparedSearchBranchSchema} from "./search-preparation.model";
+import {featureSearchStyleFieldInventorySchema} from "./search.model";
+import {coreLib, initializeLibrary, uint8ArrayToWasmOrThrow} from "../integrations/wasm.adapter";
 import type {TileLayerParser} from "../../build/libs/core/erdblick-core";
-import type {
-    FeatureSearchAttributeScopeCandidate,
-    FeatureSearchStyleFieldCandidate,
-    FeatureSearchStyleValueKind
-} from "./search.model";
 import type {CompletionCandidate} from "./search.model";
 import type {FeatureSearchMapLayerRef} from "./search-definition.model";
 import type {
     SearchCompletionRequestMessage,
+    SearchCompletionDataSourceInfoMessage,
+    SearchCompletionDataSourceInfoReady,
     SearchCompletionResultMessage,
     SearchScopeAnalysisRequestMessage,
     SearchScopeAnalysisResultMessage,
@@ -20,7 +19,6 @@ import type {
 
 let parser: TileLayerParser | null = null;
 let dataSourceInfoJson: string | null = null;
-let parserConfiguration: Promise<void> = Promise.resolve();
 const dataSourceInfoEncoder = new TextEncoder();
 const latestCompletionSerialByOwner = new Map<string, number>();
 
@@ -30,25 +28,11 @@ interface CompletionContext {
 
 interface SchemaOptions {
     selectedMapLayers?: FeatureSearchMapLayerRef[];
+    selectedFeatureTypes?: string[];
 }
-
-interface SearchQueryNormalizationNativeResult {
-    concreteScope?: unknown;
-    normalizedQuery?: unknown;
-    attributeScopes?: unknown;
-    attributeScopeCandidateCount?: unknown;
-    rewriteSuppressed?: unknown;
-    rewriteSuppressionReason?: unknown;
-    matchedFeatureTypes?: unknown;
-    error?: unknown;
-}
-
-type TileLayerParserWithSearchNormalization = TileLayerParser & {
-    normalizeSearchQuery(query: string, scope: string, options: SchemaOptions): unknown;
-};
 
 /** Returns the feature map/layer refs described by the last `/sources` payload. */
-function featureLayerRefsFromDataSourceInfo(): FeatureSearchMapLayerRef[] {
+function featureLayerRefsFromDataSourceInfo(): Array<FeatureSearchMapLayerRef & {schemaId: string}> {
     if (!dataSourceInfoJson) {
         return [];
     }
@@ -62,7 +46,7 @@ function featureLayerRefsFromDataSourceInfo(): FeatureSearchMapLayerRef[] {
         return [];
     }
 
-    const refs: FeatureSearchMapLayerRef[] = [];
+    const refs: Array<FeatureSearchMapLayerRef & {schemaId: string}> = [];
     const known = new Set<string>();
     for (const source of sources) {
         const sourceRecord = recordFromUnknown(source);
@@ -88,52 +72,41 @@ function featureLayerRefsFromDataSourceInfo(): FeatureSearchMapLayerRef[] {
                 continue;
             }
             known.add(key);
-            refs.push({mapId, layerId});
+            refs.push({mapId, layerId, schemaId: String(sourceRecord?.["schemaId"] ?? mapId)});
         }
     }
     return refs;
 }
 
-/** Builds a fresh parser with the worker's last known `/sources` metadata. */
-function createParserFromDataSourceInfo(): TileLayerParser | null {
-    if (!dataSourceInfoJson) {
-        return null;
-    }
-    if (!coreLib?.TileLayerParser) {
-        throw new Error("Erdblick WASM core is not initialized for schema completion.");
-    }
+/**
+ * Binds one requested source scope after installing its binary graphs.
+ * Native MapSchema ownership is shared across the old and new parser while
+ * replacement validates; failed installation leaves the old parser untouched.
+ */
+async function configureDataSourceInfo(message: SearchCompletionDataSourceInfoMessage): Promise<void> {
+    await initializeLibrary();
     const nextParser: TileLayerParser = new coreLib.TileLayerParser();
-    uint8ArrayToWasm(
-        data => nextParser.setDataSourceInfo(data),
-        dataSourceInfoEncoder.encode(dataSourceInfoJson)
-    );
-    return nextParser;
-}
-
-/** Replaces the worker-local parser metadata after `/sources` changed. */
-async function configureDataSourceInfoNow(nextDataSourceInfoJson: string | null): Promise<void> {
-    await initializeLibrary();
-    parser?.delete();
-    parser = null;
-    dataSourceInfoJson = nextDataSourceInfoJson;
-    parser = createParserFromDataSourceInfo();
-}
-
-/** Serializes parser reconfiguration so requests never observe a half-updated parser. */
-function configureDataSourceInfo(nextDataSourceInfoJson: string | null): Promise<void> {
-    parserConfiguration = parserConfiguration
-        .catch(() => undefined)
-        .then(() => configureDataSourceInfoNow(nextDataSourceInfoJson));
-    return parserConfiguration;
-}
-
-/** Ensures the worker can answer completion requests even if the first metadata sync races startup. */
-async function currentParser(): Promise<TileLayerParser | null> {
-    await initializeLibrary();
-    await parserConfiguration.catch(() => undefined);
-    if (!parser) {
-        parser = createParserFromDataSourceInfo();
+    try {
+        for (const artifact of message.schemas) {
+            uint8ArrayToWasmOrThrow(bytes => nextParser.installMapSchema(bytes, artifact.schemaId), artifact.bytes);
+        }
+        uint8ArrayToWasmOrThrow(
+            bytes => nextParser.setDataSourceInfo(bytes),
+            dataSourceInfoEncoder.encode(message.dataSourceInfoJson ?? "[]")
+        );
+    } catch (error) {
+        nextParser.delete();
+        throw error;
     }
+    parser?.delete();
+    parser = nextParser;
+    dataSourceInfoJson = message.dataSourceInfoJson;
+}
+
+/** Queries are admitted only after the main thread receives the installation acknowledgement. */
+async function currentParser(): Promise<TileLayerParser> {
+    await initializeLibrary();
+    if (!parser) throw new Error("Search schema has not been installed in this worker.");
     return parser;
 }
 
@@ -171,179 +144,28 @@ function normalizeCompletionCandidate(
         query: queryValue,
         source: sourceQuery,
         hint: enumKind ? "" : rawHint,
+        isExactMatch: candidate?.["isExactMatch"] === true,
         ...(originLayers.length ? {originLayers} : {})
     };
 }
 
-/** Normalizes a native style-field value kind into the frontend union. */
-function normalizeStyleFieldValueKind(value: unknown): FeatureSearchStyleValueKind {
-    switch (value) {
-        case "number":
-        case "integer":
-        case "string":
-        case "boolean":
-        case "enum":
-        case "object":
-        case "array":
-            return value;
-        default:
-            return "unknown";
-    }
-}
-
-/** Normalizes optional native numeric range metadata for schema-backed style fields. */
-function normalizeStyleFieldNumericRange(value: unknown): {min: number; max: number} | undefined {
-    const record = recordFromUnknown(value);
-    if (!record) {
-        return undefined;
-    }
-    const min = Number(record["min"]);
-    const max = Number(record["max"]);
-    return Number.isFinite(min) && Number.isFinite(max) ? {min, max} : undefined;
-}
-
-/** Normalizes untyped WASM attribute-scope candidates into the TypeScript-facing shape. */
-function normalizeAttributeScopeCandidates(value: unknown): FeatureSearchAttributeScopeCandidate[] {
-    if (!Array.isArray(value)) {
-        return [];
-    }
-    return value.flatMap(item => {
-        const raw = recordFromUnknown(item);
-        if (!raw) {
-            return [];
-        }
-        const attrName = typeof raw["attrName"] === "string" ? raw["attrName"] : "";
-        const attrLayerName = typeof raw["attrLayerName"] === "string" ? raw["attrLayerName"] : "";
-        const featureType = typeof raw["featureType"] === "string" ? raw["featureType"] : "";
-        const mapId = typeof raw["mapId"] === "string" ? raw["mapId"] : "";
-        const layerId = typeof raw["layerId"] === "string" ? raw["layerId"] : "";
-        return attrName && mapId && layerId
-            ? [{attrName, attrLayerName, featureType, mapId, layerId}]
-            : [];
-    });
-}
-
-/** Normalizes untrusted map/layer refs returned by native schema analysis. */
-function normalizeMapLayerRefs(value: unknown): FeatureSearchMapLayerRef[] {
-    if (!Array.isArray(value)) {
-        return [];
-    }
-    const refs: FeatureSearchMapLayerRef[] = [];
-    const seen = new Set<string>();
-    for (const item of value) {
-        const raw = recordFromUnknown(item);
-        const mapId = typeof raw?.["mapId"] === "string" ? raw["mapId"] : "";
-        const layerId = typeof raw?.["layerId"] === "string" ? raw["layerId"] : "";
-        const key = `${mapId}\u0000${layerId}`;
-        if (!mapId || !layerId || seen.has(key)) {
-            continue;
-        }
-        seen.add(key);
-        refs.push({mapId, layerId});
-    }
-    return refs;
-}
-
-/** Normalizes untrusted string arrays returned by native schema analysis. */
-function normalizeStringList(value: unknown): string[] {
-    return Array.isArray(value)
-        ? value.filter((item): item is string => typeof item === "string")
-        : [];
-}
-
-/** Normalizes native map-layer inference into the worker protocol shape. */
-function normalizeMapLayerInference(value: unknown): Pick<
-    SearchScopeAnalysisResultMessage,
-    "inferredMapLayers" | "matchedFieldNames" | "matchedEnumValues"
-> {
-    const raw = recordFromUnknown(value);
-    return {
-        inferredMapLayers: normalizeMapLayerRefs(raw?.["mapLayers"]),
-        matchedFieldNames: normalizeStringList(raw?.["matchedFieldNames"]),
-        matchedEnumValues: normalizeStringList(raw?.["matchedEnumValues"])
-    };
-}
-
-/** Normalizes the native mapget-backed search-query normalization result. */
-function normalizeSearchQueryNormalization(
-    query: string,
-    scope: string,
-    value: unknown
-): Pick<
-    SearchScopeAnalysisResultMessage,
-    "concreteScope" | "normalizedQuery" | "attributeScopes" | "attributeScopeCandidateCount"
-        | "rewriteSuppressed" | "rewriteSuppressionReason" | "matchedFeatureTypes" | "error"
-> {
-    const raw = recordFromUnknown(value) as SearchQueryNormalizationNativeResult | null;
-    const concreteScope = raw?.concreteScope === "attribute" || raw?.concreteScope === "feature"
-        ? raw.concreteScope
-        : (scope === "attribute" ? "attribute" : "feature");
-    const normalizedQuery = typeof raw?.normalizedQuery === "string" && raw.normalizedQuery.trim()
-        ? raw.normalizedQuery
-        : query;
-    const error = typeof raw?.error === "string" && raw.error
-        ? raw.error
-        : undefined;
-    return {
-        concreteScope,
-        normalizedQuery,
-        attributeScopes: normalizeAttributeScopeCandidates(raw?.attributeScopes),
-        attributeScopeCandidateCount: Math.max(0, Number(raw?.attributeScopeCandidateCount) || 0),
-        rewriteSuppressed: raw?.rewriteSuppressed === true,
-        rewriteSuppressionReason: typeof raw?.rewriteSuppressionReason === "string"
-            ? raw.rewriteSuppressionReason
-            : "",
-        matchedFeatureTypes: normalizeStringList(raw?.matchedFeatureTypes),
-        ...(error ? {error} : {})
-    };
-}
-
-/** Normalizes untyped WASM search-style field candidates into the TypeScript-facing shape. */
-function normalizeSearchStyleFieldCandidates(value: unknown): FeatureSearchStyleFieldCandidate[] {
-    if (!Array.isArray(value)) {
-        return [];
-    }
-    return value.flatMap(item => {
-        const raw = recordFromUnknown(item);
-        if (!raw) {
-            return [];
-        }
-        const path = typeof raw["path"] === "string" ? raw["path"] : "";
-        const mapId = typeof raw["mapId"] === "string" ? raw["mapId"] : "";
-        const layerId = typeof raw["layerId"] === "string" ? raw["layerId"] : "";
-        if (!path || !mapId || !layerId) {
-            return [];
-        }
-        const attrName = typeof raw["attrName"] === "string" ? raw["attrName"] : undefined;
-        const attrLayerName = typeof raw["attrLayerName"] === "string" ? raw["attrLayerName"] : undefined;
-        const featureType = typeof raw["featureType"] === "string" ? raw["featureType"] : undefined;
-        const enumValues = Array.isArray(raw["enumValues"])
-            ? raw["enumValues"].filter((item): item is string => typeof item === "string")
-            : [];
-        const numericRange = normalizeStyleFieldNumericRange(raw["numericRange"]);
-        return [{
-            path,
-            mapId,
-            layerId,
-            attrName,
-            attrLayerName,
-            featureType,
-            valueKind: normalizeStyleFieldValueKind(raw["valueKind"]),
-            enumValues,
-            ...(numericRange ? {numericRange} : {})
-        }];
-    });
-}
-
-/** Returns completion contexts narrow enough to stream useful batches as they are produced. */
+/**
+ * Scan an identical schema/layer once even when several maps publish it.
+ * Keep origin maps as provenance and fallback scope when no layers are active.
+ * These are not all maps that can evaluate the accepted portable expression.
+ */
 function completionContexts(options: SearchCompletionWorkerOptions): CompletionContext[] {
-    if (options.selectedMapLayers && options.selectedMapLayers.length > 0) {
-        return options.selectedMapLayers.map(ref => ({selectedMapLayers: [ref]}));
+    const available = featureLayerRefsFromDataSourceInfo();
+    const identities = new Map(available.map(ref => [ref.mapId, ref.schemaId]));
+    const selected = options.selectedMapLayers ?? available;
+    const groups = new Map<string, FeatureSearchMapLayerRef[]>();
+    for (const {mapId, layerId} of selected) {
+        const key = JSON.stringify([identities.get(mapId) ?? mapId, layerId]);
+        const refs = groups.get(key) ?? [];
+        refs.push({mapId, layerId});
+        groups.set(key, refs);
     }
-    const featureLayerRefs = featureLayerRefsFromDataSourceInfo();
-    return featureLayerRefs.length > 0
-        ? featureLayerRefs.map(ref => ({selectedMapLayers: [ref]}))
-        : [{}];
+    return [...groups.values()].map(selectedMapLayers => ({selectedMapLayers}));
 }
 
 /** Runs one native completion pass in the worker-local parser. */
@@ -364,63 +186,38 @@ function completeQueryInContext(
         : [];
 }
 
-/** Runs native schema completion and streams partial result batches by map/layer context. */
+/**
+ * Stream completion between native passes so a cancellation can interrupt an
+ * obsolete prefix. Always acknowledge completion, including cancellation: the
+ * main thread keeps schema replacement serialized until this scan has stopped.
+ */
 async function completeQuery(message: SearchCompletionRequestMessage): Promise<void> {
     latestCompletionSerialByOwner.set(message.ownerId, message.requestSerial);
-    const activeParser = await currentParser();
-    if (!activeParser) {
-        postMessage({
-            type: "SearchCompletionResult",
-            ownerId: message.ownerId,
-            requestSerial: message.requestSerial,
-            candidates: [],
-            done: true
-        } satisfies SearchCompletionResultMessage);
-        return;
-    }
-
-    const contexts = completionContexts(message.options);
     const stale = () => latestCompletionSerialByOwner.get(message.ownerId) !== message.requestSerial;
-    if (stale()) {
-        return;
-    }
-    if (contexts.length === 1) {
+    let error: string | undefined;
+    try {
+        const activeParser = await currentParser();
+        const contexts = completionContexts(message.options);
+        for (let index = 0; index < contexts.length; index++) {
+            if (stale()) return;
+            const candidates = completeQueryInContext(activeParser, message, contexts[index]);
+            if (candidates.length) {
+                postMessage({
+                    type: "SearchCompletionResult", ownerId: message.ownerId,
+                    requestSerial: message.requestSerial, candidates, done: false
+                } satisfies SearchCompletionResultMessage);
+            }
+            if (index + 1 < contexts.length) await new Promise(resolve => setTimeout(resolve, 0));
+        }
+    } catch (failure) {
+        error = failure instanceof Error ? failure.message : String(failure);
+    } finally {
         postMessage({
-            type: "SearchCompletionResult",
-            ownerId: message.ownerId,
-            requestSerial: message.requestSerial,
-            candidates: completeQueryInContext(activeParser, message, contexts[0]!),
-            done: true
+            type: "SearchCompletionResult", ownerId: message.ownerId,
+            requestSerial: message.requestSerial, candidates: [], done: true,
+            ...(error ? {error} : {})
         } satisfies SearchCompletionResultMessage);
-        return;
     }
-
-    for (const context of contexts) {
-        if (stale()) {
-            return;
-        }
-        const candidates = completeQueryInContext(activeParser, message, context);
-        if (candidates.length > 0) {
-            postMessage({
-                type: "SearchCompletionResult",
-                ownerId: message.ownerId,
-                requestSerial: message.requestSerial,
-                candidates,
-                done: false
-            } satisfies SearchCompletionResultMessage);
-        }
-        await new Promise(resolve => setTimeout(resolve, 0));
-    }
-    if (stale()) {
-        return;
-    }
-    postMessage({
-        type: "SearchCompletionResult",
-        ownerId: message.ownerId,
-        requestSerial: message.requestSerial,
-        candidates: [],
-        done: true
-    } satisfies SearchCompletionResultMessage);
 }
 
 /** Keeps the posted worker options limited to the native parser's expected shape. */
@@ -432,7 +229,7 @@ function completionOptionsForNative(
         limit: options.limit,
         timeoutMs: options.timeoutMs,
         ...(options.scope ? {scope: options.scope} : {}),
-        ...(context.selectedMapLayers !== undefined ? {selectedMapLayers: context.selectedMapLayers} : {})
+        ...(context.selectedMapLayers !== undefined ? {selectedMapLayers: context.selectedMapLayers.slice(0, 1)} : {})
     };
 }
 
@@ -462,40 +259,45 @@ async function analyzeSearchScope(message: SearchScopeAnalysisRequestMessage): P
         return;
     }
 
-    const normalization = normalizeSearchQueryNormalization(
-        message.query,
-        message.scope,
-        (activeParser as TileLayerParserWithSearchNormalization).normalizeSearchQuery(
-            message.query,
-            message.scope,
-            schemaOptions(message.selectedMapLayers)
-        )
-    );
-    const mapLayerInference = normalizeMapLayerInference(
-        activeParser.getMapLayersForQuery(message.query, schemaOptions(message.selectedMapLayers))
-    );
+    const interpretations = preparedSearchBranchSchema.array().parse(activeParser.prepareSearchQuery(
+        message.query, message.scope, {...schemaOptions(message.selectedMapLayers),
+            ...(message.selectedFeatureTypes ? {selectedFeatureTypes: message.selectedFeatureTypes} : {})}));
+    const attributeScopes = interpretations.flatMap(branch => branch.attributeScopes);
     postMessage({
-        type: "SearchScopeAnalysisResult",
-        requestId: message.requestId,
-        ...normalization,
-        ...mapLayerInference
+        type: "SearchScopeAnalysisResult", requestId: message.requestId, interpretations,
+        // This is candidate metadata only. SearchService chooses and commits
+        // concrete per-layer branches after any required user decision.
+        concreteScope: interpretations.length && interpretations.every(branch => branch.scope === "attribute") ? "attribute" : "feature",
+        normalizedQuery: message.query, attributeScopes, attributeScopeCandidateCount: attributeScopes.length,
+        rewriteSuppressed: false, rewriteSuppressionReason: "",
+        inferredMapLayers: [...new Map(interpretations.map(branch => [JSON.stringify([branch.mapId, branch.layerId]),
+            {mapId: branch.mapId, layerId: branch.layerId}])).values()],
+        matchedFieldNames: [...new Set(interpretations.flatMap(branch => branch.matchedFieldNames ?? []))],
+        matchedEnumValues: [...new Set(interpretations.flatMap(branch => branch.matchedEnumValues ?? []))],
+        matchedFeatureTypes: [...new Set(interpretations.flatMap(branch => branch.featureTypes))]
     } satisfies SearchScopeAnalysisResultMessage);
 }
 
-/** Enumerates style field candidates in the worker-local parser. */
+/** Discover and validate shared native metadata before transferring it to the UI. */
 async function enumerateSearchStyleFields(message: SearchStyleFieldsRequestMessage): Promise<void> {
     const activeParser = await currentParser();
-    const fields = activeParser
-        ? normalizeSearchStyleFieldCandidates(activeParser.searchStyleFieldsForQuery(
-            message.query,
-            message.scope,
-            schemaOptions(message.selectedMapLayers)
-        ))
-        : [];
+    if (!activeParser) throw new Error("Schema parser is unavailable.");
+    const started = performance.now();
+    const raw = activeParser.searchStyleFieldsForQuery(message.query, message.scope, {
+        ...schemaOptions(message.selectedMapLayers), ...message.options
+    });
+    const nativeDone = performance.now();
+    const inventory = featureSearchStyleFieldInventorySchema.parse(raw);
+    const normalized = performance.now();
     postMessage({
         type: "SearchStyleFieldsResult",
         requestId: message.requestId,
-        fields
+        inventory,
+        timing: {
+            nativeMs: nativeDone - started,
+            normalizationMs: normalized - nativeDone,
+            postedAt: performance.timeOrigin + normalized
+        }
     } satisfies SearchStyleFieldsResultMessage);
 }
 
@@ -503,7 +305,14 @@ async function enumerateSearchStyleFields(message: SearchStyleFieldsRequestMessa
 async function handleMessage(message: SearchCompletionWorkerInboundMessage): Promise<void> {
     try {
         if (message.type === "SearchCompletionDataSourceInfo") {
-            await configureDataSourceInfo(message.dataSourceInfoJson);
+            await configureDataSourceInfo(message);
+            postMessage({
+                type: "SearchCompletionDataSourceInfoReady", requestId: message.requestId
+            } satisfies SearchCompletionDataSourceInfoReady);
+            return;
+        }
+        if (message.type === "SearchCompletionCancel") {
+            latestCompletionSerialByOwner.delete(message.ownerId);
             return;
         }
         if (message.type === "SearchCompletionRequest") {
@@ -520,7 +329,10 @@ async function handleMessage(message: SearchCompletionWorkerInboundMessage): Pro
         }
     } catch (error) {
         if (message.type === "SearchCompletionDataSourceInfo") {
-            console.error("Failed to configure schema completion worker.", error);
+            postMessage({
+                type: "SearchCompletionDataSourceInfoReady", requestId: message.requestId,
+                error: error instanceof Error ? error.message : String(error)
+            } satisfies SearchCompletionDataSourceInfoReady);
         } else if (message.type === "SearchCompletionRequest") {
             postMessage({
                 type: "SearchCompletionResult",
@@ -550,7 +362,6 @@ async function handleMessage(message: SearchCompletionWorkerInboundMessage): Pro
             postMessage({
                 type: "SearchStyleFieldsResult",
                 requestId: message.requestId,
-                fields: [],
                 error: error instanceof Error ? error.message : String(error)
             } satisfies SearchStyleFieldsResultMessage);
         }

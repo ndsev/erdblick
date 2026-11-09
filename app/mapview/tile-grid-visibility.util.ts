@@ -29,7 +29,7 @@ export interface TileGridLevelExtent {
     north: number;
 }
 
-/** Coarsens every requested grid level until its visible cell count falls under the safety threshold. */
+/** Coarsens requested levels to fit the cell budget or reach level zero, then sorts and deduplicates them. */
 export function coarsenedTileGridLevels(
     levels: number[],
     viewport: Viewport,
@@ -43,7 +43,7 @@ export function coarsenedTileGridLevels(
     return Array.from(effectiveLevels.values()).sort((lhs, rhs) => lhs - rhs);
 }
 
-/** Coarsens one tile level until the number of visible cells fits the supplied overlay budget. */
+/** Coarsens one level to fit the cell budget, stopping at zero even if that grid still exceeds it. */
 export function coarsenedTileLevel(
     level: number,
     viewport: Viewport,
@@ -80,7 +80,9 @@ export function tileGridVisibleCellCount(level: number, viewport: Viewport, mode
 
 /**
  * Computes the wrap-aware tile-grid extent that covers the current viewport for one level.
- * The extent intentionally includes a small margin so fast pans do not reveal seams immediately.
+ * Pads rows and non-full-world columns by two cells so fast pans do not immediately reveal seams.
+ * Clips the row margin at the poles.
+ * Column and row maxima are exclusive; longitudes may extend into adjacent world copies.
  */
 export function tileGridExtentForLevel(
     level: number,
@@ -133,7 +135,11 @@ export function tileGridExtentForLevel(
     };
 }
 
-/** Converts a tile id's raw column into the current extent so world-wrap repeats stay contiguous. */
+/**
+ * Converts a tile id's raw column to an offset relative to minCol, choosing a
+ * nearby world copy so world-wrap repeats stay contiguous. Columns outside the
+ * visible extent can produce out-of-range offsets; callers must check them.
+ */
 export function wrapColumnIntoExtent(rawCol: number, extent: TileGridLevelExtent): number {
     const normalizedCol = ((rawCol % extent.colCount) + extent.colCount) % extent.colCount;
     const repeatsToNearExtent = Math.round((extent.minCol - normalizedCol) / extent.colCount);

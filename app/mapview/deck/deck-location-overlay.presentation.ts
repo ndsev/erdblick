@@ -1,5 +1,6 @@
 import { COORDINATE_SYSTEM } from "@deck.gl/core";
 import { IconLayer, TextLayer } from "@deck.gl/layers";
+import { ScreenSpaceSizeExtension } from "./screen-space-size.extension";
 import { Color } from "../../integrations/geo.adapter";
 import type { LocationArea, LocationPolygon } from "../render-view.model";
 import type { DeckLayerRegistry } from "./deck-layer-registry.util";
@@ -123,6 +124,7 @@ export class DeckLocationOverlay {
             getIcon: () => LOCATION_MARKER_ICON_NAME,
             getPosition: (marker: DeckLocationMarkerDatum) => marker.position,
             getSize: () => DeckLocationOverlay.LOCATION_MARKER_RENDER_SIZE_PX,
+            extensions: [new ScreenSpaceSizeExtension()],
             sizeUnits: "pixels",
             billboard: true,
             pickable: false,
@@ -263,6 +265,7 @@ export class DeckLocationOverlay {
                 getOutlineColor: () => [0, 0, 0, Math.round(alpha * 255)],
                 getOutlineWidth: () => 3,
                 getSize: () => 30,
+                extensions: [new ScreenSpaceSizeExtension()],
                 sizeUnits: "pixels",
                 getTextAnchor: () => "middle",
                 getAlignmentBaseline: () => "bottom",

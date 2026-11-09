@@ -41,7 +41,10 @@ export class UiAutomationService implements AppActionContributor {
         this.references.clear();
     }
 
-    /** Walks only on explicit demand with node, depth, element and byte budgets. */
+    /**
+     * Walk only on demand with node, depth, element and byte budgets. Resolve the
+     * requested root first, then retire every earlier UID, including on page reads.
+     */
     snapshot(input: { rootUid?: string; offset?: number; limit?: number }) {
         const root = input.rootUid ? this.resolve(input.rootUid) : document.body;
         this.clear();
@@ -347,7 +350,13 @@ export class UiAutomationService implements AppActionContributor {
         const safeValue = form && !element.matches('input[type="password"],input[type="file"]');
         const value = safeValue ? unicodePrefix(element.value, 512) : undefined;
         const role = element.getAttribute("role") || ({BUTTON: "button", A: "link", TEXTAREA: "textbox", SELECT: "combobox", CANVAS: "img"}[element.tagName] ?? "");
-        return {uid, ...(parentUid ? {parentUid} : {}), tag: element.tagName.toLowerCase(), role, name: this.name(element), text: this.directText(element),
+        return {
+            uid,
+            ...(parentUid ? {parentUid} : {}),
+            tag: element.tagName.toLowerCase(),
+            role,
+            name: this.name(element),
+            text: this.directText(element),
             ...(element.dataset['testid'] ? {testId: unicodePrefix(element.dataset['testid'], 512)} : {}),
             ...(safeValue ? {value, valueTruncated: value!.length < element.value.length} : {}),
             ...(element instanceof HTMLInputElement && ["checkbox", "radio"].includes(element.type) ? {checked: element.checked} : {}),
@@ -355,7 +364,8 @@ export class UiAutomationService implements AppActionContributor {
             disabled: element.matches(":disabled") || !!element.closest('[aria-disabled="true"]'),
             bounds: {x: rect.x, y: rect.y, width: rect.width, height: rect.height},
             inViewport: rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth,
-            ...(resize ? {resize} : {})};
+            ...(resize ? {resize} : {})
+        };
     }
 
     /** Performs basic actionability checks after scrolling; a covering modal must not be bypassed. */
@@ -379,7 +389,8 @@ export class UiAutomationService implements AppActionContributor {
 
     constructor(private readonly views: MapViewService, private readonly viewSettings: MapViewState) {}
     private capturingScreenshot = false;
-    /** Registers semantic operations and their live omnibar candidates. */
+
+    /** Register bounded DOM operations and explicit screenshot capture. */
     registerActions(actions: AppActionRegistration): void {
         const styleName = z.enum([
             "display",
@@ -756,6 +767,7 @@ const uid = z.string().regex(/^[0-9]+\.[0-9]+$/).max(48);
 const text = boundedUnicodeString(512);
 const pixels = z.number().positive().max(32768);
 const percentages = z.array(z.number().positive().max(100)).min(2).max(2);
+
 /** The dialog, dock and splitter adapters accept the same validated resize values. */
 export const viewerResizeSizeSchema = z.union([
     z.strictObject({ widthPx: pixels, heightPx: pixels.optional() }),
@@ -772,6 +784,7 @@ const resizeSchema = z.strictObject({
 });
 export type ViewerResizeCapabilities = z.infer<typeof resizeSchema>;
 const boundsSchema = z.strictObject({ x: z.number(), y: z.number(), width: z.number(), height: z.number() });
+
 /** DOM snapshots and action results share the bounded element representation. */
 const elementSchema = z.strictObject({
     uid,

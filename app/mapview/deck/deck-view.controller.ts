@@ -209,7 +209,9 @@ export abstract class DeckMapView implements IRenderView {
         {
             deck: () => this.deck,
             scene: () => this.gpuScene,
-            viewport: () => this.createWebMercatorViewport() ?? null
+            viewport: () => this.createWebMercatorViewport() ?? null,
+            cachedFeaturePicks: targets => this.tileStream.cachedFeaturePicks(targets),
+            resolveFeaturePicks: targets => this.tileStream.resolveFeaturePicks(targets)
         },
         () => ({
             radius: this.inspectionState.state.drillPickRadius,
@@ -225,6 +227,7 @@ export abstract class DeckMapView implements IRenderView {
     readonly firstPersonViewActive = new BehaviorSubject(false);
     readonly rendererInvalidated = new Subject<void>();
 
+    private clickPickSerial = 0;
     private ignoreNextCamAppStateUpdate = false;
     private suppressDeckViewStateEvent = false;
     private readonly tickCallbacks = new Set<() => void>();
@@ -329,7 +332,7 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /** Exposes bounded feature picking through the renderer contract. */
-    drillPickFeatures(screenPos: {x: number; y: number}, radius: number, maxObjects: number): RenderedFeaturePickResult {
+    drillPickFeatures(screenPos: {x: number; y: number}, radius: number, maxObjects: number): Promise<RenderedFeaturePickResult> {
         return this.picking.drillPickFeatures(screenPos, radius, maxObjects);
     }
 
@@ -386,7 +389,9 @@ export abstract class DeckMapView implements IRenderView {
         idSuffix = ""
     ): DeckMercatorView {
         return new ErdblickMapView({
-            id: `deck-view-${this._viewIndex}${idSuffix}`,
+            // The navigation adapter receives this same persistent identity.
+            // Reordering application views must not change Deck's controller ID.
+            id: `${this.viewId}${idSuffix}`,
             repeat: true,
             orthographic: this.useOrthographicProjection,
             controller
@@ -399,7 +404,7 @@ export abstract class DeckMapView implements IRenderView {
         idSuffix = ""
     ): DeckFirstPersonView {
         return new DeckFirstPersonView({
-            id: `deck-view-${this._viewIndex}${idSuffix}`,
+            id: `${this.viewId}${idSuffix}`,
             fovy: FIRST_PERSON_FOV_DEGREES,
             near: FIRST_PERSON_NEAR_METERS,
             far: FIRST_PERSON_FAR_METERS,
@@ -477,7 +482,9 @@ export abstract class DeckMapView implements IRenderView {
                     interactionState
                 ),
             onInteractionStateChange: (interactionState) => this.onInteractionStateChange(interactionState),
-            onClick: (info, event) => this.onClick(info, event),
+            onClick: (info, event) => {
+                void this.onClick(info, event).catch(error => console.error("Feature picking failed.", error));
+            },
             onAfterRender: () => {
                 this.locationOverlay.onAfterRender();
                 if (this.contactShadingEnabled && this.contactShading) {
@@ -1768,7 +1775,7 @@ export abstract class DeckMapView implements IRenderView {
     }
 
     /** Handles primary-click drill inspection, marker placement, and background deselection. */
-    private onClick(info: PickingInfo, event: DeckGestureEventLike): void {
+    private async onClick(info: PickingInfo, event: DeckGestureEventLike): Promise<void> {
         if (environment.visualizationOnly) {
             return;
         }
@@ -1776,6 +1783,8 @@ export abstract class DeckMapView implements IRenderView {
         if (srcEvent && Number.isInteger(srcEvent.button) && srcEvent.button !== 0) {
             return;
         }
+        // A background click also supersedes a foreign locate still in flight.
+        const pickSerial = ++this.clickPickSerial;
         this.viewSettings.focusedView = this._viewIndex;
         if (!info || !Number.isFinite(info.x) || !Number.isFinite(info.y)) {
             this.inspectionState.unsetUnlockedSelections();
@@ -1784,7 +1793,22 @@ export abstract class DeckMapView implements IRenderView {
         }
 
         const screenPosition = { x: info.x, y: info.y };
-        const {featureIds, markerPosition: featurePosition} = this.picking.click(info, srcEvent?.pointerType);
+        const deck = this.deck;
+        // Selection arrays can change in place while foreign identity is being
+        // resolved. Observe publication rather than comparing array identities.
+        let selectionChanged: boolean;
+        const guard = this.inspectionState.state.selectionState.subscribe(() => {
+            selectionChanged = true;
+        });
+        selectionChanged = false;
+        let picked: Awaited<ReturnType<DeckPicking["click"]>>;
+        try {
+            picked = await this.picking.click(info, srcEvent?.pointerType);
+        } finally {
+            guard.unsubscribe();
+        }
+        if (deck !== this.deck || pickSerial !== this.clickPickSerial || selectionChanged) return;
+        const {featureIds, markerPosition: featurePosition} = picked;
         const markerPosition = this.coordinatesService.state.marker ? featurePosition : null;
         const cartographic = markerPosition
             ? { lon: markerPosition[0], lat: markerPosition[1], alt: markerPosition[2] }
@@ -2108,8 +2132,8 @@ export abstract class DeckMapView implements IRenderView {
             markerAtlas: () => this.featureSearchService.markerGraphics(),
             showsTile: (mapId, layerId, tileId) =>
                 this.mapViewState.showsFeatureSearchTileInView(viewIndex, mapId, layerId, tileId),
-            prefersHighFidelity: (searchId, tileId, maxVisibleTiles) =>
-                this.mapViewState.prefersHighFidelityForSearchResultTile(viewIndex, searchId, tileId, maxVisibleTiles),
+            prefersHighFidelity: (tileId, maxVisibleTiles) =>
+                this.mapViewState.prefersHighFidelityForSearchResultTile(viewIndex, tileId, maxVisibleTiles),
             densityTargetLevel: (maxVisibleLevel, maxVisibleTiles) =>
                 this.mapViewState.searchResultDensityTargetLevel(viewIndex, maxVisibleLevel, maxVisibleTiles)
         };

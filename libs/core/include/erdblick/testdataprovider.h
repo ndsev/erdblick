@@ -127,7 +127,7 @@ public:
         static const std::vector<std::string> signTypes{"Stop", "Yield", "Parking", "No Entry", "Speed Limit"};
         static const std::vector<std::string> wayTypes{"Bike", "Pedestrian", "Any", "Vehicle"};
 
-        // Seed the random number generator for consistency
+        // Reseed the process-global generator from wall-clock seconds; calls in one second repeat.
         srand(time(nullptr));
 
         auto tileId = mapget::TileId::fromWgs84(camX, camY, level);
@@ -162,7 +162,7 @@ public:
             return points;
         };
 
-        // Create 10 random Way features inside the bounding box defined by NE and SW
+        // Create random Way features within the tile bounds.
         for (int i = 0; i < 2; i++) {
             std::cout << "Generated Way " << i << std::endl;
             // Create a feature with line geometry
@@ -181,7 +181,7 @@ public:
             attr->addField("count", (int64_t)rand());
         }
 
-        // Create 10 random Sign features inside the bounding box defined by NE and SW
+        // Create random Sign features within the tile bounds.
         for (int i = 0; i < 2; i++) {
             std::cout << "Generated Sign " << i << std::endl;
 
@@ -220,7 +220,7 @@ public:
         size.x *= .25;
         size.y *= .25;
         size.z = 1000.;
-        double baseHeight = 1600.0; // Base height from previous code
+        double baseHeight = 1600.0;
         // Define the vertices of the diamond
         std::vector<mapget::Point> diamondVertices = {
             {center.x, center.y - size.y, baseHeight}, // Top front vertex

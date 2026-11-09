@@ -38,6 +38,10 @@ export class NavigationTargetOverlay {
     private readonly ring: SVGPathElement;
     private readonly center: SVGCircleElement;
 
+    /**
+     * Attach a non-interactive SVG overlay owned by this presentation; destroy()
+     * removes it when the view is retired.
+     */
     constructor(container: HTMLElement) {
         this.svg = document.createElementNS(SVG_NAMESPACE, "svg");
         this.svg.setAttribute("aria-hidden", "true");

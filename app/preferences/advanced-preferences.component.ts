@@ -98,6 +98,10 @@ export class AdvancedPreferencesComponent {
         this.layout.setDialogOpen(this.dialogLayoutId, visible);
     }
 
+    /**
+     * Seed a JSON editor session from the current snapshot and subscribe to local
+     * edits/save requests; keep the baseline text for dirty-state comparison.
+     */
     onDialogShow() {
         const snapshotText = JSON.stringify(this.stateService.exportSnapshot(), null, 2);
         this.baselineSnapshotText = snapshotText;
@@ -123,6 +127,7 @@ export class AdvancedPreferencesComponent {
         this.dialogStack.bringToFront(this.advancedPreferencesDialog);
     }
 
+    /** Release this dialog's editor subscriptions/session and clear unsaved UI state. */
     onDialogHide() {
         this.sourceSubscription.unsubscribe();
         this.saveSubscription.unsubscribe();
@@ -212,6 +217,10 @@ export class AdvancedPreferencesComponent {
         this.dialogVisible = false;
     }
 
+    /**
+     * Handle Escape inside this dialog: dismiss a discard warning first, otherwise
+     * use the ordinary close flow so dirty edits still require a decision.
+     */
     @HostListener('window:keydown', ['$event'])
     onWindowKeyDown(event: KeyboardEvent) {
         if (event.key !== 'Escape' || !this.dialogVisible) {
@@ -230,6 +239,10 @@ export class AdvancedPreferencesComponent {
         this.dialogStack.bringToFront(this.discardWarningDialog);
     }
 
+    /**
+     * Report JSON syntax errors separately from snapshot-schema validation, showing
+     * the first actionable error without importing the candidate snapshot.
+     */
     private validateSnapshotText(source: string) {
         let parsed: unknown;
         try {

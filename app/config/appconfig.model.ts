@@ -42,6 +42,7 @@ export interface RawAppConfig {
     locationSearch?: RawLocationSearchConfig;
     externalViewers?: unknown[];
     mapPresets?: unknown[];
+
     /** Internal parser marker preserving present-but-malformed static/server input. */
     _mapPresetsInvalid?: boolean;
     "coordinates-enabled"?: boolean;

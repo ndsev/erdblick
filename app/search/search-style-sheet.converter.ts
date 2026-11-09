@@ -1,3 +1,4 @@
+import type {PreparedSearchBranch} from "./search-preparation.model";
 import {dump} from "js-yaml";
 import {parseDocument} from "yaml";
 
@@ -6,9 +7,11 @@ import {
     FeatureSearchColorMode,
     FeatureSearchGeometryKind,
     FeatureSearchRuleFilter,
-    FeatureSearchStyleRule
+    FeatureSearchStyleRule,
+    searchStyleRuleAppliesTo
 } from "./search-definition.model";
 import {searchStyleColorProperties} from "./search-style-color.util";
+import {colorScaleTypesSchema} from "../mapdata/schema-type.model";
 
 const SUPPORTED_SEARCH_STYLE_OPERATORS = new Set(["=", "==", "!=", "<", "<=", ">", ">=", "contains"]);
 const ALL_GEOMETRY_TYPES = ["point", "line", "polygon", "mesh", "aabb", "gltf"];
@@ -60,6 +63,8 @@ export interface SearchStyleMatchContext {
     concreteScope: "feature" | "attribute";
     backendQuery: string;
     selectedFeatureTypes: readonly string[];
+    /** One explicit query can use different result roots in different sources. */
+    branches?: readonly PreparedSearchBranch[];
 }
 
 export interface SearchStyleProjectionWarning {
@@ -104,6 +109,23 @@ export function convertSearchStyleRulesToYaml(
     }
     assertCanonicalSearchStyleRules(rules);
     const layerIds = normalizedLayerAffinity(options.layerIds);
+    const nativeRules = context.branches?.flatMap(branch => {
+        if (layerIds.length && !layerIds.includes(branch.layerId)) return [];
+        const applicable = rules.filter(rule => searchStyleRuleAppliesTo(rule, branch));
+        const types = context.selectedFeatureTypes.length
+            ? context.selectedFeatureTypes.filter(type => !branch.featureTypes.length || branch.featureTypes.includes(type))
+            : branch.featureTypes;
+        if (context.selectedFeatureTypes.length && !types.length) return [];
+        // A standalone stylesheet has no search map selector. Preserve that
+        // explicit selection here, at export, rather than embedding its source
+        // IDs in the portable query used by live per-map subscriptions.
+        const prefix = branch.scope === "attribute" ? "$feature." : "";
+        const source = `${prefix}mapId == ${JSON.stringify(branch.mapId)} and ` +
+            `${prefix}layerId == ${JSON.stringify(branch.layerId)}`;
+        return featureSearchRulesToStyleRules(applicable, {
+            concreteScope: branch.scope, backendQuery: `(${source}) and (${branch.query})`, selectedFeatureTypes: types
+        });
+    }) ?? featureSearchRulesToStyleRules(rules, context);
     const document: Record<string, unknown> = {
         name,
         category: "search",
@@ -115,7 +137,7 @@ export function convertSearchStyleRulesToYaml(
             type: "bool",
             default: true
         }],
-        rules: featureSearchRulesToStyleRules(rules, context).map(addSearchStyleVisibilityGate)
+        rules: nativeRules.map(addSearchStyleVisibilityGate)
     };
     if (layerIds.length) {
         document["layer"] = canonicalLayerAffinityExpression(layerIds);
@@ -253,12 +275,15 @@ export function featureSearchRuleToStyleRule(
     if (scope) {
         result["scope"] = scope;
     }
-    const filter = conjunction(rule.filter);
+    const filter = searchStyleFilterExpression(rule.filter);
     if (filter) {
         result[scope === "attribute" ? "attribute-filter" : "filter"] = filter;
     }
     Object.assign(result, searchStyleColorProperties(rule.color));
     result["width"] = width;
+    // Search widths and point radii are screen controls. Surface-oriented
+    // strokes would change thickness with depth and tilt despite those values.
+    result["billboard"] = true;
     result["opacity"] = label ? 0 : opacity;
     result["z-index"] = SEARCH_RESULT_Z_INDEX;
     if (label && rule.labelExpression?.trim()) {
@@ -273,7 +298,6 @@ export function featureSearchRuleToStyleRule(
         result["label-background-color"] = rule.labelBackgroundColor
             ?? DEFAULT_FEATURE_SEARCH_LABEL_BACKGROUND_COLOR;
         result["label-background-padding"] = [2, 2];
-        result["billboard"] = true;
         result["depth-test"] = false;
     }
     return result;
@@ -597,11 +621,26 @@ function colorFromStyle(raw: Record<string, unknown>): FeatureSearchColorMode | 
         if (fallback !== undefined && (typeof fallback !== "string" || !normalizeHexLiteral(fallback))) {
             return undefined;
         }
+        // Read old saved YAML guards once at import; newly generated YAML uses
+        // schemaTypes and never publishes competing spellings.
+        const schemaTypes = colorScaleTypesSchema.safeParse(scale);
+        if (!schemaTypes.success) return undefined;
+        const specials: Array<{value: unknown; color: string}> = [];
+        if (scale["specials"] !== undefined) {
+            if (!schemaTypes.data || !Array.isArray(scale["specials"])) return undefined;
+            for (const stop of scale["specials"]) {
+                if (!Array.isArray(stop) || stop.length !== 2 || !isFiniteNumber(stop[0]) ||
+                    typeof stop[1] !== "string" || !normalizeHexLiteral(stop[1])) return undefined;
+                specials.push({value: stop[0], color: normalizeHexLiteral(stop[1])!});
+            }
+        }
         return {
             mode: mode === "linear" ? "gradient" : "categories",
             field: expression,
             customField: true,
             stops: parsedStops,
+            ...(schemaTypes.data ? {schemaTypes: schemaTypes.data} : {}),
+            ...(scale["specials"] !== undefined ? {specials} : {}),
             ...(typeof fallback === "string" ? {fallbackColor: normalizeHexLiteral(fallback)!} : {})
         };
     }
@@ -769,7 +808,8 @@ function assertCanonicalSearchStyleRules(rules: readonly FeatureSearchStyleRule[
     }
 }
 
-function conjunction(filters: readonly FeatureSearchRuleFilter[]): string {
+/** Serialize a rule's filters with the same literal and precedence rules as exported styles. */
+export function searchStyleFilterExpression(filters: readonly FeatureSearchRuleFilter[]): string {
     const activeFilters = filters.filter(filter => filter.field.trim());
     const expressions = activeFilters
         .map(filterExpression)

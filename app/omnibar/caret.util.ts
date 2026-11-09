@@ -3,14 +3,15 @@
 // top-left corner. This avoids the CommonJS-only "textarea-caret"
 // package and keeps the bundle fully ESM.
 
-/** Coordinates of the text caret relative to the textarea content box. */
+/** Mirrored caret offsets in pixels, before the caller adjusts for textarea scrolling. */
 export interface CaretCoordinates { top: number; left: number }
 
 /**
- * Computes caret coordinates relative to the top-left of a textarea.
+ * Computes a caret offset for a UTF-16 position; scrolling is handled by the caller.
  *
  * The implementation mirrors the textarea styles in a hidden DOM node so
- * popup placement follows wrapped lines accurately without external packages.
+ * popup placement follows wrapped lines without external packages. The prefix
+ * currently enters the mirror as HTML, so markup in the input is interpreted.
  */
 export default function getCaretCoordinates(
   textarea: HTMLTextAreaElement,
@@ -21,7 +22,7 @@ export default function getCaretCoordinates(
 
   const computed = win.getComputedStyle(textarea);
 
-  // Create a mirror div off-screen
+  // Create an invisible mirror without affecting normal document flow
   const div = doc.createElement("div");
   div.style.position = "absolute";
   div.style.visibility = "hidden";

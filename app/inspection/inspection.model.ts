@@ -33,6 +33,7 @@ export interface TileFeatureId {
 export interface HoverLabelFieldConfig {
     expression: string;
     customExpression: boolean;
+
     /** Optional short key shown next to the value; the expression leaf is used when absent. */
     displayKey?: string;
 }
@@ -66,6 +67,7 @@ export interface InspectionPanelModel<FeatureRepresentation> {
     sourceData?: SelectedSourceData;
     color: string;
     undocked: boolean;
+
     /** Runtime-only marker used while feature identities are resolving into inspectable wrappers. */
     loading?: boolean;
 }

@@ -40,7 +40,7 @@ function setup() {
     };
     const state = testPersistence();
     const viewSettings = stateOwners(state).viewSettings;
-    viewSettings.importViews(['first', 'second']);
+    viewSettings.importViews(['0', '1']);
     viewSettings.cameraViewDataState.next(0, camera);
     const views = {
         generation: 1, captureView: () => ({ viewId: viewSettings.focusedViewIdState.value, generation: views.generation }),
@@ -133,9 +133,9 @@ describe("Location navigation ownership", () => {
 
     it("unsubscribes a superseded lookup and accepts a synchronous replacement", () => {
         const h = setup();
-        h.service.navigate("first");
+        h.service.navigate("0");
         h.locations.resolveNavigation.mockReturnValueOnce(of(areaResult));
-        h.service.navigate("second");
+        h.service.navigate("1");
         expect(h.response.observed).toBe(false);
         expect(h.area).toHaveBeenCalledOnce();
         h.response.next(areaResult);

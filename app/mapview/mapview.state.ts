@@ -41,7 +41,10 @@ import {
     ViewSyncOptionDescriptor
 } from "./mapview.model";
 
-/** Stable logical map identity; runtime renderers get a new generation when restored. */
+/**
+ * Logical map identity, allocated as a decimal integer. Keep its string form
+ * distinct from positional numeric indices in per-view state APIs.
+ */
 export type ViewId = string;
 
 export { viewIdSchema } from "./mapview.model";
@@ -71,7 +74,7 @@ interface ViewMembershipOwner {
 export class MapViewState {
     readonly viewIdsState = this.persistence.registerState<ViewId[]>({
         name: "viewIds",
-        defaultValue: [crypto.randomUUID()],
+        defaultValue: ["0"],
         schema: z.array(viewIdSchema),
         fromStorage: (value) => viewIdsSchema.parse(value),
         normalize: (value) => viewIdsSchema.parse(value),
@@ -89,7 +92,7 @@ export class MapViewState {
         return id;
     }
 
-    /** Rejects removed identities; an old index must never accidentally target a replacement view. */
+    /** Resolve current presentation order; asynchronous callers also verify the renderer generation. */
     indexOfView(id: ViewId): number {
         const index = this.viewIds.indexOf(id);
         if (index < 0) throw new Error(`View ${id} is unavailable.`);
@@ -105,16 +108,29 @@ export class MapViewState {
                 throw new Error("View ID count does not match the number of views.");
             return ids;
         }
-        return Array.from({ length: effectiveCount }, (_, index) =>
-            !replaceAbsent && this.viewIds[index] ? this.viewIds[index] : crypto.randomUUID()
-        );
+        return this.resizeViewIds(replaceAbsent ? [] : this.viewIds, effectiveCount);
     }
 
     /** A changed config-owned count keeps existing saved identities and adds only the new views. */
     resizeStoredViews(rawIds: unknown, count: unknown): ViewId[] {
         const ids = viewIdsSchema.parse(rawIds);
         const effectiveCount = viewCountSchema.parse(count);
-        return Array.from({ length: effectiveCount }, (_, index) => ids[index] ?? crypto.randomUUID());
+        return this.resizeViewIds(ids, effectiveCount);
+    }
+
+    /**
+     * Preserve surviving identities and fill the smallest unused nonnegative
+     * integer for each added view. Scan the growing list so a multi-view resize
+     * cannot allocate the same hole twice. Presentation order does not matter.
+     */
+    private resizeViewIds(current: readonly ViewId[], count: number): ViewId[] {
+        const ids = current.slice(0, count);
+        let candidate = 0;
+        while (ids.length < count) {
+            while (ids.includes(String(candidate))) candidate++;
+            ids.push(String(candidate++));
+        }
+        return ids;
     }
 
     /** Installs import membership atomically, retaining live identities and omitted positional values. */
@@ -467,10 +483,7 @@ export class MapViewState {
             return;
         }
         this.persistence.transaction(() => {
-            this.viewIdsState.next([
-                ...this.viewIds,
-                ...Array.from({ length: count - previous }, () => crypto.randomUUID())
-            ]);
+            this.viewIdsState.next(this.resizeViewIds(this.viewIds, count));
             this.seedAdditionalViews(previous, count);
         });
     }
@@ -480,9 +493,10 @@ export class MapViewState {
         const sourceIndex = this.indexOfView(sourceId);
         const previous = this.numViews;
         if (previous >= 32) throw new Error("The viewer supports at most 32 views.");
-        const id = crypto.randomUUID();
+        const ids = this.resizeViewIds(this.viewIds, previous + 1);
+        const id = ids[previous];
         this.persistence.transaction(() => {
-            this.viewIdsState.next([...this.viewIds, id]);
+            this.viewIdsState.next(ids);
             this.seedAdditionalViews(previous, previous + 1, sourceIndex);
         });
         return id;

@@ -188,6 +188,9 @@ describe("GpuTextLayerHost", () => {
             wordBreak: "break-all",
             maxWidth: 14
         });
+        // Physical labels keep their perspective; the screen-size correction
+        // applies only to labels authored in CSS pixels.
+        expect(layer.props.extensions).toEqual([]);
         expect(props.getSize(props.data[0])).toBe(18);
         expect(props.getAngle(props.data[0])).toBe(12);
         expect(props.getTextAnchor(props.data[0])).toBe("start");
@@ -246,7 +249,8 @@ describe("GpuTextLayerHost", () => {
         // Collision renders labels through a separate picking-color pass.
         // Depth-free labels must not inject the independent z-index shader
         // hook into that pass, or the collision map rejects every label.
-        expect(props.extensions).toHaveLength(1);
+        expect(props.extensions.map(extension => extension!.constructor.name))
+            .toEqual(["ScreenSpaceSizeExtension", "CollisionFilterExtension"]);
     });
 
     it("retains label order below Float32 precision", () => {

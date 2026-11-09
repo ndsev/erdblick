@@ -17,12 +17,16 @@ import {
 } from "./viewer-action-relay.contract";
 import { VIEWER_ACTION_INVOCATION_BYTES, VIEWER_ACTION_RESULT_BYTES } from "./action.model";
 
-/** Small activity summary: never includes arguments, session UUIDs, credentials or map data. */
+/**
+ * Small activity summary for the MCP popover: action name and execution status.
+ * Never includes arguments, session UUIDs, credentials or map data.
+ */
 export interface ViewerActionActivity {
     action: string;
     status: "running" | "applied" | "completed" | ViewerActionError["code"];
 }
 
+/** One admitted call, including its reply destination, deadline and cancellation cleanup. */
 interface PendingViewerAction {
     callId: string;
     clientId: string | null;
@@ -49,6 +53,9 @@ export class McpActionService implements OnDestroy {
     readonly availability$ = new BehaviorSubject({ enabled: false, ready: false, message: "MCP is not enabled" });
     private readonly subscriptions = new Subscription();
     private readonly pending = new Map<string, PendingViewerAction>();
+    // Remember recent replies so a repeated invocation frame cannot run the same
+    // action again. finish() retains the last 256 IDs; a connection change clears
+    // them because the new relay session has its own calls.
     private readonly completedCalls = new Set<string>();
     private readonly infoAbort = new AbortController();
     private clientId: string | null = null;
@@ -69,10 +76,15 @@ export class McpActionService implements OnDestroy {
         private readonly ui: UiAutomationService
     ) { }
 
-    /** Starts the optional control adapter after ordinary app/stream initialization, without delaying the map. */
+    /**
+     * Subscribe to relay connection changes and discover the backend's MCP catalog.
+     * Application startup calls this once after the map stream is initialized;
+     * discovery runs asynchronously while the viewer continues loading.
+     */
     initialize(): void {
         if (this.initialized) return;
         this.initialized = true;
+
         this.subscriptions.add(this.stream.actionClientId$.subscribe(clientId => {
             if (clientId === this.clientId) return;
             for (const call of this.pending.values()) if (call.clientId !== null) this.finish(call, undefined, {
@@ -85,9 +97,12 @@ export class McpActionService implements OnDestroy {
             this.register();
         }));
         this.subscriptions.add(this.stream.actionControlReceived.subscribe(({ payload, receivedAt }) => this.receive(payload, receivedAt)));
+
         void this.zone.runOutsideAngular(async () => {
-            // Catalog/schema startup may occupy the main thread while this small response
-            // is already in flight. Use the action transport's discovery budget, not 5 seconds.
+            // Catalog/schema startup may occupy the main thread while this small
+            // response is already in flight. Use the action transport's 30-second
+            // discovery budget, not five seconds. On timeout, MCP stays
+            // unavailable for this viewer session.
             const timer = setTimeout(() => this.infoAbort.abort(), 30000);
             try {
                 const response = await fetch(new URL("mcp/info", document.baseURI), {
@@ -102,20 +117,28 @@ export class McpActionService implements OnDestroy {
                 this.register();
             } catch {
                 // Optional discovery failure must not break startup or create toast spam.
+                // Keep it in MCP availability state; the map continues loading,
+                // and reloading can retry the adapter.
             } finally {
                 clearTimeout(timer);
             }
         });
     }
 
-    /** Cancels pending agent work only; completed mutations and human searches are untouched. */
+    /**
+     * Request cancellation of pending agent calls and report it to their callers.
+     * Completed mutations and human searches are untouched.
+     */
     stopCurrentAction(): void {
         for (const call of this.pending.values()) this.finish(call, undefined, {
             code: "cancelled", message: "Stopped by the user", outcome: "not_applied"
         });
     }
 
-    /** Changes display metadata on the existing connection, never its identity or authorization. */
+    /**
+     * Change display metadata on the existing connection, never its identity or
+     * authorization. Trim the label to 120 Unicode characters before sending it.
+     */
     renameSession(label: string): void {
         this.sessionLabel = unicodePrefix(label.trim(), 120) || "erdblick";
         if (this.registered && this.clientId) this.stream.sendActionControl(this.clientId, {
@@ -124,7 +147,10 @@ export class McpActionService implements OnDestroy {
         });
     }
 
-    /** Retires timers, listeners and discovery without sending on a later connection. */
+    /**
+     * Abort discovery and pending calls, detach listeners and release UI automation
+     * resources without sending on a later connection.
+     */
     ngOnDestroy(): void {
         this.ui.clear();
         this.infoAbort.abort();
@@ -134,7 +160,11 @@ export class McpActionService implements OnDestroy {
         }, false);
     }
 
-    /** Registers capabilities only against the configured, exactly matching trusted catalog. */
+    /**
+     * Announce this viewer's action names once its catalog matches the backend's.
+     * The backend catalog supplies the tool contracts; this message associates
+     * those actions and the display label with the current interactive connection.
+     */
     private register(): void {
         this.registered = false;
         if (!this.info.enabled) return;
@@ -150,6 +180,7 @@ export class McpActionService implements OnDestroy {
             this.availability("Waiting for the interactive connection");
             return;
         }
+
         this.availability("Connecting MCP controls");
         this.stream.sendActionControl(this.clientId, {
             type: "mapget.actions.register", version: 1, catalogId: VIEWER_ACTION_CATALOG_ID,
@@ -157,7 +188,10 @@ export class McpActionService implements OnDestroy {
         });
     }
 
-    /** Dispatches validated controls independently of tile request IDs and worker admission. */
+    /**
+     * Validate a relay message and route registration, cancellation or invocation
+     * independently of tile request IDs and worker admission.
+     */
     private receive(payload: unknown, receivedAt: number): void {
         const parsed = viewerActionServerMessageSchema.safeParse(payload);
         if (!parsed.success) {
@@ -185,7 +219,13 @@ export class McpActionService implements OnDestroy {
         }
     }
 
-    /** Runs a tool in this document with the same admission, output validation and stop control as relayed calls. */
+    /**
+     * Run a WebMCP tool in this document with the same admission, output validation
+     * and Stop control as relayed calls. `action` names a registered tool and
+     * `input` contains its arguments. The promise resolves with its validated
+     * result or rejects with ViewerActionFailure. The caller's signal, Stop
+     * control and a 30-second deadline can request cancellation.
+     */
     invokeLocal(action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
         signal.throwIfAborted();
         if (this.encoder.encode(JSON.stringify(input)).length > VIEWER_ACTION_INVOCATION_BYTES) {
@@ -200,10 +240,16 @@ export class McpActionService implements OnDestroy {
         }, signal));
     }
 
-    /** Admits bounded calls without a mutation queue; every admitted call owns its cancellation/deadline. */
+    /**
+     * Admit a local or relayed call and schedule its execution in a microtask.
+     * Allow up to four pending calls, with at most one mutation. Excess calls
+     * receive `busy` immediately. The deadline includes time since receivedAt;
+     * each admitted call gets a timer and AbortController released by finish().
+     */
     private invoke(message: Extract<ViewerActionServerMessage, { type: "mapget.actions.invoke" }>, receivedAt: number,
         localComplete?: PendingViewerAction["localComplete"], signal?: AbortSignal): void {
         if ((!localComplete && !this.clientId) || this.pending.has(message.callId) || this.completedCalls.has(message.callId)) return;
+
         let error: ViewerActionError | undefined;
         const known = Object.hasOwn(this.actions.publicActions, message.action);
         const name = message.action as string;
@@ -217,6 +263,7 @@ export class McpActionService implements OnDestroy {
             else this.stream.sendActionControl(this.clientId!, { type: "mapget.actions.result", version: 1, callId: message.callId, error });
             return;
         }
+
         const deadline = receivedAt + message.timeoutMs;
         const call: PendingViewerAction = {
             callId: message.callId, clientId: localComplete ? null : this.clientId, localComplete, action: name, arguments: message.arguments,
@@ -233,6 +280,7 @@ export class McpActionService implements OnDestroy {
             call.removeAbortListener = () => signal.removeEventListener("abort", cancel);
             if (signal.aborted) { cancel(); return; }
         }
+
         this.zone.run(() => this.activity$.next([...this.activity$.value.slice(-19), call.activity]));
         queueMicrotask(() => {
             if (!this.pending.has(call.callId)) return;
@@ -251,7 +299,12 @@ export class McpActionService implements OnDestroy {
         });
     }
 
-    /** Validates every synchronous/asynchronous result at the same trusted wire boundary. */
+    /**
+     * Check the action's output schema and encoded result size before replying.
+     * Synchronous returns and resolved promises use this same path. An active
+     * mutation completing past its deadline reports `applied` with the timeout.
+     * Once cancellation or a timer has settled the call, late results are ignored.
+     */
     private completeResult(call: PendingViewerAction, result: unknown): void {
         if (this.pending.get(call.callId) !== call) return;
         try {
@@ -265,35 +318,56 @@ export class McpActionService implements OnDestroy {
         } catch (error) { this.failCall(call, error); }
     }
 
-    /** Retains unknown-outcome semantics for failures after a domain owner may have applied effects. */
+    /**
+     * Preserve an action's structured failure, or translate an unexpected exception.
+     * An unexpected mutation failure reports `unknown`: the operation may have
+     * changed application state before throwing.
+     */
     private failCall(call: PendingViewerAction, error: unknown): void {
         this.finish(call, undefined, error instanceof ViewerActionFailure ? error.detail
             : { code: "internal_error", message: "Viewer action failed", outcome: call.mutation ? "unknown" : "not_applied" });
     }
 
-    /** Completes once, releases the admission slot on every path, and never replies through a replacement socket. */
+    /**
+     * Settle an active call once, release its timer/listener and update activity.
+     * Local calls settle their promise. Relayed replies go to the connection that
+     * admitted the call; a changed connection means the original caller has gone.
+     * send=false is used while disconnecting or destroying this service.
+     * Aborting requests cooperative cancellation; it cannot undo owner side effects.
+     */
     private finish(call: PendingViewerAction, result?: unknown, error?: ViewerActionError, send = true): void {
         if (this.pending.get(call.callId) !== call) return;
+
         this.pending.delete(call.callId);
         clearTimeout(call.timer);
         call.controller.abort();
         call.removeAbortListener?.();
         this.completedCalls.add(call.callId);
         if (this.completedCalls.size > 256) this.completedCalls.delete(this.completedCalls.values().next().value!);
+
         if (call.localComplete) call.localComplete(result, error);
         else if (send && call.clientId && this.clientId === call.clientId) this.stream.sendActionControl(call.clientId, {
             type: "mapget.actions.result", version: 1, callId: call.callId, ...(error ? { error } : { result })
         });
+
         call.activity.status = error?.code ?? (call.mutation ? "applied" : "completed");
         this.zone.run(() => this.activity$.next([...this.activity$.value]));
     }
 
-    /** Notifies Angular only for control availability changes, not streamed tile/camera frames. */
+    /**
+     * Publish MCP availability changes inside Angular so the status component
+     * refreshes, without processing streamed tile/camera frames here.
+     */
     private availability(message: string): void {
         this.zone.run(() => this.availability$.next({ enabled: this.info.enabled, ready: this.registered, message }));
     }
 
-    /** Domain methods are registered by owners; the relay only selects the Angular execution boundary. */
+    /**
+     * Domain methods are registered by owners; the relay selects their Angular
+     * execution boundary. Dispatch through AppActionRegistry's argument/result
+     * checks, running mutations inside Angular so state changes refresh the UI
+     * and read-only actions outside it to avoid unnecessary change detection.
+     */
     execute(name: string, argumentsValue: unknown, signal?: AbortSignal): unknown | Promise<unknown> {
         const declaration = this.actions.publicActions[name as string];
         if (!declaration) throw new ViewerActionFailure({ code: "unsupported_action", message: "Unsupported viewer action", outcome: "not_applied" });

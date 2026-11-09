@@ -68,6 +68,10 @@ export class InspectionContainerComponent implements OnDestroy {
 
     private readonly subscriptions = new Subscription();
 
+    /**
+     * Own dock drag listeners and project selection into display order. Pending
+     * feature loads keep their docked selections visible until wrappers arrive.
+     */
     constructor(private stateService: AppStateService,
         private mapService: InspectionSelectionService,
         private renderer: Renderer2,

@@ -9,7 +9,12 @@ import { DomSanitizer } from '@angular/platform-browser';
 export class HighlightRegion implements PipeTransform {
     constructor(private sanitizer: DomSanitizer) {}
 
-    /** Trims the preview around the hit so large source-data strings stay inspectable. */
+    /**
+     * Trims the preview around the hit so large source-data strings stay inspectable.
+     * The substring uses UTF-16 offsets; nonpositive start/size returns empty.
+     * Surrounding text must already be trusted: only the marked fragment is
+     * sanitized before the assembled result bypasses Angular's HTML sanitizer.
+     */
     transform(value: string, start: number|undefined, size: number|undefined, epsilon: number): any {
         if (!value || !start || !size || start < 0 || size <= 0)
             return '';

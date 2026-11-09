@@ -14,6 +14,7 @@ import {CollisionFilterExtension} from "@deck.gl/extensions";
 import {TextLayer} from "@deck.gl/layers";
 
 import {DeckZIndexExtension} from "./deck-z-index.extension";
+import {ScreenSpaceSizeExtension} from "./screen-space-size.extension";
 import {
     GpuLabelFlag,
     GpuLabelSizeUnit,
@@ -137,6 +138,9 @@ export class GpuTextLayerHost extends CompositeLayer<LayerProps & {
                 wordBreak: bucket.wordBreak,
                 maxWidth: bucket.maxWidth,
                 extensions: [
+                    ...(bucket.billboard && bucket.sizeUnits === "pixels"
+                        ? [new ScreenSpaceSizeExtension()]
+                        : []),
                     ...(bucket.depthTest
                         ? [new DeckZIndexExtension()]
                         : []),

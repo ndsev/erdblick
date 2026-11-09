@@ -1,6 +1,8 @@
-import type { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldCandidate } from "./search.model";
+import type {PreparedSearchBranch} from "./search-preparation.model";
+import type { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldInventory, FeatureSearchStyleFieldOptions } from "./search.model";
 import type {FeatureSearchMapLayerRef, FeatureSearchScope} from "./search-definition.model";
 import type {CompletionCandidate} from "./search.model";
+import type {MapSchemaArtifact} from "../mapdata/source-catalog.model";
 
 /** Parser options needed by the schema-completion worker. */
 export interface SearchCompletionWorkerOptions {
@@ -13,7 +15,16 @@ export interface SearchCompletionWorkerOptions {
 /** Refreshes the worker-local parser with the current `/sources` metadata. */
 export interface SearchCompletionDataSourceInfoMessage {
     type: "SearchCompletionDataSourceInfo";
+    requestId: number;
     dataSourceInfoJson: string | null;
+    schemas: MapSchemaArtifact[];
+}
+
+/** Native installation acknowledgement; dependent queries remain queued until this arrives. */
+export interface SearchCompletionDataSourceInfoReady {
+    type: "SearchCompletionDataSourceInfoReady";
+    requestId: number;
+    error?: string;
 }
 
 /** Requests one schema-backed completion pass off the UI thread. */
@@ -26,7 +37,18 @@ export interface SearchCompletionRequestMessage {
     options: SearchCompletionWorkerOptions;
 }
 
-/** Completion result emitted by the worker for the owning input surface. */
+/** Retires queued/streaming completion for one editor without replacing its schema. */
+export interface SearchCompletionCancelMessage {
+    type: "SearchCompletionCancel";
+    ownerId: string;
+}
+
+/**
+ * Additive completion candidates for one input surface and request serial.
+ * Batches arrive per context; done marks completion. A newer requestSerial for
+ * the same owner can supersede an older request. Cancelled requests still send
+ * a final reply so the main-thread schema lane can admit the next request.
+ */
 export interface SearchCompletionResultMessage {
     type: "SearchCompletionResult";
     ownerId: string;
@@ -39,6 +61,7 @@ export interface SearchCompletionResultMessage {
 /** Requests concrete search-scope inference from the schema worker. */
 export interface SearchScopeAnalysisRequestMessage {
     type: "SearchScopeAnalysisRequest";
+    selectedFeatureTypes?: string[];
     requestId: number;
     query: string;
     scope: FeatureSearchScope;
@@ -48,6 +71,7 @@ export interface SearchScopeAnalysisRequestMessage {
 /** Result of schema-backed concrete scope inference. */
 export interface SearchScopeAnalysisResultMessage {
     type: "SearchScopeAnalysisResult";
+    interpretations?: PreparedSearchBranch[];
     requestId: number;
     concreteScope: "feature" | "attribute";
     normalizedQuery: string;
@@ -69,23 +93,34 @@ export interface SearchStyleFieldsRequestMessage {
     query: string;
     scope: FeatureSearchScope;
     selectedMapLayers?: FeatureSearchMapLayerRef[];
+    options: FeatureSearchStyleFieldOptions;
 }
 
-/** Result field candidates computed by the schema worker. */
+/** Measured worker phases and send time, allowing actual transfer delay to be measured by the receiver. */
+export interface SearchStyleFieldsTiming {
+    nativeMs: number;
+    normalizationMs: number;
+    postedAt: number;
+}
+
+/** Compact result computed by the schema worker; failure is never an empty inventory. */
 export interface SearchStyleFieldsResultMessage {
     type: "SearchStyleFieldsResult";
     requestId: number;
-    fields: FeatureSearchStyleFieldCandidate[];
+    inventory?: FeatureSearchStyleFieldInventory;
+    timing?: SearchStyleFieldsTiming;
     error?: string;
 }
 
 export type SearchCompletionWorkerInboundMessage =
     SearchCompletionDataSourceInfoMessage |
     SearchCompletionRequestMessage |
+    SearchCompletionCancelMessage |
     SearchScopeAnalysisRequestMessage |
     SearchStyleFieldsRequestMessage;
 
 export type SearchCompletionWorkerOutboundMessage =
+    SearchCompletionDataSourceInfoReady |
     SearchCompletionResultMessage |
     SearchScopeAnalysisResultMessage |
     SearchStyleFieldsResultMessage;

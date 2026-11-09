@@ -61,8 +61,10 @@ export interface DiagnosticsSnapshot {
     tiles: TileStateCounts;
     progress: TilePipelineProgress;
     backend: BackendState;
+
     /** Real in-flight work, excluding pending partitions and recovery waits. */
     loading?: boolean;
+
     /** Current failures and recovery, independent of historical error logs. */
     recovery?: {retrying: boolean; failed: boolean; message: string};
 }
@@ -71,6 +73,7 @@ export interface DiagnosticsSnapshot {
 export interface PerfStat {
     key: string;
     path: string[];
+
     /** View-wide live value which is independent of the tile/layer filter. */
     scope?: 'view';
     unit?: string;

@@ -27,14 +27,22 @@ import {
 } from "./location-geometry.util";
 import { GeolocationState } from "./geolocation.state";
 
+/** Longitude and latitude in degrees, in that order. */
 export type LocationPoint = [number, number];
+
+/** South-west longitude/latitude plus width/height in degrees, not two corners. */
 export type LocationAabb = [LocationPoint, LocationPoint];
 
 const MAPGET_LOCATION_PROVIDER_ID = "mapget-offline";
 const MAPGET_LOCATION_ENDPOINT_URL = "/location";
 const LOCATION_SEARCH_TARGET_PREFIX = "loc:";
+// Selected-result detail may fall back to a saved extent or point after eight seconds.
 const LOCATION_DETAIL_TIMEOUT_MS = 8000;
 
+/**
+ * Provider identity and lightweight navigation metadata retained in search history.
+ * Detailed boundary geometry is fetched only when a result is selected.
+ */
 export interface LocationSearchMatch {
     id: string;
     name: string;
@@ -113,6 +121,7 @@ export function normalizeLocationSearchPayload(raw: unknown): LocationSearchMatc
     return normalized;
 }
 
+/** Accept a finite numeric origin/size pair; geographic extent checks happen later. */
 function normalizeAabb(value: unknown): LocationAabb | null {
     if (!(Array.isArray(value)
         && value.length === 2
@@ -145,6 +154,7 @@ function populationRank(match: LocationSearchMatch): number {
         : -1;
 }
 
+/** Rank populous results first, then use stable labels and IDs to break ties. */
 function compareLocationMatches(lhs: LocationSearchMatch, rhs: LocationSearchMatch): number {
     const populationDelta = populationRank(rhs) - populationRank(lhs);
     if (populationDelta !== 0) {
@@ -155,6 +165,11 @@ function compareLocationMatches(lhs: LocationSearchMatch, rhs: LocationSearchMat
         || lhs.id.localeCompare(rhs.id);
 }
 
+/**
+ * Split configured field selectors such as $.results[0].name into property/index
+ * steps. This supports simple paths and quoted keys, not JSONPath evaluation;
+ * malformed brackets or non-integer array indices return null.
+ */
 function parseAdapterPath(path: string): Array<string | number> | null {
     let source = path.trim();
     if (!source || source === "$") {
@@ -211,6 +226,10 @@ function parseAdapterPath(path: string): Array<string | number> | null {
     return segments;
 }
 
+/**
+ * Follow a configured path through objects/arrays; a missing or incompatible
+ * step yields undefined. The special path $ selects the whole source value.
+ */
 function readAdapterPath(source: unknown, path: string | undefined): unknown {
     if (!path) {
         return undefined;
@@ -237,6 +256,7 @@ function readAdapterPath(source: unknown, path: string | undefined): unknown {
     return current;
 }
 
+/** Substitute {field.path} placeholders, rendering missing values as empty text. */
 function renderAdapterTemplate(source: unknown, template: string): string {
     return template.replace(/\{([^{}]+)\}/g, (_match, path: string) => {
         const value = readAdapterPath(source, path);
@@ -244,6 +264,10 @@ function renderAdapterTemplate(source: unknown, template: string): string {
     }).trim();
 }
 
+/**
+ * Read an adapter field from a path, literal or template. Object selectors prefer
+ * value, then template, then path when more than one is provided.
+ */
 function readAdapterField(source: unknown, selector: LocationSearchFieldSelector | undefined): unknown {
     if (selector === undefined) {
         return undefined;
@@ -284,6 +308,11 @@ function arrayNumbers(value: unknown): number[] | null {
     return result.every(entry => entry !== undefined) ? result as number[] : null;
 }
 
+/**
+ * Query configured place-name providers and resolve selected results for navigation.
+ * Search history stores result metadata; optional offline boundary geometry is
+ * fetched on selection and cancelled when the corresponding consent is withdrawn.
+ */
 @Injectable({ providedIn: "root" })
 export class GeolocationService {
 
@@ -302,7 +331,11 @@ export class GeolocationService {
         return this.configService.snapshot.locationSearch.minCharacters;
     }
 
-    /** Requests location matches from every enabled configured provider. */
+    /**
+     * Query all enabled providers and emit one population-ranked list capped at
+     * limit (at least one). Failed providers contribute no matches. Disabling
+     * search completes the subscription and cancels its pending HTTP requests.
+     */
     search(query: string, limit: number): Observable<LocationSearchMatch[]> {
         const trimmedQuery = query.trim();
         if (!this.state.locationSearchEnabled || !isSupportedLocationSearchQuery(trimmedQuery) || trimmedQuery.length < this.minCharacters) {
@@ -359,6 +392,8 @@ export class GeolocationService {
             return of(match?.lonLat ? {point: match.lonLat, label: match.name}
                 : {error: "This location has no usable centrepoint. Search for the place again."});
         }
+
+        // Only the built-in provider has an identity endpoint for lazy boundary lookup.
         const prefix = `${LOCATION_SEARCH_TARGET_PREFIX}${MAPGET_LOCATION_PROVIDER_ID}:`;
         const id = actionId.startsWith(prefix) ? actionId.slice(prefix.length) : undefined;
         if (!id || !/^wof:[1-9]\d*$/.test(id)) {
@@ -369,6 +404,7 @@ export class GeolocationService {
         if (match?.geometryAvailable === false) return of(this.navigationFromMatch(match));
         const provider = this.configuredMapgetLocationProvider();
         if (!provider?.enabled) return of(this.navigationFromMatch(match, undefined, "Location lookup is disabled."));
+
         let params = new HttpParams();
         for (const [key, value] of Object.entries(provider.params ?? {})) {
             if (!["name", "id", "geometry", "limit", provider.queryParam, provider.limitParam].includes(key)) {
@@ -422,6 +458,7 @@ export class GeolocationService {
         return normalizeLocationSearchPayload(payload)?.name ?? null;
     }
 
+    /** Isolate one provider failure so the aggregate search can return other matches. */
     private searchProvider(
         provider: LocationSearchProviderConfig,
         query: string,
@@ -434,6 +471,10 @@ export class GeolocationService {
         );
     }
 
+    /**
+     * Apply deployment parameters, then override query/limit with this search.
+     * The response adapter converts provider-specific objects to navigation metadata.
+     */
     private searchProviderRequest(
         provider: LocationSearchProviderConfig,
         query: string,
@@ -457,6 +498,10 @@ export class GeolocationService {
             provider.id === MAPGET_LOCATION_PROVIDER_ID && provider.url === MAPGET_LOCATION_ENDPOINT_URL);
     }
 
+    /**
+     * Adapt each response row and drop candidates lacking a usable identity/position.
+     * Provider IDs and names come from configuration, not untrusted response fields.
+     */
     private normalizeProviderResponse(
         provider: LocationSearchProviderConfig,
         payload: unknown): LocationSearchMatch[] {
@@ -485,6 +530,7 @@ export class GeolocationService {
         return matches;
     }
 
+    /** Select a configured result-array path, or use the response itself. */
     private providerResponseItems(provider: LocationSearchProviderConfig, payload: unknown): unknown {
         if (!provider.adapter?.itemsPath) {
             return payload;
@@ -492,6 +538,10 @@ export class GeolocationService {
         return readAdapterPath(payload, provider.adapter.itemsPath);
     }
 
+    /**
+     * Map configured fields to the common result shape, retaining same-named source
+     * fields when a selector provides no value. Validation follows this adaptation.
+     */
     private adaptProviderMatch(rawMatch: unknown, adapter: LocationSearchAdapterConfig): Record<string, unknown> {
         const fields = adapter.fields ?? {};
         const normalizedRaw = rawMatch as Record<string, unknown>;
@@ -514,6 +564,10 @@ export class GeolocationService {
         return adapted;
     }
 
+    /**
+     * Prefer the configured coordinate array, respecting its axis order, then try
+     * separate longitude and latitude selectors. Values are normalized to lon/lat.
+     */
     private adapterLonLat(rawMatch: unknown, adapter: LocationSearchAdapterConfig): LocationPoint | undefined {
         const fields = adapter.fields ?? {};
         const lonLatValues = arrayNumbers(readAdapterField(rawMatch, fields.lonLat));
@@ -528,6 +582,10 @@ export class GeolocationService {
         return lon !== undefined && lat !== undefined ? [lon, lat] : undefined;
     }
 
+    /**
+     * Prefer an origin/size field; otherwise convert the configured bounding-box
+     * ordering into south-west origin plus angular width and height.
+     */
     private adapterAabb(rawMatch: unknown, adapter: LocationSearchAdapterConfig): LocationAabb | undefined {
         const selectedAabb = readAdapterField(rawMatch, adapter.fields?.aabb);
         const normalizedSelectedAabb = normalizeAabb(selectedAabb);
@@ -554,6 +612,7 @@ export class GeolocationService {
         return [[west, south], [east - west, north - south]];
     }
 
+    /** Build escaped palette HTML with provider metadata and available attribution links. */
     private labelForMatch(match: LocationSearchMatch): string {
         const details = [
             match.providerName,

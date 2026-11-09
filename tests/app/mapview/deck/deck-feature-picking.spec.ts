@@ -1,4 +1,5 @@
 import "@angular/compiler";
+import { Subject } from "rxjs";
 import { WebMercatorViewport } from "@deck.gl/core";
 import { addMetersToLngLat } from "@math.gl/web-mercator";
 import { describe, expect, it, vi } from "vitest";
@@ -31,7 +32,7 @@ function createView() {
 }
 
 /** Creates the perspective sibling used when a test exercises depth reconstruction. */
-function create3DView() {
+function create3DView(viewIds = ["0", "1"]) {
     return new DeckMapView3D(
         0,
         "canvas",
@@ -44,7 +45,7 @@ function create3DView() {
         { state: {} } as never,
         {} as never,
         {} as never,
-        {} as never, Object.assign({} as never, { viewIdAt: (index: number) => String(index), viewIds: ["0", "1"] }) as never, { state: {} } as never, {} as never as never, {} as never
+        {} as never, Object.assign({} as never, { viewIdAt: (index: number) => viewIds[index], viewIds, mapZoomStep: 0.2 }) as never, { state: {} } as never, {} as never as never, {} as never
     );
 }
 
@@ -58,7 +59,29 @@ function subsetPickResolver(
 }
 
 describe("Deck rendered-feature picking", () => {
-    it("uses one configured-radius deep query, excludes untagged layers, and continues after an unresolved hit", () => {
+    it("acquires navigation targets through the real view wiring before and after reordering", () => {
+        const viewIds = ["4", "7"];
+        const view = create3DView(viewIds) as any;
+        const target = {position: [11, 48, 0], origin: "ground"};
+        const resolve = vi.spyOn(view, "resolveControllerNavigationTarget").mockReturnValue(target);
+        const controller = view.createDeckControllerOptions();
+        for (const reordered of [false, true]) {
+            if (reordered) viewIds.reverse();
+            const deckView = view.createMapDeckView(controller);
+            const viewport = deckView.makeViewport({width: 1000, height: 700,
+                viewState: {longitude: 11, latitude: 48, zoom: 16, pitch: 55}});
+            const acquired = controller.getInteractionTarget({
+                viewId: deckView.id, viewport, screenPosition: [500, 350],
+                operation: "rotate", source: "pointer"
+            });
+            expect(deckView.id).toBe("4");
+            expect(acquired?.coordinate).toEqual(target.position);
+            expect(view.createFirstPersonDeckView().id).toBe(deckView.id);
+        }
+        expect(resolve).toHaveBeenCalledTimes(2);
+    });
+
+    it("uses one configured-radius deep query, excludes untagged layers, and continues after an unresolved hit", async () => {
         const view = createView();
         const unselectableLayer = {
             id: "base-unselectable",
@@ -95,7 +118,7 @@ describe("Deck rendered-feature picking", () => {
             pickMultipleObjects
         };
 
-        const result = view.drillPickFeatures({ x: 12, y: 24 }, 3, 5);
+        const result = await view.drillPickFeatures({ x: 12, y: 24 }, 3, 5);
 
         expect(pickMultipleObjects).toHaveBeenCalledOnce();
         expect(pickMultipleObjects).toHaveBeenCalledWith({
@@ -112,7 +135,7 @@ describe("Deck rendered-feature picking", () => {
         });
     });
 
-    it("flattens merged objects and deduplicates by the full tile-feature identity", () => {
+    it("flattens merged objects and deduplicates by the full tile-feature identity", async () => {
         const view = createView();
         const mergedLayer = {
             id: "merged-base",
@@ -145,7 +168,7 @@ describe("Deck rendered-feature picking", () => {
             pickMultipleObjects
         };
 
-        expect(view.drillPickFeatures({ x: 0, y: 0 }, 1, 3)).toEqual({
+        expect(await view.drillPickFeatures({ x: 0, y: 0 }, 1, 3)).toEqual({
             topFeatureIds: [
                 { mapTileKey: "map-a/tile", featureId: "feature-4" },
                 { mapTileKey: "map-b/tile", featureId: "feature-4" }
@@ -158,7 +181,7 @@ describe("Deck rendered-feature picking", () => {
         });
     });
 
-    it("orders vector candidates by z-index without moving external picks", () => {
+    it("orders vector candidates by z-index without moving external picks", async () => {
         const view = createView() as any;
         const layer = new ErdblickVectorLayer({
             id: "gpu-scene",
@@ -198,7 +221,7 @@ describe("Deck rendered-feature picking", () => {
             ])
         };
 
-        const result = view.drillPickFeatures({ x: 0, y: 0 }, 4, 4);
+        const result = await view.drillPickFeatures({ x: 0, y: 0 }, 4, 4);
         expect(result.topFeatureIds).toEqual([
             { mapTileKey: "map/tile", featureId: "feature-2" }
         ]);
@@ -210,14 +233,14 @@ describe("Deck rendered-feature picking", () => {
         ]);
     });
 
-    it("selects only the top unique feature on primary click", () => {
+    it("selects only the top unique feature on primary click", async () => {
         const view = createView() as any;
         const top = { mapTileKey: "map/tile", featureId: "top" };
         const lower = { mapTileKey: "map/tile", featureId: "lower" };
         view.picking.desktopDrillPickingEnabled = true;
         view.inspectionState = {
             focusedView: 0,
-            state: { drillPickRadius: 2, inspectionsLimit: 10 },
+            state: { drillPickRadius: 2, inspectionsLimit: 10, selectionState: new Subject() },
             unsetUnlockedSelections: vi.fn()
         };
         view.inspectionSelection = { inspectFeatureIds: vi.fn() };
@@ -232,7 +255,7 @@ describe("Deck rendered-feature picking", () => {
         }));
         view.pickCartographic = vi.fn(() => null);
 
-        view.onClick(
+        await view.onClick(
             { x: 10, y: 20 },
             { srcEvent: { button: 0, pointerType: "mouse", ctrlKey: false } }
         );
@@ -241,7 +264,28 @@ describe("Deck rendered-feature picking", () => {
             .toHaveBeenCalledWith([top], false);
     });
 
-    it("selects every member of the top merged point without selecting lower objects", () => {
+    it.each(["selection", "background click"])("ignores a late located click after a newer %s", async change => {
+        const view = createView() as any;
+        const selectionState = new Subject();
+        view.picking.desktopDrillPickingEnabled = true;
+        view.inspectionState = {
+            state: {drillPickRadius: 2, inspectionsLimit: 10, selectionState},
+            unsetUnlockedSelections: vi.fn()
+        };
+        view.inspectionSelection = {inspectFeatureIds: vi.fn()};
+        view.menuService = {tileOutline: {next: vi.fn()}};
+        let finish!: (value: unknown) => void;
+        view.picking.drillPickFeatures = vi.fn(() => new Promise(resolve => { finish = resolve; }));
+        const pending = view.onClick({x: 10, y: 20}, {srcEvent: {button: 0}});
+        if (change === "selection") selectionState.next([]);
+        else await view.onClick(undefined, {srcEvent: {button: 0}});
+        finish({topFeatureIds: [{mapTileKey: "remote", featureId: "Road.7"}], featureIds: []});
+        await pending;
+        expect(view.inspectionSelection.inspectFeatureIds).not.toHaveBeenCalled();
+        expect(selectionState.observed).toBe(false);
+    });
+
+    it("selects every member of the top merged point without selecting lower objects", async () => {
         const view = createView() as any;
         const first = { mapTileKey: "map/tile", featureId: "merged-a" };
         const second = { mapTileKey: "map/tile", featureId: "merged-b" };
@@ -249,7 +293,7 @@ describe("Deck rendered-feature picking", () => {
         view.picking.desktopDrillPickingEnabled = true;
         view.inspectionState = {
             focusedView: 0,
-            state: { drillPickRadius: 2, inspectionsLimit: 10 },
+            state: { drillPickRadius: 2, inspectionsLimit: 10, selectionState: new Subject() },
             unsetUnlockedSelections: vi.fn()
         };
         view.inspectionSelection = { inspectFeatureIds: vi.fn() };
@@ -264,7 +308,7 @@ describe("Deck rendered-feature picking", () => {
         }));
         view.pickCartographic = vi.fn(() => null);
 
-        view.onClick(
+        await view.onClick(
             { x: 10, y: 20 },
             { srcEvent: { button: 0, pointerType: "mouse", ctrlKey: false } }
         );
@@ -273,13 +317,13 @@ describe("Deck rendered-feature picking", () => {
             .toHaveBeenCalledWith([first, second], false);
     });
 
-    it("picks after a touch tap when no pointer-down picking info is available", () => {
+    it("picks after a touch tap when no pointer-down picking info is available", async () => {
         const view = createView() as any;
         const tapped = { mapTileKey: "map/tile", featureId: "tapped" };
         view.picking.desktopDrillPickingEnabled = false;
         view.inspectionState = {
             focusedView: 0,
-            state: { drillPickRadius: 5, inspectionsLimit: 10 },
+            state: { drillPickRadius: 5, inspectionsLimit: 10, selectionState: new Subject() },
             unsetUnlockedSelections: vi.fn()
         };
         view.inspectionSelection = { inspectFeatureIds: vi.fn() };
@@ -294,7 +338,7 @@ describe("Deck rendered-feature picking", () => {
         }));
         view.pickCartographic = vi.fn(() => null);
 
-        view.onClick(
+        await view.onClick(
             { x: 10, y: 20 },
             { srcEvent: { button: 0, pointerType: "touch", ctrlKey: false } }
         );
@@ -304,7 +348,7 @@ describe("Deck rendered-feature picking", () => {
             .toHaveBeenCalledWith([tapped], false);
     });
 
-    it("preserves merged membership from the direct touch pick", () => {
+    it("preserves merged membership from the direct touch pick", async () => {
         const view = createView() as any;
         const first = { mapTileKey: "map/tile", featureId: "merged-a" };
         const second = { mapTileKey: "map/tile", featureId: "merged-b" };
@@ -317,7 +361,7 @@ describe("Deck rendered-feature picking", () => {
         view.picking.desktopDrillPickingEnabled = false;
         view.inspectionState = {
             focusedView: 0,
-            state: { drillPickRadius: 5, inspectionsLimit: 10 },
+            state: { drillPickRadius: 5, inspectionsLimit: 10, selectionState: new Subject() },
             unsetUnlockedSelections: vi.fn()
         };
         view.inspectionSelection = { inspectFeatureIds: vi.fn() };
@@ -329,7 +373,7 @@ describe("Deck rendered-feature picking", () => {
         view.picking.drillPickFeatures = vi.fn();
         view.pickCartographic = vi.fn(() => null);
 
-        view.onClick(
+        await view.onClick(
             {
                 x: 10,
                 y: 20,
@@ -502,7 +546,7 @@ describe("Deck rendered-feature picking", () => {
     it("samples one exact top surface from the controller's view-local acquisition", () => {
         const view = create3DView() as any;
         const viewport = new WebMercatorViewport({
-            id: "deck-view-0",
+            id: "deck-0",
             x: 40,
             y: 60,
             width: 1000,
@@ -536,7 +580,7 @@ describe("Deck rendered-feature picking", () => {
             preventDefault
         });
         const target = view.resolveControllerNavigationTarget({
-            viewId: "deck-view-0",
+            viewId: "deck-0",
             operation: "rotate",
             source: "pointer",
             screenPosition: [12, 24],
@@ -591,7 +635,7 @@ describe("Deck rendered-feature picking", () => {
         view.picking.groundNavigationTarget = vi.fn();
 
         const target = view.resolveControllerNavigationTarget({
-            viewId: "deck-view-0",
+            viewId: "deck-0",
             operation: "rotate",
             source: "pointer",
             screenPosition: [12, 24],

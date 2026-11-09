@@ -1,8 +1,3 @@
-/**
- * Schedule keyed expirations without one browser timer per retained value.
- * Callers provide the owners, deadlines and expiry action, and explicitly
- * clear or dispose the scheduler when their transport lifetime ends.
- */
 /** Identity retained with one finite-lifetime tile while it is in the shared heap. */
 export interface TileExpiryToken<Key extends string | number = number> {
     tileId: Key;
@@ -19,12 +14,15 @@ interface HeapEntry<
 }
 
 /**
- * One-timer, indexed min-heap for all finite-lifetime tiles.
+ * Schedule keyed expirations without one browser timer per retained value.
+ * Uses one timer and an indexed min-heap for all finite-lifetime tiles.
  *
  * Memory is O(active finite-TTL tiles), replacement/cancellation is O(log n),
  * and a bounded wake-up quantum prevents a large simultaneous expiry from
- * monopolizing the browser task queue. This class deliberately contains no
- * retry delay or backoff policy.
+ * monopolizing the browser task queue. Owners supply absolute Date.now()
+ * deadlines and decide how to renew expired values. Dispose the scheduler when
+ * its transport lifetime ends; cancellation and disposal do not invoke onExpired.
+ * This class deliberately contains no retry delay or backoff policy.
  */
 export class TileExpiryScheduler<
     Owner extends object,
@@ -35,6 +33,11 @@ export class TileExpiryScheduler<
         new Map<Owner, Map<Key, HeapEntry<Owner, Key>>>();
     private timer: ReturnType<typeof setTimeout> | null = null;
 
+    /**
+     * Call onExpired once per owner in each expiry batch. maxExpiriesPerTask
+     * limits tiles processed per browser task (512 by default), yielding between
+     * batches so a burst of expirations does not block interaction.
+     */
     constructor(
         private readonly onExpired: (
             owner: Owner,
@@ -47,6 +50,11 @@ export class TileExpiryScheduler<
         return this.heap.length;
     }
 
+    /**
+     * Replace the deadline for one owner/tile pair, in Unix milliseconds.
+     * A non-finite deadline cancels any previous expiration. valueVersion is
+     * returned with the expiry so owners can ignore tokens for replaced values.
+     */
     schedule(
         owner: Owner,
         tileId: Key,
@@ -61,6 +69,7 @@ export class TileExpiryScheduler<
             }
             return;
         }
+
         let ownerEntries = this.entriesByOwner.get(owner);
         if (!ownerEntries) {
             ownerEntries = new Map();
@@ -82,6 +91,10 @@ export class TileExpiryScheduler<
         }
     }
 
+    /**
+     * Remove one deadline without expiring its value. Internal replacement can
+     * suppress timer rearming until the new heap head is known.
+     */
     cancel(owner: Owner, tileId: Key, rearm = true): void {
         const ownerEntries = this.entriesByOwner.get(owner);
         const entry = ownerEntries?.get(tileId);
@@ -99,6 +112,7 @@ export class TileExpiryScheduler<
         }
     }
 
+    /** Drop all deadlines for an owner when its subscription is released. */
     cancelOwner(owner: Owner): void {
         const entries = this.entriesByOwner.get(owner);
         if (!entries) {
@@ -111,6 +125,7 @@ export class TileExpiryScheduler<
         this.armTimer();
     }
 
+    /** Cancel the pending wake-up and release every retained owner and token. */
     dispose(): void {
         if (this.timer !== null) {
             clearTimeout(this.timer);
@@ -120,6 +135,7 @@ export class TileExpiryScheduler<
         this.entriesByOwner.clear();
     }
 
+    /** Wake just after the earliest deadline, clamping to the browser timer range. */
     private armTimer(): void {
         if (this.timer !== null) {
             clearTimeout(this.timer);
@@ -140,6 +156,10 @@ export class TileExpiryScheduler<
         }, delay);
     }
 
+    /**
+     * Remove a bounded batch before notifying owners, allowing callbacks to
+     * schedule replacement values without those values joining the current batch.
+     */
     private drainExpired(): void {
         const dueByOwner = new Map<Owner, TileExpiryToken<Key>[]>();
         const now = Date.now();
@@ -165,12 +185,14 @@ export class TileExpiryScheduler<
             });
             drained++;
         }
+
         for (const [owner, tokens] of dueByOwner) {
             this.onExpired(owner, tokens);
         }
         this.armTimer();
     }
 
+    /** Fill a removed heap slot from the tail and restore ordering in either direction. */
     private removeAt(index: number): void {
         const last = this.heap.pop();
         if (!last || index >= this.heap.length) {
@@ -186,6 +208,7 @@ export class TileExpiryScheduler<
         }
     }
 
+    /** Move a new or earlier deadline toward the heap root. */
     private siftUp(start: number): void {
         let index = start;
         while (index > 0) {
@@ -198,6 +221,7 @@ export class TileExpiryScheduler<
         }
     }
 
+    /** Move a later deadline below its earliest child. */
     private siftDown(start: number): void {
         let index = start;
         while (true) {
@@ -226,6 +250,7 @@ export class TileExpiryScheduler<
                 String(a.tileId) < String(b.tileId));
     }
 
+    /** Keep entry indices synchronized so cancellation can remove a tile directly. */
     private swap(left: number, right: number): void {
         const value = this.heap[left];
         this.heap[left] = this.heap[right];

@@ -27,7 +27,14 @@ interface DockedPanelDragControllerOptions<TId> {
 
 type DockedPanelDragMode = "reorder" | "undock";
 
-/** Shared drag controller for AppPanel-backed dock entries. */
+/**
+ * Shared drag controller for AppPanel-backed dock entries.
+ *
+ * Tracks one pointer gesture and reports the final reorder or undock to the owning
+ * component. DOM order is sampled at drop time; the owner persists the resulting
+ * order. Call destroy() when that component is removed to release window listeners
+ * and the temporary body-mounted preview.
+ */
 export class DockedPanelDragController<TId> {
     readonly state: DockedPanelDragState<TId> = {
         isReordering: false
@@ -84,6 +91,10 @@ export class DockedPanelDragController<TId> {
         this.reset();
     }
 
+    /**
+     * Start dragging only after half a base-font-size of pointer movement. The
+     * first active position selects reorder/undock mode for this gesture.
+     */
     private onDockDragMove(event: PointerEvent): void {
         if (!this.dragStart || event.pointerId !== this.dragPointerId) {
             return;
@@ -96,6 +107,7 @@ export class DockedPanelDragController<TId> {
             this.dragActive = true;
             document.body.classList.add("dialog-dragging");
         }
+
         this.ensureDragPreview(event);
         this.positionDragPreview(event.clientX, event.clientY);
         if (!this.dragMode) {
@@ -112,6 +124,10 @@ export class DockedPanelDragController<TId> {
         }
     }
 
+    /**
+     * Commit the final drop through the owner callback, then release gesture state.
+     * Dropping outside the container requests undocking even after an in-dock start.
+     */
     private onDockDragEnd(event: PointerEvent): void {
         if (event.pointerId !== this.dragPointerId) {
             return;
@@ -133,6 +149,7 @@ export class DockedPanelDragController<TId> {
         this.reset();
     }
 
+    /** Reinsert the dragged panel into the current DOM order and notify only on change. */
     private applyReorder(draggedId: TId): void {
         const displayOrder = this.currentDisplayOrder();
         if (displayOrder.length < 2) {
@@ -147,6 +164,10 @@ export class DockedPanelDragController<TId> {
         }
     }
 
+    /**
+     * Choose insertion before the first panel midpoint below the pointer, excluding
+     * the dragged panel so its original slot does not skew the resulting index.
+     */
     private updateDropTarget(clientY: number): void {
         const draggedId = this.state.draggedId;
         if (draggedId === undefined) {
@@ -162,6 +183,7 @@ export class DockedPanelDragController<TId> {
             this.clearDropTarget();
             return;
         }
+
         let dropIndex = elements.length;
         for (let i = 0; i < elements.length; i++) {
             const rect = elements[i].el.getBoundingClientRect();
@@ -190,6 +212,10 @@ export class DockedPanelDragController<TId> {
         return !!rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
     }
 
+    /**
+     * Create a body-mounted outline once per drag and preserve the pointer's
+     * original offset inside the panel, avoiding a jump when it is undocked.
+     */
     private ensureDragPreview(event: PointerEvent): void {
         if (this.dragPreviewElement || this.state.draggedId === undefined) {
             return;
@@ -226,6 +252,7 @@ export class DockedPanelDragController<TId> {
         this.dragPreviewElement = previewElement;
     }
 
+    /** Place the preview using viewport coordinates and the retained grab offset. */
     private positionDragPreview(clientX: number, clientY: number): void {
         if (!this.dragPreviewElement) {
             return;
@@ -261,6 +288,10 @@ export class DockedPanelDragController<TId> {
         this.dragPreviewOffset = {x: 0, y: 0};
     }
 
+    /**
+     * Release every window listener and preview, including a gesture still below
+     * the movement threshold. Restore the shared body drag class on all exit paths.
+     */
     private reset(): void {
         this.detachMove?.();
         this.detachUp?.();

@@ -6,7 +6,7 @@
 import type {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm.adapter";
 import type { ErdblickStyle } from "../mapstyle/mapstyle.model";
-import type {FeatureSearchStyleRule} from "./search-definition.model";
+import {searchStyleRuleAppliesTo, type FeatureSearchStyleRule} from "./search-definition.model";
 import type {FeatureSearchResolvedDefinition} from "./feature-search-runtime-state.model";
 import type {MapgetLayer} from "../mapdata/mapget-layer.model";
 import type {FilterChannelDefinition} from "../mapdata/filter-subscription.model";
@@ -48,9 +48,12 @@ export function compileFeatureSearchStyle(
     },
     featureTypes: readonly string[]
 ): CompiledFeatureSearchStyle {
-    const hasRenderRules = definition.searchStyleRules.length > 0;
+    const rules = definition.searchStyleRules.filter(rule => searchStyleRuleAppliesTo(rule, {
+        mapId: mapgetLayer.mapId, layerId: mapgetLayer.layerId, scope: definition.concreteScope
+    }));
+    const hasRenderRules = rules.length > 0;
     const runtimeRules = featureSearchRulesToStyleRules(
-        hasRenderRules ? definition.searchStyleRules : [invisiblePlaceholderRule()],
+        hasRenderRules ? rules : [invisiblePlaceholderRule()],
         definition
     );
     const sourceObject = {
@@ -99,7 +102,8 @@ export function compileFeatureSearchStyle(
     );
     const filterPlan: StyleFilterPlan = {
         valid: true,
-        channels: channelPlan.channels,
+        channels: channelPlan.channels.map(channel => ({...channel,
+            ...(definition.schemaId ? {schemaId: definition.schemaId} : {})})),
         issues: []
     };
 

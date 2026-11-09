@@ -13,7 +13,7 @@ import {
     dataSourceProgressPercent,
     sortDataSourceCatalogEntries
 } from "./source-catalog.model";
-import { Subscription } from "rxjs";
+import { Subject, Subscription } from "rxjs";
 import { filter, take } from "rxjs/operators";
 import {
     clampTileGridLevel,
@@ -456,6 +456,9 @@ export interface ResolvedMapPresetComponent {
  */
 export class MapLayerTree {
     nodes: (GroupTreeNode | MapTreeNode)[] = [];
+
+    /** Announces rebuilt option rows only after their per-view values are configured. */
+    readonly styleOptionsChanged = new Subject<void>();
     private mapsForMapIds: Map<string, MapTreeNode> = new Map();
     private sizeOfTree: number = 0;
     private readonly subscriptions = new Subscription();
@@ -470,19 +473,11 @@ export class MapLayerTree {
         public readonly layerState: MapDataState) {
         this.initializeMapGroups(mapInfo);
         this.subscriptions.add(
-            this.stateService.ready.pipe(filter(ready => ready), take(1)).subscribe(_ => {
-                this.initializeStyleOptions([...this.styleService.styles.values()]);
-                this.configureTreeParameters();
-            })
+            this.stateService.ready.pipe(filter(ready => ready), take(1))
+                .subscribe(() => this.refreshStyleOptions())
         );
-        this.subscriptions.add(this.styleService.styleGroups.subscribe(_ => {
-            this.initializeStyleOptions([...this.styleService.styles.values()]);
-            this.configureTreeParameters();
-        }));
-        this.subscriptions.add(this.mapPresetService.presets$.subscribe(_ => {
-            this.initializeStyleOptions([...this.styleService.styles.values()]);
-            this.configureTreeParameters();
-        }));
+        this.subscriptions.add(this.styleService.styleGroups.subscribe(() => this.refreshStyleOptions()));
+        this.subscriptions.add(this.mapPresetService.presets$.subscribe(() => this.refreshStyleOptions()));
         // Refresh cached controls during membership notification, before completed
         // observers clone the tree for display. All per-view owner values are
         // already staged together; the numeric count projection arrives too late.
@@ -494,6 +489,14 @@ export class MapLayerTree {
     /** Releases state and style subscriptions when the datasource catalog replaces this tree. */
     destroy(): void {
         this.subscriptions.unsubscribe();
+        this.styleOptionsChanged.complete();
+    }
+
+    /** Publishes a complete option update to panels observing this particular tree. */
+    private refreshStyleOptions(): void {
+        this.initializeStyleOptions([...this.styleService.styles.values()]);
+        this.configureTreeParameters();
+        this.styleOptionsChanged.next();
     }
 
     /** Exposes the flat map lookup used by callers that already know the map id. */
@@ -677,7 +680,13 @@ export class MapLayerTree {
         this.stateService.withSystemStateMutation(() => this.applyTreeParameters());
     }
 
+    /**
+     * Materialize per-view layer defaults, reconcile layer presets, then infer map
+     * presets from the resulting option values. Called inside a system-state edit
+     * so catalog refreshes do not become user undo steps.
+     */
     private applyTreeParameters(): void {
+        // Only the first top-level map/group starts visible without saved state.
         let defaultVisibility = true;
         for (const mapOrGroupItem of this.nodes) {
             for (const featureLayer of mapOrGroupItem.allFeatureLayers()) {
@@ -727,6 +736,9 @@ export class MapLayerTree {
                             }
                             return selectedPreset.key;
                         }
+
+                        // Retain an exact saved selection first. Infer only when the
+                        // option values identify a usable replacement preset.
                         const inferredPreset = bestMatchingLayerPreset(
                             presetNode.presets,
                             options,
@@ -758,6 +770,7 @@ export class MapLayerTree {
             defaultVisibility = false;
         }
 
+        // Map presets depend on the layer options just materialized above.
         const viewCount = this.viewSettings.numViewsState.getValue();
         for (const map of this.maps.values()) {
             map.selectedMapPresetIds = Array.from({ length: viewCount }, (_, viewIndex) => {

@@ -224,7 +224,7 @@ describe('persistence ownership of reactive writes', () => {
         localStorage.clear();
         const { registry, left, right } = setup();
         registry.registerState({ name: 'layerNames', defaultValue: [], schema: z.array(z.string()) });
-        registry.registerStyleState(() => ['view-0']);
+        registry.registerStyleState(() => ['0']);
         registry['setupStateSubscriptions']();
         registry['isReady'] = true;
         registry['scheduleFlush'] = vi.fn();

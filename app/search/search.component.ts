@@ -1,9 +1,11 @@
 import {
+    ChangeDetectionStrategy,
     ChangeDetectorRef,
     Component,
     ElementRef,
     EventEmitter,
     Input,
+    NgZone,
     OnChanges,
     OnDestroy,
     Output,
@@ -23,16 +25,12 @@ import { LayoutService } from "../layout/layout.service";
 import type { FeatureSearchScope } from "./search-definition.model";
 import { SearchResultsComponent } from "./search-results.component";
 import type { FeatureSearchSession } from "./search-session.model";
-import {
-    featureSearchActionPayloadFromCompletion,
-    featureSearchSelectedMapLayersFromPayload
-} from "./search-session.model";
-import { CompletionCandidate } from "./search.model";
 import { SearchService } from "./search.service";
 import { SimfilExpressionInputComponent } from "./simfil-expression-input.component";
 
 @Component({
     selector: "feature-search",
+    changeDetection: ChangeDetectionStrategy.OnPush,
     template: `
         @if (session) {
             @if (isDocked()) {
@@ -119,11 +117,62 @@ import { SimfilExpressionInputComponent } from "./simfil-expression-input.compon
                                          (clicked)="expandFeatureSearchQueryInput()"
                                          (focused)="expandFeatureSearchQueryInput()"
                                          (blurred)="shrinkFeatureSearchQueryInput()"
-                                         (completionAccepted)="onFeatureSearchQueryCompletionAccepted($event)"
                                          (submitted)="rerunSearch()">
                 </simfil-expression-input>
             </div>
             <search-scope [searchId]="searchId" [session]="session" [definition]="session?.definition" [analysis]="session?.schemaAnalysis"></search-scope>
+            @if (session && searchEnabled() && session.preparation?.status !== 'ready') {
+                <section class="search-preparation" data-testid="search-preparation"
+                         aria-label="Search preparation" aria-live="polite"
+                         [attr.aria-busy]="!session.preparation || session.preparation.status === 'preparing'">
+                    @if (!session.preparation || session.preparation.status === 'preparing') {
+                        <div class="search-preparation-heading" role="status" data-testid="search-preparation-spinner">
+                            <i class="pi pi-spinner pi-spin" aria-hidden="true"></i>
+                            <h3>{{ session.preparation?.phase === 'style' ? 'Preparing visualization' : 'Finding query interpretations' }}</h3>
+                        </div>
+                        <p>{{ session.preparation?.phase === 'style'
+                            ? 'Preparing the initial style before starting the search.'
+                            : 'Checking the confirmed query against the selected maps, layers and feature types.' }}</p>
+                    } @else if (session.preparation.status === 'needs-choice') {
+                        <div class="search-preparation-heading">
+                            <i class="pi pi-question-circle" aria-hidden="true"></i>
+                            <h3>Choose one interpretation</h3>
+                        </div>
+                        <p>Select the meaning of <code>{{ session.definition.query }}</code>,
+                            or narrow the scope above.</p>
+                        @if (session.preparation.error) { <p role="alert">{{ session.preparation.error }}</p> }
+                        <div class="search-interpretation-choices">
+                            @for (meaning of session.preparation.interpretations; track meaning.id) {
+                                <button type="button" data-testid="search-interpretation"
+                                        [disabled]="!searchEnabled()"
+                                        (click)="chooseInterpretation(meaning.id)">
+                                    <strong>{{ meaning.label }}</strong>
+                                    <code>{{ meaning.query }}</code>
+                                    <span class="search-interpretation-contexts">
+                                        @for (branch of meaning.branches; track $index) {
+                                            <small>{{ branch.mapId }}/{{ branch.layerId }} · {{ branch.scope }} matches</small>
+                                        }
+                                    </span>
+                                </button>
+                            }
+                        </div>
+                    } @else if (session.preparation.status === 'waiting-for-schema') {
+                        <div class="search-preparation-heading" role="status">
+                            <i class="pi pi-spinner pi-spin" aria-hidden="true"></i>
+                            <h3>Waiting for schema</h3>
+                        </div>
+                        <p>{{ session.preparation.error }}</p>
+                        <button type="button" (click)="searchService.retrySearchPreparation(session.id)">Retry preparation</button>
+                    } @else {
+                        <h3>Search preparation failed</h3>
+                        <p role="alert">{{ session.preparation.error }}</p>
+                        <button type="button" (click)="searchService.retrySearchPreparation(session.id)">Retry preparation</button>
+                    }
+                    @if (session.lastResolvedDefinition; as previous) {
+                        <small>Previous results remain on the map: {{ previous.query }}</small>
+                    }
+                </section>
+            } @else {
             <search-diagnostics mode="progress" [searchId]="searchId" [session]="session"
                 [revision]="sessionRevision" [treeIngress]="treeIngress"></search-diagnostics>
             <p-tabs [value]="resultPanelIndex"
@@ -155,11 +204,15 @@ import { SimfilExpressionInputComponent } from "./simfil-expression-input.compon
                     </p-tabpanel>
 
                     <!-- Style -->
-                    <p-tabpanel value="style">
-                        <search-visualization [searchId]="searchId" [session]="session"
-                            [definition]="session?.definition" [analysis]="session?.schemaAnalysis"
-                            [summaries]="session?.results?.valueSummaries" [active]="resultPanelIndex === 'style'"
-                            [featureSearchCompletionZIndex]="featureSearchCompletionZIndex"></search-visualization>
+                    <p-tabpanel value="style" [lazy]="true">
+                        <!-- Category editors can contain hundreds of controls.
+                             Construct them on the first visit, not while showing results. -->
+                        <ng-template #content>
+                            <search-visualization [searchId]="searchId" [session]="session"
+                                [definition]="session?.definition" [analysis]="session?.schemaAnalysis"
+                                [summaries]="session?.results?.valueSummaries" [active]="resultPanelIndex === 'style'"
+                                [featureSearchCompletionZIndex]="featureSearchCompletionZIndex"></search-visualization>
+                        </ng-template>
                     </p-tabpanel>
 
                     <!-- Diagnostics -->
@@ -170,6 +223,7 @@ import { SimfilExpressionInputComponent } from "./simfil-expression-input.compon
                     </p-tabpanel>
                 </p-tabpanels>
             </p-tabs>
+            }
             </div>
         </ng-template>
         <app-confirm-popup [key]="bookmarkedCloseConfirmKey"
@@ -200,15 +254,13 @@ export class SearchComponent implements OnChanges, OnDestroy {
     resultCount = 0;
     treeIngress = {done: 0, total: 0};
     @ViewChild('searchResults') searchResultsComponent?: SearchResultsComponent;
-    /** Publishes one completed append chunk to the independent progress presentation. */
+    /** Publishes child ingress after its check without scheduling a full application pass. */
     protected onTreeIngressChange(progress: {done: number; total: number}): void {
-        // Initial input synchronization can emit during the child's check. Publish
-        // afterwards so the progress sibling never changes inside the same check.
-        queueMicrotask(() => {
+        this.ngZone.runOutsideAngular(() => queueMicrotask(() => {
             if (this.destroyed) return;
             this.treeIngress = progress;
-            this.changeDetector.markForCheck();
-        });
+            this.changeDetector.detectChanges();
+        }));
     }
 
     /** Requests layout synchronization at dialog transitions which precede ResizeObserver. */
@@ -236,7 +288,7 @@ export class SearchComponent implements OnChanges, OnDestroy {
     private pendingBookmarkedCloseSessionId: string | null = null;
     private featureSearchHeaderActionsSignature = "";
     private featureSearchHeaderActionsCache: AppSurfaceHeaderAction[] = [];
-    private sessionSyncTimer: ReturnType<typeof setTimeout> | null = null;
+    private sessionSyncRaf: number | null = null;
     private destroyed = false;
     protected readonly measurePreferredFeatureSearchHeightEm = () => this.measurePreferredBodyHeightEm();
 
@@ -254,7 +306,8 @@ export class SearchComponent implements OnChanges, OnDestroy {
         private dialogStack: DialogStackService,
         private confirmPopupService: AppConfirmPopupService,
         public readonly layout: LayoutService,
-        private readonly changeDetector: ChangeDetectorRef) {
+        private readonly changeDetector: ChangeDetectorRef,
+        private readonly ngZone: NgZone) {
         this.subscriptions.add(this.searchService.progress.subscribe(updatedSession => {
             if (!updatedSession || updatedSession.id !== this.searchId) {
                 return;
@@ -286,20 +339,28 @@ export class SearchComponent implements OnChanges, OnDestroy {
         this.syncFromSession(session);
     }
 
-    /** Coalesces external session emissions behind the active Angular check. */
+    /**
+     * Read the latest session once per frame, after the active Angular check.
+     * Backend progress and viewport coverage can emit several times in one turn;
+     * only the UI projection is coalesced, never result ingestion or map rendering.
+     * The deferred progress refresh checks this panel directly rather than
+     * asking Angular to check the application for each stream notification.
+     */
     private scheduleSessionSync(): void {
-        if (this.destroyed || this.sessionSyncTimer !== null) {
+        if (this.destroyed || this.sessionSyncRaf !== null) {
             return;
         }
-        this.sessionSyncTimer = setTimeout(() => {
-            this.sessionSyncTimer = null;
-            if (this.destroyed) return;
-            const session = this.searchService.getSession(this.searchId);
-            if (session) {
-                this.syncFromSession(session);
-                this.changeDetector.markForCheck();
-            }
-        }, 0);
+        this.sessionSyncRaf = this.ngZone.runOutsideAngular(() =>
+            requestAnimationFrame(() => {
+                this.sessionSyncRaf = null;
+                if (this.destroyed) return;
+                const session = this.searchService.getSession(this.searchId);
+                if (session) {
+                    this.syncFromSession(session);
+                    this.changeDetector.detectChanges();
+                }
+            })
+        );
     }
 
     /** Copies session state into the local view model without crossing streams between searches. */
@@ -311,6 +372,13 @@ export class SearchComponent implements OnChanges, OnDestroy {
         const wasQueryDirty = this.featureSearchQueryDirty;
         const previousQuery = this.lastSearchQuery;
         const previousScope = this.featureSearchScope;
+        if (session.definition.enabled && session.preparation?.status === "needs-choice"
+            && this.focusedInterpretationSignature !== session.preparation.signature) {
+            this.focusedInterpretationSignature = session.preparation.signature;
+            this.ngZone.runOutsideAngular(() => requestAnimationFrame(() =>
+                this.featureSearchContentContainer?.nativeElement
+                    .querySelector<HTMLButtonElement>('[data-testid="search-interpretation"]')?.focus()));
+        }
         this.lastSearchQuery = session.definition.query;
         this.featureSearchScope = session.definition.scope;
         if (this.activeSearchGroupId !== session.runId) {
@@ -347,9 +415,9 @@ export class SearchComponent implements OnChanges, OnDestroy {
     ngOnDestroy() {
         this.destroyed = true;
         this.subscriptions.unsubscribe();
-        if (this.sessionSyncTimer !== null) {
-            clearTimeout(this.sessionSyncTimer);
-            this.sessionSyncTimer = null;
+        if (this.sessionSyncRaf !== null) {
+            cancelAnimationFrame(this.sessionSyncRaf);
+            this.sessionSyncRaf = null;
         }
     }
 
@@ -468,22 +536,11 @@ export class SearchComponent implements OnChanges, OnDestroy {
         this.updateFeatureSearchQueryDirty();
     }
 
-    /** Seeds map-layer selection from a schema completion accepted in the main search-query input. */
-    protected onFeatureSearchQueryCompletionAccepted(candidate: CompletionCandidate): void {
-        const session = this.session;
-        if (!session || !this.searchEnabled()) {
-            return;
-        }
-        const originLayers = featureSearchSelectedMapLayersFromPayload(
-            featureSearchActionPayloadFromCompletion(candidate)
-        ) ?? [];
-        if (!originLayers.length) {
-            return;
-        }
+    private focusedInterpretationSignature = "";
 
-        if (this.searchService.applySearchMapLayersForDetectedContext(session.id, originLayers)) {
-            this.infoMessageService.showInfo("Auto-detected map layers for search.");
-        }
+    /** Confirm one meaning and replace the chooser with preparation progress. */
+    protected chooseInterpretation(id: string): void {
+        if (this.session) this.searchService.chooseSearchInterpretations(this.session.id, [id]);
     }
 
     protected rerunSearch() {
