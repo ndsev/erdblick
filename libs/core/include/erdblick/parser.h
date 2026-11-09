@@ -175,6 +175,16 @@ public:
     NativeJsValue normalizeSearchQuery(std::string const& query, std::string const& scope, NativeJsValue const& options) const;
 
     /**
+     * Offer portable expressions for confirmed input and their per-layer
+     * execution plans. Artifact IDs validate only those temporary plans;
+     * accepted expressions remain reusable on other maps. No tile data is read.
+     */
+    NativeJsValue prepareSearchQuery(
+        std::string const& query,
+        std::string const& scope,
+        NativeJsValue const& options) const;
+
+    /**
      * Discover schema-backed style fields in a selected semantic subtree.
      *
      * `scope` accepts `feature`, `attribute`, or `auto`. Attribute scope is narrowed through
@@ -188,8 +198,9 @@ public:
     NativeJsValue searchStyleFieldsForQuery(std::string const& query, std::string const& scope, NativeJsValue const& options) const;
 
     /**
-     * Derive one generic mapget `/filter` channel per active top-level style
-     * rule for a concrete catalog layer.
+     * Derive generic mapget `/filter` channels for a concrete catalog layer.
+     * Compatible feature rules may share a channel; invalid plans are rejected
+     * instead of executing a partial set of channels.
      */
     NativeJsValue planStyleFilter(
         FeatureLayerStyle const& style,
@@ -234,13 +245,10 @@ public:
     };
 
     /**
-     * Takes a parameter string.
-     * Checks if the first parameter is the prefix of a feature type name.
-     * No valid feature type prefix: Try parsing with all feature types.
-     * Otherwise: Try only feature type names where the prefix matches.
-     * @return Vector of parsing results. An invalid parsing result will have
-     *  a set `error_`. The Id-Part-values of errored parses may be indicative
-     *  of the problem, e.g. `Expecting I32`.
+     * Offer matching feature types and parse their ID parts for the omnibar.
+     * A type-name prefix retains incomplete alternatives with `error_` set
+     * and missing/invalid ID parts represented by "?". Without a matching
+     * prefix, return only complete valid bare IDs. Empty input has no targets.
      */
     std::vector<FilteredFeatureJumpTarget> filterFeatureJumpTargets(std::string const& queryString) const;
 

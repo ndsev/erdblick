@@ -25,6 +25,14 @@ Generated reports still go to `coverage/`, `test-results/` and
 
 ## Angular
 
+Tests that load the core require generated bindings and WASM matching the
+checked-out native APIs. On a clean checkout or after executable native/API
+changes, prepare them with `./ci/20_linux_rebuild.bash` first. Use the same
+wrapper whenever frontend iteration needs a validation build, including
+frontend-only work. The wrapper builds both variants but does not run these
+unit suites. See the [development guide](../docs/erdblick-dev-guide.md#build-and-test)
+for validation scope and shared-input coordination.
+
 ```bash
 npm run test -- --watch=false
 npm run lint

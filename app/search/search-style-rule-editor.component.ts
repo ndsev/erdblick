@@ -128,6 +128,9 @@ import type {SearchStyleProjectionWarning} from "./search-style-sheet.converter"
                             </div>
                         </p-accordion-header>
                         <p-accordion-content>
+                          <!-- Collapsing a rule retains its drafts above, but
+                               releases its field and category editor widgets. -->
+                          @if (accordionValue.includes(panelValue(rule))) {
                             <section class="feature-search-style-section">
                                 <div class="feature-search-style-section-rail">Filter</div>
                                 <div class="feature-search-style-section-body">
@@ -328,6 +331,7 @@ import type {SearchStyleProjectionWarning} from "./search-style-sheet.converter"
                                     </search-style-color>
                                 </div>
                             </section>
+                          }
                         </p-accordion-content>
                     </p-accordion-panel>
                   } @else {
@@ -368,6 +372,7 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
     @Input() canRefreshValueSummaries = true;
     @Input() expandRulesByDefault = false;
     @Input() expansionContext = "";
+
     /** Source indices let Quick retain the authoritative YAML rule ordering. */
     @Input() sourceRuleIndices: Record<number, number> = {};
     @Input() readOnlyRuleIndices: number[] = [];

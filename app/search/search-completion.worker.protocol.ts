@@ -1,3 +1,4 @@
+import type {PreparedSearchBranch} from "./search-preparation.model";
 import type { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldInventory, FeatureSearchStyleFieldOptions } from "./search.model";
 import type {FeatureSearchMapLayerRef, FeatureSearchScope} from "./search-definition.model";
 import type {CompletionCandidate} from "./search.model";
@@ -36,7 +37,18 @@ export interface SearchCompletionRequestMessage {
     options: SearchCompletionWorkerOptions;
 }
 
-/** Completion result emitted by the worker for the owning input surface. */
+/** Retires queued/streaming completion for one editor without replacing its schema. */
+export interface SearchCompletionCancelMessage {
+    type: "SearchCompletionCancel";
+    ownerId: string;
+}
+
+/**
+ * Additive completion candidates for one input surface and request serial.
+ * Batches arrive per context; done marks completion. A newer requestSerial for
+ * the same owner can supersede an older request. Cancelled requests still send
+ * a final reply so the main-thread schema lane can admit the next request.
+ */
 export interface SearchCompletionResultMessage {
     type: "SearchCompletionResult";
     ownerId: string;
@@ -49,6 +61,7 @@ export interface SearchCompletionResultMessage {
 /** Requests concrete search-scope inference from the schema worker. */
 export interface SearchScopeAnalysisRequestMessage {
     type: "SearchScopeAnalysisRequest";
+    selectedFeatureTypes?: string[];
     requestId: number;
     query: string;
     scope: FeatureSearchScope;
@@ -58,6 +71,7 @@ export interface SearchScopeAnalysisRequestMessage {
 /** Result of schema-backed concrete scope inference. */
 export interface SearchScopeAnalysisResultMessage {
     type: "SearchScopeAnalysisResult";
+    interpretations?: PreparedSearchBranch[];
     requestId: number;
     concreteScope: "feature" | "attribute";
     normalizedQuery: string;
@@ -101,6 +115,7 @@ export interface SearchStyleFieldsResultMessage {
 export type SearchCompletionWorkerInboundMessage =
     SearchCompletionDataSourceInfoMessage |
     SearchCompletionRequestMessage |
+    SearchCompletionCancelMessage |
     SearchScopeAnalysisRequestMessage |
     SearchStyleFieldsRequestMessage;
 

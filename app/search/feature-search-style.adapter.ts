@@ -48,9 +48,12 @@ export function compileFeatureSearchStyle(
     },
     featureTypes: readonly string[]
 ): CompiledFeatureSearchStyle {
-    const hasRenderRules = definition.searchStyleRules.length > 0;
+    const rules = definition.searchStyleRules.filter(rule => !rule.applicability ||
+        (rule.applicability.mapId === mapgetLayer.mapId && rule.applicability.layerId === mapgetLayer.layerId &&
+         rule.applicability.scope === definition.concreteScope));
+    const hasRenderRules = rules.length > 0;
     const runtimeRules = featureSearchRulesToStyleRules(
-        hasRenderRules ? definition.searchStyleRules : [invisiblePlaceholderRule()],
+        hasRenderRules ? rules : [invisiblePlaceholderRule()],
         definition
     );
     const sourceObject = {
@@ -99,7 +102,8 @@ export function compileFeatureSearchStyle(
     );
     const filterPlan: StyleFilterPlan = {
         valid: true,
-        channels: channelPlan.channels,
+        channels: channelPlan.channels.map(channel => ({...channel,
+            ...(definition.schemaId ? {schemaId: definition.schemaId} : {})})),
         issues: []
     };
 

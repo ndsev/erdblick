@@ -60,6 +60,47 @@ Schema analysis normalizes the search query before runtime style compilation.
 Outgoing render and result channels therefore use `rewrite: false`; every
 filter and projected field is still schema-compiled by mapget.
 
+Confirmed shorthand first goes through `LayerSchema::searchInterpretations`.
+Each choice carries an ordinary, editable `expression` and source-local
+execution plans. Choosing it replaces the session query with that expression
+and clears the temporary interpretation ID. Adding maps or changing result
+scope prepares that same text again; it does not re-resolve the old shorthand.
+For example, a warning-sign choice becomes `**.warningSign == "SPEED_LIMIT"`
+regardless of the schema hash or versioned name of the enum that suggested it.
+
+Automatic selection of a unique attribute preserves its original shorthand.
+For example, `SPEED_LIMIT_METRIC` stays in the editor while the attribute-root
+plan executes `$name == "SPEED_LIMIT_METRIC"`. New scope selections recheck
+that shorthand for ambiguity. Disabled searches skip preparation; their tabs
+remain accessible with a static disabled status, even without a prepared plan.
+
+Each plan's `query` evaluates the expression at its concrete feature or
+attribute root. Explicit feature-root attribute paths may need rebasing, while
+recursive field predicates remain unchanged. Inferred owners drive initial
+styling, not persistent query restrictions. Map/layer routing and explicit
+feature-type selection belong to the request; exact schema IDs only validate
+the temporary plan. Standalone stylesheet export adds source guards because
+it no longer has the search's map selector.
+
+Completion origins describe where a suggestion was found; they do not define
+where the accepted expression can run. Omnibar submission starts with active
+layers, falling back to completion origins only when no layers are active.
+Completion within an existing search preserves its explicit source selection.
+
+Style discovery receives all prepared attribute owners together through
+`preparedContexts`. Native discovery visits those exact owners without
+normalizing the predicate again and shares its compact field/type tables across
+sources. One worker request installs the selected schema set once, avoiding
+per-owner installation and repeated metadata transfers. The cache depends on
+the selected schemas and owners, so another predicate over the same owners can
+reuse that inventory. Feature inventories are likewise independent of predicates;
+unresolved attribute expressions still use ordinary native normalization.
+
+The Visualization tab creates its editor on first opening. Collapsed rules retain
+their drafts but release their controls. This keeps large enum palettes out of
+the DOM during preparation and while viewing results; OnPush change detection
+alone would still pay the cost of constructing all those hidden controls.
+
 Recursive paths such as `**.numLanes.normalLanes` participate in Auto scope
 inference through SIMFIL's schema-path analysis. If the schema also exposes a
 matching basic feature property, Auto remains feature-scoped rather than
@@ -244,8 +285,14 @@ The response contains `contexts`, `types`, `fields`, `branches`, `complete` and
 context indices in which that meaning applies. Metadata is exported once per
 exact schema/type. Native rows preserve distinct meanings; the editor offers
 one choice per expression and withholds conflicting type metadata rather than
-silently choosing the first owner. Automatic rules retain separate attribute
-owners for their guards. Each attribute context may supply `primaryValuePath`,
+silently choosing the first owner. Automatic preparation retains each source
+and attribute owner until all sources have contributed their rules. Equal
+appearances then merge, and a discovery condition is removed only when doing
+so admits no prepared context requiring a different appearance. Reduction
+prefers attribute names over source IDs and owner layout; one conjunction
+remains ordinary editable filter rows. Exact color type guards stay intact,
+and mixed feature/attribute roots retain their source applicability. Each
+attribute context may supply `primaryValuePath`,
 the unambiguous native scalar shorthand, so common validity/source metadata does
 not displace the attribute value in automatic coloring.
 Scalar requests omit container descriptors while retaining navigable branches.
@@ -273,6 +320,18 @@ before installation and after completion. It provides:
 - enum values, ordinary numeric ranges, named numeric specials and flag types;
 - feature/attribute ownership analysis;
 - candidate label/category/gradient fields.
+
+The omnibar requests completion from all currently ready feature layers, including
+hidden ones. Unavailable sources do not block suggestions from other maps.
+Confirmed-search preparation still checks every explicitly selected source.
+
+Native attribute completions retain the plain name, with any ambiguity resolved
+after confirmation. Enum completions insert predicates. Whole-query completions
+mark `isExactMatch` when the draft already spells
+the symbol fully, before expanding it into a predicate. The editor uses that
+flag to submit a complete name on Enter; partial names still accept the selected
+suggestion first. TypeScript does not parse the suggested expression to recover
+its original symbol.
 
 Feature inventories are cached independently of the predicate, keyed by source
 generation and discovery options. Attribute inventories also retain the query

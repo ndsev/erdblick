@@ -327,13 +327,13 @@ collection executes no callbacks.
 
 ## Verification
 
-Run from the erdblick root with matching native/WASM artifacts already available:
+Run from the erdblick root after the toolchain preparation described in the
+[developer guide](erdblick-dev-guide.md#build-and-test). The wrapper refreshes
+the WASM artifacts, generated action catalog and both frontend bundles:
 
 ```sh
+NG_BUILD_MAX_WORKERS=2 ./ci/20_linux_rebuild.bash
 NG_BUILD_MAX_WORKERS=2 npm run test -- --watch=false
-npm run lint
-NG_BUILD_MAX_WORKERS=2 npm run build -- -c profiling
-npm run generate:viewer-actions
 ```
 
 The suite covers transaction rollback/reentrancy/origins, the actual Angular

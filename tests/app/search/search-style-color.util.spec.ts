@@ -45,11 +45,11 @@ describe("search style color helpers", () => {
         expect(result.success).toBe(true);
         expect(result.draft.gradientStops.map(stop => stop.value)).toEqual([classic ? 0 : 1, 50, 100, 150, 200, 250, 253]);
         expect(result.draft.specialStops?.map(stop => stop.value)).toEqual(classic ? [254, 255] : [0, 254, 255]);
-        expect(result.draft.schemaType).toEqual({schemaId: schemaType.schemaId, typeId: 3});
+        expect(result.draft.schemaTypes).toEqual([{schemaId: schemaType.schemaId, typeId: 3}]);
         const properties = searchStyleColorProperties({mode: "gradient", field: "speed",
-            stops: serializableGradientStops(result.draft)!, schemaType: result.draft.schemaType,
+            stops: serializableGradientStops(result.draft)!, schemaTypes: result.draft.schemaTypes,
             specials: result.draft.specialStops!.map(stop => ({value: stop.value, color: stop.color}))});
-        expect(properties["color-scale"]).toMatchObject({schemaType: result.draft.schemaType,
+        expect(properties["color-scale"]).toMatchObject({schemaTypes: result.draft.schemaTypes,
             specials: result.draft.specialStops!.map(stop => [stop.value, stop.color])});
     });
 
@@ -76,7 +76,7 @@ describe("search style color helpers", () => {
             {label: "Car", value: draft.field, valueKind: "boolean"}, () => ++id);
         expect(result.success).toBe(true);
         expect(serializableCategoryStops(result.draft).map(stop => stop.value)).toEqual([false, true]);
-        expect(result.draft.schemaType).toBeUndefined();
+        expect(result.draft.schemaTypes).toBeUndefined();
     });
     it.each(["gradient", "categories"] as const)("omits a disabled %s fallback from generated YAML properties", mode => {
         const properties = searchStyleColorProperties({mode, field: "speed",
@@ -261,7 +261,7 @@ describe("search style color helpers", () => {
         expect(new Set(stops.map(stop => stop.color)).size).toBe(stops.length);
     });
 
-    it("auto-generates deterministic unique category colors for enum values", () => {
+    it("auto-generates deterministic category colors for enum values", () => {
         let nextId = 1;
         const stops = categoryStopsForEnumValues(["A", "B", "C"], () => nextId++);
         let secondNextId = 1;
@@ -270,6 +270,15 @@ describe("search style color helpers", () => {
         expect(stops.map(stop => stop.valueText)).toEqual(["A", "B", "C"]);
         expect(new Set(stops.map(stop => stop.color)).size).toBe(3);
         expect(stops.map(stop => stop.color)).toEqual(repeatedStops.map(stop => stop.color));
+    });
+
+    it("keeps label colors stable when catalogs grow or reorder, including color collisions", () => {
+        const labels = Array.from({length: 2000}, (_, index) => `SIGN_${index}`);
+        const palette = (values: string[]) => Object.fromEntries(categoryStopsForEnumValues(values, () => 1)
+            .map(stop => [stop.valueText, stop.color]));
+        const original = palette(labels);
+        expect(palette([...labels].reverse())).toEqual(original);
+        expect(palette(labels.slice(0, 100))).toEqual(Object.fromEntries(Object.entries(original).slice(0, 100)));
     });
 
     it("auto-initializes categories and reports incompatible gradient fields", () => {

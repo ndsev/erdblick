@@ -100,6 +100,8 @@ export interface CompletionCandidate {
     query: string;
     source: string;
     hint: string;
+    /** The input already spells this native symbol fully, before predicate expansion. */
+    isExactMatch?: boolean;
     originLayers?: FeatureSearchMapLayerRef[];
 }
 
@@ -148,6 +150,8 @@ export interface SearchResultTileEntry {
 
 /** Compact list-ingestion payload derived from an immutable search subset. */
 export interface SearchResultTilePayload {
+    /** Distinguishes feature and attribute outputs for one source partition. */
+    presentationKey?: string;
     searchId: string;
     refresh: number;
     mapId: string;
@@ -234,6 +238,9 @@ export interface FeatureSearchStyleFieldOptions {
     recursive?: boolean;
     values?: "scalar" | "all";
     context?: FeatureSearchStyleFieldContext;
+
+    /** Exact attribute owners already resolved during confirmed search preparation. */
+    preparedContexts?: FeatureSearchAttributeScopeCandidate[];
 }
 
 /** Validate shared type descriptors once, then retain compact integer references. */

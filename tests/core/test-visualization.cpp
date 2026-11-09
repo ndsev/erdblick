@@ -1762,6 +1762,24 @@ TEST_CASE("Feature search auto-scope accepts one attribute across different attr
 
     REQUIRE(scopeKeys.contains({"Lane", "Lane", "LaneRulesLayer"}));
     REQUIRE(scopeKeys.contains({"Road", "Road", "RoadRulesLayer"}));
+
+    // The editor receives a portable expression. Per-source plans already
+    // carry their map/layer separately, so their predicates need no source or
+    // feature-type guards. The current artifact still validates each plan.
+    auto choices = parser.prepareSearchQuery("SPEED_LIMIT_METRIC", "auto", options);
+    REQUIRE(choices.size() == 2);
+    for (auto const& choice : choices) {
+        CHECK(choice.at("expression") == "**.SPEED_LIMIT_METRIC");
+        CHECK(choice.at("query") == "$name == \"SPEED_LIMIT_METRIC\"");
+        CHECK_FALSE(choice.at("schemaId").get<std::string>().empty());
+    }
+    auto explicitQuery = parser.prepareSearchQuery("**.speedLimitKmh > 80", "auto", options);
+    REQUIRE(explicitQuery.size() == 2);
+    for (auto const& branch : explicitQuery) {
+        CHECK(branch.at("expression") == "**.speedLimitKmh > 80");
+        CHECK(branch.at("query") == "**.speedLimitKmh > 80");
+        CHECK(branch.at("matchedFieldNames") == nlohmann::json::array({"speedLimitKmh"}));
+    }
 }
 
 TEST_CASE("Style fields use normalized attribute owners and the native payload scalar", "[erdblick.search]")
@@ -1801,6 +1819,76 @@ TEST_CASE("Style fields use normalized attribute owners and the native payload s
     for (auto const& owner : broad.at("contexts"))
         names.insert(owner.at("attrName").get<std::string>());
     CHECK(names == std::set<std::string>{"SPEED_LIMIT_METRIC", "OTHER_SPEED"});
+}
+
+TEST_CASE(
+    "Prepared style owners bypass broad query re-inference",
+    "[erdblick.search][search-preparation]")
+{
+    auto layer = speedLimitLayerInfoJson("Road", "Road", "Rules");
+    auto& definitions = layer["featureModelSchema"]["$defs"];
+    definitions["SpeedLimitMetric"]["x-mapget"].erase("attributeTypeCode");
+    for (unsigned i = 0; i < 12; ++i)
+        definitions["RulesLayer"]["properties"]["OTHER_" + std::to_string(i)] = {
+            {"$ref", "#/$defs/SpeedLimitMetric"}};
+    TileLayerParser parser;
+    parser.setDataSourceInfo(SharedUint8Array(
+        nlohmann::json::array({{{"mapId", "PreparedOwners"}, {"layers", {{"Road", layer}}}},
+                               {{"mapId", "OtherMap"}, {"layers", {{"Road", layer}}}}})
+            .dump()));
+    auto const query = "$feature.mapId == 'PreparedOwners' and true";
+    auto normalized = parser.normalizeSearchQuery(query, "attribute", nlohmann::json::object());
+    REQUIRE(normalized.at("rewriteSuppressed") == false);
+    REQUIRE(normalized.at("normalizedQuery") == query);
+    auto inventory = parser.searchStyleFieldsForQuery(
+        query,
+        "attribute",
+        {{"values", "scalar"},
+         {"context",
+          {{"mapId", "PreparedOwners"},
+           {"layerId", "Road"},
+           {"featureType", "Road"},
+           {"attrName", "SPEED_LIMIT_METRIC"},
+           {"attrLayerName", "Rules"}}}});
+    REQUIRE(inventory.at("contexts").size() == 1);
+    CHECK(inventory.at("contexts")[0].at("attrName") == "SPEED_LIMIT_METRIC");
+    CHECK(std::ranges::any_of(
+        inventory.at("fields"),
+        [](auto const& field) { return field.at("path") == "attributeValue.speedLimitKmh"; }));
+
+    // Prepared owners are the authority for discovery. The predicate need not
+    // be parsed again, and two maps share one projected scalar metadata table.
+    auto owners = nlohmann::json::array();
+    for (auto const* map : {"PreparedOwners", "OtherMap"}) {
+        owners.push_back(
+            {{"mapId", map},
+             {"layerId", "Road"},
+             {"featureType", "Road"},
+             {"attrName", "SPEED_LIMIT_METRIC"},
+             {"attrLayerName", "Rules"}});
+    }
+    owners.push_back(owners.front());  // Duplicate references must not duplicate fields.
+    auto const batch = parser.searchStyleFieldsForQuery(
+        "deliberately invalid (",
+        "attribute",
+        {{"values", "scalar"}, {"preparedContexts", owners}});
+    CHECK(batch.at("contexts").size() == 2);
+    CHECK(batch.at("types") == inventory.at("types"));
+    CHECK(batch.at("fields").size() == inventory.at("fields").size());
+    for (auto const& field : batch.at("fields"))
+        CHECK(field.at("contexts").size() == 2);
+
+    auto const empty = parser.searchStyleFieldsForQuery(
+        "true",
+        "attribute",
+        {{"preparedContexts", nlohmann::json::array()}});
+    CHECK(empty.at("fields").empty());
+    CHECK_THROWS_AS(
+        parser.searchStyleFieldsForQuery(
+            "true",
+            "attribute",
+            {{"preparedContexts", {{{"mapId", "OtherMap"}}}}}),
+        std::invalid_argument);
 }
 
 TEST_CASE("Feature search auto-scope accepts Classic direct speed-limit fields", "[erdblick.search]")
@@ -1949,7 +2037,9 @@ TEST_CASE("Feature search auto-scope keeps all shared enum attribute scopes", "[
     REQUIRE(fieldOwners.contains({"attributeValue.movableWarningSign", "MOVABLE_WARNING_SIGN"}));
 }
 
-TEST_CASE("Feature search completion labels enum-backed constants", "[erdblick.search]")
+TEST_CASE(
+    "Feature search completion proposes portable predicates and contextual enum values",
+    "[erdblick.search]")
 {
     auto datasource = nlohmann::json{
         {"stringPoolId", "WarningSignCompletionNode"},
@@ -1990,11 +2080,51 @@ TEST_CASE("Feature search completion labels enum-backed constants", "[erdblick.s
         return false;
     };
 
+    // Attribute completion keeps the ordinary name; confirmed preparation
+    // resolves any ambiguity. Enum suggestions need an actual predicate.
     REQUIRE(hasTextType(warningCompletions, "WARNING_SIGN", "Field"));
+    REQUIRE(hasHint(warningCompletions, "WARNING_SIGN", "WARNING_SIGN attribute"));
     REQUIRE_FALSE(hasTextType(warningCompletions, "\"WARNING_SIGN\"", "Constant"));
-    REQUIRE(hasHint(speedCompletions, "\"SPEED_LIMIT_END\"", "enum WarningSign"));
+    auto const speedPredicate =
+        "(**.movableWarningSign == \"SPEED_LIMIT_END\") or (**.warningSign == \"SPEED_LIMIT_END\")";
+    REQUIRE(hasTextType(speedCompletions, speedPredicate, "Constant"));
+    REQUIRE(hasHint(speedCompletions, speedPredicate, "SPEED_LIMIT_END enum value"));
     REQUIRE_FALSE(hasCompletionType(warningCompletions, "Hint"));
     REQUIRE_FALSE(hasCompletionType(speedCompletions, "Hint"));
+
+    // Enter on a fully typed name submits that shorthand for interpretation.
+    // The same suggestion for a partial name still needs to be accepted first.
+    REQUIRE(std::ranges::none_of(warningCompletions, [](auto const& item) {
+        return item.at("isExactMatch").template get<bool>();
+    }));
+    for (std::string const input : {"WARNING_SIGN", "SPEED_LIMIT_END", "\"SPEED_LIMIT_END\""}) {
+        auto completed = parser.completeSearchQuery(
+            input, static_cast<int>(input.size()), nlohmann::json{{"limit", 20}});
+        CAPTURE(input);
+        REQUIRE(std::ranges::any_of(completed, [](auto const& item) {
+            return item.at("isExactMatch").template get<bool>();
+        }));
+    }
+
+    // Inside an authored comparison, the field already determines the meaning.
+    // Complete only its value rather than inserting a second whole predicate.
+    std::string comparison = "**.warningSign == \"SPEED";
+    auto values = parser.completeSearchQuery(
+        comparison,
+        static_cast<int>(comparison.size()),
+        nlohmann::json{{"limit", 20}});
+    REQUIRE(hasHint(values, "\"SPEED_LIMIT_END\"", "enum WarningSign"));
+
+    // A feature field and an attribute enum can share their spelling. The
+    // keyword fast path must preserve both suggestions without enumerating
+    // every attribute root merely to rediscover the enum hidden by Simfil's
+    // normal field-precedence rule.
+    datasource["layers"]["Road"]["featureModelSchema"]["$defs"]["Feature"]["properties"]
+              ["SPEED_LIMIT_END"] = {{"type", "number"}};
+    parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({datasource}).dump()));
+    auto collision = parser.completeSearchQuery("SPEED", 5, nlohmann::json{{"limit", 20}});
+    REQUIRE(hasTextType(collision, "SPEED_LIMIT_END", "Field"));
+    REQUIRE(hasTextType(collision, speedPredicate, "Constant"));
 }
 
 TEST_CASE(
@@ -2036,6 +2166,9 @@ TEST_CASE(
         CHECK(found->at("query") == replaced);
     };
     complete("samples[17].spe", "feature", "speedLimit");
+    complete("attributeVa", "auto", "attributeValue");
+    complete("warningSi", "auto", "warningSign");
+    complete("dir", "auto", "direction");
     complete("samples[-1].spe", "feature", "speedLimit");
     complete("samples[0].next.samples[0].next.samples[0].spe", "feature", "speedLimit");
     complete("$fea", "attribute", "[\"$feature\"]");

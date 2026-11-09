@@ -21,7 +21,7 @@ describe("FeatureSearchState", () => {
             }]
         }]);
         expect(entry.searchStyleRules[0].color).toMatchObject({
-            schemaType: {schemaId: "saved-graph", typeId: 7},
+            schemaTypes: [{schemaId: "saved-graph", typeId: 7}],
             specials: [{value: 255, color: "#00ffff"}]
         });
         expect(entry.searchStyleRules[0].color).not.toHaveProperty("domain");

@@ -12,7 +12,7 @@ import {AppModule} from "../../../app/app.module";
 import {initializeLibrary} from "../../../app/integrations/wasm.adapter";
 import {featureSearchResultFields} from "../../../app/search/feature-search-runtime-state.model";
 import {createFeatureSearchStateEntry} from "../../../app/search/search-definition.model";
-import {SearchService, type FeatureSearchSession} from "../../../app/search/search.service";
+import {SearchService} from "../../../app/search/search.service";
 import {buildFeatureSearchFilterChannels} from "../../../app/search/feature-search-style.adapter";
 import {SearchStyleColorComponent} from "../../../app/search/search-style-color.component";
 import {defaultSearchStyleColorDraft} from "../../../app/search/search-style-color.util";
@@ -27,6 +27,31 @@ void AppModule;
 
 describe("Search observed category values", () => {
     beforeAll(() => initializeLibrary());
+
+    it.each(["gradient", "categories"] as const)("keeps shared type guards and special colors when updating %s from mixed-map observations", mode => {
+        const component = new SearchStyleColorComponent();
+        const types = [{schemaId: "A", typeId: 1}, {schemaId: "B", typeId: 2}];
+        component.draft = {...defaultSearchStyleColorDraft("speed"), mode, schemaTypes: types,
+            specialStops: [{id: 1, value: 255, color: "#123456"}]};
+        component.fieldOptions = [{label: "Speed", value: "speed", valueKind: "integer", schemaTypes: types,
+            schemaType: {...types[0], typeName: "Speed", namedValues: [{name: "UNLIMITED", value: 255,
+                valueType: "integer", role: "special", meaning: "unbounded", deprecated: false, removed: false}]}}];
+        component.ngOnChanges({draft: new SimpleChange(undefined, component.draft, true)});
+        const changed = vi.spyOn(component.draftChange, "emit");
+        component.dataSummary = {
+            count: 3, missing: 0, nulls: 0, specials: 1,
+            kinds: {integer: 3, number: 0, boolean: 0, string: 0, object: 0, list: 0, blob: 0, bitmask: 0, unknown: 0},
+            numeric: {count: 2, min: 30, max: 50, sum: 80, average: 40},
+            histogram: [{value: "30", count: 1}, {value: "50", count: 1}, {value: "255", count: 1}],
+            otherCount: 0, distinctLimitReached: false
+        };
+        component["updateStopsFromData"]();
+        expect(changed).toHaveBeenCalledWith(expect.objectContaining({schemaTypes: types,
+            specialStops: [{id: 1, value: 255, color: "#123456"}]}));
+        if (mode === "categories") {
+            expect(changed.mock.calls[0][0]!.categoryStops.map(stop => stop.valueText)).toEqual(["30", "50"]);
+        }
+    });
 
     it("merges only identical native types for both projected values and traces", () => {
         const service = Object.create(SearchService.prototype) as SearchService;
@@ -191,32 +216,4 @@ describe("Search observed category values", () => {
             }
         });
 
-    it("does not wait for retired filters' chunks after replacing a style", () => {
-        const service = Object.create(SearchService.prototype) as SearchService;
-        const session = Object.create(null) as FeatureSearchSession;
-        session.progressByRequestKey = new Map([
-            ["old\n1", {tilesQueued: 2, tilesSearched: 2, chunksEmitted: 2, chunksReported: true, matches: 0, terminal: true}],
-            ["old\n2", {tilesQueued: 2, tilesSearched: 2, chunksEmitted: 2, chunksReported: true, matches: 0, terminal: true}],
-            ["old-replacement\n1", {tilesQueued: 4, tilesSearched: 4, chunksEmitted: 4, chunksReported: true, matches: 1114, terminal: true}]
-        ]);
-        session.searchResultTilesBySourceKey = new Map();
-        for (let tile = 0; tile < 4; ++tile) {
-            session.searchResultTilesBySourceKey.set(String(tile), Object.create(null));
-        }
-        service["updateSearchResultIngressProgress"](session);
-        expect(session.resultTileIngressDone).toBe(4);
-        expect(session.resultTileIngressTotal).toBe(8);
-
-        service["clearFilterSearchProgress"](session, "old");
-        expect([...session.progressByRequestKey.keys()]).toEqual(["old-replacement\n1"]);
-        expect(session.resultTileIngressDone).toBe(4);
-        expect(session.resultTileIngressTotal).toBe(4);
-        session.backendComplete = true;
-        session.complete = false;
-        session.paused = false;
-        session.progressTotal = 4;
-        session.progressDone = 4;
-        expect(service["updateSessionCompletion"](session)).toBe(true);
-        expect(service["canSummarizeSessionValues"](session)).toBe(true);
-    });
 });

@@ -1,6 +1,22 @@
+import {searchStyleFieldCandidates, type FeatureSearchStyleFieldInventory} from "./search.model";
+import type {FeatureSearchRuleFilter, FeatureSearchStyleRule} from "./search-definition.model";
+import {autoInitializeSearchStyleColorDraft, defaultSearchStyleColorDraft} from "./search-style-color.util";
+import {SearchStyleRuleDraftCodec} from "./search-style-rule-editor.model";
 import type { FeatureSearchAttributeScopeCandidate } from "./search.model";
 import type {FeatureSearchMapLayerRef} from "./search-definition.model";
 import type {SearchStyleFieldOption} from "./search-style-color.util";
+import {searchStyleFilterExpression} from "./search-style-sheet.converter";
+import {schemaScalarMeaning} from "../mapdata/schema-type.model";
+
+/**
+ * Temporary proof used only while combining freshly prepared rules. Persisted
+ * rules keep their exact accepted types, not a second copy of schema metadata.
+ */
+interface PreparedAutoStyleRule extends FeatureSearchStyleRule {
+    valueMeaning?: string;
+    /** Generated enum colors depend only on the string label, not its catalog/version. */
+    symbolicCategories?: boolean;
+}
 
 export interface FeatureSearchAutoStyleOption extends SearchStyleFieldOption {
     mapId?: string;
@@ -58,7 +74,7 @@ export function searchAutoStyleFieldOptions(
             .sort((left, right) =>
                 left.rank - right.rank || left.index - right.index);
         const bestRank = ranked[0]?.rank;
-        if (bestRank === undefined) {
+        if (bestRank === undefined || bestRank > 3) {
             continue;
         }
         // Heterogeneous schemas can expose the same semantic value at
@@ -230,4 +246,196 @@ function optionContexts(option: FeatureSearchAutoStyleOption): FeatureSearchMapL
     return option.mapId && option.layerId
         ? [{mapId: option.mapId, layerId: option.layerId}]
         : [];
+}
+
+/**
+ * Choose the initial visualization while preparing a confirmed search. The
+ * component only edits the resulting persisted rules; opening a tab or
+ * receiving data does not replace their field or color mode. Keep the exact
+ * owner filters here until all selected sources have contributed: a different
+ * source may need a different scale at the same attribute path.
+ */
+export function preparedSearchAutoStyleRules(
+    inventory: FeatureSearchStyleFieldInventory | undefined,
+    analysis: FeatureSearchAutoStyleAnalysis,
+    color: string,
+    applicability: NonNullable<FeatureSearchStyleRule["applicability"]>
+): PreparedAutoStyleRule[] {
+    const options: FeatureSearchAutoStyleOption[] = inventory ? searchStyleFieldCandidates(inventory).flatMap(field =>
+        field.contexts.filter(context => context.mapId === applicability.mapId && context.layerId === applicability.layerId)
+            .map(context => ({
+            label: field.path, value: field.path, ...context,
+            valueKind: field.valueKind, enumValues: field.enumValues,
+            numericRange: field.numericRange, schemaType: field.schemaType,
+            primaryValue: context.primaryValuePath === field.path,
+            mapLayers: [{mapId: context.mapId, layerId: context.layerId}]
+        }))) : [];
+    // Cover every exact owner, including owners for which there is no useful
+    // scalar. Deduplicating by attribute name before this step can silently
+    // drop a second feature type or a different field/type in another layer.
+    const owners = [...new Map(analysis.attributeScopes.map(owner => [JSON.stringify(owner), owner])).values()];
+    const groups: PreparedAutoStyleRule[][] = [];
+    let nextId = 0;
+    for (const owner of owners.length ? owners : [undefined]) {
+        const localOptions = options.filter(option => owner &&
+            option.mapId === owner.mapId && option.layerId === owner.layerId &&
+            option.featureType === owner.featureType && option.attrLayerName === owner.attrLayerName &&
+            option.attrName === owner.attrName);
+        const fields = owner ? searchAutoStyleFieldOptions(localOptions, {...analysis, attributeScopes: [owner]}) : [];
+        const rules: PreparedAutoStyleRule[] = [];
+        for (const field of fields.length ? fields : [undefined]) {
+            // The codec binds a field's exact schema type. Supplying only this
+            // candidate avoids rebinding an equal path to another owner's type.
+            const codec = new SearchStyleRuleDraftCodec(field ? [field] : []);
+            let draft = {...defaultSearchStyleColorDraft(field?.value ?? ""), solidColor: color, fallbackColor: color};
+            draft.mode = field?.valueKind === "enum" || field?.valueKind === "boolean" ? "categories"
+                : field?.valueKind === "number" || field?.valueKind === "integer" ? "gradient" : "solid";
+            const initialized = autoInitializeSearchStyleColorDraft(draft, field, () => ++nextId);
+            draft = initialized.success ? initialized.draft : {...draft, mode: "solid"};
+
+            rules.push(...codec.fromDrafts(([['point'], ['line', 'surface']] as const).map(geometry => ({
+                id: ++nextId,
+                name: field ? `Auto: ${field.attrName}.${field.value}` : "Auto: solid",
+                autoGenerated: true,
+                applicability,
+                filters: owner ? [
+                    {id: ++nextId, attributeField: "$name", operator: "=", filterValue: owner.attrName},
+                    {id: ++nextId, attributeField: "$feature.typeId", operator: "=", filterValue: owner.featureType},
+                    {id: ++nextId, attributeField: "$layer", operator: "=", filterValue: owner.attrLayerName}
+                ] : [],
+                visualization: [...geometry],
+                lineWidth: 5,
+                pointRadius: 20,
+                opacity: 60,
+                labelExpression: "",
+                labelBackgroundColor: "#111827",
+                color: draft
+            }))).map(rule => ({...rule,
+                valueMeaning: field?.schemaType && rule.color.mode !== "solid"
+                    ? JSON.stringify([field.valueKind, schemaScalarMeaning(field.schemaType)]) : undefined,
+                symbolicCategories: field?.valueKind === "enum" && !!field.schemaType &&
+                    schemaScalarMeaning(field.schemaType) === "symbolic-categories"
+            })));
+        }
+        groups.push(rules);
+    }
+    return groups.flat();
+}
+
+/**
+ * Merge equal automatic appearances and keep only conditions needed to
+ * distinguish them within the prepared search. For example, Road and Lane
+ * can share `$name == "MOVABLE_WARNING_SIGN"`; their map, feature type and
+ * attribute-layer names add nothing when WARNING_SIGN is the only competitor.
+ * If every context uses the same appearance, the search already supplies all
+ * membership restrictions and the rule needs no additional filter.
+ *
+ * These are freshly generated equality selectors, not arbitrary user Simfil.
+ * Edited rules do not enter this helper. Equivalent source types share one
+ * scale with several accepted identities. Symbolic category catalogs can grow
+ * independently: union their labels, whose generated colors are deterministic.
+ * Numeric units, ranges and special values still need to agree.
+ */
+export function combinePreparedSearchAutoStyles(
+    groups: readonly PreparedAutoStyleRule[][]
+): FeatureSearchStyleRule[] {
+    const allRules = groups.flat();
+    const mixedScopes = new Set(allRules.map(rule => rule.applicability?.scope)).size > 1;
+    // Feature and attribute predicates evaluate at different roots. Preserve
+    // per-source applicability when a search uses both; within one scope the
+    // request already routes the rules to its selected map/layer coverage.
+    const partitions = mixedScopes ? groups : [allRules];
+    return partitions.flatMap(partition => {
+        const rows = partition.map(rule => {
+            const source = rule.applicability;
+            const prefix = source?.scope === "attribute" ? "$feature." : "";
+            const selectors: FeatureSearchRuleFilter[] = [
+                ...(source ? [
+                    {field: `${prefix}mapId`, op: "=" as const, value: source.mapId},
+                    {field: `${prefix}layerId`, op: "=" as const, value: source.layerId}
+                ] : []),
+                ...rule.filter
+            ];
+            return {
+                rule,
+                selectors,
+                context: new Map(selectors.map(selector => [selector.field, selector.value])),
+                contextKey: JSON.stringify(selectors),
+                appearance: JSON.stringify({
+                    ...rule,
+                    color: rule.color.mode !== "solid" && rule.valueMeaning
+                        ? {...rule.color, schemaTypes: undefined,
+                            ...(rule.symbolicCategories ? {stops: undefined} : {})} : rule.color,
+                    name: undefined,
+                    filter: undefined,
+                    applicability: undefined
+                }),
+                // Prefer attribute names over deployment-specific routing and
+                // owner layout when either would distinguish the same styles.
+                removalOrder: [`${prefix}mapId`, `${prefix}layerId`, "$feature.typeId", "$layer", "$name"]
+            };
+        });
+
+        const matching = new Map<string, typeof rows>();
+        for (const row of rows) {
+            const appearance = matching.get(row.appearance) ?? [];
+            appearance.push(row);
+            matching.set(row.appearance, appearance);
+        }
+        return [...matching.values()].map(appearance => {
+            const first = appearance[0].rule;
+            let color = first.color.mode !== "solid" && first.valueMeaning
+                ? {...first.color, schemaTypes: [...new Map(appearance.flatMap(({rule}) =>
+                    rule.color.mode === "solid" ? [] : (rule.color.schemaTypes ?? []).map(type =>
+                        [`${type.schemaId}:${type.typeId}`, type] as const))).values()]}
+                : first.color;
+            if (color.mode === "categories" && first.symbolicCategories) {
+                // These stops were generated together, never edited by a user.
+                // Equal labels have equal colors even when one schema adds or
+                // removes other labels. Keep all known entries in the editor.
+                const stops = new Map(appearance.flatMap(({rule}) =>
+                    rule.color.mode === "categories" ? rule.color.stops.map(stop => [stop.value, stop] as const) : []));
+                color = {...color, stops: [...stops.values()].sort((a, b) => String(a.value).localeCompare(String(b.value)))};
+            }
+            const owners = new Set(appearance.map(row => row.contextKey));
+            const competitors = rows.filter(row =>
+                !owners.has(row.contextKey) &&
+                row.rule.geometry.some(kind => first.geometry.includes(kind)));
+            const alternatives = new Map<string, FeatureSearchRuleFilter[]>();
+            for (const row of appearance) {
+                let selectors = row.selectors;
+                for (const field of row.removalOrder) {
+                    const reduced = selectors.filter(selector => selector.field !== field);
+                    // Dropping a condition is safe only if it admits no context
+                    // that requires a different field, scale or solid fallback.
+                    if (!competitors.some(other => reduced.every(selector =>
+                        other.context.get(selector.field) === selector.value))) {
+                        selectors = reduced;
+                    }
+                }
+                alternatives.set(searchStyleFilterExpression(selectors), selectors);
+            }
+
+            // Keep a single conjunction as ordinary editable filter rows.
+            // Only genuinely distinct alternatives need a custom OR expression.
+            let filter: FeatureSearchRuleFilter[] = [];
+            if (!alternatives.has("")) {
+                filter = alternatives.size === 1 ? [...alternatives.values()][0] : [{
+                    field: [...alternatives.keys()].join(" or "),
+                    op: "=",
+                    value: true,
+                    customExpression: true
+                }];
+            }
+            const {valueMeaning: _proof, symbolicCategories: _symbols, ...persisted} = first;
+            return {
+                ...persisted,
+                color,
+                name: filter.length ? first.name
+                    : `Auto: ${first.color.mode === "solid" ? "solid" : first.color.field}`,
+                applicability: mixedScopes ? first.applicability : undefined,
+                filter
+            };
+        });
+    });
 }

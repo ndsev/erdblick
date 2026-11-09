@@ -114,21 +114,45 @@ describe("feature search flat style channels", () => {
 
 
 describe("feature search native style compilation", () => {
+    // Inline metadata remains a supported import boundary. Its schema is built
+    // in WASM before the search style can be compiled against its feature types.
+    const metadata = [{
+        mapId: "Map", sourceId: "Map", stringPoolId: "Map",
+        maxParallelJobs: 1, addOn: false,
+        layers: {Lane: {
+            layerId: "Lane", type: "Features", canRead: true, canWrite: false,
+            coverage: [], featureTypes: [{name: "Lane", uniqueIdCompositions: [[
+                {partId: "laneId", datatype: "U32"}
+            ]]}], zoomLevels: [13],
+            version: {major: 1, minor: 0, patch: 0}
+        }}
+    }];
+
     beforeAll(async () => { await initializeLibrary(); });
+
+    it("recovers from a failed schema build without poisoning the next import", () => {
+        const parser = new coreLib.TileLayerParser();
+        const invalid = structuredClone(metadata);
+        invalid[0].layers.Lane.featureTypes[0].uniqueIdCompositions = [];
+        /** Exercise the actual byte boundary, including native cache cleanup on failure. */
+        const install = (sources: typeof metadata) => uint8ArrayToWasmOrThrow(
+            buffer => parser.setDataSourceInfo(buffer),
+            new TextEncoder().encode(JSON.stringify(sources))
+        );
+        try {
+            // The second attempt must report the original validation error,
+            // not a stale "reentrant construction" guard left by the first.
+            for (let attempt = 0; attempt < 2; ++attempt) {
+                expect(() => install(invalid)).toThrow("Feature identity requires a name and 1..256 ID compositions.");
+            }
+            expect(() => install(metadata)).not.toThrow();
+        } finally {
+            parser.delete();
+        }
+    });
 
     it.each([true, false])("accepts valid native channels for two coloured rules (shared=%s)", shared => {
         const parser = new coreLib.TileLayerParser() as TileLayerParser;
-        const metadata = [{
-            mapId: "Map", sourceId: "Map", stringPoolId: "Map",
-            maxParallelJobs: 1, addOn: false,
-            layers: {Lane: {
-                layerId: "Lane", type: "Features", canRead: true, canWrite: false,
-                coverage: [], featureTypes: [{name: "Lane", uniqueIdCompositions: [[
-                    {partId: "laneId", datatype: "U32"}
-                ]]}], zoomLevels: [13],
-                version: {major: 1, minor: 0, patch: 0}
-            }}
-        }];
         try {
             uint8ArrayToWasmOrThrow(buffer => parser.setDataSourceInfo(buffer),
                 new TextEncoder().encode(JSON.stringify(metadata)));

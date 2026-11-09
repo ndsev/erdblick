@@ -5,6 +5,18 @@ import {enableMapLayer, navigateToStateSnapshotRoot, openOmnibar} from '../utils
 
 test.use({stateSnapshot: 'style_editor_state'});
 
+/** Catch missing worker assets and schema-install failures through the actual editor. */
+test('Omnibar offers schema completions from its module worker', async ({page, request}) => {
+    await requireTestMapSource(request);
+    await navigateToStateSnapshotRoot(page);
+    await enableMapLayer(page, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0]);
+    await openOmnibar(page, 'attributes.isB');
+    // Completion is driven by typing/caret events, rather than form assignment.
+    await page.getByTestId('omnibar-input').press('r');
+    const popup = page.locator('.completion-popup:not(.completion-popup-hidden)');
+    await expect(popup.getByText('isBridge', {exact: true})).toBeVisible({timeout: 15000});
+});
+
 /** Exercise the real worker and field picker without requiring search matches. */
 test('Visualization discovers nested fields without separate scope controls', async ({page, request}) => {
     await requireTestMapSource(request);

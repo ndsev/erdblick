@@ -37,7 +37,7 @@ describe("native style authoring contract", () => {
             [{geometry: ["line"], filter: [], color: {
                 mode: "gradient", field: "speed",
                 stops: [{value: 1, color: "#111111"}, {value: 253, color: "#222222"}],
-                schemaType: {schemaId: "source-graph", typeId: 7},
+                schemaTypes: [{schemaId: "source-graph", typeId: 7}],
                 specials: [{value: 0, color: "#123456"}, {value: 255, color: "#654321"}],
                 fallbackColor: "#ffffff"
             }}],
@@ -64,7 +64,7 @@ describe("native style authoring contract", () => {
         const result = projectStyleSourceForSearch(control.model.source, "feature");
         expect(result.omissions).toEqual([]);
         expect(result.rules[0].color).toMatchObject({
-            schemaType: {schemaId: "source-graph", typeId: 7},
+            schemaTypes: [{schemaId: "source-graph", typeId: 7}],
             stops: [{value: 1, color: "#111111"}, {value: 253, color: "#222222"}],
             specials: [{value: 0, color: "#abcdef"}, {value: 255, color: "#654321"}],
             fallbackColor: "#ffffff"

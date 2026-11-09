@@ -32,6 +32,12 @@ struct TileLayerParser::SchemaCompletionBinding
 {
     std::shared_ptr<mapget::StringPool> strings;
     std::unique_ptr<simfil::Environment> environment;
+    // Complete tokens recur across successive prefixes and attribute roots.
+    // The binding is tied to an immutable graph/layer and retired with it.
+    std::map<
+        std::pair<std::string, mapget::LayerSchema::SearchQueryRequestedScope>,
+        std::vector<mapget::LayerSchema::SearchInterpretation>>
+        enumMeanings;
 };
 
 namespace {
@@ -115,12 +121,12 @@ simfil::CompletionCandidate enrichCompletionCandidate(
 }
 
 /** Return whether two completions are the same user-visible candidate before hint decoration. */
-bool sameCompletionIdentity(simfil::CompletionCandidate const& lhs, simfil::CompletionCandidate const& rhs)
+bool sameCompletionIdentity(
+    simfil::CompletionCandidate const& lhs,
+    simfil::CompletionCandidate const& rhs)
 {
-    return lhs.text == rhs.text
-        && lhs.location.offset == rhs.location.offset
-        && lhs.location.size == rhs.location.size
-        && lhs.type == rhs.type;
+    return lhs.text == rhs.text && lhs.location.offset == rhs.location.offset &&
+        lhs.location.size == rhs.location.size && lhs.type == rhs.type;
 }
 
 /** Merge a hint into an existing completion without duplicating identical text. */
@@ -138,6 +144,7 @@ void mergeCompletionHint(std::string& target, std::string const& hint)
 NativeJsValue completionCandidatesToJs(
     std::string const& query,
     std::set<simfil::CompletionCandidate> const& candidates,
+    std::set<std::string> const& exactInputExpressions,
     size_t limit)
 {
     auto result = JsValue::List();
@@ -162,10 +169,14 @@ NativeJsValue completionCandidatesToJs(
     }
     if (!fieldCandidateTexts.empty()) {
         normalized.erase(
-            std::remove_if(normalized.begin(), normalized.end(), [&](auto const& item) {
-                return item.type == simfil::CompletionCandidate::Type::CONSTANT
-                    && fieldCandidateTexts.contains(completionConstantSymbol(item.text));
-            }),
+            std::remove_if(
+                normalized.begin(),
+                normalized.end(),
+                [&](auto const& item)
+                {
+                    return item.type == simfil::CompletionCandidate::Type::CONSTANT &&
+                        fieldCandidateTexts.contains(completionConstantSymbol(item.text));
+                }),
             normalized.end());
     }
 
@@ -184,11 +195,13 @@ NativeJsValue completionCandidatesToJs(
 
         result.push(JsValue::Dict({
             {"text", JsValue(item.text)},
-            {"range", JsValue::List({
-                JsValue(static_cast<int>(item.location.offset)),
-                JsValue(static_cast<int>(item.location.size)),
-            })},
+            {"range",
+             JsValue::List({
+                 JsValue(static_cast<int>(item.location.offset)),
+                 JsValue(static_cast<int>(item.location.size)),
+             })},
             {"query", JsValue(completedQuery)},
+            {"isExactMatch", JsValue(exactInputExpressions.contains(item.text))},
             {"type", JsValue(completionTypeToString(item.type))},
             {"hint", item.hint.empty() ? JsValue::Undefined() : JsValue(item.hint)},
         }));
@@ -681,9 +694,31 @@ SearchStyleSchemaMetadata schemaMetadata(simfil::SchemaType type)
         (simfil::valueTypeAffinity(simfil::ValueType::Int) |
          simfil::valueTypeAffinity(simfil::ValueType::Float)))
         metadata.valueKind = "number";
+    std::set<std::string> categories;
     for (auto name : type.directEnumSymbols())
-        metadata.enumValues.emplace_back(type.pool()->dictionary().resolve(name).value());
-    if (metadata.valueKind == "string" && !metadata.enumValues.empty())
+        categories.emplace(type.pool()->dictionary().resolve(name).value());
+    // Live enums are a union of known string labels and unknown integer codes.
+    // Their named constants belong to the union itself, while direct enum
+    // symbols belong to its string alternative. Use the logical labels for
+    // categories; raw wire ordinals and numeric specials are not color keys.
+    type.forEachNamedValue(
+        [&](auto const& value)
+        {
+            if (value.role != simfil::SchemaType::NamedValue::Role::Constant)
+                return;
+            std::visit(
+                [&](auto const& raw)
+                {
+                    using T = std::decay_t<decltype(raw)>;
+                    if constexpr (
+                        std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view>)
+                        categories.emplace(raw);
+                },
+                value.value);
+        });
+    metadata.enumValues.assign(categories.begin(), categories.end());
+    if ((metadata.valueKind == "string" || metadata.valueKind == "unknown") &&
+        !metadata.enumValues.empty())
         metadata.valueKind = "enum";
     metadata.schemaType = JsValue::fromSchema(type);
     if (auto numeric = type.numericDomain()) {
@@ -884,6 +919,62 @@ public:
         }
         if (options.has("context"))
             contextFilter_ = options["context"];
+        if (options.has("preparedContexts")) {
+            preparedContexts_ = options["preparedContexts"];
+            for (uint32_t i = 0; i < preparedContexts_->size(); ++i) {
+                for (auto const* name :
+                     {"mapId", "layerId", "featureType", "attrName", "attrLayerName"}) {
+                    if (!preparedContexts_->at(i).has(name))
+                        throw std::invalid_argument(
+                            "Prepared style discovery requires complete attribute owners");
+                }
+            }
+        }
+        else if (
+            contextFilter_.has("mapId") && contextFilter_.has("layerId") &&
+            contextFilter_.has("featureType") && contextFilter_.has("attrName") &&
+            contextFilter_.has("attrLayerName"))
+        {
+            preparedContexts_ = JsValue::List();
+            preparedContexts_->push(contextFilter_);
+        }
+    }
+
+    /**
+     * Visit already resolved owners together, sharing the projected type table.
+     * A present empty list means no owners; absence asks the caller to perform
+     * ordinary query normalization. This avoids rescanning a prepared predicate
+     * at a different root or reinstalling the schema for each individual owner.
+     */
+    bool collectPrepared(
+        simfil::model_ptr<mapget::LayerSchema> const& registry,
+        std::string const& mapId,
+        std::string const& layerId)
+    {
+        if (!preparedContexts_)
+            return false;
+        for (auto const& owner : registry->attributeScopes()) {
+            for (uint32_t i = 0; i < preparedContexts_->size(); ++i) {
+                auto context = preparedContexts_->at(i);
+                if (context["mapId"].as<std::string>() == mapId &&
+                    context["layerId"].as<std::string>() == layerId &&
+                    context["featureType"].as<std::string>() == owner.featureType_ &&
+                    context["attrName"].as<std::string>() == owner.attributeName_ &&
+                    context["attrLayerName"].as<std::string>() == owner.attributeLayerName_)
+                {
+                    collect(
+                        registry,
+                        owner.attributeSchema_,
+                        mapId,
+                        layerId,
+                        owner.featureType_,
+                        owner.attributeName_,
+                        owner.attributeLayerName_);
+                    break;
+                }
+            }
+        }
+        return true;
     }
 
     /** Retain all context choices, then walk only those selected by the user. */
@@ -1243,6 +1334,7 @@ private:
     bool scalarsOnly_;
     bool recursiveCycle_ = false;
     JsValue contextFilter_ = JsValue::Dict();
+    std::optional<JsValue> preparedContexts_;
     std::set<std::string> featureTypes_;
     Path path_;
     std::vector<JsValue> contexts_;
@@ -1694,9 +1786,16 @@ std::vector<TileLayerParser::FilteredFeatureJumpTarget>
 TileLayerParser::filterFeatureJumpTargets(const std::string& queryString) const
 {
     std::vector<FilteredFeatureJumpTarget> results;
-    std::regex sep("[\\.,;|\\s]+"); // Regex to split the input based on multiple delimiters
+    // An empty omnibar does not need every feature type. Trim surrounding
+    // whitespace before looking for a type prefix or a complete bare ID.
+    auto const first = queryString.find_first_not_of(" \t\r\n\f\v");
+    if (first == std::string::npos)
+        return results;
+    auto const last = queryString.find_last_not_of(" \t\r\n\f\v");
+    auto const query = queryString.substr(first, last - first + 1);
+    std::regex sep("[\\.,;|\\s]+");
     std::vector<std::string> tokens(
-        std::sregex_token_iterator(queryString.begin(), queryString.end(), sep, -1),
+        std::sregex_token_iterator(query.begin(), query.end(), sep, -1),
         std::sregex_token_iterator());
 
     // Find applicable feature types based on the prefix.
@@ -1710,7 +1809,8 @@ TileLayerParser::filterFeatureJumpTargets(const std::string& queryString) const
         }
     }
 
-    // Match all targets if there are no matching ones, or there is no prefix.
+    // Without a type prefix, try bare IDs. Only successful parses are useful
+    // here; unrelated text must not produce a catalog of missing parameters.
     if (targetsWithPrefixMatch.empty()) {
         for (const auto& [_, target] : featureJumpTargets_) {
             targetsWithPrefixMatch.push_back(&target);
@@ -1748,7 +1848,10 @@ TileLayerParser::filterFeatureJumpTargets(const std::string& queryString) const
             result.error_ = "Too many parameters.";
         }
 
-        results.push_back(result);
+        // A matching type prefix keeps incomplete alternatives visible so the
+        // omnibar can show which ID parts the user still needs to supply.
+        if (!prefix.empty() || !result.error_)
+            results.push_back(std::move(result));
     }
 
     return results;
@@ -1808,8 +1911,17 @@ NativeJsValue TileLayerParser::completeSearchQuery(
     }
     auto const includeFeatureScope = scope != "attribute";
     auto const includeAttributeScope = scope != "feature";
+    // A feature's shorthand index already includes all owned attribute fields
+    // and enum symbols. Scanning every attribute again for a bare keyword
+    // spends the full completion budget returning duplicates. Paths and the
+    // attribute-only scope still need their attribute roots and $feature context.
+    auto const featureCoversAttributeShorthand = includeFeatureScope && isPathIdentifier(query);
     auto const selectedLayers = selectedLayerFilterFromOptions(options);
     std::set<simfil::CompletionCandidate> mergedCandidates;
+    // A complete symbol may expand into a predicate in the suggestions. Tell
+    // the editor that Enter can submit the original input for interpretation;
+    // accepting the first expanded suggestion would silently choose a meaning.
+    std::set<std::string> exactInputExpressions;
     auto const completionStart = std::chrono::steady_clock::now();
     auto const completionBudgetExhausted = [&]() {
         if (opts.timeoutMs <= 0) {
@@ -1847,7 +1959,61 @@ NativeJsValue TileLayerParser::completeSearchQuery(
         auto candidates = simfil::complete(*binding->environment, query, point, rootSchema, remaining);
         if (candidates) {
             for (auto candidate : *candidates) {
-                mergedCandidates.insert(enrichCompletionCandidate(std::move(candidate), registry, rootSchema.id()));
+                candidate =
+                    enrichCompletionCandidate(std::move(candidate), registry, rootSchema.id());
+                bool qualified = false;
+                if (candidate.location.offset == 0 && candidate.location.size == query.size()) {
+                    auto const symbol = completionConstantSymbol(candidate.text);
+                    auto const exact = symbol == completionConstantSymbol(query);
+                    if (candidate.type == simfil::CompletionCandidate::Type::FIELD) {
+                        // Simfil already found this field. A full interpretation
+                        // would enumerate every path through every feature again
+                        // merely to label one autocomplete row.
+                        for (auto const& owner : registry->attributeScopes()) {
+                            if (owner.attributeName_ == symbol) {
+                                candidate.hint = symbol + " attribute";
+                                break;
+                            }
+                        }
+                        if (exact)
+                            exactInputExpressions.insert(candidate.text);
+                    }
+                    auto const symbolId = registry->mapSchema()->dictionary().get(symbol);
+                    auto const symbols = rootSchema.nestedEnumSymbols();
+                    auto const fieldShadowsSymbol = featureCoversAttributeShorthand &&
+                        candidate.type == simfil::CompletionCandidate::Type::FIELD && symbolId &&
+                        std::ranges::find(symbols, symbolId) != symbols.end();
+                    if (candidate.type == simfil::CompletionCandidate::Type::CONSTANT ||
+                        fieldShadowsSymbol) {
+                        // A whole-query enum needs a predicate, whereas an enum
+                        // inside an authored comparison remains a literal value.
+                        // Simfil gives fields precedence over equal enum names.
+                        // Here both are useful: keep the plain field alongside
+                        // the enum's explicit predicate, without rescanning all
+                        // attribute roots to recover that second interpretation.
+                        // Bound the retained cache as users explore new symbols.
+                        auto key = std::make_pair(symbol, requestedSearchScopeFromString(scope));
+                        if (!binding->enumMeanings.contains(key) &&
+                            binding->enumMeanings.size() >= 128)
+                            binding->enumMeanings.clear();
+                        auto [found, inserted] = binding->enumMeanings.try_emplace(key);
+                        if (inserted)
+                            found->second = registry->enumSearchInterpretations(symbol, key.second);
+                        for (auto const& meaning : found->second) {
+                            auto chosen = candidate;
+                            chosen.type = simfil::CompletionCandidate::Type::CONSTANT;
+                            chosen.hint = meaning.label_;
+                            chosen.text = meaning.expression_;
+                            if (exact)
+                                exactInputExpressions.insert(chosen.text);
+                            mergedCandidates.emplace(std::move(chosen));
+                            qualified = candidate.type ==
+                                simfil::CompletionCandidate::Type::CONSTANT;
+                        }
+                    }
+                }
+                if (!qualified)
+                    mergedCandidates.emplace(std::move(candidate));
             }
         }
     };
@@ -1855,7 +2021,7 @@ NativeJsValue TileLayerParser::completeSearchQuery(
     for (auto const& [_, dataSource] : info_) {
         for (auto const& [__, layerInfo] : dataSource.layers_) {
             if (completionBudgetExhausted()) {
-                return completionCandidatesToJs(query, mergedCandidates, opts.limit);
+                return completionCandidatesToJs(query, mergedCandidates, exactInputExpressions, opts.limit);
             }
             if (layerInfo && !selectedLayers.contains(dataSource.mapId_, layerInfo->layerId_)) {
                 continue;
@@ -1873,12 +2039,12 @@ NativeJsValue TileLayerParser::completeSearchQuery(
                 auto const featureSchema = registry->featureSchema(featureType);
                 if (includeFeatureScope && featureSchema != simfil::NoTypeId) {
                     if (completionBudgetExhausted()) {
-                        return completionCandidatesToJs(query, mergedCandidates, opts.limit);
+                        return completionCandidatesToJs(query, mergedCandidates, exactInputExpressions, opts.limit);
                     }
                     addCandidates(registry, registry->mapSchema()->schemaType(featureSchema));
                 }
 
-                if (!includeAttributeScope) {
+                if (!includeAttributeScope || featureCoversAttributeShorthand) {
                     continue;
                 }
 
@@ -1887,7 +2053,7 @@ NativeJsValue TileLayerParser::completeSearchQuery(
                         continue;
                     }
                     if (completionBudgetExhausted()) {
-                        return completionCandidatesToJs(query, mergedCandidates, opts.limit);
+                        return completionCandidatesToJs(query, mergedCandidates, exactInputExpressions, opts.limit);
                     }
                     auto const root =
                         registry->attributeQuerySchema(featureType, owner.attributeSchema_);
@@ -1897,7 +2063,7 @@ NativeJsValue TileLayerParser::completeSearchQuery(
         }
     }
 
-    return completionCandidatesToJs(query, mergedCandidates, opts.limit);
+    return completionCandidatesToJs(query, mergedCandidates, exactInputExpressions, opts.limit);
 }
 
 bool TileLayerParser::isAttributeScopeSearchQuery(std::string const& query, NativeJsValue const& options_) const
@@ -1918,6 +2084,112 @@ NativeJsValue TileLayerParser::getMapLayersForQuery(std::string const& query, Na
         info_,
         query,
         selectedLayerFilterFromOptions(JsValue(options_))));
+}
+
+/** Enumerate meanings before selecting scope, preserving each layer's evaluation root. */
+NativeJsValue TileLayerParser::prepareSearchQuery(
+    std::string const& query,
+    std::string const& scope,
+    NativeJsValue const& options_) const
+{
+    auto const selected = selectedLayerFilterFromOptions(JsValue(options_));
+    auto strings = std::make_shared<mapget::StringPool>("PreparedSearchTerms");
+    auto environment = mapget::makeEnvironment(strings);
+    auto ast = simfil::compile(
+        *environment,
+        query,
+        simfil::CompileOptions{.any = false, .rewriteMode = simfil::RewriteMode::None});
+    if (!ast)
+        throw std::runtime_error(ast.error().message);
+    std::set<std::string> selectedTypes;
+    JsValue options(options_);
+    if (options.has("selectedFeatureTypes")) {
+        auto types = options["selectedFeatureTypes"];
+        for (uint32_t i = 0; i < types.size(); ++i)
+            selectedTypes.insert(types.at(i).as<std::string>());
+    }
+    auto result = JsValue::List();
+    for (auto const& [_, source] : info_) {
+        for (auto const& [__, layer] : source.layers_) {
+            if (!layer || layer->type_ != mapget::LayerType::Features ||
+                !selected.contains(source.mapId_, layer->layerId_))
+                continue;
+            auto registry = layer->layerSchema();
+            if (!registry)
+                throw std::runtime_error(
+                    "Search requires the schema for " + source.mapId_ + "/" + layer->layerId_);
+            auto prepared =
+                registry->searchInterpretations(query, requestedSearchScopeFromString(scope));
+            if (!prepared)
+                throw std::runtime_error(prepared.error().message);
+            for (auto const& meaning : *prepared) {
+                // Styling follows the accepted field predicate, rather than
+                // ranking fields from the ambiguous shorthand that led to it.
+                auto expression = simfil::compile(
+                    *environment,
+                    meaning.expression_,
+                    simfil::CompileOptions{.any = false, .rewriteMode = simfil::RewriteMode::None});
+                if (!expression)
+                    throw std::runtime_error(expression.error().message);
+                auto terms = simfil::referencedQueryTerms(**expression);
+                auto fields = JsValue::List(), literals = JsValue::List();
+                for (auto const& field : terms.leafFields)
+                    fields.push(JsValue(field));
+                for (auto const& literal : terms.stringLiterals)
+                    literals.push(JsValue(literal));
+                // The user's type selector constrains execution. Discovered
+                // owners only guide styling: another produced type can expose
+                // the same portable field, including through open metadata.
+                auto featureTypes = registry->featureTypes();
+                if (!selectedTypes.empty())
+                    std::erase_if(
+                        featureTypes,
+                        [&](auto const& type) { return !selectedTypes.contains(type); });
+                if (featureTypes.empty())
+                    continue;
+                auto scopes = JsValue::List();
+                for (auto const& owner : meaning.attributeScopes_) {
+                    if (!selectedTypes.empty() && !selectedTypes.contains(owner.featureType_))
+                        continue;
+                    auto value = JsValue::Dict();
+                    value.set("mapId", JsValue(source.mapId_));
+                    value.set("layerId", JsValue(layer->layerId_));
+                    value.set("featureType", JsValue(owner.featureType_));
+                    value.set("attrLayerName", JsValue(owner.attributeLayerName_));
+                    value.set("attrName", JsValue(owner.attributeName_));
+                    scopes.push(value);
+                }
+                auto value = JsValue::Dict();
+                value.set("id", JsValue(meaning.id_));
+                value.set("label", JsValue(meaning.label_));
+                value.set("kind", JsValue(meaning.kind_));
+                value.set("symbol", JsValue(meaning.symbol_));
+                value.set("mapId", JsValue(source.mapId_));
+                value.set("layerId", JsValue(layer->layerId_));
+                value.set("schemaId", JsValue(std::string(registry->mapSchema()->schemaId())));
+                // Requests already select their map/layer. The chosen query
+                // stays readable and can be prepared for another schema later;
+                // schemaId only validates this temporary execution plan.
+                value.set("expression", JsValue(meaning.expression_));
+                value.set("query", JsValue(meaning.query_));
+                value.set(
+                    "scope",
+                    JsValue(
+                        meaning.scope_ == mapget::LayerSchema::SearchQueryConcreteScope::Attribute ?
+                            "attribute" :
+                            "feature"));
+                auto types = JsValue::List();
+                for (auto const& type : featureTypes)
+                    types.push(JsValue(type));
+                value.set("featureTypes", types);
+                value.set("attributeScopes", scopes);
+                value.set("matchedFieldNames", fields);
+                value.set("matchedEnumValues", literals);
+                result.push(value);
+            }
+        }
+    }
+    return *result;
 }
 
 /** Returns concrete scope and backend-safe normalized query for selected map/layers. */
@@ -2053,6 +2325,15 @@ NativeJsValue TileLayerParser::searchStyleFieldsForQuery(
             auto registry = layer->layerSchema();
             if (!registry)
                 continue;
+
+            // A confirmed search supplies its exact owners in one batch.
+            // Browse them directly; their predicates already have the correct
+            // result root and must not undergo another inference pass here.
+            if (requestedScope == mapget::LayerSchema::SearchQueryRequestedScope::Attribute &&
+                discovery.collectPrepared(registry, source.mapId_, layer->layerId_))
+            {
+                continue;
+            }
 
             // Resolve owners exactly as execution does. Leaf/enum matching
             // also reaches shared metadata and can turn SPEED_LIMIT_METRIC

@@ -1,3 +1,4 @@
+import type {PreparedSearchBranch} from "./search-preparation.model";
 import { Injectable } from "@angular/core";
 import { MapDataService } from "../mapdata/mapdata.service";
 import type { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldInventory, FeatureSearchStyleFieldOptions } from "./search.model";
@@ -15,6 +16,8 @@ import type {
 
 export interface FeatureSearchScopeAnalysis {
     signature: string;
+    interpretations?: PreparedSearchBranch[];
+    waitingForSchema?: boolean;
     concreteScope: "feature" | "attribute";
     normalizedQuery: string;
     attributeScopes: FeatureSearchAttributeScopeCandidate[];
@@ -99,9 +102,10 @@ export class FeatureSearchSchemaService {
     requestSearchScopeAnalysis(
         query: string,
         scope: FeatureSearchScope,
-        selectedMapLayers?: FeatureSearchMapLayerRef[]
+        selectedMapLayers?: FeatureSearchMapLayerRef[],
+        selectedFeatureTypes: string[] = []
     ): Promise<FeatureSearchScopeAnalysis> {
-        const signature = this.searchScopeAnalysisSignature(query, scope, selectedMapLayers);
+        const signature = this.searchScopeAnalysisSignature(query, scope, selectedMapLayers) + "\n" + JSON.stringify([...selectedFeatureTypes].sort());
         const cached = this.scopeAnalysisByQueryCache.get(signature);
         if (cached) return cached;
         const promise: Promise<FeatureSearchScopeAnalysis> = this.enqueueSchemaRequest("analysis", selectedMapLayers, worker =>
@@ -109,11 +113,12 @@ export class FeatureSearchSchemaService {
                 const requestId = ++this.workerRequestSerial;
                 this.pendingScopeAnalysis.set(requestId, {resolve, signature});
                 worker.postMessage({
-                    type: "SearchScopeAnalysisRequest", requestId, query, scope,
+                    type: "SearchScopeAnalysisRequest", requestId, query, scope, selectedFeatureTypes,
                     ...(selectedMapLayers !== undefined ? {selectedMapLayers} : {})
                 } satisfies SearchScopeAnalysisRequestMessage);
             })
-        ).catch(error => this.workerUnavailableScopeAnalysis(signature, scope, String(error))).then(result => {
+        ).catch(error => ({...this.workerUnavailableScopeAnalysis(signature, scope, String(error)),
+            waitingForSchema: !!this.mapInfo.schemaReadinessError(selectedMapLayers?.map(layer => layer.mapId))})).then(result => {
             // A temporarily unavailable source can recover without changing its
             // model generation; failed analysis is never a reusable answer.
             if (result.error && this.scopeAnalysisByQueryCache.get(signature) === promise) {
@@ -137,7 +142,8 @@ export class FeatureSearchSchemaService {
             recursive: options.recursive ?? true,
             path: options.path ?? [],
             selectedFeatureTypes: [...new Set(options.selectedFeatureTypes ?? [])].sort(),
-            ...(options.context ? {context: options.context} : {})
+            ...(options.context ? {context: options.context} : {}),
+            ...(options.preparedContexts ? {preparedContexts: options.preparedContexts} : {})
         };
         const cacheKey = this.searchScopeAnalysisSignature(scope === "feature" ? "" : query, scope, selectedMapLayers)
             + "\n" + JSON.stringify(normalized);
@@ -166,12 +172,58 @@ export class FeatureSearchSchemaService {
         return promise;
     }
 
+    /**
+     * Browse the accepted owners together, without re-inferring their query.
+     * One request shares metadata across maps and keeps the worker's installed
+     * schema set stable; per-owner requests repeatedly replaced that set.
+     */
+    async requestPreparedSearchStyleFields(
+        branches: readonly PreparedSearchBranch[], options: FeatureSearchStyleFieldOptions
+    ): Promise<FeatureSearchStyleFieldInventory> {
+        const attributeBranches = branches.filter(branch => branch.scope === "attribute" && branch.attributeScopes.length);
+        const featureBranches = branches.filter(branch => branch.scope === "feature");
+        const owners = [...new Map(attributeBranches.flatMap(branch => branch.attributeScopes)
+            .map(owner => [JSON.stringify(owner), owner])).values()];
+        const requests: Promise<FeatureSearchStyleFieldInventory>[] = [];
+        if (attributeBranches.length) {
+            const layers = attributeBranches.map(({mapId, layerId}) => ({mapId, layerId}));
+            requests.push(this.requestSearchStyleFields("", "attribute", layers, {...options, preparedContexts: owners}));
+        }
+        if (featureBranches.length) {
+            const layers = featureBranches.map(({mapId, layerId}) => ({mapId, layerId}));
+            requests.push(this.requestSearchStyleFields("", "feature", layers, options));
+        }
+        // Explicit attribute expressions without resolved owners still need
+        // native normalization; an empty owner list is not the entire layer.
+        for (const branch of branches.filter(branch => branch.scope === "attribute" && !branch.attributeScopes.length)) {
+            requests.push(this.requestSearchStyleFields(branch.query, branch.scope,
+                [{mapId: branch.mapId, layerId: branch.layerId}], options));
+        }
+        const inventories = await Promise.all(requests);
+        const result: FeatureSearchStyleFieldInventory = {
+            contexts: [], types: [], fields: [], branches: [], complete: true, incompleteReason: ""
+        };
+        for (const inventory of inventories) {
+            const contextOffset = result.contexts.length, typeOffset = result.types.length;
+            result.contexts.push(...inventory.contexts);
+            result.types.push(...inventory.types);
+            result.fields.push(...inventory.fields.map(field => ({...field, metadata: field.metadata + typeOffset,
+                contexts: field.contexts.map(index => index + contextOffset)})));
+            result.branches.push(...inventory.branches.map(branch => ({...branch,
+                contexts: branch.contexts.map(index => index + contextOffset)})));
+            result.complete &&= inventory.complete;
+            if (inventory.incompleteReason) result.incompleteReason = inventory.incompleteReason;
+        }
+        return result;
+    }
+
     /** Queues completion behind native installation, superseding older queued input from the same owner. */
     requestCompletion(
         message: SearchCompletionRequestMessage,
         handler: (message: SearchCompletionResultMessage) => void
     ): boolean {
         if (!this.schemaWorker("completion")) return false;
+        this.cancelCompletion(message.ownerId);
         this.latestCompletionSerialByOwner.set(message.ownerId, message.requestSerial);
         void this.enqueueSchemaRequest("completion", message.options.selectedMapLayers, (worker, isCurrent) =>
             new Promise<void>(resolve => {
@@ -196,6 +248,16 @@ export class FeatureSearchSchemaService {
             requestSerial: message.requestSerial, candidates: [], done: true, error: String(error)
         }));
         return true;
+    }
+
+    /**
+     * Stop obsolete prefixes at the worker's next context boundary. Merely
+     * ignoring their replies leaves newer typing queued behind the entire scan.
+     * The worker's final acknowledgement releases the serialized schema lane.
+     */
+    cancelCompletion(ownerId: string): void {
+        this.latestCompletionSerialByOwner.delete(ownerId);
+        this.workerStates.completion.worker?.postMessage({type: "SearchCompletionCancel", ownerId});
     }
 
     /**
@@ -374,6 +436,7 @@ export class FeatureSearchSchemaService {
         this.pendingScopeAnalysis.delete(message.requestId);
         pending.resolve({
             signature: pending.signature,
+            interpretations: message.interpretations,
             concreteScope: message.concreteScope,
             normalizedQuery: message.normalizedQuery,
             attributeScopes: message.attributeScopes,

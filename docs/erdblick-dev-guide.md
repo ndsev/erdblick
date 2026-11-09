@@ -35,48 +35,100 @@ Test sources live under `tests/`; Angular specs mirror `app/` in `tests/app/`.
 See [Test Layout and Commands](../tests/README.md) for the shared helpers,
 browser fixtures and MapViewer integration paths.
 
-Native core:
+Choose validation by semantic impact. Verified comment/whitespace-only changes
+need diff and token/AST checks, including preprocessor continuations and literals;
+they need no build or runtime test by default, even in C++/WASM files.
+Documentation changes need applicable link/example checks. Changes to meaningful
+strings, generated contracts, CSS or templates need validation of their effects.
 
-```bash
-cmake -S . -B build-native -G Ninja
-cmake --build build-native --parallel 8
-ctest --test-dir build-native --output-on-failure --no-tests=error
-```
-
-For changes to the native/WASM core or its mapget/simfil dependencies, use the
-incremental rebuild script. It rebuilds the bindings and both frontend variants:
+Whenever frontend iteration needs a validation build, run the incremental
+wrapper from the erdblick root, including for frontend-only changes:
 
 ```bash
 ./ci/20_linux_rebuild.bash
 ```
 
-A tile-protocol or static-dictionary change requires a coordinated rebuild of
-the native server, binary datasource clients and browser WASM from compatible
-mapget/simfil sources. Deploy the matching server and frontend together, then
-reload open tabs. A newly built frontend cannot validate the new protocol
-against a still-running server built for the previous format; integration tests
-must start a matching server.
+It reconfigures the existing WASM build while preserving its cached generator,
+incrementally rebuilds the core and bindings, and builds both frontend variants.
+The default profiling build keeps release optimization, JavaScript identifiers
+and source maps; pass `production` for compact deployment bundles. Direct
+`npm run build` or `build-ui.bash` calls do not replace this validation workflow.
+`./ci/10_linux_build.bash` removes the build tree and is reserved for clean CI
+builds. See [Running from source](erdblick-setup.md#running-from-source) for
+initial toolchain preparation.
 
-WASM exception catching is enabled only for the parser, style validation/loading,
-and packet-error reporting sources listed in `libs/core/CMakeLists.txt`. Keep it
-off globally: Emscripten's emulated catching inserts JavaScript invoke wrappers
-into hot model access. Existing validation errors still need their local catches;
-the WASM style-validation tests check recovery after malformed input.
+In a shared checkout, coordinate one build owner and keep consumed scripts,
+configuration, source and generator inputs stable through generation, build and
+test. Wait for the process to exit, cancel it with its owner, or use isolated
+inputs and outputs before editing. Even comment-only edits can disrupt a shell
+that resumes reading a running script. Pausing that shell or checking the final
+file with `bash -n` does not prevent this.
 
-With matching WASM artifacts already present, frontend-only validation uses:
+### Angular checks
+
+Run lint and tests as appropriate to the change:
 
 ```bash
 npm run lint
 npm run test -- --watch=false
-npm run build -- -c profiling
 ```
+
+Angular tests and `npm start` require generated bindings and WASM in
+`build/libs/core/` matching the checked-out native APIs. Run the wrapper first
+on a clean checkout or after executable native/API changes. Its build does not
+run these unit suites.
 
 For a focused run, add `--include '../tests/app/<domain>/**/*.spec.ts'`.
 Angular resolves that pattern relative to its `app/` source root.
 
 The build, start, watch and unit-test hooks generate the trusted viewer-action
-catalog before compiling. `./ci/10_linux_build.bash` is the clean CI build;
-it removes the existing build tree and is not the routine iteration command.
+catalog before compiling. Keep action declarations stable through generation
+and testing; regenerate if those inputs change between stages.
+
+### Native core
+
+For C++ behavior changes, also run native tests in a separate build tree:
+
+```bash
+cmake -S . -B build-test -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build-test --parallel 8
+ctest --test-dir build-test --output-on-failure --no-tests=error
+```
+
+Record native tests, WASM compilation/linking, frontend bundles and runtime
+tests as separate results. Browser-consumed native changes need the wrapper
+and relevant tests using its fresh WASM. Native tests or frontend tests using
+older WASM do not establish correctness of the changed browser core.
+
+### WASM exception handling
+
+The current build enables Emscripten's JavaScript-based C++ exception support.
+The [root CMake configuration](../CMakeLists.txt) applies `-fexceptions` before
+configuring C++ dependencies; the [core link configuration](../libs/core/CMakeLists.txt)
+uses `-s DISABLE_EXCEPTION_CATCHING=0` and `-s EXCEPTION_STACK_TRACES=1`.
+The native WebAssembly exception backend, selected by `-fwasm-exceptions`, is
+not enabled. See [Emscripten's exception documentation](https://emscripten.org/docs/porting/exceptions.html)
+for the distinction between the two backends.
+
+Mapget and Simfil require catches for legacy schema declarations and RAII
+cleanup for schema-import rollback and construction caches. Compiling catches
+only into selected core files omits required dependency cleanup; enabling
+catching at the final link cannot restore that code. Failed imports can then
+leave cache entries marked as still under construction, breaking later attempts.
+
+Validate exception-policy changes with fresh WASM: repeat an invalid import,
+then confirm a valid import succeeds in the same module. Native tests cannot
+expose missing Emscripten unwind code. Evaluate performance and browser
+compatibility when changing the exception backend or narrowing its coverage,
+while preserving failure/recovery behavior.
+
+### Browser integration
+
+A tile-protocol or static-dictionary change requires compatible native server,
+binary datasource and browser WASM builds. Before integration tests, verify
+the actual running server's process/binary and major/minor stream version;
+rebuilding an executable on disk does not update an already running process.
+Start a matching test server and reload tabs after serving the matching frontend.
 
 The action/transport browser smoke can use a matching native `mapget` executable
 without an installed Python datasource wheel. From the erdblick root:

@@ -1,4 +1,5 @@
 import type {FeatureSearchResolvedDefinition} from "./feature-search-runtime-state.model";
+import {schemaScalarMeaning} from "../mapdata/schema-type.model";
 import {
     AfterViewInit,
     ChangeDetectorRef,
@@ -64,13 +65,9 @@ import type { FeatureSearchAutoStyleOption } from "./feature-search-auto-style.u
 import {
     defaultSearchStyleFieldOptionsForAnalysis,
     preferredSearchAutoStyleField,
-    searchAutoStyleFieldOptions,
-    searchAutoStyleFieldOptionsArePortable
 } from "./feature-search-auto-style.util";
 import {
-    featureSearchActionPayloadFromCompletion,
     FeatureSearchExportGroupingOption,
-    featureSearchSelectedMapLayersFromPayload,
     SearchService,
     FeatureSearchSession
 } from "./search.service";
@@ -96,7 +93,6 @@ import {
     SearchStyleApplicationProjection
 } from "./search-style-sheet.converter";
 import {
-    CompletionCandidate,
     DiagnosticsMessage,
     SearchResultFieldValueSummary,
     SearchValueSummariesState,
@@ -254,7 +250,6 @@ interface FeatureSearchResultTreeItem {
                                          (clicked)="expandFeatureSearchQueryInput()"
                                          (focused)="expandFeatureSearchQueryInput()"
                                          (blurred)="shrinkFeatureSearchQueryInput()"
-                                         (completionAccepted)="onFeatureSearchQueryCompletionAccepted($event)"
                                          (submitted)="rerunSearch()">
                 </simfil-expression-input>
             </div>
@@ -359,6 +354,58 @@ interface FeatureSearchResultTreeItem {
                     </p-iftalabel>
                 }
             </div>
+            @if (session && searchEnabled() && session.preparation?.status !== 'ready') {
+                <section class="search-preparation" data-testid="search-preparation"
+                         aria-label="Search preparation" aria-live="polite"
+                         [attr.aria-busy]="!session.preparation || session.preparation.status === 'preparing'">
+                    @if (!session.preparation || session.preparation.status === 'preparing') {
+                        <div class="search-preparation-heading" role="status" data-testid="search-preparation-spinner">
+                            <i class="pi pi-spinner pi-spin" aria-hidden="true"></i>
+                            <h3>{{ session.preparation?.phase === 'style' ? 'Preparing visualization' : 'Finding query interpretations' }}</h3>
+                        </div>
+                        <p>{{ session.preparation?.phase === 'style'
+                            ? 'Preparing the initial style before starting the search.'
+                            : 'Checking the confirmed query against the selected maps, layers and feature types.' }}</p>
+                    } @else if (session.preparation.status === 'needs-choice') {
+                        <div class="search-preparation-heading">
+                            <i class="pi pi-question-circle" aria-hidden="true"></i>
+                            <h3>Choose one interpretation</h3>
+                        </div>
+                        <p>Select the meaning of <code>{{ session.definition.query }}</code>,
+                            or narrow the scope above.</p>
+                        @if (session.preparation.error) { <p role="alert">{{ session.preparation.error }}</p> }
+                        <div class="search-interpretation-choices">
+                            @for (meaning of session.preparation.interpretations; track meaning.id) {
+                                <button type="button" data-testid="search-interpretation"
+                                        [disabled]="!searchEnabled()"
+                                        (click)="chooseInterpretation(meaning.id)">
+                                    <strong>{{ meaning.label }}</strong>
+                                    <code>{{ meaning.query }}</code>
+                                    <span class="search-interpretation-contexts">
+                                        @for (branch of meaning.branches; track $index) {
+                                            <small>{{ branch.mapId }}/{{ branch.layerId }} · {{ branch.scope }} matches</small>
+                                        }
+                                    </span>
+                                </button>
+                            }
+                        </div>
+                    } @else if (session.preparation.status === 'waiting-for-schema') {
+                        <div class="search-preparation-heading" role="status">
+                            <i class="pi pi-spinner pi-spin" aria-hidden="true"></i>
+                            <h3>Waiting for schema</h3>
+                        </div>
+                        <p>{{ session.preparation.error }}</p>
+                        <button type="button" (click)="searchService.retrySearchPreparation(session.id)">Retry preparation</button>
+                    } @else {
+                        <h3>Search preparation failed</h3>
+                        <p role="alert">{{ session.preparation.error }}</p>
+                        <button type="button" (click)="searchService.retrySearchPreparation(session.id)">Retry preparation</button>
+                    }
+                    @if (session.lastResolvedDefinition; as previous) {
+                        <small>Previous results remain on the map: {{ previous.query }}</small>
+                    }
+                </section>
+            } @else {
             <div class="feature-search-controls">
                 <div class="feature-search-progress-meter" [title]="progressTooltip">
                     <p-metergroup [value]="progressMeterItems"
@@ -441,7 +488,10 @@ interface FeatureSearchResultTreeItem {
                     </p-tabpanel>
 
                     <!-- Style -->
-                    <p-tabpanel value="style">
+                    <p-tabpanel value="style" [lazy]="true">
+                      <!-- Category editors can contain hundreds of controls.
+                           Construct them on the first visit, not while showing results. -->
+                      <ng-template #content>
                         <div class="feature-search-style-rules" data-testid="feature-search-style-rules">
                             <section class="feature-search-visualization-controls">
                                 <div class="feature-search-style-control-group feature-search-density-map">
@@ -589,6 +639,7 @@ interface FeatureSearchResultTreeItem {
                                 (updateFromDataRequested)="onStyleColorDataUpdateRequested()">
                             </search-style-rule-editor>
                         </div>
+                      </ng-template>
                     </p-tabpanel>
 
                     <!-- Diagnostics -->
@@ -738,6 +789,7 @@ interface FeatureSearchResultTreeItem {
                     </p-tabpanel>
                 </p-tabpanels>
             </p-tabs>
+            }
             </div>
         </ng-template>
         <app-confirm-popup [key]="bookmarkedCloseConfirmKey"
@@ -890,7 +942,6 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
     private styleAttributeOptionsSessionSignature = "";
     private styleAttributeOptionsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
     private styleAttributeOptionsRefreshPatchMissing = false;
-    private readonly autoStyleRuleAttemptSignatures = new Set<string>();
     private mapLayerTreeOptionsSignature = "";
     // PrimeNG supports null at runtime to disable tree selection, but its TreeSelect type excludes it.
     protected readonly mapLayerTreeSelectionMode = null as unknown as "single";
@@ -900,7 +951,6 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
     private selectedMapLayersSignature = "";
     private selectedSearchMapLayersCacheSignature = "";
     private selectedSearchMapLayersCache: FeatureSearchMapLayerRef[] = [];
-    private initializedMapLayerSelectionSessionId = "";
     private featureSearchFeatureTypeOptionsSignature = "";
     private selectedFeatureTypesSignature = "";
     private searchTileLevelOptionsSignature = "";
@@ -1136,6 +1186,25 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
 
     /** Updates the compact multi-phase progress display from the current session and tree state. */
     private refreshProgressDisplay(session: FeatureSearchSession): void {
+        // Disabled searches are not prepared on restore. Their saved settings
+        // remain inspectable, without suggesting that background work is running.
+        if (!session.definition.enabled) {
+            this.progressLabel = "Search disabled";
+            this.progressTooltip = "Enable this search to run it. Its saved settings remain available below.";
+            this.progressMeterItems = [];
+            this.progressDisplayPercent = 0;
+            return;
+        }
+        if (session.preparation?.status !== "ready") {
+            const status = session.preparation?.status;
+            this.progressLabel = status === "needs-choice" ? "Choose an interpretation"
+                : status === "waiting-for-schema" ? "Waiting for schema"
+                : status === "invalid" ? "Preparation failed" : "Preparing search";
+            this.progressTooltip = session.preparation?.error ?? "Scope and initial visualization are resolved before searching.";
+            this.progressMeterItems = [];
+            this.progressDisplayPercent = 0;
+            return;
+        }
         this.percentDone = this.progressPercent(session.progressDone, session.progressTotal);
         this.totalTiles = session.progressTotal;
         this.doneTiles = session.progressDone;
@@ -1386,6 +1455,11 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
     /** Refreshes the compact scope label from the same schema metadata used by the style field picker. */
     private refreshFeatureSearchScopeSummary(session: FeatureSearchSession): void {
         const analysis = session.schemaAnalysis;
+        if (new Set(session.preparation?.branches.map(branch => branch.scope)).size > 1) {
+            this.featureSearchScopeSummary = "Mixed feature and attribute contexts";
+            this.featureSearchScopeSummaryTitle = "Each selected interpretation uses its own source and evaluation context.";
+            return;
+        }
         if (analysis.status === "pending") {
             this.featureSearchScopeSummary = "Auto: resolving scope...";
             this.featureSearchScopeSummaryTitle = "Schema analysis is running in the background.";
@@ -1815,16 +1889,9 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
      */
     private refreshStyleAttributeOptions(session: FeatureSearchSession, patchMissingFields = true): void {
         const signature = this.styleAttributeOptionsSessionSignature;
-        this.searchSchema.requestSearchStyleFields(
-            session.definition.query,
-            this.styleFieldRequestScope(session),
-            session.definition.selectedMapLayers,
-            {
-                selectedFeatureTypes: session.definition.selectedFeatureTypes,
-                recursive: true,
-                values: "scalar"
-            }
-        ).then(inventory => {
+        this.searchSchema.requestPreparedSearchStyleFields(session.preparation?.branches ?? [], {
+            selectedFeatureTypes: session.definition.selectedFeatureTypes, recursive: true, values: "scalar"
+        }).then(inventory => {
             if (signature !== this.styleAttributeOptionsSessionSignature) {
                 return;
             }
@@ -1849,26 +1916,14 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
     private applyStyleAttributeOptions(
         session: FeatureSearchSession,
         inventory: FeatureSearchStyleFieldInventory,
-        patchMissingFields: boolean
+        _patchMissingFields: boolean
     ): void {
         if (this.appliedStyleFieldInventory !== inventory) {
             this.updateStyleFieldOptions(inventory);
             this.appliedStyleFieldInventory = inventory;
         }
         this.styleAttributeOptionsLoading = false;
-        if (patchMissingFields && this.shouldRefreshAutoStyleRule()) {
-            this.refreshAutoStyleRule(session);
-            return;
-        }
-        if (patchMissingFields && (session.definition.searchStyleRules?.length ?? 0) === 0) {
-            this.tryCreateAutoStyleRule(session);
-            return;
-        }
-        if (patchMissingFields
-            && (session.definition.searchStyleRules?.length ?? 0) > 0
-            && this.applyDefaultStyleFieldIfMissing()) {
-            this.onStyleRulesChanged();
-        }
+
     }
 
     /** Aggregate one new inventory; feature-predicate cache hits reuse these dropdown arrays. */
@@ -1929,6 +1984,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
                         primaryValue: false,
                         valueKind: "boolean" as const,
                         schemaType: undefined,
+                        schemaTypes: undefined,
                         numericRange: undefined,
                         enumValues: ["false", "true"]
                     }))];
@@ -1958,13 +2014,25 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         source: FeatureSearchStyleFieldCandidate,
         context: FeatureSearchStyleFieldContext
     ): void {
-        const sameType = target.schemaType?.schemaId === source.schemaType?.schemaId &&
-            target.schemaType?.typeId === source.schemaType?.typeId;
+        const sourceType = source.schemaType;
+        const newType = !!sourceType && !target.schemaTypes?.some(type =>
+            type.schemaId === sourceType.schemaId && type.typeId === sourceType.typeId);
+        const sameType = (target.schemaType?.schemaId === source.schemaType?.schemaId &&
+            target.schemaType?.typeId === source.schemaType?.typeId) ||
+            (!!target.schemaType && !!source.schemaType &&
+                schemaScalarMeaning(target.schemaType) === schemaScalarMeaning(source.schemaType));
         target.primaryValue &&= context.primaryValuePath === source.path;
         target.incompatibleTypes ||= !sameType;
-        // Identical exact types already share metadata. Repeatedly unioning
-        // their enum names for each feature owner was a substantial UI cost.
-        if (!source.schemaType && !target.incompatibleTypes && target.enumValues !== source.enumValues) {
+        if (source.schemaType && !target.incompatibleTypes) {
+            const type = source.schemaType;
+            target.schemaTypes ??= [];
+            if (!target.schemaTypes.some(candidate => candidate.schemaId === type.schemaId && candidate.typeId === type.typeId)) {
+                target.schemaTypes.push({schemaId: type.schemaId, typeId: type.typeId});
+            }
+        }
+        // Repeated owners of one exact type already share their enum array.
+        // Compatible versions can add labels; retain their union in the picker.
+        if (!target.incompatibleTypes && target.enumValues !== source.enumValues && (!source.schemaType || newType)) {
             target.valueKind = this.mergedStyleFieldValueKind(target.valueKind, source.valueKind);
             target.enumValues = [...new Set([...(target.enumValues ?? []), ...source.enumValues])].sort();
         }
@@ -1978,6 +2046,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         }
         if (target.incompatibleTypes) {
             target.schemaType = undefined;
+            target.schemaTypes = undefined;
             target.numericRange = undefined;
             target.enumValues = [];
             target.valueKind = "unknown";
@@ -2022,70 +2091,14 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         return lhs === "unknown" ? rhs : lhs;
     }
 
-    /** Refreshes schema-backed fields when the editor or automatic rules need them. */
+    /** Field browsing is an editor operation; initial styling belongs to preparation. */
     private refreshStyleAttributeOptionsIfNeeded(session: FeatureSearchSession, patchMissingFields = true): boolean {
-        if (session.schemaAnalysis.status !== "ready") {
-            return false;
-        }
-        const concreteScope = this.styleFieldRequestScope(session);
-        if (session.schemaAnalysis.rewriteSuppressed) {
-            this.styleAttributeOptionsSessionSignature = [
-                session.definition.query,
-                session.definition.scope,
-                "rewrite-suppressed",
-                session.schemaAnalysis.rewriteSuppressionReason,
-                this.selectedSearchMapLayerSignature(session.definition.selectedMapLayers)
-            ].join("\n");
-            if (this.styleAttributeOptionsRefreshTimer) {
-                clearTimeout(this.styleAttributeOptionsRefreshTimer);
-                this.styleAttributeOptionsRefreshTimer = null;
-            }
-            this.styleAttributeOptionsRefreshPatchMissing = false;
-            this.styleAttributeOptionsLoading = false;
-            this.styleAttributeOptions = [];
-            this.styleScalarAttributeOptions = [];
-            this.appliedStyleFieldInventory = null;
-            if (this.shouldAttemptAutoStyleRule(session)) {
-                this.tryCreateAutoStyleRule(session);
-            } else if (this.shouldRefreshAutoStyleRule()) {
-                this.refreshAutoStyleRule(session);
-            }
-            return false;
-        }
-        // Paint a generic result immediately. Schema-field enumeration may be
-        // delayed behind a broad Classic query; once it completes below, the
-        // auto-generated solid rule is replaced with the richer field rule.
-        if (this.styleAttributeOptions.length === 0 &&
-            this.shouldAttemptAutoStyleRule(session)) {
-            this.tryCreateAutoStyleRule(session);
-        }
-        if (this.resultPanelIndex !== "style"
-            && session.schemaAnalysis.concreteScope !== "attribute") {
-            return false;
-        }
-        if (this.resultPanelIndex !== "style"
-            && this.styleAttributeOptions.length === 0
-            && !this.shouldAttemptAutoStyleRule(session)
-            && !this.shouldRefreshAutoStyleRule()) {
-            return false;
-        }
-        const signature = [
-            session.definition.query,
-            session.definition.scope,
-            this.styleFieldRequestScope(session),
-            session.schemaAnalysis.status,
-            session.schemaAnalysis.normalizedQuery,
-            this.attributeScopeSyncSignature(session.schemaAnalysis.attributeScopes),
-            this.selectedSearchMapLayerSignature(session.definition.selectedMapLayers),
-            JSON.stringify(session.definition.selectedFeatureTypes),
-            this.searchSchema.searchScopeAnalysisSignature("", concreteScope, session.definition.selectedMapLayers)
-        ].join("\n");
-        if (signature === this.styleAttributeOptionsSessionSignature) {
-            if (this.styleAttributeOptionsRefreshTimer && patchMissingFields) {
-                this.styleAttributeOptionsRefreshPatchMissing = true;
-            }
+        if (session.schemaAnalysis.status !== "ready" || this.resultPanelIndex !== "style") return false;
+        const signature = [session.definition.query, session.schemaAnalysis.signature,
+            JSON.stringify(session.definition.interpretationIds), this.styleFieldRequestScope(session),
+            JSON.stringify(session.definition.selectedFeatureTypes)].join("\n");
+        if (signature === this.styleAttributeOptionsSessionSignature)
             return !!this.styleAttributeOptionsRefreshTimer || this.styleAttributeOptionsLoading;
-        }
         this.styleAttributeOptionsSessionSignature = signature;
         this.scheduleStyleAttributeOptionsRefresh(session.id, patchMissingFields);
         return true;
@@ -2096,165 +2109,6 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         return session.schemaAnalysis.status === "ready"
             ? session.schemaAnalysis.concreteScope
             : session.definition.scope;
-    }
-
-    /** Returns whether all existing style rules still belong to automatic query-derived styling. */
-    private shouldRefreshAutoStyleRule(): boolean {
-        return this.styleRuleDrafts.length > 0 && this.styleRuleDrafts.every(rule => rule.autoGenerated === true);
-    }
-
-    /** Rebuilds automatic rules after the query or selected layer context changes. */
-    private refreshAutoStyleRule(session: FeatureSearchSession): boolean {
-        if (!this.shouldRefreshAutoStyleRule()) {
-            return false;
-        }
-        const existingIds = this.styleRuleDrafts.map(rule => rule.id);
-        this.styleRuleDrafts = this.createAutoStyleRules(session, existingIds);
-        this.styleRuleAccordionValue = [];
-        this.onStyleRulesChanged();
-        return true;
-    }
-
-    /** Returns whether this session still needs its one-shot automatic style rule attempt. */
-    private shouldAttemptAutoStyleRule(session: FeatureSearchSession): boolean {
-        return (session.definition.searchStyleRules?.length ?? 0) === 0
-            && session.schemaAnalysis.status === "ready"
-            && !this.autoStyleRuleAttemptSignatures.has(this.autoStyleRuleAttemptSignature(session));
-    }
-
-    /** Signature for the user-visible query scope that an automatic style rule would represent. */
-    private autoStyleRuleAttemptSignature(session: FeatureSearchSession): string {
-        return [
-            session.id,
-            session.definition.query,
-            session.definition.scope,
-            this.selectedSearchMapLayerSignature(session.definition.selectedMapLayers)
-        ].join("\n");
-    }
-
-    /** Creates the initial schema-backed style rule for a search that has no explicit rules yet. */
-    private tryCreateAutoStyleRule(session: FeatureSearchSession): boolean {
-        if (!this.shouldAttemptAutoStyleRule(session)) {
-            return false;
-        }
-        this.autoStyleRuleAttemptSignatures.add(this.autoStyleRuleAttemptSignature(session));
-        this.styleRuleDrafts = this.createAutoStyleRules(session);
-        this.styleRuleAccordionValue = [];
-        this.onStyleRulesChanged();
-        return true;
-    }
-
-    /**
-     * Creates point and non-point variants for each differentiated auto style,
-     * or two generic variants matching the search color when no field is safe.
-     */
-    private createAutoStyleRules(session: FeatureSearchSession, existingIds: number[] = []): FeatureSearchStyleRuleDraft[] {
-        const fieldOptions = this.autoStyleFieldOptions(session);
-        const portableFieldOptions = fieldOptions.length > 0
-            && searchAutoStyleFieldOptionsArePortable(fieldOptions, session.schemaAnalysis)
-            ? fieldOptions
-            : [null];
-        const rules: FeatureSearchStyleRuleDraft[] = [];
-        for (const fieldOption of portableFieldOptions) {
-            const pointRule = fieldOption
-                ? this.createAutoStyleRule(existingIds[rules.length] ?? this.nextStyleRuleId++, fieldOption)
-                : this.createSolidAutoStyleRule(existingIds[rules.length] ?? this.nextStyleRuleId++, session);
-            pointRule.name += " (points)";
-            pointRule.visualization = ["point"];
-            pointRule.pointRadius = 20;
-            rules.push(pointRule);
-
-            const geometryRule = fieldOption
-                ? this.createAutoStyleRule(existingIds[rules.length] ?? this.nextStyleRuleId++, fieldOption)
-                : this.createSolidAutoStyleRule(existingIds[rules.length] ?? this.nextStyleRuleId++, session);
-            geometryRule.name += " (lines/surfaces)";
-            geometryRule.visualization = ["line", "surface"];
-            geometryRule.lineWidth = 5;
-            rules.push(geometryRule);
-        }
-        return rules;
-    }
-
-    /** Creates one generic auto-generated rule that does not depend on schema field enumeration. */
-    private createSolidAutoStyleRule(id: number, session: FeatureSearchSession): FeatureSearchStyleRuleDraft {
-        const rule = this.createStyleRule(id, null);
-        const solidColor = this.searchColorForAutoStyle(session);
-        rule.name = "Auto: solid";
-        rule.autoGenerated = true;
-        rule.color = {
-            ...rule.color,
-            mode: "solid",
-            solidColor,
-            fallbackColor: solidColor
-        };
-        return rule;
-    }
-
-    /** Returns the color shared by density markers, pins, and generic automatic style rules. */
-    private searchColorForAutoStyle(session: FeatureSearchSession): string {
-        return normalizeHexColor(session.pointColor || session.definition.pinColor, DEFAULT_SEARCH_STYLE_SOLID_COLOR);
-    }
-
-    /** Keeps generic automatic rules visually tied to the density-map/pin color while user-edited rules stay stable. */
-    private syncAutoGeneratedSolidRulesToSearchColor(color: string): boolean {
-        let changed = false;
-        this.styleRuleDrafts = this.styleRuleDrafts.map(rule => {
-            if (!rule.autoGenerated || rule.color.mode !== "solid") {
-                return rule;
-            }
-            if (rule.color.solidColor === color && rule.color.fallbackColor === color) {
-                return rule;
-            }
-            changed = true;
-            return {
-                ...rule,
-                color: {
-                    ...rule.color,
-                    solidColor: color,
-                    fallbackColor: color
-                }
-            };
-        });
-        return changed;
-    }
-
-    /** Creates one collapsed automatic style rule for the selected schema field. */
-    private createAutoStyleRule(id: number, fieldOption: FeatureSearchStyleOption): FeatureSearchStyleRuleDraft {
-        const rule = this.createStyleRule(id, fieldOption);
-        rule.name = this.autoStyleRuleName(fieldOption);
-        rule.autoGenerated = true;
-        if (fieldOption.attrName) {
-            rule.filters = [{
-                id: this.nextStyleConditionId++,
-                attributeField: "$name",
-                customExpression: false,
-                operator: "=",
-                filterValue: fieldOption.attrName
-            }];
-            if (fieldOption.featureType) {
-                rule.filters.push({
-                    id: this.nextStyleConditionId++,
-                    attributeField: `$feature.typeId == ${JSON.stringify(fieldOption.featureType)}`,
-                    customExpression: true,
-                    operator: "=",
-                    filterValue: true
-                });
-            }
-        }
-        return rule;
-    }
-
-    /** Returns a portable user-facing name without embedding a source map or layer identity. */
-    private autoStyleRuleName(fieldOption: FeatureSearchStyleOption): string {
-        const context = fieldOption.attrName
-            ? `${fieldOption.attrName}.${fieldOption.value}`
-            : fieldOption.value;
-        return `Auto: ${context}`;
-    }
-
-    /** Selects all schema fields that should get an automatically generated style rule. */
-    private autoStyleFieldOptions(session: FeatureSearchSession): FeatureSearchStyleOption[] {
-        return searchAutoStyleFieldOptions(this.styleAttributeOptions, session.schemaAnalysis);
     }
 
     /** Defers expensive WASM-backed field enumeration until the browser can paint the style tab. */
@@ -2652,19 +2506,13 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         return JSON.stringify(Array.from(selectedKeys).sort());
     }
 
+    /** Reflect confirmed scope edits, including MCP edits, without losing tree expansion. */
     private syncMapLayerTreeSelection(session: FeatureSearchSession): void {
         this.refreshMapLayerTreeOptions();
-        if (this.initializedMapLayerSelectionSessionId !== session.id) {
-            this.initializedMapLayerSelectionSessionId = session.id;
-            const selectedKeys = new Set(session.definition.selectedMapLayers
-                .map(ref => this.searchLayerKey(ref.mapId, ref.layerId)));
-            this.selectedMapLayersSignature = this.mapLayerKeySignature(selectedKeys);
-            this.setSelectedMapLayerTreeLeafKeys(selectedKeys);
-            return;
-        }
-        const selectedKeys = this.selectedMapLayerKeysFromTreeNodes(this.selectedMapLayerTreeNodes);
+        const selectedKeys = new Set(session.definition.selectedMapLayers
+            .map(ref => this.searchLayerKey(ref.mapId, ref.layerId)));
         this.selectedMapLayersSignature = this.mapLayerKeySignature(selectedKeys);
-        this.setSelectedMapLayerTreeLeafKeys(selectedKeys);
+        this.setSelectedMapLayerTreeLeafKeys(selectedKeys, new Set(this.mapLayerTreeExpandedKeys));
     }
 
     protected onSearchMapLayerTreeNodeToggle(
@@ -3089,6 +2937,12 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         const wasQueryDirty = this.featureSearchQueryDirty;
         const previousQuery = this.lastSearchQuery;
         const previousScope = this.featureSearchScope;
+        if (session.definition.enabled && session.preparation?.status === "needs-choice"
+            && this.focusedInterpretationSignature !== session.preparation.signature) {
+            this.focusedInterpretationSignature = session.preparation.signature;
+            requestAnimationFrame(() => this.featureSearchContentContainer?.nativeElement
+                .querySelector<HTMLButtonElement>('[data-testid="search-interpretation"]')?.focus());
+        }
         const staticSignature = this.staticSessionSyncSignatureFor(session);
         const staticSessionChanged = staticSignature !== this.staticSessionSyncSignature;
         if (staticSessionChanged) {
@@ -3102,12 +2956,8 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
             this.refreshFeatureSearchScopeSummary(session);
             this.syncStyleRulesFromSession(session.definition.searchStyleRules ?? []);
             const hasStyleRules = (session.definition.searchStyleRules?.length ?? 0) > 0;
-            const styleFieldsRefreshScheduled = this.refreshStyleAttributeOptionsIfNeeded(session, hasStyleRules);
-            if (!styleFieldsRefreshScheduled && hasStyleRules && this.applyDefaultStyleFieldIfMissing()) {
-                this.onStyleRulesChanged();
-            } else if (!styleFieldsRefreshScheduled && !hasStyleRules) {
-                this.tryCreateAutoStyleRule(session);
-            }
+            this.refreshStyleAttributeOptionsIfNeeded(session, hasStyleRules);
+
         }
         if (this.activeSearchGroupId !== session.runId) {
             this.activeSearchGroupId = session.runId;
@@ -3304,9 +3154,6 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
     protected onSearchColorChange(color: string) {
         if (this.session) {
             const normalizedColor = normalizeHexColor(color, DEFAULT_SEARCH_STYLE_SOLID_COLOR);
-            if (this.syncAutoGeneratedSolidRulesToSearchColor(normalizedColor)) {
-                this.onStyleRulesChanged();
-            }
             this.searchService.setSearchColor(this.session.id, normalizedColor);
         }
     }
@@ -3342,22 +3189,11 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         }
     }
 
-    /** Seeds map-layer selection from a schema completion accepted in the main search-query input. */
-    protected onFeatureSearchQueryCompletionAccepted(candidate: CompletionCandidate): void {
-        const session = this.session;
-        if (!session || !this.searchEnabled()) {
-            return;
-        }
-        const originLayers = featureSearchSelectedMapLayersFromPayload(
-            featureSearchActionPayloadFromCompletion(candidate)
-        ) ?? [];
-        if (!originLayers.length) {
-            return;
-        }
+    private focusedInterpretationSignature = "";
 
-        if (this.searchService.applySearchMapLayersForDetectedContext(session.id, originLayers)) {
-            this.infoMessageService.showInfo("Auto-detected map layers for search.");
-        }
+    /** Confirm one meaning and replace the chooser with preparation progress. */
+    protected chooseInterpretation(id: string): void {
+        if (this.session) this.searchService.chooseSearchInterpretations(this.session.id, [id]);
     }
 
     protected rerunSearch() {
@@ -3849,7 +3685,6 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         this.selectedMapLayersSignature = "";
         this.selectedSearchMapLayersCacheSignature = "";
         this.selectedSearchMapLayersCache = [];
-        this.initializedMapLayerSelectionSessionId = "";
         this.featureSearchFeatureTypeOptionsSignature = "";
         this.selectedFeatureTypesSignature = "";
         this.searchTileLevelOptionsSignature = "";

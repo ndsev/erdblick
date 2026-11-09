@@ -1,4 +1,4 @@
-import {load} from "js-yaml";
+import {dump, load} from "js-yaml";
 import {
     beforeAll,
     describe,
@@ -67,22 +67,29 @@ describe("search style sheet codec", () => {
         layerIds: readonly string[] = []
     ) => ({name, defaultEnabled, layerIds});
 
-    it.each([false, true])("round-trips type-bound special overrides through saved YAML (legacy guard: %s)", legacy => {
+    it.each(["schemaTypes", "schemaType", "domain"])("round-trips type-bound special overrides through saved YAML (%s)", spelling => {
         const rule: FeatureSearchStyleRule = {geometry: ["line"], filter: [], color: {
             mode: "gradient", field: "speed", stops: [{value: 1, color: "#111111"}, {value: 253, color: "#222222"}],
-            schemaType: {schemaId: "saved-graph", typeId: 7},
+            schemaTypes: [{schemaId: "saved-graph", typeId: 7}],
             specials: [{value: 0, color: "#123456"}, {value: 255, color: "#abcdef"}], fallbackColor: "#ffffff"
         }};
         const saved = convertSearchStyleRulesToYaml(saveOptions("Semantic colors"), [rule]);
-        expect(saved.source).toContain("schemaType:");
+        expect(saved.source).toContain("schemaTypes:");
         expect(saved.source).not.toContain("domainId:");
         // Simulate a stylesheet saved before the type terminology change. Both
         // the editor import and the native runtime must retain its exact guard.
-        const source = legacy ? saved.source.replace("schemaType:", "domain:").replace("typeId:", "domainId:") : saved.source;
+        const document = load(saved.source) as any;
+        if (spelling !== "schemaTypes") {
+            const scale = document.rules[0]["color-scale"];
+            scale[spelling] = spelling === "domain"
+                ? {schemaId: "saved-graph", domainId: 7} : scale.schemaTypes[0];
+            delete scale.schemaTypes;
+        }
+        const source = dump(document);
         const loaded = projectStyleSourceForSearch(source, "feature");
         expect(loaded.rules[0].color).toMatchObject(rule.color);
         const rewritten = convertSearchStyleRulesToYaml(saveOptions("Semantic colors"), loaded.rules);
-        expect(rewritten.source).toContain("schemaType:");
+        expect(rewritten.source).toContain("schemaTypes:");
         expect(rewritten.source).not.toContain("domainId:");
         const style = uint8ArrayToWasm(data => new coreLib.FeatureLayerStyle(data), new TextEncoder().encode(source))!;
         try {
@@ -149,6 +156,42 @@ describe("search style sheet codec", () => {
         expect(options.get(0)?.defaultValue).toBe(true);
         options.delete();
         style.delete();
+    });
+
+    it("exports each prepared source in its own evaluation scope", () => {
+        const featureRule: FeatureSearchStyleRule = {...rules[0], applicability: {
+            mapId: "Classic", layerId: "Routing", scope: "feature"
+        }};
+        const attributeRule: FeatureSearchStyleRule = {...rules[1], applicability: {
+            mapId: "Live", layerId: "Road", scope: "attribute"
+        }};
+        const saved = convertSearchStyleRulesToYaml(saveOptions("Mixed meanings"), [featureRule, attributeRule], {
+            concreteScope: "feature", backendQuery: "unused representative predicate", selectedFeatureTypes: [],
+            branches: [
+                {id: "classic", label: "Classic field", kind: "field", mapId: "Classic", layerId: "Routing",
+                    expression: "true", schemaId: "classic-v1", scope: "feature", featureTypes: ["Link"], attributeScopes: [],
+                    query: 'speed > 40'},
+                {id: "live", label: "Live enum", kind: "enum", mapId: "Live", layerId: "Road",
+                    expression: "true", schemaId: "live-v1", scope: "attribute", featureTypes: ["Road"], attributeScopes: [],
+                    query: '**.warningSign == "SPEED_LIMIT"'}
+            ]
+        });
+        const parsed = load(saved.source) as any;
+        expect(parsed.rules).toHaveLength(2);
+        expect(parsed.rules[0].scope).toBe("feature");
+        expect(parsed.rules[0].filter).toContain('mapId == "Classic"');
+        expect(parsed.rules[0].filter).toContain('typeId == "Link"');
+        expect(parsed.rules[0]).not.toHaveProperty("attribute-filter");
+        expect(parsed.rules[1].scope).toBe("attribute");
+        expect(parsed.rules[1]["attribute-filter"]).toContain('$feature.mapId == "Live"');
+        expect(parsed.rules[1]["attribute-filter"]).toContain('$feature.typeId == "Road"');
+        expect(saved.source).not.toContain("unused representative predicate");
+        const style = uint8ArrayToWasm(data => new coreLib.FeatureLayerStyle(data), new TextEncoder().encode(saved.source))!;
+        try {
+            expect(style.isValid(), JSON.stringify(style.validationReport())).toBe(true);
+        } finally {
+            style.delete();
+        }
     });
 
     it.each(["feature", "attribute"] as const)("exports the live %s membership and native validity defaults", concreteScope => {

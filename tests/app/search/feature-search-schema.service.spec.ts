@@ -97,6 +97,57 @@ describe("compact style inventory", () => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("schema worker admission", () => {
+    it("browses all prepared owners with one schema installation and reuses them across predicates", async () => {
+        const {service} = fixture();
+        const branches = ["A", "B"].map(mapId => ({
+            mapId, layerId: "Road", scope: "attribute" as const, query: 'warningSign == "ANIMALS"',
+            id: mapId, label: mapId, kind: "expression" as const, schemaId: mapId,
+            expression: 'warningSign == "ANIMALS"', featureTypes: ["Road"],
+            attributeScopes: ["WARNING_SIGN", "MOVABLE_WARNING_SIGN"].map(attrName => ({
+                mapId, layerId: "Road", featureType: "Road", attrLayerName: "Rules", attrName
+            })), matchedFieldNames: [], matchedEnumValues: ["ANIMALS"]
+        }));
+        const fields = service.requestPreparedSearchStyleFields(branches, {recursive: true, values: "scalar"});
+        await vi.waitFor(() => expect(SchemaWorker.instances[0]?.messages).toHaveLength(1));
+        const worker = SchemaWorker.instances[0];
+        expect(worker.messages[0]).toMatchObject({schemas: [{schemaId: "A"}, {schemaId: "B"}]});
+        await finishFields(worker);
+        expect(worker.messages[1]).toMatchObject({query: "", scope: "attribute",
+            selectedMapLayers: [{mapId: "A", layerId: "Road"}, {mapId: "B", layerId: "Road"}],
+            options: {preparedContexts: branches.flatMap(branch => branch.attributeScopes)}
+        });
+        expect(await fields).toEqual(emptyInventory);
+        await service.requestPreparedSearchStyleFields(branches.map(branch => ({...branch,
+            query: 'warningSign == "SPEED_LIMIT"'})), {recursive: true, values: "scalar"});
+        expect(worker.messages).toHaveLength(2);
+    });
+
+    it("cancels an obsolete completion, releases its lane on acknowledgement, and skips queued prefixes", async () => {
+        const {service} = fixture();
+        const first = vi.fn(), skipped = vi.fn(), latest = vi.fn();
+        const request = (requestSerial: number, query: string) => ({
+            type: "SearchCompletionRequest" as const, ownerId: "omnibar", requestSerial, query, point: query.length,
+            options: {limit: 15, timeoutMs: 35, selectedMapLayers: [{mapId: "A", layerId: "Road"}]}
+        });
+        service.requestCompletion(request(1, "S"), first);
+        const worker = SchemaWorker.instances[0];
+        await vi.waitFor(() => expect(worker.messages.some(message => message.type === "SearchCompletionDataSourceInfo")).toBe(true));
+        const configuration = worker.messages.find(message => message.type === "SearchCompletionDataSourceInfo")!;
+        worker.reply({type: "SearchCompletionDataSourceInfoReady", requestId: configuration.requestId});
+        await vi.waitFor(() => expect(worker.messages.some(message => message.type === "SearchCompletionRequest")).toBe(true));
+        service.requestCompletion(request(2, "SP"), skipped);
+        service.requestCompletion(request(3, "SPE"), latest);
+        expect(worker.messages.at(-1)).toEqual({type: "SearchCompletionCancel", ownerId: "omnibar"});
+        worker.reply({type: "SearchCompletionResult", ownerId: "omnibar", requestSerial: 1, candidates: [], done: true});
+        await vi.waitFor(() => expect(worker.messages.filter(message => message.type === "SearchCompletionRequest")).toHaveLength(2));
+        expect(worker.messages.filter(message => message.type === "SearchCompletionRequest").map(message => message.query))
+            .toEqual(["S", "SPE"]);
+        expect(first).not.toHaveBeenCalled();
+        expect(skipped).toHaveBeenCalledWith(expect.objectContaining({done: true, candidates: []}));
+        worker.reply({type: "SearchCompletionResult", ownerId: "omnibar", requestSerial: 3, candidates: [], done: true});
+        expect(latest).toHaveBeenCalledWith(expect.objectContaining({requestSerial: 3, done: true}));
+    });
+
     it("coalesces feature inventories across predicates while retaining type and branch selection", async () => {
         const {service} = fixture();
         const scope = [{mapId: "A", layerId: "Road"}];

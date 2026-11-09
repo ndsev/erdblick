@@ -305,6 +305,11 @@ export class SearchStyleColorComponent implements OnChanges {
         this.customFieldCompletionOwnerId = `search-style-color-field-${componentId}`;
     }
 
+    /**
+     * Refresh the local editable copy on parent changes. Complete an explicitly
+     * requested data refresh when its summary arrives; metadata updates alone do
+     * not regenerate the user's saved stops.
+     */
     ngOnChanges(changes: SimpleChanges): void {
         if (!this.draft) {
             return;
@@ -354,10 +359,12 @@ export class SearchStyleColorComponent implements OnChanges {
 
     /** A saved generated scale must be explicitly replanned after a source changes meaning. */
     protected get schemaHasChanged(): boolean {
-        const expected = this.viewDraft.schemaType;
+        const expected = this.viewDraft.schemaTypes;
         const option = this.selectedFieldOption();
         return !!expected && !!option && (option.incompatibleTypes === true ||
-            expected.schemaId !== option.schemaType?.schemaId || expected.typeId !== option.schemaType?.typeId);
+            !(option.schemaTypes ?? (option.schemaType ? [option.schemaType] : [])).every(actual =>
+                expected.some(type => type.schemaId === actual.schemaId && type.typeId === actual.typeId)) ||
+            !option.schemaType);
     }
 
     /** Names explain raw codes only when the currently loaded type still matches the saved one. */
@@ -384,6 +391,10 @@ export class SearchStyleColorComponent implements OnChanges {
         return gradientStopsNeedSorting(this.viewDraft);
     }
 
+    /**
+     * Switch modes and regenerate defaults from the selected schema field, choosing
+     * a numeric field for gradients or keeping the previous mode when none exists.
+     */
     protected setMode(mode: SearchStyleColorMode): void {
         this.clearDataWarning();
         let nextField = this.viewDraft.field;
@@ -402,6 +413,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    /** Select a schema field and rebuild defaults only when its type supports the mode. */
     protected setField(field: string): void {
         this.clearDataWarning();
         if (this.viewDraft.mode === "gradient" && !this.fieldSupportsGradient(field)) {
@@ -414,6 +426,10 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    /**
+     * Switch between free expressions and schema choices. Returning to the field
+     * picker resolves a compatible current field before regenerating its stops.
+     */
     protected setFieldMode(mode: "field" | "custom"): void {
         this.clearDataWarning();
         if (mode === "custom") {
@@ -456,11 +472,15 @@ export class SearchStyleColorComponent implements OnChanges {
         this.setFieldMode(this.viewDraft.customField ? "field" : "custom");
     }
 
+    /**
+     * Retain edited stops while changing the expression, but discard saved type
+     * guards and special-value overrides when they refer to the previous expression.
+     */
     protected setCustomField(field: string): void {
         this.clearDataWarning();
         this.viewDraft = {
             ...this.viewDraft,
-            ...(field !== this.viewDraft.field ? {schemaType: undefined, specialStops: undefined} : {}),
+            ...(field !== this.viewDraft.field ? {schemaTypes: undefined, specialStops: undefined} : {}),
             field: field ?? "",
             customField: this.viewDraft.customField || this.fieldOptions.length > 0,
             categoryValueKind: this.fieldOptions.length > 0
@@ -472,6 +492,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    /** Keep the fallback synchronized with the selected solid color for later mode changes. */
     protected setSolidColor(color: string): void {
         const solidColor = normalizeHexColor(color);
         this.viewDraft = {
@@ -492,6 +513,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    /** Append an incomplete numeric row with its own stable editor ID. */
     protected addGradientStop(): void {
         this.clearDataWarning();
         this.viewDraft = {
@@ -519,6 +541,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    /** Keep blank or non-finite input as null so the editor can show an incomplete row. */
     protected setGradientStopValue(stop: SearchStyleGradientStopDraft, value: number | string | null): void {
         this.clearDataWarning();
         const numberValue = value === null || value === "" ? Number.NaN : Number(value);
@@ -540,6 +563,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    /** Apply an explicit user-requested sort while preserving stop IDs and colors. */
     protected sortGradientStops(): void {
         if (!this.canSortGradientStops) {
             return;
@@ -552,6 +576,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    /** Append a pending category row; its empty text is not yet an authored key. */
     protected addCategoryStop(): void {
         this.clearDataWarning();
         this.viewDraft = {
@@ -580,6 +605,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    /** Keep category text editable and mark whitespace-only input as pending. */
     protected setCategoryStopValue(stop: SearchStyleCategoryStopDraft, value: string): void {
         this.clearDataWarning();
         const valueText = value ?? "";
@@ -689,6 +715,10 @@ export class SearchStyleColorComponent implements OnChanges {
         return isNumericStyleValueKind(option?.valueKind);
     }
 
+    /**
+     * Generate schema defaults using this editor's ID sequence and surface the
+     * reason when automatic initialization cannot produce a usable scale.
+     */
     private autoInitializedDraft(draft: SearchStyleColorDraft): SearchStyleColorDraft {
         const result = autoInitializeSearchStyleColorDraft(
             draft,
@@ -704,6 +734,27 @@ export class SearchStyleColorComponent implements OnChanges {
         this.dataColorWarning = "";
     }
 
+    /**
+     * Result summaries expose a type only when every value has that exact ID.
+     * Several maps can instead share equivalent types verified by the field
+     * picker. Updating ordinary stops must retain that shared scale's guards
+     * and edited special colors, even when the summary has no single type.
+     */
+    private observedColorBinding(summary: SearchValueSummary) {
+        const field = this.selectedFieldOption();
+        const type = summary.schemaType ?? field?.schemaType;
+        const unchanged = !type || this.viewDraft.schemaTypes?.some(accepted =>
+            accepted.schemaId === type.schemaId && accepted.typeId === type.typeId);
+        return {
+            type,
+            schemaTypes: unchanged ? this.viewDraft.schemaTypes
+                : (!summary.schemaType ? field?.schemaTypes : undefined)
+                    ?? (type ? [{schemaId: type.schemaId, typeId: type.typeId}] : undefined),
+            specialStops: unchanged && this.viewDraft.specialStops !== undefined
+                ? this.viewDraft.specialStops : type ? specialStopsForType(type, () => this.nextStopId++) : undefined
+        };
+    }
+
     /** Uses observed numeric min/max to rebuild gradient stops. */
     private updateGradientStopsFromData(summary: SearchValueSummary): void {
         if (!summary.numeric || summary.numeric.count <= 0) {
@@ -712,25 +763,23 @@ export class SearchStyleColorComponent implements OnChanges {
             return;
         }
 
+        const binding = this.observedColorBinding(summary);
         const gradientStops = gradientStopsForObservedNumericRange({
             min: summary.numeric.min,
             max: summary.numeric.max
-        }, () => this.nextStopId++, summary.schemaType?.numeric);
+        }, () => this.nextStopId++, binding.type?.numeric);
         if (gradientStops.length === 0) {
             this.dataColorWarning = "Observed numeric values do not provide a usable range.";
             this.updateColorWarning();
             return;
         }
 
-        const sameType = this.viewDraft.schemaType?.schemaId === summary.schemaType?.schemaId &&
-            this.viewDraft.schemaType?.typeId === summary.schemaType?.typeId;
         this.viewDraft = {
             ...this.viewDraft,
             gradientStops,
             categoryStops: [],
-            schemaType: summary.schemaType ? {schemaId: summary.schemaType.schemaId, typeId: summary.schemaType.typeId} : undefined,
-            specialStops: !summary.schemaType ? undefined : sameType && this.viewDraft.specialStops !== undefined
-                ? this.viewDraft.specialStops : specialStopsForType(summary.schemaType, () => this.nextStopId++)
+            schemaTypes: binding.schemaTypes,
+            specialStops: binding.specialStops
         };
         this.dataColorWarning = "";
         this.emitChange();
@@ -744,7 +793,8 @@ export class SearchStyleColorComponent implements OnChanges {
             this.updateColorWarning();
             return;
         }
-        const specialValues = new Set(summary.schemaType?.namedValues
+        const binding = this.observedColorBinding(summary);
+        const specialValues = new Set(binding.type?.namedValues
             .filter(named => named.role === "special").map(named => String(named.value)) ?? []);
         const values = summary.histogram
             .map(bucket => bucket.value)
@@ -765,14 +815,11 @@ export class SearchStyleColorComponent implements OnChanges {
         }
         // Refreshing observed categories changes ordinary stops only. Preserve
         // edited or deleted special colors while their exact meaning matches.
-        const sameType = this.viewDraft.schemaType?.schemaId === summary.schemaType?.schemaId &&
-            this.viewDraft.schemaType?.typeId === summary.schemaType?.typeId;
         this.viewDraft = {
             ...this.viewDraft,
             categoryValueKind: valueKind,
-            schemaType: summary.schemaType ? {schemaId: summary.schemaType.schemaId, typeId: summary.schemaType.typeId} : undefined,
-            specialStops: !summary.schemaType ? undefined : sameType && this.viewDraft.specialStops !== undefined
-                ? this.viewDraft.specialStops : specialStopsForType(summary.schemaType, () => this.nextStopId++),
+            schemaTypes: binding.schemaTypes,
+            specialStops: binding.specialStops,
             gradientStops: [],
             categoryStops: categoryStopsForObservedValues(
                 values,
@@ -807,7 +854,7 @@ export class SearchStyleColorComponent implements OnChanges {
         return undefined;
     }
 
-    /** Explains why observed data is not available yet and kicks off lazy aggregation. */
+    /** Explain the current aggregation state; the requesting action starts the work. */
     private dataSummaryMissingMessage(): string {
         if (this.dataSummaryStatus === "loading") {
             return "Summarizing observed values...";
@@ -824,6 +871,10 @@ export class SearchStyleColorComponent implements OnChanges {
         return "Summarizing observed values; click again when ready.";
     }
 
+    /**
+     * Prioritize changed schema identity, then data failures and mode compatibility.
+     * If no stops exist, ask the initializer for an explanation without applying it.
+     */
     private updateColorWarning(): void {
         if (this.schemaHasChanged) {
             this.colorWarning = "This saved scale belongs to an older or different value type. Its fallback remains active until you choose Use current schema.";

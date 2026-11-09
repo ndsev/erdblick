@@ -571,12 +571,20 @@ void setExceptionHandler(em::val handler) {
     });
 }
 
-/** Validate a SIMFIL query by compiling it against a fresh default environment. */
-void validateSimfil(const std::string &query) {
+/**
+ * Check an omnibar draft without schema rewriting or query execution.
+ * Simfil returns compilation errors as values. Invalid drafts are normal while
+ * typing, so return their message instead of throwing across the WASM boundary.
+ * An empty message means that the draft parses successfully.
+ */
+std::string simfilQueryError(const std::string& query)
+{
     auto env = mapget::makeEnvironment(simfil::Environment::WithNewStringCache);
-    simfil::compile(*env, query, simfil::CompileOptions{
-        .any = false,
-        .rewriteMode = simfil::RewriteMode::None});
+    auto result = simfil::compile(
+        *env,
+        query,
+        simfil::CompileOptions{.any = false, .rewriteMode = simfil::RewriteMode::None});
+    return result ? std::string{} : result.error().message;
 }
 
 uint16_t tileLayerStreamProtocolMajor()
@@ -909,6 +917,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("getAttributeScopeForQuery", &TileLayerParser::getAttributeScopeForQuery)
         .function("getMapLayersForQuery", &TileLayerParser::getMapLayersForQuery)
         .function("normalizeSearchQuery", &TileLayerParser::normalizeSearchQuery)
+        .function("prepareSearchQuery", &TileLayerParser::prepareSearchQuery)
         .function("searchStyleFieldsForQuery", &TileLayerParser::searchStyleFieldsForQuery)
         .function("planStyleFilter", &TileLayerParser::planStyleFilter)
         .function(
@@ -964,7 +973,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::function("setExceptionHandler", &setExceptionHandler);
 
     ////////// Validate SIMFIL query
-    em::function("validateSimfilQuery", &validateSimfil);
+    em::function("simfilQueryError", &simfilQueryError);
 
     ////////// Memory utilities
     em::function("getTotalMemory", &getTotalMemory);

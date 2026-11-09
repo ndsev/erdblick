@@ -8,7 +8,7 @@ describe("SearchStyleRuleDraftCodec", () => {
         const codec = new SearchStyleRuleDraftCodec();
         const rule: FeatureSearchStyleRule = {geometry: ["line"], filter: [], color: {
             mode: "gradient", field: "speed", stops: [{value: 1, color: "#111111"}, {value: 253, color: "#222222"}],
-            schemaType: {schemaId: "saved-graph", typeId: 7},
+            schemaTypes: [{schemaId: "saved-graph", typeId: 7}, {schemaId: "second-graph", typeId: 19}],
             specials: [{value: 0, color: "#123456"}, {value: 255, color: "#abcdef"}]
         }};
         const drafts = codec.toDrafts([rule]);

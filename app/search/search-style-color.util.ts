@@ -12,6 +12,7 @@ export interface SearchStyleNumericRange {
     max: number;
 }
 
+/** One selectable expression with schema facts used to offer safe color modes. */
 export interface SearchStyleFieldOption {
     label: string;
     value: string;
@@ -19,16 +20,22 @@ export interface SearchStyleFieldOption {
     enumValues?: string[];
     numericRange?: SearchStyleNumericRange;
     schemaType?: SchemaScalarType;
+
+    /** All verified equivalent types behind a shared field-picker entry. */
+    schemaTypes?: SchemaTypeIdentity[];
+
     /** One expression spans different meanings; auto-coloring requires a narrower source scope. */
     incompatibleTypes?: boolean;
 }
 
+/** Editable raw-value threshold; null represents an incomplete numeric input. */
 export interface SearchStyleGradientStopDraft {
     id: number;
     value: number | null;
     color: string;
 }
 
+/** Editable textual category key; pending marks a row the user has not filled yet. */
 export interface SearchStyleCategoryStopDraft {
     id: number;
     valueText: string;
@@ -36,19 +43,26 @@ export interface SearchStyleCategoryStopDraft {
     pending?: boolean;
 }
 
+/**
+ * Editor-owned color configuration that can retain incomplete inputs before
+ * conversion into executable style properties.
+ */
 export interface SearchStyleColorDraft {
     mode: SearchStyleColorMode;
     field: string;
     customField?: boolean;
+
     /** Scalar type learned from observed values when no schema field supplies it. */
     categoryValueKind?: SearchStyleFieldValueKind;
     solidColor: string;
     gradientStops: SearchStyleGradientStopDraft[];
     categoryStops: SearchStyleCategoryStopDraft[];
+
     /** These are explicit saved rules; loading new metadata must not regenerate them. */
-    schemaType?: SchemaTypeIdentity;
+    schemaTypes?: SchemaTypeIdentity[];
     specialStops?: SearchStyleGradientStopDraft[];
     fallbackColor: string;
+
     /** False omits the scale fallback: unmatched values are not rendered. */
     fallbackEnabled?: boolean;
 }
@@ -101,7 +115,7 @@ export function searchStyleColorProperties(
             mode: color.mode === "gradient" ? "linear" : "categorical",
             expression,
             stops,
-            ...(color.schemaType ? {schemaType: color.schemaType} : {}),
+            ...(color.schemaTypes ? {schemaTypes: color.schemaTypes} : {}),
             ...(color.specials?.length ? {specials: normalizedCategoricalStyleStops(color.specials, fallback)} : {}),
             ...(color.fallbackColor === undefined ? {} : {fallback})
         }
@@ -115,6 +129,10 @@ function usableStyleColor(
     return value?.trim() || fallback;
 }
 
+/**
+ * Keep finite numeric thresholds, let the last duplicate value win, and sort
+ * ascending so the native linear scale receives a valid ordered sequence.
+ */
 function normalizedLinearStyleStops(
     stops: readonly FeatureSearchColorStop[],
     fallback: string
@@ -129,6 +147,10 @@ function normalizedLinearStyleStops(
     return [...byValue].sort(([left], [right]) => left - right);
 }
 
+/**
+ * Keep the first occurrence of each typed key; numeric 1 and string "1" remain
+ * distinct categories because the native scale matches their value types.
+ */
 function normalizedCategoricalStyleStops(
     stops: readonly FeatureSearchColorStop[],
     fallback: string
@@ -149,6 +171,7 @@ function normalizedCategoricalStyleStops(
     return result;
 }
 
+/** Normalize three/six-digit hex literals to lowercase #rrggbb; reject other forms. */
 function normalizeHexString(value: string | null | undefined): string | undefined {
     const trimmed = (value ?? "").trim();
     const longHex = /^#([0-9a-f]{6})$/i.exec(trimmed);
@@ -163,6 +186,7 @@ function normalizeHexString(value: string | null | undefined): string | undefine
     return undefined;
 }
 
+/** Choose the first valid hex value from the input, caller fallback and default. */
 export function normalizeHexColor(
     value: string | null | undefined,
     fallback = DEFAULT_SEARCH_STYLE_SOLID_COLOR
@@ -172,6 +196,10 @@ export function normalizeHexColor(
         ?? DEFAULT_SEARCH_STYLE_SOLID_COLOR;
 }
 
+/**
+ * Start a gradient draft for one expression; stops are populated by schema/data
+ * initialization or by the editor after construction.
+ */
 export function defaultSearchStyleColorDraft(field: string): SearchStyleColorDraft {
     return {
         mode: "gradient",
@@ -185,13 +213,17 @@ export function defaultSearchStyleColorDraft(field: string): SearchStyleColorDra
     };
 }
 
+/**
+ * Copy mutable stop/type records and normalize editor colors/numbers without
+ * generating new stops or replacing a saved schema identity.
+ */
 export function cloneSearchStyleColorDraft(draft: SearchStyleColorDraft): SearchStyleColorDraft {
     return {
         mode: draft.mode,
         field: draft.field,
         customField: !!draft.customField,
         categoryValueKind: draft.categoryValueKind,
-        ...(draft.schemaType ? {schemaType: {...draft.schemaType}} : {}),
+        ...(draft.schemaTypes ? {schemaTypes: draft.schemaTypes.map(type => ({...type}))} : {}),
         ...(draft.specialStops ? {specialStops: draft.specialStops.map(stop => ({...stop}))} : {}),
         fallbackEnabled: draft.fallbackEnabled !== false,
         solidColor: normalizeHexColor(draft.solidColor),
@@ -210,6 +242,7 @@ export function cloneSearchStyleColorDraft(draft: SearchStyleColorDraft): Search
     };
 }
 
+/** Assign editor-local IDs to stored stops, retaining invalid numeric input as null. */
 export function gradientStopsToDraft(
     stops: Array<{value: unknown; color: string}>,
     nextId: () => number
@@ -224,6 +257,10 @@ export function gradientStopsToDraft(
     });
 }
 
+/**
+ * Build a left-to-right preview. Missing offsets are evenly spaced, explicit
+ * offsets are clamped to [0, 1], and empty/single-stop inputs use solid colors.
+ */
 export function gradientCss(stops: Array<{color: string; offset?: number}>): string {
     if (stops.length === 0) {
         return EMPTY_GRADIENT_PREVIEW_COLOR;
@@ -242,6 +279,10 @@ export function gradientCss(stops: Array<{color: string; offset?: number}>): str
     return `linear-gradient(90deg, ${cssStops})`;
 }
 
+/**
+ * Read finite numeric thresholds in their authored order. Return null if any
+ * stop is incomplete; ordering and duplicate normalization happen separately.
+ */
 export function serializableGradientStops(
     draft: SearchStyleColorDraft
 ): Array<{value: number; color: string}> | null {
@@ -270,6 +311,7 @@ function gradientStopNumberValue(stop: SearchStyleGradientStopDraft): number | n
     return Number.isFinite(value) ? value : null;
 }
 
+/** Offer sorting only for a complete numeric sequence containing a descending pair. */
 export function gradientStopsNeedSorting(draft: SearchStyleColorDraft): boolean {
     let previous: number | null = null;
     for (const stop of draft.gradientStops) {
@@ -285,6 +327,7 @@ export function gradientStopsNeedSorting(draft: SearchStyleColorDraft): boolean 
     return false;
 }
 
+/** Sort a copy by numeric value, moving incomplete stops behind finite values. */
 export function sortedGradientStopDrafts(
     stops: SearchStyleGradientStopDraft[]
 ): SearchStyleGradientStopDraft[] {
@@ -294,6 +337,10 @@ export function sortedGradientStopDrafts(
     );
 }
 
+/**
+ * Preview complete thresholds at their proportional numeric offsets. During
+ * incomplete editing, distribute colors evenly so the preview remains usable.
+ */
 export function gradientPreviewCss(draft: SearchStyleColorDraft): string {
     if (!draft.gradientStops.length) {
         return EMPTY_GRADIENT_PREVIEW_COLOR;
@@ -315,6 +362,10 @@ export function gradientPreviewCss(draft: SearchStyleColorDraft): string {
     })));
 }
 
+/**
+ * Place finite raw-value labels along the preview, centered for a single stop.
+ * Equal-valued stops are spaced evenly to keep their labels addressable.
+ */
 export function gradientValueTags(draft: SearchStyleColorDraft): SearchStyleGradientValueTag[] {
     const stops = draft.gradientStops
         .flatMap(stop => {
@@ -358,21 +409,17 @@ export function isNumericStyleValueKind(kind: SearchStyleFieldValueKind | undefi
     return kind === "number" || kind === "integer";
 }
 
-/** Returns a deterministic color for one enum value while avoiding collisions within the enum set. */
-export function categoryColorForEnumValue(value: string, usedColors = new Set<string>()): string {
+/**
+ * Derive a category color from its logical label alone. Resolving collisions
+ * against the current catalog would recolor existing labels when another
+ * schema version adds or reorders entries. Users can edit similar colors.
+ */
+export function categoryColorForEnumValue(value: string): string {
     const hash = stableStringHash(value);
-    let hue = hash % 360;
-    let saturation = 58 + ((hash >>> 8) % 18);
-    let lightness = 44 + ((hash >>> 16) % 14);
-    let color = hslToHex(hue, saturation, lightness);
-    for (let attempt = 0; usedColors.has(color) && attempt < 360; ++attempt) {
-        hue = (hue + 37) % 360;
-        saturation = 58 + ((saturation + 7) % 18);
-        lightness = 44 + ((lightness + 5) % 14);
-        color = hslToHex(hue, saturation, lightness);
-    }
-    usedColors.add(color);
-    return color;
+    const hue = hash % 360;
+    const saturation = 58 + ((hash >>> 8) % 18);
+    const lightness = 44 + ((hash >>> 16) % 14);
+    return hslToHex(hue, saturation, lightness);
 }
 
 /** Creates one category stop for each schema enum value. */
@@ -380,11 +427,10 @@ export function categoryStopsForEnumValues(
     enumValues: string[],
     nextId: () => number
 ): SearchStyleCategoryStopDraft[] {
-    const usedColors = new Set<string>();
     return enumValues.map(value => ({
         id: nextId(),
         valueText: value,
-        color: categoryColorForEnumValue(value, usedColors),
+        color: categoryColorForEnumValue(value),
         pending: false
     }));
 }
@@ -509,7 +555,12 @@ export function autoInitializeSearchStyleColorDraft(
                     categoryValueKind: fieldOption.valueKind,
                     categoryStops: categoryStopsForEnumValues(enumValues, nextId),
                     gradientStops: [],
-                    schemaType: undefined,
+                    // Several enum catalogs may contribute the same logical
+                    // labels. Keep their accepted types without tying colors
+                    // to a particular catalog's wire ordinals or entry count.
+                    schemaTypes: fieldOption.schemaTypes ?? (fieldOption.schemaType
+                        ? [{schemaId: fieldOption.schemaType.schemaId, typeId: fieldOption.schemaType.typeId}]
+                        : undefined),
                     specialStops: undefined
                 }),
                 message: "",
@@ -549,7 +600,9 @@ export function autoInitializeSearchStyleColorDraft(
     return {
         draft: cloneSearchStyleColorDraft({
             ...draft, gradientStops, categoryStops: [],
-            schemaType: fieldOption.schemaType ? {schemaId: fieldOption.schemaType.schemaId, typeId: fieldOption.schemaType.typeId} : undefined,
+            schemaTypes: fieldOption.schemaTypes ?? (fieldOption.schemaType
+                ? [{schemaId: fieldOption.schemaType.schemaId, typeId: fieldOption.schemaType.typeId}]
+                : undefined),
             specialStops: fieldOption.schemaType ? specialStopsForType(fieldOption.schemaType, nextId) : undefined
         }),
         message: "",
@@ -566,6 +619,7 @@ function stableStringHash(value: string): number {
     return hash >>> 0;
 }
 
+/** Convert the bounded HSL palette values into an 8-bit RGB hex literal. */
 function hslToHex(hue: number, saturationPercent: number, lightnessPercent: number): string {
     const saturation = saturationPercent / 100;
     const lightness = lightnessPercent / 100;
@@ -614,6 +668,10 @@ function hexToRgb(color: string): [number, number, number] {
     ];
 }
 
+/**
+ * Interpret category text using its known scalar kind. Unrecognized numeric
+ * or Boolean text stays a string so an unfinished edit is not silently coerced.
+ */
 function serializableValue(valueText: string, valueKind: SearchStyleFieldValueKind | undefined): unknown {
     const trimmed = valueText.trim();
     if (isNumericStyleValueKind(valueKind)) {
@@ -632,6 +690,10 @@ function serializableValue(valueText: string, valueKind: SearchStyleFieldValueKi
     return trimmed;
 }
 
+/**
+ * Convert category text to typed scale keys, preferring an explicit kind over
+ * the kind retained in the draft; normalize each color with the draft fallback.
+ */
 export function serializableCategoryStops(
     draft: SearchStyleColorDraft,
     valueKind?: SearchStyleFieldValueKind

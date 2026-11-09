@@ -1,3 +1,4 @@
+import type {PreparedSearchBranch} from "./search-preparation.model";
 /**
  * Resolved search definitions and canonical requested result fields.
  * The values describe a prepared search independently of the service that
@@ -9,6 +10,9 @@ import type {FeatureSearchStateEntry} from "./search-definition.model";
 export interface FeatureSearchResolvedDefinition extends FeatureSearchStateEntry {
     concreteScope: "feature" | "attribute";
     backendQuery: string;
+    branches?: PreparedSearchBranch[];
+    branchKey?: string;
+    schemaId?: string;
     resultFields: string[];
 }
 

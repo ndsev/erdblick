@@ -449,12 +449,22 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             ? ColorScale::Mode::Categorical
             : ColorScale::Mode::Linear;
         scale.expression = scaleYaml["expression"].as<std::string>();
-        // Existing local and server-hosted styles used domain/domainId. Read that
-        // pair at the YAML boundary; runtime state always uses schemaId/typeId.
-        auto const hasCanonicalType = scaleYaml["schemaType"].IsDefined();
-        if (auto type = scaleYaml[hasCanonicalType ? "schemaType" : "domain"]; type.IsDefined()) {
-            scale.schemaId = type["schemaId"].as<std::string>();
-            scale.typeId = type[hasCanonicalType ? "typeId" : "domainId"].as<simfil::TypeId>();
+        // Saved styles used singular schemaType, and earlier domain/domainId.
+        // Normalize those spellings at the YAML boundary only.
+        if (auto types = scaleYaml["schemaTypes"]; types.IsDefined()) {
+            for (auto const& type : types) {
+                scale.schemaTypes.push_back(
+                    {type["schemaId"].as<std::string>(), type["typeId"].as<simfil::TypeId>()});
+            }
+        }
+        else {
+            auto const hasCanonicalType = scaleYaml["schemaType"].IsDefined();
+            if (auto type = scaleYaml[hasCanonicalType ? "schemaType" : "domain"]; type.IsDefined())
+            {
+                scale.schemaTypes.push_back(
+                    {type["schemaId"].as<std::string>(),
+                     type[hasCanonicalType ? "typeId" : "domainId"].as<simfil::TypeId>()});
+            }
         }
         if (auto specials = scaleYaml["specials"]; specials.IsDefined()) {
             for (auto const& stopYaml : specials) {
@@ -713,9 +723,7 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         relationTargetStyle_->parse(yaml["relation-target-style"]);
     }
     if (yaml["relation-recursive"].IsDefined()) {
-        // Parse whether relations should be resolved recursively.
-        // This is only done if mode==Highlight, and only works for
-        // relations within the same layer.
+        // Retain the recursion policy passed to the backend relation channel.
         relationRecursive_ = yaml["relation-recursive"].as<bool>();
     }
     if (yaml["relation-merge-twoway"].IsDefined()) {
@@ -754,6 +762,7 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         else
             std::cout << "Unsupported validity requirement: " << reqValidityStr << std::endl;
     }
+
     /////////////////////////////////////
     /// Label Rule Fields
     /////////////////////////////////////
@@ -872,6 +881,7 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     if (yaml["label-max-width"].IsDefined()) {
         labelMaxWidth_ = yaml["label-max-width"].as<float>();
     }
+
     /////////////////////////////////////
     /// Sub-Rule Fields
     /////////////////////////////////////
@@ -884,7 +894,8 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         branchMode_ = mode;
         subRules_.clear();
         for (auto yamlSubRule : yaml[key]) {
-            // The sub-rule adopts all attributes except gates and branch state.
+            // Children inherit presentation and relation/attribute gates. Only the
+            // feature type/filter and existing branch state are cleared.
             auto& subRule = subRules_.emplace_back(*this, true);
             subRule.parse(yamlSubRule);
         }
@@ -1175,9 +1186,15 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
         };
         auto const evaluated = evalFun.evaluate(colorScale_->expression);
         auto const type = evaluated.schemaType();
-        if (!colorScale_->schemaId.empty()) {
-            if (!type || type.id() != colorScale_->typeId ||
-                type.pool()->identity() != colorScale_->schemaId)
+        if (!colorScale_->schemaTypes.empty()) {
+            if (!type ||
+                std::none_of(
+                    colorScale_->schemaTypes.begin(),
+                    colorScale_->schemaTypes.end(),
+                    [&](auto const& accepted) {
+                        return type.id() == accepted.typeId &&
+                            type.pool()->identity() == accepted.schemaId;
+                    }))
                 return fallback();
         }
         // Special overrides precede clamping/interpolation. A computed plain
@@ -1193,7 +1210,7 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
             }
         }
         auto input = numericColorScaleKey(*value);
-        if (input && !colorScale_->schemaId.empty()) {
+        if (input && !colorScale_->schemaTypes.empty()) {
             // Generated type-bound scales cover ordinary measurements only.
             // Deleting a special override exposes fallback, never a high-end
             // gradient or ordinary category color for an exceptional code.

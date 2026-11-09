@@ -115,6 +115,35 @@ TEST_CASE(
 }
 
 TEST_CASE(
+    "Jump suggestions retain type prefixes and valid bare IDs without unrelated errors",
+    "[erdblick.schema][erdblick.identity]")
+{
+    auto graph = schemaFixture();
+    auto const id = std::string(graph->schemaId());
+    erdblick::TileLayerParser parser;
+    parser.installMapSchema(schemaBytes(*graph), id);
+    parser.setDataSourceInfo(sourceFixture("JumpSuggestions", id));
+
+    for (auto const* query : {"", " \t\n", "WARNING_SIGN", "Unknown.7", "7.8"}) {
+        CAPTURE(query);
+        CHECK(parser.filterFeatureJumpTargets(query).empty());
+    }
+    for (auto const* query : {"7", "Road.7", "Ro.7", " \tRoad.007  "}) {
+        CAPTURE(query);
+        auto targets = parser.filterFeatureJumpTargets(query);
+        REQUIRE(targets.size() == 1);
+        CHECK_FALSE(targets.front().error_);
+        CHECK(targets.front().jumpTarget_.name_ == "Road");
+        CHECK(std::get<int64_t>(targets.front().parsedParams_.front().second) == 7);
+    }
+    // A recognizable prefix still teaches the required ID composition.
+    auto incomplete = parser.filterFeatureJumpTargets("Ro");
+    REQUIRE(incomplete.size() == 1);
+    CHECK(incomplete.front().error_.has_value());
+    CHECK(std::get<std::string>(incomplete.front().parsedParams_.front().second) == "?");
+}
+
+TEST_CASE(
     "Jump targets preserve optional identity parts through canonical views",
     "[erdblick.schema][erdblick.identity]")
 {
@@ -265,6 +294,52 @@ TEST_CASE(
     CHECK(values[1].at("value") == "HIGH");
     CHECK(values[1].at("rawValue") == "18446744073709551615");
     CHECK_FALSE(values[2].contains("rawValue"));
+}
+
+TEST_CASE(
+    "Search styling recognizes coded enum labels with unknown integer alternatives",
+    "[erdblick.schema][erdblick.search]")
+{
+    using Type = simfil::SchemaType;
+    auto graph = std::make_shared<mapget::MapSchema>();
+    auto layer = graph->newLayer("Road", mapget::LayerType::Features);
+    auto properties = graph->newObjectType();
+    auto warning = graph->newCompositionType(Type::Composition::AnyOf);
+    auto labels = graph->newEnumType();
+    std::vector<std::string> symbols{"GENERAL_HAZARD", "CURVE_LEFT"};
+    for (auto const& symbol : symbols)
+        labels.addSymbol(symbol);
+    warning.addAlternative(labels);
+    warning.addAlternative(graph->newScalarType(Type::Kind::Int));
+    warning.addNamedValue(
+        {.name = "GENERAL_HAZARD",
+         .value = std::string_view{"GENERAL_HAZARD"},
+         .rawValue = int64_t{0}});
+    warning.addNamedValue(
+        {.name = "CURVE_LEFT", .value = std::string_view{"CURVE_LEFT"}, .rawValue = int64_t{10}});
+    properties.addField("warningSign", warning);
+    auto root = layer->newFeature(
+        mapget::FeatureTypeInfo::fromJson(
+            {{"name", "Road"},
+             {"uniqueIdCompositions", {{{{"partId", "roadId"}, {"datatype", "U32"}}}}}}),
+        properties);
+    layer->setRootSchema(root.id());
+    graph->finalize();
+
+    erdblick::TileLayerParser parser;
+    parser.installMapSchema(schemaBytes(*graph), std::string(graph->schemaId()));
+    parser.setDataSourceInfo(sourceFixture("Signs", std::string(graph->schemaId())));
+    auto inventory = parser.searchStyleFieldsForQuery("true", "feature", nlohmann::json::object());
+    auto const& fields = inventory.at("fields");
+    auto field = std::ranges::find_if(
+        fields,
+        [](auto const& value) { return value.at("path") == "attributes.warningSign"; });
+    REQUIRE(field != fields.end());
+    auto const& type = inventory.at("types").at(field->at("metadata").template get<size_t>());
+    CHECK(type.at("valueKind") == "enum");
+    CHECK(type.at("enumValues") == nlohmann::json::array({"CURVE_LEFT", "GENERAL_HAZARD"}));
+    CHECK(type.at("schemaType").at("typeId") == warning.id());
+    CHECK_FALSE(type.contains("numericRange"));
 }
 
 TEST_CASE(

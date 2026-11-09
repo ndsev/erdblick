@@ -890,7 +890,7 @@ TEST_CASE(
     "[erdblick.schema][erdblick.subset-renderer]")
 {
     auto categorical = GENERATE(false, true);
-    auto legacyGuard = GENERATE(false, true);
+    auto guardSpelling = GENERATE("schemaTypes", "schemaType", "domain");
     erdblick::test::ScalarSchema fixture;
     auto selected = fixture.number(255, fixture.speed);
     std::array<uint8_t, 3> expected{0, 255, 255};
@@ -973,10 +973,21 @@ rules:
         // when its separate override is deleted from a type-bound scale.
         scale["stops"].push_back(YAML::Load("[255, '#ff0000']"));
     }
-    // Saved server/local YAML keeps working, while new styles use schemaType/typeId.
-    auto guard = scale[legacyGuard ? "domain" : "schemaType"];
+    // New scales accept a list of verified source identities. The matching
+    // identity is deliberately second, proving this is membership, not a
+    // first-source shortcut. Existing server/local YAML remains readable.
+    YAML::Node guard;
     guard["schemaId"] = std::string(fixture.owner->schemaId());
-    guard[legacyGuard ? "domainId" : "typeId"] = fixture.speed;
+    guard[std::string_view(guardSpelling) == "domain" ? "domainId" : "typeId"] = fixture.speed;
+    if (std::string_view(guardSpelling) == "schemaTypes") {
+        auto unrelated = YAML::Clone(guard);
+        unrelated["schemaId"] = "another-equivalent-schema";
+        scale[guardSpelling].push_back(unrelated);
+        scale[guardSpelling].push_back(guard);
+    }
+    else {
+        scale[guardSpelling] = guard;
+    }
     if (removeOverride)
         scale.remove("specials");
     auto style = rendererStyle(YAML::Dump(yaml));

@@ -24,20 +24,17 @@ bool identifierCharacter(char value)
     return std::isalnum(byte) || value == '_' || value == '$';
 }
 
-bool containsIdentifier(
-    std::string_view expression,
-    std::string_view identifier)
+/**
+ * Search with identifier-boundary checks. This is a textual scan used for the
+ * reserved merge-count convenience, not a full SIMFIL parse.
+ */
+bool containsIdentifier(std::string_view expression, std::string_view identifier)
 {
     size_t offset = 0;
-    while ((offset = expression.find(identifier, offset)) !=
-           std::string_view::npos)
-    {
-        auto const before =
-            offset == 0 || !identifierCharacter(expression[offset - 1]);
+    while ((offset = expression.find(identifier, offset)) != std::string_view::npos) {
+        auto const before = offset == 0 || !identifierCharacter(expression[offset - 1]);
         auto const end = offset + identifier.size();
-        auto const after =
-            end == expression.size() ||
-            !identifierCharacter(expression[end]);
+        auto const after = end == expression.size() || !identifierCharacter(expression[end]);
         if (before && after) {
             return true;
         }
@@ -46,6 +43,7 @@ bool containsIdentifier(
     return false;
 }
 
+/** A generated filter, including constant true/false cases that need no expression. */
 struct Predicate
 {
     /** Empty means the predicate is unconditionally true. */
@@ -53,6 +51,7 @@ struct Predicate
     bool alwaysFalse = false;
 };
 
+/** Join membership requirements while folding constant predicates. */
 Predicate conjunction(Predicate left, Predicate right)
 {
     if (left.alwaysFalse || right.alwaysFalse) {
@@ -64,19 +63,17 @@ Predicate conjunction(Predicate left, Predicate right)
     if (!right.expression) {
         return left;
     }
-    return Predicate{
-        "(" + *left.expression + ") and (" + *right.expression + ")"};
+    return Predicate{"(" + *left.expression + ") and (" + *right.expression + ")"};
 }
 
+/** Admit the union of branch candidates, folding unconditional and impossible cases. */
 Predicate disjunction(std::vector<Predicate> predicates)
 {
     predicates.erase(
         std::remove_if(
             predicates.begin(),
             predicates.end(),
-            [](Predicate const& predicate) {
-                return predicate.alwaysFalse;
-            }),
+            [](Predicate const& predicate) { return predicate.alwaysFalse; }),
         predicates.end());
     if (predicates.empty()) {
         return Predicate{std::nullopt, true};
@@ -99,10 +96,13 @@ Predicate disjunction(std::vector<Predicate> predicates)
     return Predicate{result.str()};
 }
 
+/**
+ * Collect everything that can reach a concrete descendant. Both first-of and
+ * all-of need this union on the server; the renderer still chooses which branches
+ * to draw after receiving the projected values.
+ */
 template <class OwnPredicate>
-Predicate eligible(
-    FeatureStyleRule const& rule,
-    OwnPredicate const& ownPredicate)
+Predicate eligible(FeatureStyleRule const& rule, OwnPredicate const& ownPredicate)
 {
     Predicate result = ownPredicate(rule);
     if (rule.branchMode() == FeatureStyleRule::BranchMode::None) {
@@ -113,53 +113,47 @@ Predicate eligible(
     for (auto const& child : rule.subRules()) {
         children.push_back(eligible(child, ownPredicate));
     }
-    return conjunction(
-        std::move(result),
-        disjunction(std::move(children)));
+    return conjunction(std::move(result), disjunction(std::move(children)));
 }
 
 Predicate featurePredicate(FeatureStyleRule const& rule)
 {
-    return rule.filter().empty()
-        ? Predicate{}
-        : Predicate{rule.filter()};
+    return rule.filter().empty() ? Predicate{} : Predicate{rule.filter()};
 }
 
-Predicate eligibleForFeatureType(
-    FeatureStyleRule const& rule,
-    std::string_view featureType)
+/**
+ * Compute branch eligibility for one produced type, excluding type-mismatched
+ * children before point-grid membership and counts are determined.
+ */
+Predicate eligibleForFeatureType(FeatureStyleRule const& rule, std::string_view featureType)
 {
     if (!rule.maybeMatchesType(featureType)) {
         return Predicate{std::nullopt, true};
     }
     auto result = featurePredicate(rule);
-    if (rule.branchMode() ==
-        FeatureStyleRule::BranchMode::None)
-    {
+    if (rule.branchMode() == FeatureStyleRule::BranchMode::None) {
         return result;
     }
     std::vector<Predicate> children;
     children.reserve(rule.subRules().size());
     for (auto const& child : rule.subRules()) {
-        children.push_back(
-            eligibleForFeatureType(
-                child,
-                featureType));
+        children.push_back(eligibleForFeatureType(child, featureType));
     }
-    return conjunction(
-        std::move(result),
-        disjunction(std::move(children)));
+    return conjunction(std::move(result), disjunction(std::move(children)));
 }
 
-Predicate exactGroupPredicate(
-    FeatureStyleRule const& rule,
-    std::vector<std::string> const& featureTypes)
+/**
+ * Keep group membership exact across feature types. When their predicates differ,
+ * guard each predicate with typeId before combining them; a broader union would
+ * include unrelated members in the group count and its projections.
+ */
+Predicate
+exactGroupPredicate(FeatureStyleRule const& rule, std::vector<std::string> const& featureTypes)
 {
     std::vector<Predicate> predicates;
     predicates.reserve(featureTypes.size());
     for (auto const& featureType : featureTypes) {
-        predicates.push_back(
-            eligibleForFeatureType(rule, featureType));
+        predicates.push_back(eligibleForFeatureType(rule, featureType));
     }
     if (predicates.empty()) {
         return Predicate{std::nullopt, true};
@@ -169,10 +163,8 @@ Predicate exactGroupPredicate(
     auto const equal = std::ranges::all_of(
         predicates,
         [&](Predicate const& predicate) {
-            return predicate.alwaysFalse ==
-                    first.alwaysFalse &&
-                predicate.expression ==
-                    first.expression;
+            return predicate.alwaysFalse == first.alwaysFalse &&
+                predicate.expression == first.expression;
         });
     if (equal) {
         return first;
@@ -180,30 +172,25 @@ Predicate exactGroupPredicate(
 
     std::vector<Predicate> guarded;
     guarded.reserve(featureTypes.size());
-    for (size_t index = 0;
-         index < featureTypes.size();
-         ++index)
-    {
+    for (size_t index = 0; index < featureTypes.size(); ++index) {
         auto predicate = predicates[index];
         if (predicate.alwaysFalse) {
             continue;
         }
-        auto typeGate = Predicate{
-            "typeId == " +
-            nlohmann::json(
-                featureTypes[index])
-                .dump()};
-        guarded.push_back(
-            conjunction(
-                std::move(typeGate),
-                std::move(predicate)));
+        auto typeGate = Predicate{"typeId == " + nlohmann::json(featureTypes[index]).dump()};
+        guarded.push_back(conjunction(std::move(typeGate), std::move(predicate)));
     }
     return disjunction(std::move(guarded));
 }
 
+/**
+ * Combine attribute filter, name/layer selectors and validity requirement in the
+ * attribute-entry context used by mapget.
+ */
 Predicate attributeEntryPredicate(FeatureStyleRule const& rule)
 {
-    auto regexLiteral = [](std::string_view pattern) {
+    auto regexLiteral = [](std::string_view pattern)
+    {
         std::string result = "re\"";
         result.reserve(pattern.size() + 4U);
         for (auto const character : pattern) {
@@ -215,70 +202,58 @@ Predicate attributeEntryPredicate(FeatureStyleRule const& rule)
         result.push_back('"');
         return result;
     };
-    auto result = rule.attributeFilter()
-        ? Predicate{*rule.attributeFilter()}
-        : Predicate{};
+    auto result = rule.attributeFilter() ? Predicate{*rule.attributeFilter()} : Predicate{};
     if (auto const& pattern = rule.attributeTypePattern()) {
-        result = conjunction(
-            std::move(result),
-            Predicate{"$name == " + regexLiteral(*pattern)});
+        result = conjunction(std::move(result), Predicate{"$name == " + regexLiteral(*pattern)});
     }
     if (auto const& pattern = rule.attributeLayerTypePattern()) {
-        result = conjunction(
-            std::move(result),
-            Predicate{"$layer == " + regexLiteral(*pattern)});
+        result = conjunction(std::move(result), Predicate{"$layer == " + regexLiteral(*pattern)});
     }
     if (auto const& hasValidity = rule.attributeValidityGeometry()) {
         result = conjunction(
             std::move(result),
-            Predicate{
-                std::string("$hasValidity == ") +
-                (*hasValidity ? "true" : "false")});
+            Predicate{std::string("$hasValidity == ") + (*hasValidity ? "true" : "false")});
     }
     return result;
 }
 
-bool membershipUsesMergeCount(
-    FeatureStyleRule const& rule)
+/**
+ * Detect a grouping cycle: a member cannot be selected using a count that only
+ * exists after membership has been decided.
+ */
+bool membershipUsesMergeCount(FeatureStyleRule const& rule)
 {
-    if (containsIdentifier(
-            rule.filter(),
-            kMergeCount) ||
-        (rule.attributeFilter() &&
-         containsIdentifier(
-             *rule.attributeFilter(),
-             kMergeCount)))
+    if (containsIdentifier(rule.filter(), kMergeCount) ||
+        (rule.attributeFilter() && containsIdentifier(*rule.attributeFilter(), kMergeCount)))
     {
         return true;
     }
-    return std::ranges::any_of(
-        rule.subRules(),
-        membershipUsesMergeCount);
+    return std::ranges::any_of(rule.subRules(), membershipUsesMergeCount);
 }
 
+/**
+ * Deduplicate projection expressions while preserving the order of first use.
+ * The renderer binds columns by this stable expression order.
+ */
 class StableFields
 {
 public:
     void append(std::string expression)
     {
-        if (expression.empty() ||
-            !seen_.insert(expression).second)
-        {
+        if (expression.empty() || !seen_.insert(expression).second) {
             return;
         }
         values_.push_back(std::move(expression));
     }
 
-    [[nodiscard]] std::vector<std::string> take()
-    {
-        return std::move(values_);
-    }
+    [[nodiscard]] std::vector<std::string> take() { return std::move(values_); }
 
 private:
     std::set<std::string> seen_;
     std::vector<std::string> values_;
 };
 
+/** Keep feature and terminal-entry projections separate while recording group-only use. */
 struct ExpressionCollection
 {
     StableFields feature;
@@ -286,6 +261,10 @@ struct ExpressionCollection
     bool usesMergeCount = false;
 };
 
+/**
+ * Track merge-count dependencies and expand group expressions before registering
+ * their stable server projection slot.
+ */
 void appendExpression(
     ExpressionCollection& result,
     StableFields& fields,
@@ -295,53 +274,43 @@ void appendExpression(
     if (expression.empty()) {
         return;
     }
-    auto const hasMergeCount =
-        containsIdentifier(expression, kMergeCount);
-    result.usesMergeCount =
-        result.usesMergeCount || hasMergeCount;
-    fields.append(
-        group
-            ? expandStyleExpressionForFilter(expression)
-            : expression);
+    auto const hasMergeCount = containsIdentifier(expression, kMergeCount);
+    result.usesMergeCount = result.usesMergeCount || hasMergeCount;
+    fields.append(group ? expandStyleExpressionForFilter(expression) : expression);
 }
 
+/**
+ * Gather authored expressions from a feature rule tree. The server already
+ * applies the ordinary top-level filter; child filters still need projected values.
+ * Grouped rules evaluate in the group entry context rather than an individual feature.
+ */
 void collectFeatureTree(
     FeatureStyleRule const& rule,
     ExpressionCollection& result,
     bool group,
     bool serverGatedRoot = false)
 {
-    for (auto const& [property, expression] :
-         rule.expressionUses())
-    {
-        if (property == "attribute-filter" ||
-            (serverGatedRoot && property == "filter"))
-        {
+    for (auto const& [property, expression] : rule.expressionUses()) {
+        if (property == "attribute-filter" || (serverGatedRoot && property == "filter")) {
             continue;
         }
-        appendExpression(
-            result,
-            group ? result.entry : result.feature,
-            expression,
-            group);
+        appendExpression(result, group ? result.entry : result.feature, expression, group);
     }
     for (auto const& child : rule.subRules()) {
         collectFeatureTree(child, result, group);
     }
 }
 
-void collectAttributeTree(
-    FeatureStyleRule const& rule,
-    ExpressionCollection& result)
+/**
+ * Project feature filters against the owning feature and all other expressions
+ * against the attribute/validity entry, including nested branches.
+ */
+void collectAttributeTree(FeatureStyleRule const& rule, ExpressionCollection& result)
 {
-    for (auto const& [property, expression] :
-         rule.expressionUses())
-    {
+    for (auto const& [property, expression] : rule.expressionUses()) {
         appendExpression(
             result,
-            property == "filter"
-                ? result.feature
-                : result.entry,
+            property == "filter" ? result.feature : result.entry,
             expression,
             false);
     }
@@ -350,25 +319,23 @@ void collectAttributeTree(
     }
 }
 
-void collectRelationEntryTree(
-    FeatureStyleRule const& rule,
-    ExpressionCollection& result)
+/**
+ * Project relation-rule expressions against relation entries; endpoint feature
+ * styles are collected separately in their feature context.
+ */
+void collectRelationEntryTree(FeatureStyleRule const& rule, ExpressionCollection& result)
 {
     for (auto const& [_, expression] : rule.expressionUses()) {
-        appendExpression(
-            result,
-            result.entry,
-            expression,
-            false);
+        appendExpression(result, result.entry, expression, false);
     }
     for (auto const& child : rule.subRules()) {
         collectRelationEntryTree(child, result);
     }
 }
 
-std::vector<std::string> concreteFeatureTypes(
-    FeatureStyleRule const& rule,
-    mapget::LayerInfo const& layerInfo)
+/** Restrict the rule to types actually produced by this layer, using its schema. */
+std::vector<std::string>
+concreteFeatureTypes(FeatureStyleRule const& rule, mapget::LayerInfo const& layerInfo)
 {
     std::vector<std::string> result;
     for (auto const& featureType : layerInfo.layerSchema()->featureTypes()) {
@@ -389,18 +356,20 @@ struct GroupDefinition
 
 bool sameVector(glm::dvec3 const& left, glm::dvec3 const& right)
 {
-    return left.x == right.x &&
-        left.y == right.y &&
-        left.z == right.z;
+    return left.x == right.x && left.y == right.y && left.z == right.z;
 }
 
+/**
+ * Require all concrete leaves to agree on grouping and cell size before they can
+ * share one server group channel.
+ */
 GroupDefinition groupDefinition(FeatureStyleRule const& rule)
 {
     GroupDefinition result;
     rule.forEachConcreteRule(
-        [&](FeatureStyleRule const& concrete) {
-            auto const& size =
-                concrete.pointMergeGridCellSize();
+        [&](FeatureStyleRule const& concrete)
+        {
+            auto const& size = concrete.pointMergeGridCellSize();
             result.any = result.any || size.has_value();
             result.all = result.all && size.has_value();
             if (!size) {
@@ -423,12 +392,15 @@ struct GeometryNameDefinition
     std::optional<std::string> name;
 };
 
-void mergeGeometryNames(
-    GeometryNameDefinition& result,
-    FeatureStyleRule const& rule)
+/**
+ * Retain a single geometry-name selector only while every concrete leaf agrees.
+ * A mismatch requires broader geometry delivery or rejection of a grouped rule.
+ */
+void mergeGeometryNames(GeometryNameDefinition& result, FeatureStyleRule const& rule)
 {
     rule.forEachConcreteRule(
-        [&](FeatureStyleRule const& concrete) {
+        [&](FeatureStyleRule const& concrete)
+        {
             auto const& name = concrete.geometryName();
             if (!result.initialized) {
                 result.initialized = true;
@@ -444,42 +416,35 @@ void mergeGeometryNames(
 
 uint32_t geometryBit(mapget::GeomType type)
 {
-    return uint32_t{1} <<
-        static_cast<std::underlying_type_t<mapget::GeomType>>(type);
+    return uint32_t{1} << static_cast<std::underlying_type_t<mapget::GeomType>>(type);
 }
 
-void addIssue(
-    StyleFilterPlan& plan,
-    FeatureStyleRule const& rule,
-    std::string message)
+/** Retain the source rule index and invalidate the whole plan on a planning error. */
+void addIssue(StyleFilterPlan& plan, FeatureStyleRule const& rule, std::string message)
 {
     plan.valid = false;
-    plan.issues.push_back(
-        StyleFilterPlanIssue{
-            rule.index(),
-            std::move(message)});
+    plan.issues.push_back(StyleFilterPlanIssue{rule.index(), std::move(message)});
 }
 
+/**
+ * Share only feature channels with identical membership and geometry policy.
+ * Their projection fields can be unioned without changing the selected rows.
+ */
 bool canShareFeatureChannel(
     mapget::FeatureLayerFilterChannel const& left,
     mapget::FeatureLayerFilterChannel const& right)
 {
     return left.scope_ == mapget::FeatureLayerFilterScope::Feature &&
-        right.scope_ == mapget::FeatureLayerFilterScope::Feature &&
-        !left.group_ && !right.group_ &&
-        !left.relation_ && !right.relation_ &&
-        left.rewrite_ == right.rewrite_ &&
-        left.featureTypes_ == right.featureTypes_ &&
-        left.featureFilter_ == right.featureFilter_ &&
-        left.entryFilter_ == right.entryFilter_ &&
-        left.geometryTypes_ == right.geometryTypes_ &&
+        right.scope_ == mapget::FeatureLayerFilterScope::Feature && !left.group_ && !right.group_ &&
+        !left.relation_ && !right.relation_ && left.rewrite_ == right.rewrite_ &&
+        left.featureTypes_ == right.featureTypes_ && left.featureFilter_ == right.featureFilter_ &&
+        left.entryFilter_ == right.entryFilter_ && left.geometryTypes_ == right.geometryTypes_ &&
         left.geometryName_ == right.geometryName_ &&
         left.pointCloudMaxPoints_ == right.pointCloudMaxPoints_;
 }
 
-void appendUniqueFields(
-    std::vector<std::string>& target,
-    std::vector<std::string> const& source)
+/** Merge projection columns without changing any existing column position. */
+void appendUniqueFields(std::vector<std::string>& target, std::vector<std::string> const& source)
 {
     for (auto const& field : source) {
         if (std::ranges::find(target, field) == target.end()) {
@@ -488,6 +453,10 @@ void appendUniqueFields(
     }
 }
 
+/**
+ * Coalesce compatible feature rules into the first matching channel. Preserve
+ * their source indices in channelId so the renderer can apply every authored rule.
+ */
 void appendChannel(
     StyleFilterPlan& plan,
     mapget::FeatureLayerFilterChannel channel,
@@ -495,16 +464,14 @@ void appendChannel(
 {
     auto const shared = std::ranges::find_if(
         plan.channels,
-        [&](mapget::FeatureLayerFilterChannel const& candidate) {
-            return canShareFeatureChannel(candidate, channel);
-        });
+        [&](mapget::FeatureLayerFilterChannel const& candidate)
+        { return canShareFeatureChannel(candidate, channel); });
     if (shared == plan.channels.end()) {
         plan.channels.push_back(std::move(channel));
         return;
     }
     if (shared->channelId_.starts_with("style-rule:")) {
-        shared->channelId_.replace(0, std::string_view("style-rule:").size(),
-                                   "style-rules:");
+        shared->channelId_.replace(0, std::string_view("style-rule:").size(), "style-rules:");
     }
     shared->channelId_ += "," + std::to_string(ruleIndex);
     appendUniqueFields(shared->featureFields_, channel.featureFields_);
@@ -514,14 +481,10 @@ void appendChannel(
 std::string scopeName(mapget::FeatureLayerFilterScope scope)
 {
     switch (scope) {
-    case mapget::FeatureLayerFilterScope::Feature:
-        return "feature";
-    case mapget::FeatureLayerFilterScope::Attribute:
-        return "attribute";
-    case mapget::FeatureLayerFilterScope::Relation:
-        return "relation";
-    case mapget::FeatureLayerFilterScope::Auto:
-        return "auto";
+    case mapget::FeatureLayerFilterScope::Feature: return "feature";
+    case mapget::FeatureLayerFilterScope::Attribute: return "attribute";
+    case mapget::FeatureLayerFilterScope::Relation: return "relation";
+    case mapget::FeatureLayerFilterScope::Auto: return "auto";
     }
     return "feature";
 }
@@ -535,8 +498,11 @@ JsValue stringList(std::vector<std::string> const& values)
     return result;
 }
 
-JsValue channelToJsValue(
-    mapget::FeatureLayerFilterChannel const& channel)
+/**
+ * Serialize the generic mapget channel contract, including optional grouping and
+ * relation settings, for the browser transport owner.
+ */
+JsValue channelToJsValue(mapget::FeatureLayerFilterChannel const& channel)
 {
     auto result = JsValue::Dict({
         {"channelId", JsValue(channel.channelId_)},
@@ -546,87 +512,70 @@ JsValue channelToJsValue(
         {"featureFields", stringList(channel.featureFields_)},
         {"entryFields", stringList(channel.entryFields_)},
         {"geometryTypes", JsValue(channel.geometryTypes_)},
-        {"geometryName",
-         JsValue(channel.geometryName_.value_or("*"))},
+        {"geometryName", JsValue(channel.geometryName_.value_or("*"))},
     });
     if (channel.pointCloudMaxPoints_)
         result.set("pointCloudMaxPoints", JsValue(*channel.pointCloudMaxPoints_));
     if (channel.featureFilter_) {
-        result.set(
-            "featureFilter",
-            JsValue(*channel.featureFilter_));
+        result.set("featureFilter", JsValue(*channel.featureFilter_));
     }
     if (channel.entryFilter_) {
-        result.set(
-            "entryFilter",
-            JsValue(*channel.entryFilter_));
+        result.set("entryFilter", JsValue(*channel.entryFilter_));
     }
     if (channel.group_) {
         result.set(
             "group",
             JsValue::Dict({
                 {"kind", JsValue("point-grid")},
-                {"origin", JsValue::List({
-                    JsValue(channel.group_->origin_.x),
-                    JsValue(channel.group_->origin_.y),
-                    JsValue(channel.group_->origin_.z),
-                })},
-                {"cellSize", JsValue::List({
-                    JsValue(channel.group_->cellSize_.x),
-                    JsValue(channel.group_->cellSize_.y),
-                    JsValue(channel.group_->cellSize_.z),
-                })},
+                {"origin",
+                 JsValue::List({
+                     JsValue(channel.group_->origin_.x),
+                     JsValue(channel.group_->origin_.y),
+                     JsValue(channel.group_->origin_.z),
+                 })},
+                {"cellSize",
+                 JsValue::List({
+                     JsValue(channel.group_->cellSize_.x),
+                     JsValue(channel.group_->cellSize_.y),
+                     JsValue(channel.group_->cellSize_.z),
+                 })},
             }));
     }
     if (channel.relation_) {
         auto relation = JsValue::Dict({
-            {"recursive",
-             JsValue(channel.relation_->recursive_)},
-            {"mergeTwoway",
-             JsValue(channel.relation_->mergeTwoway_)},
+            {"recursive", JsValue(channel.relation_->recursive_)},
+            {"mergeTwoway", JsValue(channel.relation_->mergeTwoway_)},
         });
         if (channel.relation_->relationNamePattern_) {
-            relation.set(
-                "namePattern",
-                JsValue(
-                    *channel.relation_
-                         ->relationNamePattern_));
+            relation.set("namePattern", JsValue(*channel.relation_->relationNamePattern_));
         }
         result.set("relation", relation);
     }
     return result;
 }
 
-}
+}  // namespace
 
-std::string expandStyleExpressionForFilter(
-    std::string_view expression)
+std::string expandStyleExpressionForFilter(std::string_view expression)
 {
     std::string result;
     result.reserve(expression.size());
     size_t cursor = 0;
     while (cursor < expression.size()) {
-        auto const offset =
-            expression.find(kMergeCount, cursor);
+        auto const offset = expression.find(kMergeCount, cursor);
         if (offset == std::string_view::npos) {
             result.append(expression.substr(cursor));
             break;
         }
-        auto const before =
-            offset == 0 ||
-            !identifierCharacter(expression[offset - 1]);
+        auto const before = offset == 0 || !identifierCharacter(expression[offset - 1]);
         auto const end = offset + kMergeCount.size();
-        auto const after =
-            end == expression.size() ||
-            !identifierCharacter(expression[end]);
+        auto const after = end == expression.size() || !identifierCharacter(expression[end]);
         if (!before || !after) {
-            result.append(
-                expression.substr(cursor, end - cursor));
+            result.append(expression.substr(cursor, end - cursor));
             cursor = end;
             continue;
         }
-        result.append(
-            expression.substr(cursor, offset - cursor));
+        result.append(expression.substr(cursor, offset - cursor));
         result.append(kServerMergeCount);
         cursor = end;
     }
@@ -642,46 +591,39 @@ StyleFilterPlan planStyleFilter(
     StyleFilterPlan plan;
     if (!style.isValid()) {
         plan.valid = false;
-        plan.issues.push_back(
-            {0, "Cannot plan an invalid stylesheet."});
+        plan.issues.push_back({0, "Cannot plan an invalid stylesheet."});
         return plan;
     }
 
     for (auto const& rule : style.rules()) {
-        if (!rule.supportsMode(highlightMode) ||
-            !rule.supportsLod(lod))
-        {
+        if (!rule.supportsMode(highlightMode) || !rule.supportsLod(lod)) {
             continue;
         }
 
-        auto featureTypes =
-            concreteFeatureTypes(rule, layerInfo);
+        auto featureTypes = concreteFeatureTypes(rule, layerInfo);
         if (featureTypes.empty()) {
             continue;
         }
 
         mapget::FeatureLayerFilterChannel channel;
-        channel.channelId_ =
-            "style-rule:" + std::to_string(rule.index());
+        channel.channelId_ = "style-rule:" + std::to_string(rule.index());
         channel.featureTypes_ = std::move(featureTypes);
         channel.rewrite_ = false;
 
         auto group = groupDefinition(rule);
-        if (group.any &&
-            (!group.all || !group.sameSize || !group.size))
-        {
+        if (group.any && (!group.all || !group.sameSize || !group.size)) {
             addIssue(
                 plan,
                 rule,
-                "One top-level rule cannot mix grouped and ungrouped leaves or point-grid cell sizes.");
+                "One top-level rule cannot mix grouped and ungrouped leaves or point-grid cell "
+                "sizes.");
             continue;
         }
 
+        // Choose the server evaluation context before collecting projection columns.
         ExpressionCollection expressions;
         if (group.any) {
-            if (rule.scope() !=
-                FeatureStyleRule::Feature)
-            {
+            if (rule.scope() != FeatureStyleRule::Feature) {
                 addIssue(
                     plan,
                     rule,
@@ -702,174 +644,119 @@ StyleFilterPlan planStyleFilter(
                 addIssue(
                     plan,
                     rule,
-                    "Point-grid leaves require one identical geometry-name selector, including wildcard.");
+                    "Point-grid leaves require one identical geometry-name selector, including "
+                    "wildcard.");
                 continue;
             }
-            auto const pointBit =
-                geometryBit(mapget::GeomType::Points);
+            auto const pointBit = geometryBit(mapget::GeomType::Points);
             bool pointOnly = true;
             rule.forEachConcreteRule(
-                [&](FeatureStyleRule const& concrete) {
-                    pointOnly =
-                        pointOnly &&
-                        concrete.geometryTypesMask() ==
-                            pointBit;
-                });
+                [&](FeatureStyleRule const& concrete)
+                { pointOnly = pointOnly && concrete.geometryTypesMask() == pointBit; });
             if (!pointOnly) {
-                addIssue(
-                    plan,
-                    rule,
-                    "Point-grid leaves must select only point geometry.");
+                addIssue(plan, rule, "Point-grid leaves must select only point geometry.");
                 continue;
             }
 
             collectFeatureTree(rule, expressions, true);
-            channel.scope_ =
-                mapget::FeatureLayerFilterScope::Feature;
+            channel.scope_ = mapget::FeatureLayerFilterScope::Feature;
             channel.geometryTypes_ = pointBit;
             channel.geometryName_ = names.name;
-            channel.featureFilter_ =
-                exactGroupPredicate(
-                    rule,
-                    channel.featureTypes_)
-                    .expression;
+            channel.featureFilter_ = exactGroupPredicate(rule, channel.featureTypes_).expression;
             channel.group_ =
-                mapget::FeatureLayerPointGridGroup{
-                    glm::dvec3{0.0, 0.0, 0.0},
-                    *group.size};
-            channel.entryFields_ =
-                expressions.entry.take();
+                mapget::FeatureLayerPointGridGroup{glm::dvec3{0.0, 0.0, 0.0}, *group.size};
+            channel.entryFields_ = expressions.entry.take();
         }
-        else if (rule.scope() ==
-                 FeatureStyleRule::Attribute)
-        {
+        else if (rule.scope() == FeatureStyleRule::Attribute) {
             collectAttributeTree(rule, expressions);
-            channel.scope_ =
-                mapget::FeatureLayerFilterScope::Attribute;
-            channel.geometryTypes_ =
-                rule.effectiveGeometryTypesMask();
-            channel.geometryName_ =
-                rule.effectiveGeometryName();
-            channel.featureFilter_ =
-                eligible(rule, featurePredicate).expression;
-            channel.entryFilter_ =
-                eligible(
-                    rule,
-                    attributeEntryPredicate)
-                    .expression;
-            channel.featureFields_ =
-                expressions.feature.take();
-            channel.entryFields_ =
-                expressions.entry.take();
+            channel.scope_ = mapget::FeatureLayerFilterScope::Attribute;
+            channel.geometryTypes_ = rule.effectiveGeometryTypesMask();
+            channel.geometryName_ = rule.effectiveGeometryName();
+            channel.featureFilter_ = eligible(rule, featurePredicate).expression;
+            channel.entryFilter_ = eligible(rule, attributeEntryPredicate).expression;
+            channel.featureFields_ = expressions.feature.take();
+            channel.entryFields_ = expressions.entry.take();
         }
-        else if (rule.scope() ==
-                 FeatureStyleRule::Relation)
-        {
-            collectRelationEntryTree(
-                rule,
-                expressions);
-            if (auto marker =
-                    rule.relationLineEndMarkerStyle())
-            {
-                collectRelationEntryTree(
-                    *marker,
-                    expressions);
+        else if (rule.scope() == FeatureStyleRule::Relation) {
+            collectRelationEntryTree(rule, expressions);
+            if (auto marker = rule.relationLineEndMarkerStyle()) {
+                collectRelationEntryTree(*marker, expressions);
             }
-            if (auto source =
-                    rule.relationSourceStyle())
-            {
-                collectFeatureTree(
-                    *source,
-                    expressions,
-                    false);
+            if (auto source = rule.relationSourceStyle()) {
+                collectFeatureTree(*source, expressions, false);
             }
-            if (auto target =
-                    rule.relationTargetStyle())
-            {
-                collectFeatureTree(
-                    *target,
-                    expressions,
-                    false);
+            if (auto target = rule.relationTargetStyle()) {
+                collectFeatureTree(*target, expressions, false);
             }
 
-            channel.scope_ =
-                mapget::FeatureLayerFilterScope::Relation;
+            channel.scope_ = mapget::FeatureLayerFilterScope::Relation;
             // The outer line is synthesized from endpoint centers. Restricting
             // copied endpoint geometry to the outer rule's "line" presentation
             // mask would make point-to-point relations disappear.
-            channel.geometryTypes_ =
-                mapget::FeatureLayerFilterChannel::
-                    AllGeometryTypes;
+            channel.geometryTypes_ = mapget::FeatureLayerFilterChannel::AllGeometryTypes;
             auto names = GeometryNameDefinition{};
             mergeGeometryNames(names, rule);
-            if (auto source =
-                    rule.relationSourceStyle())
-            {
+            if (auto source = rule.relationSourceStyle()) {
                 mergeGeometryNames(names, *source);
             }
-            if (auto target =
-                    rule.relationTargetStyle())
-            {
+            if (auto target = rule.relationTargetStyle()) {
                 mergeGeometryNames(names, *target);
             }
-            channel.geometryName_ =
-                names.compatible ? names.name : std::nullopt;
-            channel.entryFilter_ =
-                rule.filter().empty()
-                    ? std::nullopt
-                    : std::optional<std::string>{
-                          rule.filter()};
-            channel.featureFields_ =
-                expressions.feature.take();
-            channel.entryFields_ =
-                expressions.entry.take();
-            channel.relation_ =
-                mapget::FeatureLayerStoredRelationOptions{
-                    rule.relationTypePattern(),
-                    rule.relationRecursive(),
-                    rule.relationMergeTwoWay(),
-                };
+            channel.geometryName_ = names.compatible ? names.name : std::nullopt;
+            channel.entryFilter_ = rule.filter().empty() ?
+                std::nullopt :
+                std::optional<std::string>{rule.filter()};
+            channel.featureFields_ = expressions.feature.take();
+            channel.entryFields_ = expressions.entry.take();
+            channel.relation_ = mapget::FeatureLayerStoredRelationOptions{
+                rule.relationTypePattern(),
+                rule.relationRecursive(),
+                rule.relationMergeTwoWay(),
+            };
         }
         else {
-            collectFeatureTree(
-                rule,
-                expressions,
-                false,
-                true);
-            channel.scope_ =
-                mapget::FeatureLayerFilterScope::Feature;
-            channel.geometryTypes_ =
-                rule.effectiveGeometryTypesMask();
-            channel.geometryName_ =
-                rule.effectiveGeometryName();
-            channel.featureFilter_ =
-                eligible(rule, featurePredicate).expression;
-            channel.featureFields_ =
-                expressions.feature.take();
+            collectFeatureTree(rule, expressions, false, true);
+            channel.scope_ = mapget::FeatureLayerFilterScope::Feature;
+            channel.geometryTypes_ = rule.effectiveGeometryTypesMask();
+            channel.geometryName_ = rule.effectiveGeometryName();
+            channel.featureFilter_ = eligible(rule, featurePredicate).expression;
+            channel.featureFields_ = expressions.feature.take();
         }
 
-        auto consistentCloudPolicy = [&](auto const& self, FeatureStyleRule const& child) -> bool {
+        // One channel carries one point-cloud budget; nested leaves must inherit it.
+        auto consistentCloudPolicy = [&](auto const& self, FeatureStyleRule const& child) -> bool
+        {
             if (child.pointCloud() != rule.pointCloud() ||
-                (child.pointCloud() && child.pointCloudMaxPoints() != rule.pointCloudMaxPoints())) return false;
-            return std::ranges::all_of(child.subRules(), [&](auto const& sub) { return self(self, sub); });
+                (child.pointCloud() && child.pointCloudMaxPoints() != rule.pointCloudMaxPoints()))
+                return false;
+            return std::ranges::all_of(
+                child.subRules(),
+                [&](auto const& sub) { return self(self, sub); });
         };
         if (!consistentCloudPolicy(consistentCloudPolicy, rule)) {
-            addIssue(plan, rule, "point-cloud and point-cloud-max-points must be set on the top-level rule and inherited by every subrule.");
+            addIssue(
+                plan,
+                rule,
+                "point-cloud and point-cloud-max-points must be set on the top-level rule and "
+                "inherited by every subrule.");
             continue;
         }
         if (rule.pointCloud()) {
             if (channel.scope_ != mapget::FeatureLayerFilterScope::Feature ||
                 channel.geometryTypes_ != (1U << static_cast<unsigned>(mapget::GeomType::Points)) ||
-                channel.group_ || channel.relation_) {
-                addIssue(plan, rule, "point-cloud requires a feature-scope point-only rule without grouping or relations.");
+                channel.group_ || channel.relation_)
+            {
+                addIssue(
+                    plan,
+                    rule,
+                    "point-cloud requires a feature-scope point-only rule without grouping or "
+                    "relations.");
                 continue;
             }
             channel.pointCloudMaxPoints_ = rule.pointCloudMaxPoints();
         }
 
-        if (expressions.usesMergeCount &&
-            !channel.group_)
-        {
+        if (expressions.usesMergeCount && !channel.group_) {
             addIssue(
                 plan,
                 rule,
@@ -891,12 +778,10 @@ NativeJsValue StyleFilterPlan::toJsValue() const
     }
     auto issueList = JsValue::List();
     for (auto const& issue : issues) {
-        issueList.push(
-            JsValue::Dict({
-                {"ruleIndex",
-                 JsValue(issue.ruleIndex)},
-                {"message", JsValue(issue.message)},
-            }));
+        issueList.push(JsValue::Dict({
+            {"ruleIndex", JsValue(issue.ruleIndex)},
+            {"message", JsValue(issue.message)},
+        }));
     }
     return *JsValue::Dict({
         {"valid", JsValue(valid)},
@@ -905,4 +790,4 @@ NativeJsValue StyleFilterPlan::toJsValue() const
     });
 }
 
-}
+}  // namespace erdblick

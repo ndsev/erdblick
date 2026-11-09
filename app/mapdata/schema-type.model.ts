@@ -27,6 +27,23 @@ export const legacySchemaTypeIdentitySchema = z.object({
     domainId: schemaTypeIdentitySchema.shape.typeId
 }).transform(value => ({schemaId: value.schemaId, typeId: value.domainId}));
 
+/**
+ * A saved color scale can cover several verified equivalent source types.
+ * Read historical singular guards at the persistence/YAML boundary; an invalid
+ * current spelling must not fall through to a different legacy guard.
+ */
+export const colorScaleTypesSchema = z.preprocess((value) => {
+    if (!value || typeof value !== "object") return value;
+    const input = value as Record<string, unknown>;
+    if (input["schemaTypes"] !== undefined) return input["schemaTypes"];
+    if (input["schemaType"] !== undefined) return [input["schemaType"]];
+    if (input["domain"] !== undefined) {
+        const old = legacySchemaTypeIdentitySchema.safeParse(input["domain"]);
+        return old.success ? [old.data] : [input["domain"]];
+    }
+    return undefined;
+}, z.array(schemaTypeIdentitySchema).min(1).optional());
+
 /** Presentation metadata borrowed from one installed native type. */
 export const schemaScalarTypeSchema = schemaTypeIdentitySchema.extend({
     typeName: z.string(),
@@ -56,6 +73,25 @@ export const schemaScalarTypeSchema = schemaTypeIdentitySchema.extend({
 
 export type SchemaScalarType = z.infer<typeof schemaScalarTypeSchema>;
 export type SchemaNamedValue = SchemaScalarType["namedValues"][number];
+
+/**
+ * Compare values by their meaning rather than by their position in a schema.
+ * Two map versions can encode the same speed scale with different type IDs.
+ * Numeric units, raw ranges and exceptional values must still agree. Symbolic
+ * categories instead use their logical string labels: adding enum entries or
+ * changing their wire ordinals does not change the color of "ANIMALS".
+ */
+export function schemaScalarMeaning(type: SchemaScalarType): string {
+    if (!type.numeric && type.namedValues.length && type.namedValues.every(value =>
+        value.valueType === "string" && value.role === "constant")) {
+        return "symbolic-categories";
+    }
+    return JSON.stringify({
+        numeric: type.numeric,
+        bitWidth: type.bitWidth,
+        namedValues: [...type.namedValues].sort((a, b) => a.name.localeCompare(b.name))
+    });
+}
 
 /** Lossless mask transport, matching simfil's JSON export representation. */
 export interface SchemaBitmask {
