@@ -95,7 +95,7 @@ describe("application registration boundaries", () => {
         expected.actions.sort((left, right) => left.name.localeCompare(right.name, "en"));
         expected.channels.sort((left, right) => left.name.localeCompare(right.name, "en"));
         expect(catalog).toEqual(expected);
-        expect(catalog.actions).toHaveLength(32);
+        expect(catalog.actions).toHaveLength(33);
         expect(catalog.channels).toHaveLength(21);
         expect(catalog.actions.every(action => action.permission ===
             (action.mutation ? "viewer-control" : "viewer-read"))).toBe(true);

@@ -26,7 +26,7 @@ async function call(page: Page, name: string, input: Record<string, unknown> = {
 }
 
 test('native WebMCP discovers all tools, controls only this document and calls real mapget', async ({ page, context }) => {
-    await page.goto('/?v2=1&n=1&vid=left&lon=11&lat=48&alt=500&m2d=0&l=');
+    await page.goto('/?v2=1&n=1&vid=0&lon=11&lat=48&alt=500&m2d=0&l=');
     await waitForAppReady(page);
     await page.getByTestId('viewer-action-status').click();
     await expect(page.getByTestId('viewer-action-details')).toContainText('WebMCP ready for this tab and mapget');
@@ -46,18 +46,18 @@ test('native WebMCP discovers all tools, controls only this document and calls r
     expect(names.filter(name => name.startsWith('mapget_')).sort()).toEqual(native.sort());
     const second = await context.newPage();
     try {
-        await second.goto('/?v2=1&n=1&vid=left&lon=20&lat=50&alt=1000&m2d=0&l=');
+        await second.goto('/?v2=1&n=1&vid=0&lon=20&lat=50&alt=1000&m2d=0&l=');
     await waitForAppReady(second);
         await expect.poll(() => second.evaluate(async () =>
             (await (document as Document & { modelContext: ModelContext }).modelContext.getTools()).map(tool => tool.name)))
             .toContain('viewer_get_controls');
-        const before = await call(page, 'viewer_get_controls', { targets: [{ control: 'view.projection', viewId: 'left' }] });
-        const otherBefore = await call(second, 'viewer_get_controls', { targets: [{ control: 'view.projection', viewId: 'left' }] });
+        const before = await call(page, 'viewer_get_controls', { targets: [{ control: 'view.projection', viewId: '0' }] });
+        const otherBefore = await call(second, 'viewer_get_controls', { targets: [{ control: 'view.projection', viewId: '0' }] });
         const applied = await call(page, 'viewer_set_control', {
-            target: { control: 'view.projection', viewId: 'left' }, value: '2d'
+            target: { control: 'view.projection', viewId: '0' }, value: '2d'
         });
         expect(applied).toMatchObject({ status: 'applied', value: '2d' });
-        expect((await call(second, 'viewer_get_controls', { targets: [{ control: 'view.projection', viewId: 'left' }] })).values)
+        expect((await call(second, 'viewer_get_controls', { targets: [{ control: 'view.projection', viewId: '0' }] })).values)
             .toEqual(otherBefore.values);
         const sources = await call(page, 'mapget_list_sources', { details: false });
         expect(sources.isError).toBe(false);

@@ -1,9 +1,8 @@
 import { z } from "zod";
 
-/** IDs address persisted records; Object.prototype names are deliberately reserved. */
-export const viewIdSchema = z.string().regex(/^[A-Za-z0-9_-]{1,64}$/)
-    .refine(id => !Object.hasOwn(Object.prototype, id), "This view ID is reserved.")
-    .meta({ not: { enum: Object.getOwnPropertyNames(Object.prototype) } });
+/** Decimal identities stay distinct from numeric positional indices in per-view APIs. */
+export const viewIdSchema = z.string().max(16).regex(/^(0|[1-9]\d*)$/)
+    .refine(id => Number.isSafeInteger(Number(id)), "View IDs must be nonnegative safe integers.");
 
 export const DEFAULT_MAP_ZOOM_STEP = 0.5;
 

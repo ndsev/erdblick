@@ -30,6 +30,15 @@ function setup(params: Record<string, unknown> = {}) {
 beforeEach(() => { localStorage.clear(); window.history.replaceState({}, '', '/'); });
 
 describe('logical view identity', () => {
+    it.each([
+        'legacy-view', 'e787265d-8429-42c2-a719-e3a47c2ac3a3', '01', '-1', '1.5', '9007199254740992'
+    ])('rejects non-canonical decimal identity %s', id => {
+        const {registry, owners: {viewSettings: views}} = setup();
+        expect(() => views.prepareImportedViews(1, [id], true)).toThrow();
+        expect(views.viewIds).toEqual(['0']);
+        registry.ngOnDestroy();
+    });
+
     it('allocates compact IDs and reuses the smallest gap independently of presentation order', () => {
         const { registry, owners: { viewSettings: views } } = setup();
         expect(views.viewIds).toEqual(['0']);
@@ -40,7 +49,7 @@ describe('logical view identity', () => {
         views.numViews = 5;
         expect(views.viewIds).toEqual(['3', '1', '0', '2', '4']);
         expect(views.prepareImportedViews(3, undefined, true)).toEqual(['0', '1', '2']);
-        expect(views.resizeStoredViews(['2', 'legacy-view'], 4)).toEqual(['2', 'legacy-view', '0', '1']);
+        expect(views.resizeStoredViews(['2', '9'], 4)).toEqual(['2', '9', '0', '1']);
         registry.ngOnDestroy();
     });
 
@@ -105,17 +114,17 @@ describe('logical view identity', () => {
     });
 
     it('ignores legacy URL background values after rejecting its explicit view identities', () => {
-        localStorage.setItem('viewIds', '["saved-view"]');
+        localStorage.setItem('viewIds', '["8"]');
         localStorage.setItem('numberOfViews', '1');
         localStorage.setItem('osm', JSON.stringify(['1~27', '0~40']));
         localStorage.setItem('cameraView', JSON.stringify([{ lon: 7, lat: 8, alt: 900 }]));
         const { registry, owners: { viewSettings: views }, toasts } = setup({
-            n: '2', vid: 'duplicate,duplicate', osm: '0~6', lon: '42.5'
+            n: '2', vid: '5,5', osm: '0~6', lon: '42.5'
         });
         try {
             expect(() => registry.initializePersistence()).not.toThrow();
             expect(registry.ready.value).toBe(true);
-            expect(views.viewIds).toEqual(['saved-view']);
+            expect(views.viewIds).toEqual(['8']);
             expect(views.getBackgroundState(0)).toEqual({ layerId: 'osm', opacity: 27 });
             expect(views.cameraViewDataState.getValue(0).destination).toEqual({ lon: 7, lat: 8, alt: 900 });
             expect(toasts.add).toHaveBeenCalled();
@@ -182,44 +191,44 @@ describe('logical view identity', () => {
 
     it.each(['snapshot', 'url'])('imports reordered identities through membership owners: %s', format => {
         const { registry, owners: { viewSettings: views, layerState: layers, searchService: searches, url } } = setup();
-        views.importViews(['first', 'second']);
-        const camera = { ...views.cameraViewDataState.getValue('first'), destination: { lon: 11, lat: 48, alt: 300 } };
-        views.cameraViewDataState.next('first', camera);
+        views.importViews(['4', '7']);
+        const camera = { ...views.cameraViewDataState.getValue('4'), destination: { lon: 11, lat: 48, alt: 300 } };
+        views.cameraViewDataState.next('4', camera);
         layers.layerNames = ['Map/Lane'];
-        layers.layerVisibilityState.next('first', [true]);
-        layers.layerVisibilityState.next('second', [false]);
+        layers.layerVisibilityState.next('4', [true]);
+        layers.layerVisibilityState.next('7', [false]);
         layers.setStyleOptionValues('Map', 'Lane', 'STY0', 'active', [true, false]);
         searches.state.addFeatureSearch({ query: 'true', selectedViewIndices: [0] });
         views.focusedView = 0;
         const observations: unknown[] = [];
         registry.observe(() => registry.exportSnapshot()).subscribe(value => observations.push(value));
-        if (format === 'snapshot') expect(registry.importSnapshot({ viewIds: ['second', 'first'] })).toEqual([]);
-        else registry.transaction(() => url.hydrate({ vid: 'second,first' }));
-        expect(views.viewIds).toEqual(['second', 'first']);
+        if (format === 'snapshot') expect(registry.importSnapshot({ viewIds: ['7', '4'] })).toEqual([]);
+        else registry.transaction(() => url.hydrate({ vid: '7,4' }));
+        expect(views.viewIds).toEqual(['7', '4']);
         expect(views.focusedView).toBe(1);
-        expect(views.cameraViewDataState.getValue('first')).toEqual(camera);
-        expect(layers.layerVisibilityState.getValue('first')).toEqual([true]);
-        expect(layers.stylesState.value.get('Map/Lane/STY0/active')).toEqual({ first: true, second: false });
-        expect(searches.state.featureSearchState.value[0].selectedViewIds).toEqual(['first']);
+        expect(views.cameraViewDataState.getValue('4')).toEqual(camera);
+        expect(layers.layerVisibilityState.getValue('4')).toEqual([true]);
+        expect(layers.stylesState.value.get('Map/Lane/STY0/active')).toEqual({ '4': true, '7': false });
+        expect(searches.state.featureSearchState.value[0].selectedViewIds).toEqual(['4']);
         expect(observations).toHaveLength(2);
         registry.ngOnDestroy();
     });
 
     it('preserves omitted positional values but prunes removed search associations during snapshot replacement', () => {
         const { registry, owners: { viewSettings: views, layerState: layers, searchService: searches } } = setup();
-        views.importViews(['first', 'second']);
-        const camera = { ...views.cameraViewDataState.getValue('first'), destination: { lon: 11, lat: 48, alt: 300 } };
-        views.cameraViewDataState.next('first', camera);
+        views.importViews(['4', '7']);
+        const camera = { ...views.cameraViewDataState.getValue('4'), destination: { lon: 11, lat: 48, alt: 300 } };
+        views.cameraViewDataState.next('4', camera);
         layers.layerNames = ['Map/Lane'];
-        layers.layerVisibilityState.next('first', [false]);
+        layers.layerVisibilityState.next('4', [false]);
         layers.setStyleOptionValues('Map', 'Lane', 'STY0', 'active', [true, false]);
         searches.state.addFeatureSearch({ query: 'true', selectedViewIndices: [0] });
-        expect(registry.importSnapshot({ viewIds: ['replacement', 'second'] })).toEqual([]);
-        expect(views.cameraViewDataState.getValue('replacement')).toEqual(camera);
-        expect(layers.layerVisibilityState.getValue('replacement')).toEqual([false]);
-        expect(layers.stylesState.value.get('Map/Lane/STY0/active')).toEqual({ replacement: true, second: false });
+        expect(registry.importSnapshot({ viewIds: ['9', '7'] })).toEqual([]);
+        expect(views.cameraViewDataState.getValue('9')).toEqual(camera);
+        expect(layers.layerVisibilityState.getValue('9')).toEqual([false]);
+        expect(layers.stylesState.value.get('Map/Lane/STY0/active')).toEqual({ '9': true, '7': false });
         expect(searches.state.featureSearchState.value[0].selectedViewIds).toEqual([]);
-        expect(registry.importSnapshot({ viewIds: ['first', 'second'] })).toEqual([]);
+        expect(registry.importSnapshot({ viewIds: ['4', '7'] })).toEqual([]);
         expect(searches.state.featureSearchState.value[0].selectedViewIds).toEqual([]);
         registry.ngOnDestroy();
     });
@@ -228,14 +237,14 @@ describe('logical view identity', () => {
         const { registry, owners: { viewSettings: views, layerState: layers, searchService: searches } } = setup();
         registry.initializePersistence();
         const defaultCamera = views.cameraViewDataState.getValue(0);
-        views.importViews(['first', 'second']);
-        views.cameraViewDataState.next('first', { ...defaultCamera, destination: { lon: 11, lat: 48, alt: 300 } });
+        views.importViews(['4', '7']);
+        views.cameraViewDataState.next('4', { ...defaultCamera, destination: { lon: 11, lat: 48, alt: 300 } });
         layers.layerNames = ['Map/Lane'];
-        layers.layerVisibilityState.next('first', [false]);
+        layers.layerVisibilityState.next('4', [false]);
         layers.setStyleOptionValues('Map', 'Lane', 'STY0', 'active', [true, false]);
         searches.state.addFeatureSearch({ query: 'true', selectedViewIndices: [0] });
-        expect(registry.replaceSnapshotState({ viewIds: ['replacement'] })).toEqual([]);
-        expect(views.viewIds).toEqual(['replacement']);
+        expect(registry.replaceSnapshotState({ viewIds: ['9'] })).toEqual([]);
+        expect(views.viewIds).toEqual(['9']);
         expect(views.cameraViewDataState.getValue(0)).toEqual(defaultCamera);
         expect(layers.layerNames).toEqual([]);
         expect(layers.stylesState.value.size).toBe(0);
@@ -246,7 +255,7 @@ describe('logical view identity', () => {
 
     it('publishes ordinary synchronized camera and projection methods once each', () => {
         const { registry, owners: { viewSettings: views } } = setup();
-        views.importViews(['first', 'second', 'third']);
+        views.importViews(['4', '7', '12']);
         views.viewSync = [VIEW_SYNC_POSITION, VIEW_SYNC_PROJECTION];
         const observations: unknown[] = [];
         registry.observe(() => views.viewIds.map(id => ({ camera: views.cameraViewDataState.getValue(id), mode2d: views.mode2dState.getValue(id) })))
@@ -303,7 +312,7 @@ describe('logical view identity', () => {
         const unregisterOld = views.registerRenderView(old as never);
         const token = views.captureView(id)!;
         owners.viewSettings.retainViews([1], new Map());
-        registry.transaction(() => owners.url.hydrate({ v2: '1', n: '2', vid: `${id},restored-other` }));
+        registry.transaction(() => owners.url.hydrate({ v2: '1', n: '2', vid: `${id},9` }));
         const replacement = { viewId: id, viewIndex: 0, isAvailable: () => true };
         views.registerRenderView(replacement as never);
         unregisterOld();
@@ -332,7 +341,7 @@ describe('logical view identity', () => {
         if (operation === 'reorder') owners.viewSettings.retainViews([1, 0], new Map());
         else {
             owners.viewSettings.retainViews([1], new Map());
-            registry.transaction(() => owners.url.hydrate({ v2: '1', n: '2', vid: `${id},other` }));
+            registry.transaction(() => owners.url.hydrate({ v2: '1', n: '2', vid: `${id},9` }));
             views.registerRenderView({ viewId: id, isAvailable: () => true } as never);
         }
         finish([{} as FeatureWrapper]);
@@ -363,7 +372,7 @@ describe('logical view identity', () => {
 
     it.each([{}, { external: 'keep' }, { lon: '12,13' }])('preserves omitted storage values under a partial legacy URL: %j', params => {
         localStorage.setItem('numberOfViews', '2');
-        localStorage.setItem('viewIds', JSON.stringify(['old-a', 'old-b']));
+        localStorage.setItem('viewIds', JSON.stringify(['4', '7']));
         localStorage.setItem('cameraView', JSON.stringify([{ lon: 1, lat: 40, alt: 111 }, { lon: 2, lat: 50, alt: 222 }]));
         localStorage.setItem('layerNames', JSON.stringify(['Map/Lane']));
         localStorage.setItem('visibility', JSON.stringify([[true], [false]]));
@@ -372,7 +381,7 @@ describe('logical view identity', () => {
         const { registry, owners: { viewSettings: views, layerState: layers } } = setup(params);
         registry.initializePersistence();
         expect(views.viewIds).toHaveLength(2);
-        expect(views.viewIds).toEqual(['old-a', 'old-b']);
+        expect(views.viewIds).toEqual(['4', '7']);
         expect(views.cameraViewDataState.getValue(0).destination).toMatchObject({ lat: 40, alt: 111 });
         expect(views.cameraViewDataState.getValue(1).destination).toMatchObject({ lat: 50, alt: 222 });
         expect(layers.layerVisibilityState.getValue(0)).toEqual([true]);
@@ -384,31 +393,31 @@ describe('logical view identity', () => {
 
     it('retains identity and omitted values across partial legacy navigation, extending only new views', () => {
         const { registry, owners: { viewSettings: views, layerState: layers, url } } = setup();
-        views.importViews(['first', 'second']);
-        views.cameraViewDataState.next('second', { ...views.cameraViewDataState.getValue('second'), destination: { lon: 11, lat: 22, alt: 33 } });
+        views.importViews(['4', '7']);
+        views.cameraViewDataState.next('7', { ...views.cameraViewDataState.getValue('7'), destination: { lon: 11, lat: 22, alt: 33 } });
         layers.layerNamesState.next(['Map/Lane']);
-        layers.layerVisibilityState.next('second', [false]);
+        layers.layerVisibilityState.next('7', [false]);
         registry.transaction(() => url.hydrate({ n: '3', lon: '1,2,3' }));
-        expect(views.viewIds.slice(0, 2)).toEqual(['first', 'second']);
-        expect(views.cameraViewDataState.getValue('second').destination).toEqual({ lon: 2, lat: 22, alt: 33 });
-        expect(layers.layerVisibilityState.getValue('second')).toEqual([false]);
+        expect(views.viewIds.slice(0, 2)).toEqual(['4', '7']);
+        expect(views.cameraViewDataState.getValue('7').destination).toEqual({ lon: 2, lat: 22, alt: 33 });
+        expect(layers.layerVisibilityState.getValue('7')).toEqual([false]);
         const replacement = url.prepareUrl({ n: '2' }, true);
-        expect(replacement['vid'].split(',')).not.toContain('first');
+        expect(replacement['vid'].split(',')).not.toContain('4');
     });
 
     it.each(['startup', 'partial', 'replacement'])('derives membership count from explicit IDs without n during %s', async mode => {
         localStorage.setItem('numberOfViews', '1');
-        localStorage.setItem('viewIds', '["saved"]');
-        const { registry, owners: { viewSettings: views, url } } = setup(mode === 'startup' ? { vid: 'first,second' } : {});
+        localStorage.setItem('viewIds', '["8"]');
+        const { registry, owners: { viewSettings: views, url } } = setup(mode === 'startup' ? { vid: '4,7' } : {});
         registry.initializePersistence();
-        if (mode === 'partial') registry.transaction(() => url.hydrate({ vid: 'first,second' }));
-        if (mode === 'replacement') await registry.replaceUrlState({ vid: 'first,second' }, true);
-        expect(views.viewIds).toEqual(['first', 'second']);
+        if (mode === 'partial') registry.transaction(() => url.hydrate({ vid: '4,7' }));
+        if (mode === 'replacement') await registry.replaceUrlState({ vid: '4,7' }, true);
+        expect(views.viewIds).toEqual(['4', '7']);
         expect(views.numViews).toBe(2);
         registry.ngOnDestroy();
     });
 
-    it.each(['same,same', 'bad!id,other', '__proto__,other', 'constructor,other', 'toString,other', 'one', ['one,two', 'three,four']])('rejects malformed explicit IDs without changing valid state: %j', vid => {
+    it.each(['3,3', 'bad!id,other', '__proto__,other', 'constructor,other', 'toString,other', 'one', ['one,two', 'three,four']])('rejects malformed explicit IDs without changing valid state: %j', vid => {
         const { registry, owners } = setup();
         owners.viewSettings.numViews = 2;
         const before = registry.exportSnapshot();
@@ -419,7 +428,7 @@ describe('logical view identity', () => {
         expect(events).toHaveLength(1);
     });
 
-    it.each(['{', '["same","same"]', '["constructor"]', '[]', '"not-an-array"'])('recovers corrupt saved identities without losing other saved values: %s', saved => {
+    it.each(['{', '["3","3"]', '["constructor"]', '[]', '"not-an-array"'])('recovers corrupt saved identities without losing other saved values: %s', saved => {
         localStorage.setItem('viewIds', saved);
         localStorage.setItem('numberOfViews', '2');
         localStorage.setItem('cameraView', JSON.stringify([{ lon: 11, lat: 48, alt: 300 }, { lon: 12, lat: 49, alt: 400 }]));
@@ -435,19 +444,19 @@ describe('logical view identity', () => {
     });
 
     it.each(['{', '0', '100', '"bad"'])('recovers a corrupt saved count while retaining valid identities: %s', count => {
-        localStorage.setItem('viewIds', '["saved-first","saved-second"]');
+        localStorage.setItem('viewIds', '["5","6"]');
         localStorage.setItem('numberOfViews', count);
         const { registry, owners, messages, toasts } = setup();
         expect(() => registry.initializePersistence()).not.toThrow();
         expect(registry.ready.value).toBe(true);
-        expect(owners.viewSettings.viewIds).toEqual(['saved-first', 'saved-second']);
+        expect(owners.viewSettings.viewIds).toEqual(['5', '6']);
         expect(toasts.add).toHaveBeenCalled();
         registry.ngOnDestroy();
     });
 
     it('reports invalid startup identities and still completes startup with valid saved state', () => {
         localStorage.setItem('numberOfViews', '2');
-        const { registry, owners, messages, toasts } = setup({ n: '2', vid: 'duplicate,duplicate' });
+        const { registry, owners, messages, toasts } = setup({ n: '2', vid: '5,5' });
         registry.initializePersistence();
         expect(registry.ready.value).toBe(true);
         expect(new Set(owners.viewSettings.viewIds).size).toBe(2);

@@ -64,7 +64,7 @@ test("presentation scenes apply state and authored searches without reloading th
             }
         };
         snapshot["numberOfViews"] = 2;
-        snapshot["viewIds"] = ["presentation-first", "presentation-second"];
+        snapshot["viewIds"] = ["4", "7"];
         for (const name of [
             "cameraView", "layerSyncOptions", "background", "visibility", "tileBorders",
             "tileGridMode", "tileGridLevel", "tileGridAutoLevel", "tileGridColor",

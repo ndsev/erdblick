@@ -31,7 +31,7 @@
       "arguments": {
         "target": {
           "control": "view.layer",
-          "viewId": "view-0",
+          "viewId": "0",
           "mapId": "m",
           "layerId": "l"
         },
@@ -49,7 +49,7 @@
       "arguments": {
         "target": {
           "control": "view.layers",
-          "viewId": "view-0",
+          "viewId": "0",
           "mapId": "m",
           "layerId": "l"
         },
@@ -224,7 +224,7 @@
       "arguments": {
         "target": {
           "control": "view.projection",
-          "viewId": "view-0"
+          "viewId": "0"
         },
         "value": "2d"
       },
@@ -236,7 +236,7 @@
       "arguments": {
         "target": {
           "control": "view.projection",
-          "viewId": "view-0"
+          "viewId": "0"
         },
         "value": {
           "layerId": null,
@@ -287,7 +287,7 @@
       "arguments": {
         "target": {
           "control": "view.layerPreset",
-          "viewId": "view-0",
+          "viewId": "0",
           "mapId": "m",
           "layerId": "l"
         },
@@ -415,7 +415,7 @@
         "targets": [
           {
             "control": "view.camera",
-            "viewId": "view-1"
+            "viewId": "1"
           },
           {
             "control": "app.searches"
@@ -431,7 +431,7 @@
         "targets": [
           {
             "control": "view.layers",
-            "viewId": "view-0",
+            "viewId": "0",
             "mapId": "Île 6",
             "layerId": "Lane"
           }
@@ -520,7 +520,7 @@
       "arguments": {
         "target": {
           "control": "view.camera",
-          "viewId": "view-0"
+          "viewId": "0"
         },
         "value": {
           "destination": {
@@ -548,7 +548,7 @@
       "arguments": {
         "target": {
           "control": "view.camera",
-          "viewId": "view-0"
+          "viewId": "0"
         },
         "value": {
           "destination": {
@@ -571,7 +571,7 @@
       "arguments": {
         "target": {
           "control": "view.camera",
-          "viewId": "view-0"
+          "viewId": "0"
         },
         "value": {
           "destination": {
@@ -599,7 +599,7 @@
       "arguments": {
         "target": {
           "control": "view.camera",
-          "viewId": "view-0"
+          "viewId": "0"
         },
         "value": {
           "destination": {
@@ -623,7 +623,7 @@
       "arguments": {
         "target": {
           "control": "view.camera",
-          "viewId": "view-0"
+          "viewId": "0"
         },
         "value": {
           "destination": {
@@ -650,7 +650,7 @@
       "arguments": {
         "target": {
           "control": "view.camera",
-          "viewId": "view-0"
+          "viewId": "0"
         },
         "value": {
           "destination": {
@@ -679,7 +679,7 @@
       "arguments": {
         "target": {
           "control": "view.camera",
-          "viewId": "view-0"
+          "viewId": "0"
         },
         "value": {
           "destination": {
@@ -741,7 +741,7 @@
       "arguments": {
         "target": {
           "control": "view.camera",
-          "viewId": "view-0"
+          "viewId": "0"
         },
         "value": {
           "destination": {
@@ -1504,7 +1504,7 @@
         "status": "applied",
         "target": {
           "control": "view.projection",
-          "viewId": "view-0"
+          "viewId": "0"
         },
         "value": {
           "layerId": null,
@@ -1528,7 +1528,7 @@
               "control": "app.views"
             },
             "value": {
-              "focusedViewId": "view-0",
+              "focusedViewId": "0",
               "sync": [
                 "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
               ],
@@ -1552,7 +1552,7 @@
               "control": "app.views"
             },
             "value": {
-              "focusedViewId": "view-0",
+              "focusedViewId": "0",
               "sync": [
                 "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
               ],
@@ -1592,7 +1592,7 @@
           {
             "target": {
               "control": "view.camera",
-              "viewId": "view-0"
+              "viewId": "0"
             },
             "unavailable": "first_person"
           }
@@ -1642,7 +1642,7 @@
           {
             "target": {
               "control": "view.camera",
-              "viewId": "view-0"
+              "viewId": "0"
             },
             "value": []
           }
@@ -1659,7 +1659,7 @@
         "status": "applied",
         "target": {
           "control": "view.camera",
-          "viewId": "view-0"
+          "viewId": "0"
         },
         "value": {
           "destination": {
@@ -1687,7 +1687,7 @@
         "status": "applied",
         "target": {
           "control": "view.camera",
-          "viewId": "view-0"
+          "viewId": "0"
         },
         "value": {
           "destination": {
@@ -1719,7 +1719,7 @@
         "status": "applied",
         "target": {
           "control": "view.camera",
-          "viewId": "view-0"
+          "viewId": "0"
         },
         "value": {
           "destination": {

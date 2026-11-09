@@ -103,10 +103,10 @@ describe("viewer action shared contract fixtures", () => {
     it("does not accept a runtime value for the wrong channel", () => {
         expect(viewerActions.viewer_get_controls.outputSchema.safeParse({
             observedAt: "2026-09-29T00:00:00Z",
-            values: [{target: {control: "view.camera", viewId: "view-0"}, value: []}], complete: true, omissions: []
+            values: [{target: {control: "view.camera", viewId: "0"}, value: []}], complete: true, omissions: []
         }).success).toBe(false);
         const input = viewerActions.viewer_set_control.inputSchema;
-        const target = {control: "view.projection", viewId: "view-0"};
+        const target = {control: "view.projection", viewId: "0"};
         expect(input.safeParse({target, value: "2d"}).success).toBe(true);
         expect(input.safeParse({target, value: []}).success).toBe(false);
         expect(input.safeParse({target: {control: "view.projection", viewIndex: 0}, value: "2d"}).success).toBe(false);
@@ -122,7 +122,7 @@ describe("viewer action shared contract fixtures", () => {
         expect(catalog.actions.every(action => action.permission === (action.mutation ? "viewer-control" : "viewer-read"))).toBe(true);
         expect(catalog.channels.filter(channel => channel.writable).map(channel => channel.name))
             .toEqual(Object.entries(applicationControls).filter(([, channel]) => channel.writable).map(([name]) => name));
-        expect(catalog.actions).toHaveLength(32);
+        expect(catalog.actions).toHaveLength(33);
         expect(catalog.channels).toHaveLength(21);
         expect(catalog.actions.some(action => String(action.name) === "viewer_list_sessions")).toBe(false);
     });

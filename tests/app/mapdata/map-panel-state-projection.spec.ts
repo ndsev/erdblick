@@ -23,7 +23,7 @@ afterEach(() => cleanup.splice(0).reverse().forEach(destroy => destroy()));
 function fixture() {
     const persistence = testPersistence();
     const owners = stateOwners(persistence);
-    owners.viewSettings.importViews(["left"]);
+    owners.viewSettings.importViews(["0"]);
     owners.layerState.setMapLayerConfig("Map", "Roads", [{ visible: false, level: 8, autoLevel: false }]);
     owners.layerState.setStyleOptionValues("Map", "Roads", "roads", "details", [true]);
     const style = {
@@ -162,7 +162,7 @@ describe("map panel owner projections", () => {
             applySync(index);
         });
 
-        test.owners.viewSettings.importViews([right, "left"]);
+        test.owners.viewSettings.importViews([right, "0"]);
 
         expect(test.values()).toEqual([
             { visible: true, level: 12, autoLevel: true, details: false },

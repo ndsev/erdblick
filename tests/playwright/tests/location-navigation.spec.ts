@@ -143,8 +143,9 @@ test('uses centrepoints without boundaries and removes location results and hist
     await page.getByTestId('omnibar-action').filter({has: page.getByText('WGS84 Lon-Lat Coordinates', {exact: true})}).click();
     await expect.poll(async () => (await camera(page)).destination.lon).toBeCloseTo(20, 5);
     await openOmnibar(page, '');
-    await page.getByTestId('omnibar-history-action').filter({has: page.getByText('20 10', {exact: true})})
-        .getByRole('button').click();
+    await page.getByTestId('omnibar-history-action')
+        .and(page.locator('[data-action-id="j:wgs84-lon-lat"]'))
+        .getByRole('button', {name: 'Remove from history'}).click();
     const reopened = await openLocationPreferences(page);
     await reopened.getByLabel('Enable location search', {exact: true}).check();
     await reopened.getByRole('button', {name: /Close$/}).last().click();

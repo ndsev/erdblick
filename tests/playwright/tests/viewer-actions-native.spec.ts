@@ -14,7 +14,7 @@ import {
 test.use({ stateSnapshot: null });
 test.skip(process.env['EB_MAPGET_MCP_LOCAL'] !== '1', 'Requires the native local MCP fixture, not a mocked relay');
 
-const twoViews = '/?v2=1&n=2&vid=left,right&m=1&f=0&sync=&lon=10,20&lat=40,50&alt=500,1000&h=0,0&p=-1,-1&r=0,0&px=0,0&py=0,0&pz=0,0&m2d=0,0&bg=~10,~10&l=';
+const twoViews = '/?v2=1&n=2&vid=0,1&m=1&f=0&sync=&lon=10,20&lat=40,50&alt=500,1000&h=0,0&p=-1,-1&r=0,0&px=0,0&py=0,0&pz=0,0&m2d=0,0&bg=~10,~10&l=';
 
 /** Labels a real tab through the product UI, so discovery also proves WS registration/update. */
 async function openViewer(page: Page, label: string, sync = false, origin?: string) {
@@ -47,7 +47,7 @@ test('native MCP controls the selected live tab/view, retires stale UUIDs, and p
         const firstId = sessions.find(tab => tab.label === 'first-native-tab')!.clientId;
         const secondId = sessions.find(tab => tab.label === 'second-native-tab')!.clientId;
         expect(firstId).not.toEqual(secondId);
-        const targets = [{ control: 'view.camera', viewId: 'left' }, { control: 'view.camera', viewId: 'right' }];
+        const targets = [{ control: 'view.camera', viewId: '0' }, { control: 'view.camera', viewId: '1' }];
         async function read(clientId: string) {
             const result = await mcp.call('viewer_get_controls', { clientId, targets });
             expect(result.isError).not.toBe(true);
@@ -130,6 +130,38 @@ test('native MCP controls the selected live tab/view, retires stale UUIDs, and p
         await second.close();
     }
     await expect.poll(async () => (await mcp.sessions()).length).toBe(1);
+});
+
+test('a failed payload fetch reconnects MCP and resumes map delivery without reloading', async ({ page, request }) => {
+    const mcp = mcpClient(request);
+    await openViewer(page, 'payload-recovery');
+    const originalId = (await mcp.sessions()).find(tab => tab.label === 'payload-recovery')!.clientId;
+
+    // Use a real browser socket: permissive unit-test spies cannot reproduce
+    // WebSocket.close rejecting a reserved wire-protocol code such as 1011.
+    await page.route('**/interactive/payload?**', async route => {
+        // Lose the response after the backend has dequeued it. The replacement
+        // session must request the still-unreceived output again.
+        await route.fetch();
+        await route.abort('failed');
+    }, { times: 1 });
+    await enableMapLayer(page, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0]);
+    await expect.poll(async () => {
+        const sessions = await mcp.sessions();
+        const clientId = sessions.find(tab => tab.label === 'payload-recovery')?.clientId;
+        return clientId !== undefined && clientId !== originalId;
+    }).toBe(true);
+    if (!await page.getByTestId('viewer-action-details').isVisible()) {
+        await page.getByTestId('viewer-action-status').click();
+    }
+    await expect(page.getByTestId('viewer-action-details')).toContainText('MCP controls ready');
+    await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions))
+        .toBeGreaterThan(0);
+
+    const replacement = (await mcp.sessions()).find(tab => tab.label === 'payload-recovery')!;
+    expect(replacement.clientId).not.toBe(originalId);
+    expect((await mcp.call('viewer_get_controls', { clientId: replacement.clientId })).isError).not.toBe(true);
+    expect((await mcp.call('viewer_get_controls', { clientId: originalId })).isError).toBe(true);
 });
 
 test('native MCP reads and operates UI controls and resizes sidebar, dock and split views in place', async ({ page, request }) => {
@@ -242,10 +274,10 @@ test('native MCP starts, styles, exports and inspects a real search through the 
     const initial = viewerActions.viewer_get_controls.outputSchema.parse(await call('viewer_get_controls', {}));
     const layer = { mapId: TEST_MAP_NAMES[0], layerId: TEST_LAYER_NAMES[0] };
     await call('viewer_set_control', {
-        target: { control: 'view.layer', viewId: 'left', ...layer },
+        target: { control: 'view.layer', viewId: '0', ...layer },
         value: { visible: true, level: 13, autoLevel: false }
     });
-    expect(await call('viewer_list_layers', { viewId: 'left', ...layer })).toMatchObject({ items: [{ visible: true, available: true }] });
+    expect(await call('viewer_list_layers', { viewId: '0', ...layer })).toMatchObject({ items: [{ visible: true, available: true }] });
     await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions)).toBeGreaterThan(0);
     // Visibility must change rendered geometry, not only the persisted/catalog flag.
     const styleCatalog = viewerActions.viewer_list_styles.outputSchema.parse(await call('viewer_list_styles', { limit: 100 }));
@@ -267,7 +299,7 @@ rules:
     expect(invalidRegex.issues).toEqual(expect.arrayContaining([expect.objectContaining({ property: 'attribute-type' })]));
     const started = viewerActions.viewer_start_search.outputSchema.parse(await call('viewer_start_search', {
         // GridDataSource does not advertise zoomLevels; there is no automatic search-level choice.
-        query: 'true', scope: 'feature', mapLayers: [layer], viewIds: ['left'], tileLevels: [13], autoUpdate: false
+        query: 'true', scope: 'feature', mapLayers: [layer], viewIds: ['0'], tileLevels: [13], autoUpdate: false
     }));
     const searchId = started.searchId;
     let status = viewerActions.viewer_get_search.outputSchema.parse(await call('viewer_get_search', { searchId }));
@@ -361,7 +393,7 @@ rules:
     }));
     expect(relationInspection.features).toEqual([{ mapTileKey: feature.mapTileKey, featureId: `${feature.featureId}:relation#0` }]);
     await call('viewer_close_inspection', { panelId: relationInspection.panelIds[0] });
-    await call('viewer_navigate', { viewId: 'left', target: { features: [{ mapTileKey: feature.mapTileKey, featureId: feature.featureId }] } });
+    await call('viewer_navigate', { viewId: '0', target: { features: [{ mapTileKey: feature.mapTileKey, featureId: feature.featureId }] } });
     // Exercise the same persisted resize callbacks as floating and stacked inspection UI.
     const panelTarget = { control: 'inspection.panel', panelId };
     const panelState = viewerActions.viewer_get_controls.outputSchema.parse(await call('viewer_get_controls', { targets: [panelTarget] }));
