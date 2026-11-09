@@ -231,7 +231,7 @@ describe('JumpTargetService', () => {
         expect(service.validatePackedTileId('1 2')).toBe(false);
     });
 
-    it('builds inspect-tile source-data target label and validity based on map and layer presence', () => {
+    it('builds source-data bubbles and validates map and layer presence without error labels', () => {
         const { service, mapService } = createService();
 
         mapService.maps.maps.set('m1', {});
@@ -241,17 +241,21 @@ describe('JumpTargetService', () => {
 
         service.targetValueSubject.next('65536');
         let target = service.getInspectTileSourceDataTarget();
-        expect(target.label).toBe('packedTileId = 65536 | (mapId = ?) | (sourceLayerId = ?)');
+        expect(target.bubbles).toEqual([
+            {name: 'packedTileId', value: 65536},
+            {name: 'mapId', value: undefined, optional: true},
+            {name: 'sourceLayerId', value: undefined, optional: true}
+        ]);
         expect(target.validate('any')).toBe(true);
 
         service.targetValueSubject.next('65536 m1');
         target = service.getInspectTileSourceDataTarget();
-        expect(target.label).toBe('packedTileId = 65536 | mapId = m1 | (sourceLayerId = ?)');
+        expect(target.bubbles?.[1]).toEqual({name: 'mapId', value: 'm1', optional: true});
         expect(target.validate('any')).toBe(true);
 
         service.targetValueSubject.next('65536 m1 layerA');
         target = service.getInspectTileSourceDataTarget();
-        expect(target.label).toBe('packedTileId = 65536 | mapId = m1 | sourceLayerId = layerA');
+        expect(target.bubbles?.[2]).toEqual({name: 'sourceLayerId', value: 'layerA', optional: true});
         expect(target.validate('any')).toBe(true);
 
         service.targetValueSubject.next('abc');
@@ -260,13 +264,26 @@ describe('JumpTargetService', () => {
 
         service.targetValueSubject.next('65536 unknownMap');
         target = service.getInspectTileSourceDataTarget();
-        expect(target.label).toContain('Map ID not found');
+        expect(target.label).toBe('');
+        expect(target.bubbles?.[1].value).toBe('unknownMap');
         expect(target.validate('any')).toBe(false);
 
         service.targetValueSubject.next('65536 m1 unknownLayer');
         target = service.getInspectTileSourceDataTarget();
-        expect(target.label).toContain('SourceData layer ID not found');
+        expect(target.label).toBe('');
+        expect(target.bubbles?.[2].value).toBe('unknownLayer');
         expect(target.validate('any')).toBe(false);
+    });
+
+    it('preserves coordinate ordering and zeroes in the displayed bubbles', () => {
+        const {service} = createService();
+        const candidates = service.coordinateTargetsForValue('0,11');
+        expect(candidates.find(candidate => candidate.id === 'j:wgs84-lon-lat')?.bubbles).toEqual([
+            {name: 'lon', value: 0}, {name: 'lat', value: 11}, {name: 'level', value: undefined, optional: true}
+        ]);
+        expect(candidates.find(candidate => candidate.id === 'j:wgs84-lat-lon')?.bubbles).toEqual([
+            {name: 'lat', value: 0}, {name: 'lon', value: 11}, {name: 'level', value: undefined, optional: true}
+        ]);
     });
 
     it('executes inspect-tile source-data target and sets selection when map and layer exist', () => {

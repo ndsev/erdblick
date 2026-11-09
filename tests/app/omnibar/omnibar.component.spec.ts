@@ -64,11 +64,41 @@ function fixture() {
     const navigation = new LocationNavigationService(owners.locationSearch, views as never, state, {} as never, jumps,
         {} as never, owners.viewSettings, {} as never, {} as never, {} as never);
     const run = vi.spyOn(owners.searchService, 'run').mockReturnValue({ id: 'new-search' } as never);
+    vi.spyOn(owners.searchService as any, 'activeFeatureSearchLayers').mockReturnValue([]);
     actions.registerContributors([owners.searchService, jumps, external, navigation, owners.inspectionState]);
     return { state, owners, actions, jumps, external, navigation, parser, views, moved, menu, run };
 }
 
 describe('owner action candidates', () => {
+    it.each(['', '   '])('omits feature search for empty input %j', query => {
+        const h = fixture();
+        expect(h.actions.getCandidates(query).some(candidate => candidate.id === 'features')).toBe(false);
+    });
+
+    it.each(['(', '**.warningSign ==', 'Way.'])('explains an invalid feature search in a disabled bubble: %j', query => {
+        const h = fixture();
+        expect(h.actions.getCandidates(query)).toContainEqual(expect.objectContaining({
+            id: 'features', enabled: false, bubbles: [{value: expect.any(String), tone: 'error'}]
+        }));
+    });
+
+    it.each(['WARNING_SIGN', '**.warningSign == "ANIMALS"', 'true'])('offers parsable feature search %j', query => {
+        const h = fixture();
+        expect(h.actions.getCandidates(query)).toContainEqual(expect.objectContaining({
+            id: 'features', enabled: true, input: expect.objectContaining({query})
+        }));
+    });
+
+    it('carries feature ID bubbles without a second line of parse errors', () => {
+        const h = fixture();
+        h.parser.filterFeatureJumpTargets.mockReturnValue([{
+            id: 'Road.id:1', name: 'Road', idParts: [{key: 'id', value: '?'}], maps: ['Map'], error: 'Missing ID'
+        }] as never);
+        expect(h.actions.getCandidates('Road').find(candidate => candidate.id === 'fj:Road.id:1')).toMatchObject({
+            name: 'Jump to Road', label: '', bubbles: [{name: 'id', value: '?'}], enabled: false
+        });
+    });
+
     it('constructs the actual jump, context-menu and external-viewer owners together through Angular DI', () => {
         const state = testPersistence();
         const owners = new StateOwners(state);
@@ -125,7 +155,7 @@ describe('owner action candidates', () => {
 
     it.each(['reorder', 'remove-and-restore'] as const)('retains the async provider destination through %s', async change => {
         const h = fixture();
-        h.owners.viewSettings.importViews(['a', 'b']);
+        h.owners.viewSettings.importViews(['0', '1']);
         h.owners.viewSettings.focusedView = 1;
         let resolve!: (value: number[]) => void;
         const result = new Promise<number[]>(done => { resolve = done; });
@@ -137,14 +167,14 @@ describe('owner action candidates', () => {
         const execution = h.actions.execute(candidate.action, candidate.input);
         if (change === 'reorder') {
             h.owners.viewSettings.retainViews([1, 0], new Map());
-            h.owners.viewSettings.focusedView = 1; // Focus now points to a, while the intent still targets b.
+            h.owners.viewSettings.focusedView = 1; // Focus now points to ID 0, while the intent still targets ID 1.
             resolve([48, 11, 100]);
             await execution;
             expect(h.moved).toHaveBeenCalledExactlyOnceWith({ x: 11, y: 48, z: 100, targetView: 0 });
         } else {
             h.owners.viewSettings.retainViews([0], new Map());
             h.views.generation++; // The runtime owner retires the removed renderer's lifetime.
-            h.owners.viewSettings.importViews(['a', 'b']);
+            h.owners.viewSettings.importViews(['0', '1']);
             resolve([48, 11, 100]);
             await expect(execution).rejects.toThrow('no longer available');
             expect(h.moved).not.toHaveBeenCalled();
@@ -162,12 +192,12 @@ describe('owner action candidates', () => {
 
     it('captures the UI history scope before reorder and rejects a removed saved view', () => {
         const h = fixture();
-        h.owners.viewSettings.importViews(['a', 'b']);
+        h.owners.viewSettings.importViews(['0', '1']);
         const panel = Object.create(OmnibarComponent.prototype) as OmnibarComponent;
         panel.featureSearch = h.owners.searchService;
         const target = h.actions.getCandidates('true').find(candidate => candidate.id === 'features')!;
         const entry = panel['historyEntryForTarget']({ ...target, payload: { selectedViewIndices: [1] } }, 'true')!;
-        expect(entry.payload).toEqual({ selectedViewIds: ['b'] });
+        expect(entry.payload).toEqual({ selectedViewIds: ['1'] });
         h.owners.viewSettings.retainViews([1, 0], new Map());
         const replay = h.actions.getCandidates(entry.input, { id: entry.actionId, payload: entry.payload }).find(candidate => candidate.id === 'features')!;
         h.actions.execute(replay.action, replay.input);
@@ -178,9 +208,9 @@ describe('owner action candidates', () => {
 
     it('resolves explicit omnibar history against stable view identities after reorder', () => {
         const h = fixture();
-        h.owners.viewSettings.importViews(['first', 'second']);
+        h.owners.viewSettings.importViews(['0', '1']);
         const legacy = h.actions.getCandidates('true', { id: 'features', payload: { selectedViewIndices: [0] } }).find(candidate => candidate.id === 'features')!;
-        expect(legacy.payload).toEqual({ selectedViewIds: ['first'] });
+        expect(legacy.payload).toEqual({ selectedViewIds: ['0'] });
         h.owners.viewSettings.retainViews([1, 0], new Map());
         const replay = h.actions.getCandidates('true', { id: 'features', payload: legacy.payload }).find(candidate => candidate.id === 'features')!;
         h.actions.execute(replay.action, replay.input);

@@ -1,5 +1,6 @@
 import {
     AfterViewInit,
+    ChangeDetectorRef,
     Component,
     ElementRef,
     EventEmitter,
@@ -111,7 +112,8 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
 
     /** Wires the completion service and DOM renderer used by the inline editor. */
     constructor(private readonly searchService: SearchService,
-                private readonly renderer: Renderer2) {
+                private readonly renderer: Renderer2,
+                private readonly changeDetector: ChangeDetectorRef) {
         this.subscriptions.add(this.completionRequests.pipe(debounceTime(this.completionDelay)).subscribe(() => {
             this.completeCurrentQuery();
         }));
@@ -473,6 +475,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
             if (this.isCompletionDismissedFor(currentValue, this.cursorPosition())) {
                 this.completionItems = [];
                 this.completion.visible = false;
+                this.changeDetector.markForCheck();
                 return;
             }
             this.completionItems = value.filter(item => item.query !== currentValue && item.source === currentValue);
@@ -484,12 +487,16 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
             if (this.completion.visible) {
                 this.updateCursorPosition();
             }
+            // Worker replies can arrive without an Angular input event. The
+            // inline editor needs the same explicit refresh as the omnibar.
+            this.changeDetector.markForCheck();
         }));
         this.completionSubscriptions.add(state.pending.pipe(distinctUntilChanged()).subscribe(pending => {
             const currentValue = this.editorView?.state.doc.toString() ?? this.value ?? "";
             if (pending && this.isCompletionDismissedFor(currentValue, this.cursorPosition())) {
                 this.completion.pending = false;
                 this.completion.visible = false;
+                this.changeDetector.markForCheck();
                 return;
             }
             const focusValid = this.completion.visible || pending || !!this.editorView?.hasFocus;
@@ -499,6 +506,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
             } else if (this.completionItems.length === 0) {
                 this.completion.visible = false;
             }
+            this.changeDetector.markForCheck();
         }));
     }
 
