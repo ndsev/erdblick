@@ -1,12 +1,12 @@
 export type BudgetLoopScheduler = "frame" | "task";
 
 /**
- * Small consumer-owned budgeted work loop.
+ * Cooperative work queue owned and disposed by its consumer.
  *
  * Frame scheduling is the default for presentation work. Task scheduling is
  * available to transport consumers whose progress must not stop when rendering
- * misses animation frames. It deliberately has no global queue or Angular
- * lifetime.
+ * misses animation frames. Each callback receives a performance.now() deadline
+ * and must yield itself: this loop cannot interrupt a long-running callback.
  */
 export class FrameBudgetLoop<T> {
     private readonly queue: T[] = [];
@@ -14,12 +14,18 @@ export class FrameBudgetLoop<T> {
     private disposed = false;
     private paused = false;
 
+    /**
+     * work returns true when an item is complete, or false to retry it behind
+     * other queued items. frameBudgetMs is a per-slice budget in milliseconds;
+     * the default eight milliseconds leaves time for other browser work.
+     */
     constructor(
         private readonly work: (item: T, deadline: number) => boolean,
         private readonly frameBudgetMs = 8,
         private readonly scheduler: BudgetLoopScheduler = "frame"
     ) {}
 
+    /** Append work and arrange one wake-up; enqueueing after disposal is ignored. */
     enqueue(item: T): void {
         if (this.disposed) {
             return;
@@ -57,6 +63,7 @@ export class FrameBudgetLoop<T> {
         }
     }
 
+    /** Remove matching queued items without invoking their work callback. */
     cancel(predicate: (item: T) => boolean): void {
         for (let index = this.queue.length - 1; index >= 0; --index) {
             if (predicate(this.queue[index])) {
@@ -69,6 +76,7 @@ export class FrameBudgetLoop<T> {
         this.queue.length = 0;
     }
 
+    /** Permanently stop the loop, cancel its wake-up and discard pending work. */
     dispose(): void {
         if (this.disposed) {
             return;
@@ -80,6 +88,7 @@ export class FrameBudgetLoop<T> {
         }
     }
 
+    /** Keep at most one pending frame or task callback while runnable work exists. */
     private schedule(): void {
         if (this.scheduledWork !== null || !this.queue.length ||
             this.disposed || this.paused) {
@@ -94,6 +103,7 @@ export class FrameBudgetLoop<T> {
             : requestAnimationFrame(callback);
     }
 
+    /** Cancel using the scheduler that created the handle, then clear that handle. */
     private cancelScheduledWork(): void {
         if (this.scheduledWork === null) {
             return;
@@ -106,6 +116,10 @@ export class FrameBudgetLoop<T> {
         this.scheduledWork = null;
     }
 
+    /**
+     * Process items until the elapsed-time budget is exhausted, rotating partial
+     * items to the tail so later items can make progress in the same slice.
+     */
     private runSlice(): void {
         if (this.paused || this.disposed) {
             return;

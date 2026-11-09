@@ -468,6 +468,11 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     @ViewChild('geoJsonMenu') geoJsonMenu!: Menu;
     geoJsonMenuItems: MenuItem[] = [];
 
+    /**
+     * Bind column visibility, tree replacement and shared filtering to this panel.
+     * Preserve panel-local expansion state across data refreshes, while explicit
+     * expand-by-default changes reset temporary full-expand/full-collapse snapshots.
+     */
     constructor(private cdr: ChangeDetectorRef,
         private clipboardService: ClipboardService,
         public mapService: InspectionSelectionService,
@@ -1562,6 +1567,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.cdr.markForCheck();
         });
     }
+
     /** Returns whether a row's value column stores a FeatureId rather than a plain scalar. */
     protected isFeatureIdValueRow(rowData: any): boolean {
         return rowData?.["type"] === this.InspectionValueType.FEATUREID.value;

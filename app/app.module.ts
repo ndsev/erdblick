@@ -213,6 +213,7 @@ export const initializeServices = () => {
         await initializeLibrary();
         updateGlobalSpinner('Loading render worker');
         await subsetRenderService.preloadWorkerSource();
+        // Hydration needs the native codecs and must precede services that consume saved state.
         stateService.initializePersistence();
         coordinatesPolicy.initialize();
         locationPolicy.initialize();
@@ -227,6 +228,7 @@ export const initializeServices = () => {
         inspectionSelection.initialize();
         featureSearch.initialize();
         diagnostics.initialize();
+        // Expose automation only after its domain owners have initialized.
         presentationBridge.initialize();
         viewerActions.initialize();
         webMcp.initialize();

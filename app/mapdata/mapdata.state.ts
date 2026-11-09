@@ -65,6 +65,10 @@ export class MapDataState {
         ] as Array<PerViewState<unknown>>;
     }
 
+    /**
+     * Register per-view layer and style-option state with view membership changes,
+     * including positional rekeying when a legacy snapshot receives logical view IDs.
+     */
     constructor(
         private readonly persistence: AppStateService,
         private readonly viewSettings: MapViewState
@@ -215,6 +219,11 @@ export class MapDataState {
         );
     }
 
+    /**
+     * Keep layerNames and every per-view configuration array aligned on the same
+     * layer index. The public caller owns the transaction because a new name and
+     * its visibility/zoom values must be published together.
+     */
     private writeMapLayerConfig(
         mapId: string,
         layerId: string,

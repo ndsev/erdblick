@@ -85,7 +85,7 @@ export class DeckLayerRegistry {
         this.cancelFn = cancelFn;
     }
 
-    /** Swaps the target deck instance and schedules a full layer-array flush. */
+    /** Swaps the target and schedules a flush; existing layers are sent only if already dirty. */
     setDeck(deck: DeckLike | null): void {
         this.deck = deck;
         this.scheduleFlush();
@@ -99,7 +99,7 @@ export class DeckLayerRegistry {
 
     /**
      * Adds or updates one contributor of a shared keyed layer. The final deck layer is synthesized
-     * from all contributions during `flush()`.
+     * from all contributions during `flush()`, using the most recently supplied builder.
      */
     upsertShared(
         key: string,

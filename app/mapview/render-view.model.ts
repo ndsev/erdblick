@@ -45,6 +45,7 @@ export type RenderNavigationTargetOrigin =
 /** Physical surface used as a 3D navigation or first-person camera target. */
 export interface RenderNavigationTarget {
     position: [longitude: number, latitude: number, altitude: number];
+
     /** Application identities represented by the surface; empty for ground or identity-less geometry. */
     featureIds: TileFeatureId[];
     surfaceNormal?: [east: number, north: number, up: number];
@@ -55,6 +56,7 @@ export interface RenderNavigationTarget {
 export interface RenderedFeaturePickResult {
     /** Exact feature identities represented by the first resolved render object. */
     topFeatureIds: TileFeatureId[];
+
     /** Unique exact feature identities in renderer traversal order. */
     featureIds: TileFeatureId[];
 }
@@ -88,6 +90,7 @@ export interface IRenderView {
     readonly viewIndex: number;
     readonly hoveredFeatureIds: BehaviorSubject<TileFeatureId[]>;
     readonly firstPersonViewActive: BehaviorSubject<boolean>;
+
     /** Emits when this renderer generation can no longer be used safely. */
     readonly rendererInvalidated: Observable<void>;
 
@@ -95,6 +98,7 @@ export interface IRenderView {
     destroy(): Promise<void>;
     isAvailable(): boolean;
     requestRender(): void;
+
     /** Forces a frame and freezes its canvas before a non-preserved WebGL drawing buffer is cleared. */
     captureCanvas(scale: number): { canvas: HTMLCanvasElement; dataUrl: string };
     prepareForLayoutResize(targetCssSize: { width: number; height: number }): void;
@@ -116,8 +120,10 @@ export interface IRenderView {
     ): Promise<RenderedFeaturePickResult>;
     setViewFromState(cameraData: CameraViewState): void;
     getViewState(): CameraViewState;
+
     /** Reads the live renderer pose without persisting it; unavailable in first-person mode. */
     getLiveCameraState(): CameraViewState | undefined;
+
     /** Whether a human camera gesture currently owns this view. */
     isCameraInteractionActive(): boolean;
     prepareForViewRemoval(): RenderViewCameraState;

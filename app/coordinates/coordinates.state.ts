@@ -77,6 +77,10 @@ export class CoordinatesState {
         this.enabledCoordsTileIdsState.next(val);
     }
 
+    /**
+     * Expose the marker control shape, using null for an unplaced marker and zero
+     * altitude for legacy two-coordinate positions.
+     */
     get markerControlValue() {
         return {
             enabled: this.marker,

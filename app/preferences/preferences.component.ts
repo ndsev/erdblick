@@ -997,7 +997,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.styleService.clearStorageForImportedStyles();
     }
 
-    /** Restores built-in styles by dropping locally modified overrides. */
+    /** Starts reloads of modified built-in styles and clears their stored overrides without awaiting completion. */
     clearModifiedStyles() {
         for (let [styleId, style] of this.styleService.styles) {
             if (!style.imported && style.modified) {
@@ -1057,7 +1057,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         this.lod3TileThresholdChanged = false;
     }
 
-    /** Keep numeric drafts out of persisted state until the whole policy is applied. */
+    /** Reports whether the detached policy draft differs from its persisted value. */
     get pointCloudPolicyChanged(): boolean {
         return JSON.stringify(this.pointCloudPolicyDraft) !== JSON.stringify(this.mapService.state.pointCloudPolicy);
     }

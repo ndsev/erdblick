@@ -85,7 +85,7 @@ enum class GpuScreenLengthAnchor {
     Center,
 };
 
-/** Path-wide values copied into each independently drawable segment record. */
+/** Path-wide values expanded into segment records; spans are borrowed only during appendPath(). */
 struct GpuPathRecordData {
     std::span<mapget::Point const> points;
     std::span<float const> lateralOffsetsPx;
@@ -126,7 +126,7 @@ struct GpuIconRecordData {
     GpuRecordStyle style;
 };
 
-/** Final stream ranges belonging to one path and its optional arrowheads. */
+/** Stream ranges for one path/arrow pair, valid only in the producing builder until reset(). */
 struct GpuPathRecordHandle {
     uint32_t pathStreamIndex = 0xffffffffU;
     uint32_t firstPathRecord = 0U;
@@ -139,7 +139,9 @@ struct GpuPathRecordHandle {
 /**
  * Builds final fixed-stride primitive streams while preserving contribution
  * ownership. Geometry is expanded exactly once here; packet encoding only
- * concatenates these bytes and writes their descriptors.
+ * concatenates these bytes and writes their descriptors. Configure before rendering,
+ * append geometry/labels within non-nested contributions, then close them before
+ * building. Append failures can leave partial state; reset before reusing a failed build.
  */
 class GpuRenderPacketBuilder
 {
@@ -156,7 +158,7 @@ public:
     /** Clear one completed or failed packet while retaining stream allocations. */
     void reset();
 
-    /** Replace packet sequencing and deterministic origin metadata. */
+    /** Sets sequencing/origin metadata before any contribution or primitive records exist. */
     void configure(
         uint32_t sceneGeneration,
         uint32_t packetSequence,
@@ -180,18 +182,24 @@ public:
         bool depthTest,
         bool ring = false);
 
-    /** Expand one directed polyline into final adjacency segment and arrow records. */
+    /**
+     * Expands a polyline; fewer than two points or nonpositive width emits nothing.
+     * Screen-length anchors require two points; overlays require a narrower compact stroke.
+     */
     [[nodiscard]] GpuPathRecordHandle appendPath(
         GpuPathRecordData const& path,
         bool billboard,
         bool depthTest);
 
-    /** Patch one transition group's final contraction threshold in-place. */
+    /** Patches a live full-layout path/arrow handle; clamps negative thresholds to zero and rejects compact paths. */
     void updateAdaptiveOffsetThreshold(
         GpuPathRecordHandle const& handle,
         float threshold);
 
-    /** Triangulate one polygon and optionally add a raised roof plus ring walls. */
+    /**
+     * Triangulates outer/hole rings and optionally raises a roof with walls. Invalid
+     * or non-increasing ring starts are ignored; a degenerate outer ring emits nothing.
+     */
     void appendSurface(
         std::span<mapget::Point const> points,
         std::span<uint32_t const> ringStarts,
@@ -200,7 +208,7 @@ public:
         double polygonHeight = 0.0,
         bool surfaceShading = false);
 
-    /** Append triangle-list surface geometry and optionally extrude its boundary. */
+    /** Appends complete triangles (trailing vertices are ignored); positive height extrudes exact-coordinate boundary edges. */
     void appendTriangleMesh(
         std::span<mapget::Point const> points,
         GpuRecordStyle const& style,
@@ -214,7 +222,7 @@ public:
         bool billboard,
         bool depthTest);
 
-    /** Add semantic picking metadata after local indices have been assigned. */
+    /** Appends picks in contribution/local-index order after geometry; complete builds require dense local indices from zero. */
     void appendPick(GpuPickRecord pick);
 
     /** Add one logical label owned by its current contribution. */
@@ -223,13 +231,13 @@ public:
     /** Add a deduplicated missing browser-resource request. */
     void appendResourceRequest(GpuResourceRequest request);
 
-    /** Add one style evaluation issue without touching primitive streams. */
+    /** Appends an issue for an existing contribution; keep issues grouped by increasing owner for fragmentation. */
     void appendRuntimeIssue(GpuRuntimeIssue issue);
 
-    /** Encode and validate the complete transferable packet. */
+    /** Encodes a closed packet after logical ownership checks; throws on invalid metadata or size overflow. */
     [[nodiscard]] std::vector<std::byte> build() const;
 
-    /** Split an oversized revision into individually bounded packet fragments. */
+    /** Splits a closed revision into bounded fragments; throws if an individual record or z-index table cannot fit. */
     [[nodiscard]] std::vector<std::vector<std::byte>> buildFragments() const;
 
     /** Number of contribution descriptors currently present in the packet. */

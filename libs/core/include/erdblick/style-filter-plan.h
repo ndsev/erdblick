@@ -23,8 +23,10 @@ struct StyleFilterPlanIssue
 /**
  * Generic mapget filter channels derived from one stylesheet presentation.
  *
- * Channel order follows active top-level stylesheet order. A failed plan is
- * intentionally not executable even when some earlier channels were valid.
+ * Channels retain first-seen top-level rule order; compatible feature rules may
+ * share one channel. Check valid before submitting: a failed plan may still
+ * contain channels built before the failure, but executing those would render
+ * only part of the authored style.
  */
 struct StyleFilterPlan
 {
@@ -36,8 +38,9 @@ struct StyleFilterPlan
 };
 
 /**
- * Plan one concrete map/layer presentation without sending style semantics to
- * mapget.
+ * Select active rules for this layer, highlight mode and LOD, then request the
+ * feature/entry projections needed by the renderer. Invalid rule combinations
+ * are collected as issues; callers must reject the entire plan when valid is false.
  */
 StyleFilterPlan planStyleFilter(
     FeatureLayerStyle const& style,
@@ -46,8 +49,8 @@ StyleFilterPlan planStyleFilter(
     uint8_t lod);
 
 /**
- * Expand Erdblick-only expression conveniences to their generic server form.
- *
+ * Replace the reserved $mergeCount spelling at identifier boundaries with
+ * count($features.*) for server group evaluation. This is a textual rewrite.
  * The renderer applies the same mapping when binding an authored expression
  * back to a projected channel slot.
  */

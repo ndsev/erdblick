@@ -66,6 +66,10 @@ double lineLength(std::vector<mapget::Point> const& points)
     return result;
 }
 
+/**
+ * Trim a metric planar polyline from its end, interpolating the remaining endpoint.
+ * If the requested distance consumes the line, retain only its first point.
+ */
 std::vector<mapget::Point> trimLineEnd(
     std::vector<mapget::Point> const& points,
     double trimMeters)
@@ -94,6 +98,10 @@ std::vector<mapget::Point> trimLineEnd(
     return {points.front()};
 }
 
+/**
+ * Trim a metric planar polyline from its start while preserving later vertices.
+ * If the requested distance consumes the line, retain only its last point.
+ */
 std::vector<mapget::Point> trimLineStart(
     std::vector<mapget::Point> const& points,
     double trimMeters)
@@ -125,6 +133,10 @@ std::vector<mapget::Point> trimLineStart(
     return {points.back()};
 }
 
+/**
+ * Find the first non-degenerate XY segment from the requested end and return
+ * its unit direction for constructing a smooth connection.
+ */
 std::optional<std::array<double, 2>> terminalDirection(
     std::vector<mapget::Point> const& points,
     bool atEnd)
@@ -155,6 +167,7 @@ std::optional<std::array<double, 2>> terminalDirection(
     return std::nullopt;
 }
 
+/** Evaluate a cubic Bezier connection in the current geometry coordinate space. */
 mapget::Point cubicPoint(
     mapget::Point const& p0,
     mapget::Point const& p1,
@@ -174,6 +187,11 @@ mapget::Point cubicPoint(
     };
 }
 
+/**
+ * Find the smallest pixel-to-world scale at which lateral offset changes would
+ * consume too much forward motion along a sampled transition. Zero means no
+ * finite contraction threshold was found.
+ */
 double transitionOffsetScaleThreshold(
     std::span<mapget::Point const> points,
     std::span<glm::fvec2 const> offsetVectorsPx)
@@ -210,6 +228,10 @@ bool hasLocalOffset(glm::dvec3 const& offset)
     return offset.x != 0.0 || offset.y != 0.0 || offset.z != 0.0;
 }
 
+/**
+ * Decode source rule indices from a planner channel ID suffix such as :2,5.
+ * Malformed or partially parsed indices reject the whole list.
+ */
 std::vector<uint32_t> channelRuleIndices(std::string_view channelId)
 {
     auto const separator = channelId.rfind(':');
@@ -318,6 +340,10 @@ double mercatorWorldX(double longitudeDeg)
         (2.0 * kPi);
 }
 
+/**
+ * Project latitude into Deck's 512-unit Mercator world, clamping near the poles
+ * to avoid the projection singularity.
+ */
 double mercatorWorldY(double latitudeDeg)
 {
     auto const latitudeRad = glm::clamp(
@@ -329,6 +355,10 @@ double mercatorWorldY(double latitudeDeg)
     return (kMercatorTileSize * (kPi + mercatorTerm)) / (2.0 * kPi);
 }
 
+/**
+ * Compute local Mercator scaling for offset geometry. False means the caller
+ * must use its fallback projection because the scale is not finite or usable.
+ */
 bool distanceScalesAt(
     double latitudeDeg,
     double& latitudeCosine,
@@ -759,6 +789,9 @@ void TileSubsetLayerRenderer::run()
             .latitude = coordinateOriginWgs_.y,
             .altitude = coordinateOriginWgs_.z,
         });
+
+    // Size picking storage before emission; all scope-specific rows share one
+    // contribution-local pick index space.
     size_t terminalEntryCount = 0;
     subset_->forEachChannel(
         [&](mapget::model_ptr<mapget::TileSubsetChannel> const& channel) {
@@ -853,6 +886,9 @@ void TileSubsetLayerRenderer::run()
                 return true;
             });
     gpuPacketBuilder_.endContribution();
+
+    // Geometry emission discovers pick identities and issues. Append those
+    // tables after the contribution's physical streams have been finalized.
     for (uint32_t index = 0U; index < pickRefs_.size(); ++index) {
         auto const& pick = pickRefs_[index];
         gpuPacketBuilder_.appendPick({

@@ -27,7 +27,11 @@ export function locationExtent(value: unknown): RenderRectangle | undefined {
     return {west: origin[0], south: origin[1], east: origin[0] + width, north: origin[1] + height};
 }
 
-/** Validates a complete boundary once; malformed holes/components reject the whole geometry. */
+/**
+ * Check coordinates, ring closure, nonzero planar area and the vertex budget.
+ * A rejected ring rejects the whole geometry; ring intersections and hole
+ * containment are outside this structural validation.
+ */
 export function locationPolygons(value: unknown): LocationPolygon[] | undefined {
     if (!value || typeof value !== "object") return undefined;
     const geometry = value as {type?: unknown; coordinates?: unknown};
@@ -63,7 +67,10 @@ export function locationPolygons(value: unknown): LocationPolygon[] | undefined 
     return polygons;
 }
 
-/** Contains every component; metadata may disambiguate a short dateline-crossing envelope. */
+/**
+ * Enclose all components, using metadata to disambiguate a short dateline crossing.
+ * Supply nonempty validated polygons or a valid metadata extent.
+ */
 export function locationGeometryExtent(polygons: LocationPolygon[], metadata?: RenderRectangle): RenderRectangle {
     let west = metadata?.west ?? Infinity, east = metadata?.east ?? -Infinity;
     let south = metadata?.south ?? Infinity, north = metadata?.north ?? -Infinity;
@@ -73,14 +80,19 @@ export function locationGeometryExtent(polygons: LocationPolygon[], metadata?: R
         for (let index = 0; index < ring.length; index++) {
             const [rawLon, lat] = ring[index];
             const lon = metadata ? rawLon + 360 * Math.round((center - rawLon) / 360) : rawLon;
-            west = Math.min(west, lon); east = Math.max(east, lon);
-            south = Math.min(south, lat); north = Math.max(north, lat);
+            west = Math.min(west, lon);
+            east = Math.max(east, lon);
+            south = Math.min(south, lat);
+            north = Math.max(north, lat);
             if (index && Math.abs(rawLon - ring[index - 1][0]) > 180 && (!metadata || metadata.east <= 180)) {
                 // Without an explicitly wrapped box, preserve full-world edges and polar interiors.
                 fullWorld = true;
             }
         }
     }
-    if (fullWorld || east - west > 360) { west = -180; east = 180; }
+    if (fullWorld || east - west > 360) {
+        west = -180;
+        east = 180;
+    }
     return {west, south, east, north};
 }

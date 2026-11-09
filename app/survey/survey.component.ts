@@ -178,7 +178,7 @@ export class SurveyComponent implements OnInit, OnDestroy {
         this.surveyEnabled = true;
     }
 
-    /** Parses a survey date in local time, optionally expanding it to the end of that day. */
+    /** Parses local calendar parts, with optional end-of-day time; Date normalizes overflowing days. */
     private parseSurveyDate(dateString: string, endOfDay: boolean): Date | null {
         const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateString);
         if (!match) {

@@ -193,7 +193,7 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
         }
     }
 
-    /** Returns the cached tile-size distribution payload when it has the expected shape. */
+    /** Accept an object-valued distribution payload without validating its nested fields. */
     private getTileSizeDistribution(value: unknown): TileSizeDistribution | undefined {
         if (!value || typeof value !== 'object') {
             return undefined;
@@ -214,7 +214,8 @@ export class DiagnosticsFacadeService extends DiagnosticsDatasource implements O
     override ngOnDestroy(): void {
         super.ngOnDestroy();
     }
-    /** Registers semantic operations and their live omnibar candidates. */
+
+    /** Register the bounded browser-diagnostics read action. */
     registerActions(actions: AppActionRegistration): void {
         const text = boundedUnicodeString(4096);
 

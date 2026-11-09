@@ -51,6 +51,7 @@ export const viewerActionClientMessageSchema = z.union([
 ]);
 
 export type ViewerActionError = z.infer<typeof viewerActionErrorSchema>;
+
 /** Typed application failure shared by domain and UI action owners. */
 export class ViewerActionFailure extends Error {
     constructor(readonly detail: ViewerActionError) {

@@ -40,6 +40,7 @@ export class LegalInfoDialogComponent {
     readonly dialogLayoutId = LEGAL_INFO_DIALOG_LAYOUT_ID;
     public aggregatedLegalInfo: { mapName: string, entry: string }[] = [];
 
+    /** Rebuild map-grouped notices from the currently accumulated tile legal information. */
     constructor(private mapService: MapDataService,
         public stateService: AppStateService,
         public readonly layout: LayoutService) {

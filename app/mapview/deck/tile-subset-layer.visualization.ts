@@ -74,6 +74,7 @@ interface GpuPickSubset {
 
 const FLAT_2D_MODEL_MATRIX = new Matrix4().scale([1, 1, 0]);
 const UNSELECTABLE = 0xffffffff;
+
 /**
  * One logical Deck visualization for one independently owned TileSubsetLayer.
  *

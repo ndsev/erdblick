@@ -24,8 +24,9 @@ interface DiagnosticsProvider {
 /**
  * Read-through registry for current view presentation diagnostics.
  *
- * It owns neither subsets nor historical samples. Every read is rebuilt from
- * the StyledMapgetLayers currently owned or consumed by live view controllers.
+ * It owns neither subsets nor historical samples. Reads reuse cached snapshots
+ * until a provider change or notification invalidates them. Callers must treat
+ * returned objects as read-only; the service does not clone them per read.
  */
 @Injectable({providedIn: "root"})
 export class ViewLayerDiagnosticsService {
@@ -167,6 +168,11 @@ export class ViewLayerDiagnosticsService {
         return result;
     }
 
+    /**
+     * Return the cached diagnostics snapshot, one row per view/owner/tile. Source
+     * conversion metrics count once across regular presentations, while request
+     * counters count once per filter generation to avoid inflating aggregate totals.
+     */
     currentTiles(): SubsetDiagnosticsTile[] {
         if (this.cachedTiles) {
             return this.cachedTiles;
@@ -238,6 +244,8 @@ export class ViewLayerDiagnosticsService {
                             }
                         }
                     }
+
+                    // Request counters describe a whole filter generation, not each tile.
                     const status = layer.latestStatus;
                     if (status) {
                         const requestKey = `${status.filterId}|${status.generation}`;
@@ -288,6 +296,10 @@ export class ViewLayerDiagnosticsService {
         return result;
     }
 
+    /**
+     * A ready backend value counts as presentation-ready immediately if it has no
+     * render demand; otherwise wait until that exact value version was rendered.
+     */
     private presentationReady(
         provider: DiagnosticsProvider,
         layer: StyledMapgetLayer,
@@ -303,6 +315,7 @@ export class ViewLayerDiagnosticsService {
         this.cachedSummary = null;
     }
 
+    /** Normalize scalar/array metrics and discard non-finite or non-numeric entries. */
     private numericValues(value: unknown): number[] {
         if (typeof value === "number" && Number.isFinite(value)) {
             return [value];

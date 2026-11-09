@@ -1,9 +1,4 @@
 /**
- * Omnibar history values and compatibility schemas for saved entries.
- * Normalization preserves earlier local history while action registration and
- * execution remain independent of persistence representation.
- */
-/**
  * Saved command identities and their replay payloads. History accepts deployed
  * tuple formats as well as versioned records; resolving an identity to a live
  * action remains the omnibar component's responsibility.
@@ -88,7 +83,7 @@ export function normalizeOmnibarHistoryEntry(raw: unknown): OmnibarHistoryStateE
     };
 }
 
-/** Returns a small JSON-serializable payload value, or undefined when it is unsafe to persist. */
+/** JSON-roundtrips payloads up to 8192 serialized UTF-16 code units; rejects failed or larger encodings. */
 export function normalizeOmnibarHistoryPayload(payload: unknown): unknown {
     if (payload === undefined) {
         return undefined;
@@ -113,7 +108,7 @@ export function normalizeResolvedOmnibarHistoryEntry(raw: unknown): OmnibarHisto
     return normalized;
 }
 
-/** Builds the dedupe key for an omnibar history entry. */
+/** Builds the command/input dedupe key; payload and timestamp do not distinguish entries. */
 export function historyEntryDedupeKey(entry: OmnibarHistoryEntry): string {
     return `${entry.actionId}\u0000${entry.input}`;
 }
@@ -123,7 +118,7 @@ export function historyEntryKey(entry: OmnibarHistoryEntry): string {
     return `${historyEntryDedupeKey(entry)}\u0000${entry.savedAt ?? ""}`;
 }
 
-/** Attaches an action name to an omnibar history entry. */
+/** Copies the entry with a nonempty action name; a missing name preserves its current value. */
 export function withOmnibarHistoryActionName(
     entry: OmnibarHistoryEntry,
     actionName: string | undefined

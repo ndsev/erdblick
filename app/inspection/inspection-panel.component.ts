@@ -175,6 +175,10 @@ export class InspectionPanelComponent {
     isMetadata: boolean = false;
     protected readonly measurePreferredPanelHeightEm = () => this.getPanelContentAdapter()?.measurePreferredHeightEm();
 
+    /**
+     * Derive the panel title and source-layer menu from its current selection.
+     * Changing a source layer retains the partition and clears the previous address.
+     */
     constructor(private mapService: MapDataService,
         private inspectionSelection: InspectionSelectionService,
         public stateService: AppStateService,

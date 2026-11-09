@@ -393,7 +393,7 @@ export class InspectionPanelDialogComponent implements OnDestroy {
         this.comparePopover.hide();
     }
 
-    /** Restores persisted layout state and wires dock-drag cues when the dialog opens. */
+    /** Restores persisted size, focuses the dialog, and schedules a feature-tree refresh. */
     protected onDialogShow() {
         this.focusPanel();
         this.dialogStack.bringToFront(this.dialog);

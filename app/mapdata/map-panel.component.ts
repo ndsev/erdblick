@@ -716,7 +716,7 @@ export class MapPanelComponent {
         this.keyboardService.registerShortcut('m', this.toggleLayerDialog.bind(this), true);
 
         this.subscriptions.push(
-            // Rebuild metadata menus recursively and prune when needed.
+            // Replace metadata menus from the current catalog so removed maps disappear.
             this.mapService.maps$.subscribe(mapTree => {
                 this.metadataLayerOptions.clear();
                 for (const [_, mapItem] of mapTree.maps) {
@@ -834,7 +834,7 @@ export class MapPanelComponent {
         this.dialogStack.bringToFront(this.mapLayerDialog);
     }
 
-    /** Applies one presentation filter to the map trees rendered for every view. */
+    /** Queues a trimmed filter for all views; nonempty input is delayed, while clearing applies immediately. */
     updateMapFilter(filterText: string) {
         this.mapFilterText = filterText;
         this.mapFilterTextChanges.next(filterText);
@@ -1019,7 +1019,7 @@ export class MapPanelComponent {
         this.setMapsPanelVisible(!this.layerDialogVisible);
     }
 
-    /** Moves the target view camera to the coverage bounds represented by one tree node. */
+    /** Fits nonempty tile coverage using individual tile boxes and each range's two endpoint boxes. */
     focus(event: any, viewIndex: number, coverages: (number | CoverageRectItem)[]) {
         event.stopPropagation();
         let tileIds = coverages.map(coverage => {
@@ -1405,7 +1405,7 @@ export class MapPanelComponent {
         this.stylePresetProjectionChanges.next(this.stylePresetProjectionChanges.getValue() + 1);
     }
 
-    /** Returns the distinct style sheets owned by the selected preset for editor shortcuts. */
+    /** Returns the selected preset's single stylesheet, or an empty list when no preset resolves. */
     selectedPresetStyleIds(node: LayerPresetNode, viewIndex: number): string[] {
         const preset = node.presets.find(candidate => candidate.key === node.selectedPresetKeys[viewIndex]);
         return preset ? [preset.styleId] : [];

@@ -164,6 +164,10 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
     protected readonly copyright$: Observable<string>;
     protected readonly legalInfoDialogId = LEGAL_INFO_DIALOG_LAYOUT_ID;
 
+    /**
+     * Bind dock visibility and search drag/reorder behavior to layout state,
+     * coordinating renderer resize pauses around changes to available map width.
+     */
     constructor(public stateService: AppStateService,
         public coordinatesPolicy: CoordinatesPolicyService,
         private renderer: Renderer2,
@@ -320,6 +324,10 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
         this.searchDockDrag.start(payload.session.id, payload.event);
     }
 
+    /**
+     * Position the floating search panel at the original grab offset before changing
+     * its dock state, so the newly mounted dialog opens under the same pointer.
+     */
     private undockSearchAt(searchId: string, event: PointerEvent, offset: DockedPanelDragOffset): void {
         const session = this.featureSearchService.getSession(searchId);
         if (!session) {
@@ -425,6 +433,7 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
         }
     }
 
+    /** List tabs that currently have docked content, preserving inspection-before-search order. */
     private visibleDockTabs(): string[] {
         const tabs: string[] = [];
         if (this.dockedInspectionCount() > 0) {

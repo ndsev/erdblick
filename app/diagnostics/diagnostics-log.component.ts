@@ -140,6 +140,7 @@ export class DiagnosticsLogDialogComponent implements OnDestroy {
 
     private readonly subscriptions: Subscription[] = [];
 
+    /** Project persisted log-filter changes into the dialog's editable copy. */
     constructor(public readonly diagnostics: DiagnosticsFacadeService,
         public readonly stateService: AppStateService,
         private readonly dialogStack: DialogStackService,

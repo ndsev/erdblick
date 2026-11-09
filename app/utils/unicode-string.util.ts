@@ -1,6 +1,6 @@
 import {z} from "zod";
 
-/** Takes a bounded Unicode-code-point prefix without splitting surrogate pairs or copying the whole string. */
+/** Take a code-point prefix; maxLength must be a nonnegative integer. Preserve surrogate pairs. */
 export function unicodePrefix(value: string, maxLength: number): string {
     let end = 0;
     let count = 0;

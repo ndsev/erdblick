@@ -34,7 +34,7 @@ export function packedTileIdFromWgs84(lon: number, lat: number, level: number): 
     return packedTileIdFromNdsCoordinates(x, y, level);
 }
 
-/** Parses a signed NDS.Live packed tile id and rejects malformed or out-of-range input. */
+/** Accept signed/unsigned 32-bit decimal tile IDs; invalid library IDs return undefined. */
 export function parsePackedTileId(value: string): PackedTileId | undefined {
     const trimmed = value.trim();
     if (!/^-?\d+$/.test(trimmed)) {

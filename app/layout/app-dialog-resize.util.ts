@@ -45,7 +45,7 @@ function clamp(value: number, minimum: number, maximum: number): number {
 
 /**
  * Resizes one horizontal or vertical interval while keeping the opposite edge fixed.
- * The effective minimum is reduced only when the available viewport itself is smaller.
+ * Reduce the minimum when the span between the fixed edge and viewport is smaller.
  */
 function resizeAxis(
     startLow: number,
@@ -75,7 +75,10 @@ function resizeAxis(
     return [fixedEdge, clamp(startHigh + delta, minimumHigh, maximumHigh)];
 }
 
-/** Calculates the viewport-clamped rectangle for one AppDialog corner-resize gesture. */
+/**
+ * Clamp the moved edges for one corner-resize gesture. Starting fixed edges must
+ * already lie inside the viewport; they are preserved throughout the gesture.
+ */
 export function resizeAppDialogBounds(
     start: AppDialogBounds,
     deltaX: number,

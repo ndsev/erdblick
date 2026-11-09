@@ -41,6 +41,8 @@ export interface DeckTileGltfAsset {
 /** Independently releasable demand for one shared CPU-side GLTF asset. */
 export interface DeckTileGltfAssetRef {
     readonly source: DeckTileGltfAttachmentSource;
+
+    /** Shared load result; check released before attaching an asynchronously resolved asset. */
     readonly ready: Promise<DeckTileGltfAsset | null>;
     readonly released: boolean;
     release(): void;
@@ -88,6 +90,7 @@ async function loadDeckTileGltfAsset(
     };
 }
 
+/** Make each presentation release its share at most once. */
 class DeckTileGltfAssetRefImpl implements DeckTileGltfAssetRef {
     private isReleased = false;
 
@@ -124,6 +127,11 @@ export class DeckTileGltfAssetStore {
             loadDeckTileGltfAsset
     ) {}
 
+    /**
+     * Share parsing by cacheKey until the last reference is released. The ready
+     * promise returns null for missing bytes and propagates loader failures. A
+     * released reference may still resolve, so its consumer must check released.
+     */
     retain(source: DeckTileGltfAttachmentSource): DeckTileGltfAssetRef {
         let entry = this.entries.get(source.cacheKey);
         if (!entry) {
@@ -136,6 +144,7 @@ export class DeckTileGltfAssetStore {
             const retainedEntry = entry;
             entry.promise = this.loadAsset(source).then(asset => {
                 retainedEntry.asset = asset;
+                // All presentations may have disappeared while the attachment loaded.
                 if (retainedEntry.refCount === 0) {
                     asset?.destroy();
                 }
@@ -153,6 +162,10 @@ export class DeckTileGltfAssetStore {
         );
     }
 
+    /**
+     * Evict the final reference immediately. If parsing is still pending, its
+     * continuation destroys the asset when it arrives; it does not cancel the load.
+     */
     private release(entry: DeckTileGltfAssetCacheEntry): void {
         entry.refCount -= 1;
         if (entry.refCount > 0) {

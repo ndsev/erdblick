@@ -87,6 +87,7 @@ export class MapDataService implements AppActionContributor {
     public readonly legalInformationUpdated = new Subject<boolean>();
     public readonly layerStateChanged = new Subject<string>();
     public readonly styleOptionsChanged = new Subject<StyleOptionChange[]>();
+
     /**
      * Fences old transport/work before retiring these maps' native metadata.
      * Unlisted maps keep their dictionaries, layers and retained presentations.
@@ -96,43 +97,62 @@ export class MapDataService implements AppActionContributor {
 
     /** Shared parser instance whose datasource metadata is populated from `/sources`. */
     private parserInstance: TileLayerParser | null = null;
+
     /** Raw datasource metadata retained for diagnostics/debug export. */
     private dataSourceInfoJson: string | null = null;
+
     /** UTF-8 form of ready datasource metadata shared with render workers. */
     private dataSourceInfoBlobValue: Uint8Array | null = null;
+
     /** Installed ready metadata keyed by JSON content, excluding catalog progress/status decoration. */
     private readySourceMetadata = new Map<string, MapInfoItem>();
+
     /** Server-ready metadata awaiting or retaining its local schema installation. */
     private catalogMetadata = new Map<string, MapInfoItem>();
+
     /** Coalesces binary downloads before allocating another copy of the same schema. */
     private readonly schemaRequests = new Map<string, {
         sourceId: string;
         promise: Promise<MapSchemaArtifact>;
     }>();
     private readonly schemaArtifacts = new Map<string, MapSchemaArtifact>();
+
     /** Limit simultaneous downloads/decodes without making readiness an all-source barrier. */
     private activeSchemaDownloads = 0;
     private readonly waitingSchemaDownloads: Array<() => void> = [];
+
     /** One initialization per exact source snapshot; late completions cannot publish a replacement. */
     private readonly sourceHydrations = new Map<string, Promise<void>>();
     private catalogLoadSerial = 0;
     private catalogChangeSerial = 0;
+
     /** Per-map model generations exclude progress updates and other maps becoming ready. */
     private readonly mapMetadataGenerations = new Map<string, number>();
     private nextMetadataGeneration = 0;
+
     /** Map-local parser metadata used only by subset render workers. */
     private readonly renderDataSourceInfoBlobCache = new Map<string, Uint8Array>();
+
     /** Complete dictionary snapshots reused until the stream appends new fields. */
     private readonly fieldDictBlobCache = new Map<string, Uint8Array>();
+
     /** Latest datasource-catalog revision advertised by `/sources`, if the backend supports it. */
     private sourceCatalogRevisionValue: number | null = null;
+
     /** True while at least one catalog entry is not ready; used to avoid pruning recoverable state. */
     private catalogHasNonReadyEntries = false;
+
     /** Last catalog snapshot, including initializing/failed entries that are not passed to the parser. */
     private sourceCatalogEntries: MapInfoItem[] = [];
+
     /** Immutable feature-layer identities rebuilt from the current source catalog. */
     private mapgetLayersByKey = new Map<string, MapgetLayer>();
 
+    /**
+     * Create an empty catalog tree before asynchronous initialization. Reapply its
+     * view/style projection after imported state is published and defer pruning
+     * until both state and a usable catalog are available.
+     */
     constructor(
         private readonly httpClient: HttpClient,
         private readonly stateService: AppStateService,
@@ -1177,6 +1197,7 @@ export class MapDataService implements AppActionContributor {
         }
         return isMetadata ? match[2] : `${match[1]}`.replace('-', '.');
     }
+
     /** Registers semantic operations and their live omnibar candidates. */
     registerActions(actions: AppActionRegistration): void {
         actions.registerAction(
@@ -1458,6 +1479,11 @@ export class MapDataService implements AppActionContributor {
         return { ...config };
     }
 
+    /**
+     * Collect current layer settings within the action reader's limits. Without a
+     * map selector, include visible layers only; explicit selectors can inspect hidden
+     * layers. The returned collection reports truncation through context.collect().
+     */
     layerSummary(target: { viewId: string; mapId?: string; layerId?: string }, context: ControlReadContext) {
         const index = this.controlViewIndex(target.viewId);
         if (target.layerId && !target.mapId) rejectAction("layerId requires mapId", "invalid_arguments");
@@ -1476,6 +1502,10 @@ export class MapDataService implements AppActionContributor {
         return context.collect(layers());
     }
 
+    /**
+     * Resolve an externally editable option by owning map/layer/style identity;
+     * internal style options are unavailable to the action/control API.
+     */
     private requirePublicOption(target: {
         viewId: string;
         mapId: string;
@@ -1491,6 +1521,10 @@ export class MapDataService implements AppActionContributor {
         return option;
     }
 
+    /**
+     * Require a value of the declared option's runtime type, then update one view
+     * and apply any option synchronization in a single persistence transaction.
+     */
     assignStyleOption(
         target: { viewId: string; mapId: string; layerId: string; styleId: string; optionId: string },
         value: string | number | boolean
@@ -1507,6 +1541,7 @@ export class MapDataService implements AppActionContributor {
         });
     }
 
+    /** Page catalog maps, including entries whose metadata or schema is still loading. */
     listMaps(input: { offset?: number; limit?: number }) {
         const maps = this.maps.maps.values();
         const available = (mapId: string) => this.isMapReady(mapId);
@@ -1516,6 +1551,11 @@ export class MapDataService implements AppActionContributor {
         return catalogPage(values(), input);
     }
 
+    /**
+     * Page the selected catalog layers, optionally annotating visibility for one view.
+     * Produced feature types are exposed only after that map is locally schema-ready;
+     * map-wide reference identities are not layer production declarations.
+     */
     listLayers(input: {
         layerType: "Features" | "SourceData" | "all";
         offset?: number;
@@ -1554,6 +1594,10 @@ export class MapDataService implements AppActionContributor {
         return catalogPage(values(), input);
     }
 
+    /**
+     * Page public style options and their current value in one view. Each row
+     * contains the fully qualified control target needed to write that same option.
+     */
     listStyleOptions(input: {
         mapId: string;
         layerId: string;
@@ -1591,6 +1635,10 @@ export class MapDataService implements AppActionContributor {
         return catalogPage(values(), input);
     }
 
+    /**
+     * Page layer presets or map presets. For a selected view, map availability
+     * accounts for conflicts with its enabled cross-layer option synchronization.
+     */
     listPresets(input: {
         mapId: string;
         offset?: number;

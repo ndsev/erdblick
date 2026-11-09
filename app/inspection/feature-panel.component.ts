@@ -110,6 +110,7 @@ export class FeaturePanelComponent implements OnDestroy {
         { key: "value", header: "Value", width: '0*', transform: this.formatData.bind(this) }
     ];
     filterOptions = new FeatureFilterOptions();
+
     /** Serialize complete geometry only when the user requests an export. */
     geoJson = (): string => this.exportGeoJson();
     featureIds: string[] = [];
@@ -135,6 +136,10 @@ export class FeaturePanelComponent implements OnDestroy {
 
     @ViewChild(InspectionTreeComponent) inspectionTree?: InspectionTreeComponent;
 
+    /**
+     * Invalidate incoming-relation requests on catalog changes and queue a tree
+     * rebuild for catalog or panel changes; old snapshots must not survive new metadata.
+     */
     constructor(private cdr: ChangeDetectorRef,
         private ngZone: NgZone,
         mapInfo: MapDataService) {

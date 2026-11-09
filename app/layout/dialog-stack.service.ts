@@ -74,7 +74,7 @@ export class DialogStackService {
         };
     }
 
-    /** Closes the topmost tracked dialog when it exposes a close path or close button. */
+    /** Close the highest tracked entry with a close callback/button, skipping others. */
     closeTopDialog(event?: Event): boolean {
         this.pruneStack();
         for (let index = this.stack.length - 1; index >= 0; index--) {

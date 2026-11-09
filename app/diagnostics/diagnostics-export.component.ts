@@ -64,6 +64,10 @@ export class DiagnosticsExportDialogComponent implements OnDestroy {
 
     private readonly subscriptions: Subscription[] = [];
 
+    /**
+     * Keep a local copy of persisted export options so editing the dialog does not
+     * mutate the stored log-filter object before an explicit preference update.
+     */
     constructor(public readonly diagnostics: DiagnosticsFacadeService,
         public readonly stateService: AppStateService,
         private readonly dialogStack: DialogStackService,

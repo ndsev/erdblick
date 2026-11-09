@@ -16,7 +16,7 @@ class Cartesian2Impl {
 class Cartesian3Impl {
     constructor(public x: number = 0, public y: number = 0, public z: number = 0) {}
 
-    /** Converts degrees plus height into an ECEF-like Cartesian approximation. */
+    /** Converts degrees and metre height using a sphere of radius EARTH_RADIUS_METERS. */
     static fromDegrees(longitudeDegrees: number, latitudeDegrees: number, heightMeters: number = 0): Cartesian3Impl {
         const lon = longitudeDegrees * DEG_TO_RAD;
         const lat = latitudeDegrees * DEG_TO_RAD;
@@ -53,7 +53,7 @@ class Cartesian3Impl {
         return result;
     }
 
-    /** Computes the vector cross product into the provided result object. */
+    /** Computes the cross product; result must not alias either input vector. */
     static cross(lhs: Cartesian3Impl, rhs: Cartesian3Impl, result: Cartesian3Impl = new Cartesian3Impl()): Cartesian3Impl {
         result.x = lhs.y * rhs.z - lhs.z * rhs.y;
         result.y = lhs.z * rhs.x - lhs.x * rhs.z;
@@ -141,7 +141,7 @@ class RectangleImpl {
         );
     }
 
-    /** Returns the union of two rectangles. */
+    /** Returns component-wise bounds for unwrapped rectangles; antimeridian wrapping is not handled. */
     static union(lhs: RectangleImpl, rhs: RectangleImpl, result?: RectangleImpl | null): RectangleImpl {
         const out = result ?? new RectangleImpl();
         out.west = Math.min(lhs.west, rhs.west);
@@ -151,7 +151,7 @@ class RectangleImpl {
         return out;
     }
 
-    /** Tests whether a point lies inside the rectangle. */
+    /** Tests inclusive radian bounds for an unwrapped rectangle (west <= east). */
     static contains(rect: RectangleImpl, point: {longitude?: number; latitude?: number; x?: number; y?: number}): boolean {
         const longitude = typeof point.longitude === "number" ? point.longitude : point.x;
         const latitude = typeof point.latitude === "number" ? point.latitude : point.y;
@@ -204,6 +204,7 @@ class BillboardCollectionImpl extends PrimitiveCollectionImpl {}
 class PointPrimitiveCollectionImpl extends PrimitiveCollectionImpl {}
 class LabelCollectionImpl extends PrimitiveCollectionImpl {}
 
+/** Compatibility constructor only: these exports provide no rendering or projection behavior. */
 class DummyClass {
     constructor(..._args: any[]) {}
 }
@@ -230,95 +231,141 @@ const HEIGHT_REFERENCE = {
 
 export type Cartesian2 = Cartesian2Impl;
 export const Cartesian2: any = Cartesian2Impl;
+
 export type Cartesian3 = Cartesian3Impl;
 export const Cartesian3: any = Cartesian3Impl;
+
 export type Cartographic = CartographicImpl;
 export const Cartographic: any = CartographicImpl;
+
 export type Matrix3 = any;
 export const Matrix3: any = DummyClass;
+
 export type Color = ColorImpl;
 export const Color: any = COLOR;
+
 export type GeometryInstance = any;
 export const GeometryInstance: any = DummyClass;
+
 export type Material = any;
 export const Material: any = DummyClass;
+
 export type MaterialAppearance = any;
 export const MaterialAppearance: any = DummyClass;
+
 export type PerInstanceColorAppearance = any;
 export const PerInstanceColorAppearance: any = DummyClass;
+
 export type Primitive = any;
 export const Primitive: any = DummyClass;
+
 export type RectangleGeometry = any;
 export const RectangleGeometry: any = DummyClass;
+
 export type RectangleOutlineGeometry = any;
 export const RectangleOutlineGeometry: any = DummyClass;
+
 export type ColorGeometryInstanceAttribute = any;
 export const ColorGeometryInstanceAttribute: any = DummyClass;
+
 export type ImageryLayer = any;
 export const ImageryLayer: any = DummyClass;
+
 export type ScreenSpaceEventHandler = any;
 export const ScreenSpaceEventHandler: any = DummyClass;
+
 export type ScreenSpaceEventType = any;
 export const ScreenSpaceEventType: any = {};
+
 export type UrlTemplateImageryProvider = any;
 export const UrlTemplateImageryProvider: any = DummyClass;
+
 export type Rectangle = RectangleImpl;
 export const Rectangle: any = RectangleImpl;
+
 export type HeightReference = typeof HEIGHT_REFERENCE[keyof typeof HEIGHT_REFERENCE];
 export const HeightReference: any = HEIGHT_REFERENCE;
+
 export type LabelStyle = any;
 export const LabelStyle: any = {};
+
 export type VerticalOrigin = any;
 export const VerticalOrigin: any = {};
+
 export type HorizontalOrigin = any;
 export const HorizontalOrigin: any = {};
+
 export type DistanceDisplayCondition = any;
 export const DistanceDisplayCondition: any = DummyClass;
+
 export type CallbackProperty = any;
 export const CallbackProperty: any = DummyClass;
+
 export type Viewer = any;
 export const Viewer: any = DummyClass;
+
 export type PrimitiveCollection = PrimitiveCollectionImpl;
 export const PrimitiveCollection: any = PrimitiveCollectionImpl;
+
 export type PointPrimitiveCollection = PointPrimitiveCollectionImpl;
 export const PointPrimitiveCollection: any = PointPrimitiveCollectionImpl;
+
 export type LabelCollection = LabelCollectionImpl;
 export const LabelCollection: any = LabelCollectionImpl;
+
 export type BillboardCollection = BillboardCollectionImpl;
 export const BillboardCollection: any = BillboardCollectionImpl;
+
 export type Billboard = any;
 export const Billboard: any = DummyClass;
+
 export const defined = (value: unknown): boolean => value !== undefined && value !== null;
+
 export type PinBuilder = any;
 export const PinBuilder: any = DummyClass;
+
 export type Entity = any;
 export const Entity: any = DummyClass;
+
 export type EntityConstructorOptions = any;
 export type Camera = any;
 export const Camera: any = DummyClass;
+
 export type Scene = any;
 export const Scene: any = DummyClass;
+
 export type HeadingPitchRange = any;
 export const HeadingPitchRange: any = DummyClass;
+
 export type BoundingSphere = any;
 export const BoundingSphere: any = DummyClass;
+
 export type SceneMode = typeof SCENE_MODE[keyof typeof SCENE_MODE];
 export const SceneMode: any = SCENE_MODE;
+
 export type VertexFormat = any;
 export const VertexFormat: any = {};
+
 export type WebMercatorProjection = any;
 export const WebMercatorProjection: any = DummyClass;
+
 export type GeographicProjection = any;
 export const GeographicProjection: any = DummyClass;
+
 export type Ellipsoid = any;
 export const Ellipsoid: any = DummyClass;
+
 export type PerspectiveFrustum = any;
 export const PerspectiveFrustum: any = DummyClass;
+
 export type KeyboardEventModifier = any;
 export const KeyboardEventModifier: any = {};
+
 export const EasingFunction: any = {};
+
 export type ColorMaterialProperty = any;
 export const ColorMaterialProperty: any = DummyClass;
+
 export type JulianDate = any;
 export const JulianDate: any = DummyClass;
 
@@ -327,6 +374,7 @@ export const GeoMath = {
     toRadians(value: number): number {
         return value * DEG_TO_RAD;
     },
+
     /** Converts radians to degrees. */
     toDegrees(value: number): number {
         return value * RAD_TO_DEG;

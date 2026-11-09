@@ -1,7 +1,7 @@
 /**
- * The saved limit on displayed place-search results. The codec preserves the
- * existing config/storage key and clamps incoming values. Network requests
- * and result selection remain in the location-search controllers.
+ * Saved place-search limits, search availability and versioned boundary consent.
+ * Availability and consent remain local preferences outside shared snapshots and
+ * deployment defaults. Request/result handling belongs to the location controllers.
  */
 import { Injectable } from "@angular/core";
 import { z } from "zod";

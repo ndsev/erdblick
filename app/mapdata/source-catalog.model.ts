@@ -17,6 +17,7 @@ export type MapSchemaStatus = "loading" | "ready" | "failed";
 export interface MapFormat {
     name: string;
     version: string;
+
     /**
      * Canonical set of name/version pairs published by mapget. A subsystem may
      * occur at several versions; a dictionary would silently discard that fact.
@@ -46,6 +47,7 @@ export interface LayerInfoItem extends Record<string, any> {
     canWrite: boolean;
     defaultVisible?: boolean;
     coverage: Array<number | CoverageRectItem>;
+
     /** Legacy input only. Native metadata import moves these definitions into MapSchema. */
     featureTypes?: Array<{ name: string, uniqueIdCompositions: Array<any> }>;
     layerId: string;
@@ -66,6 +68,7 @@ export interface MapInfoItem extends Record<string, any> {
     stringPoolId: string;
     mapFormat?: MapFormat;
     schemaId?: string;
+
     /** Local decoration, never sent back to mapget or included in metadata identity. */
     schemaStatus?: MapSchemaStatus;
     schemaMessage?: string;
@@ -105,7 +108,7 @@ export function dataSourceReadinessStatus(
     return item.schemaStatus === "failed" ? "failed" : "ready";
 }
 
-/** Normalizes optional datasource startup progress to a display percentage. */
+/** Treat progress <= 1 as a fraction and larger values as percentages; clamp for display. */
 export function dataSourceProgressPercent(item: Pick<MapInfoItem, "progress">): number | null {
     if (typeof item.progress !== "number" || !Number.isFinite(item.progress)) {
         return null;

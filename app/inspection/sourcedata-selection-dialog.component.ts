@@ -97,6 +97,10 @@ export class SourceDataLayerSelectionDialogComponent {
     customMapId: string = "";
     showCustomTileIdInput: boolean = false;
 
+    /**
+     * Populate the picker from right-click tile candidates or an explicit tile/map
+     * request; the latter also opens the dialog.
+     */
     constructor(private mapService: MapDataService,
         public menuService: RightClickMenuService) {
         this.menuService.tileIdsForSourceData.subscribe(data => {

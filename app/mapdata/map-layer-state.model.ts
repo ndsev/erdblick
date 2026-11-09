@@ -40,7 +40,7 @@ export const STORED_LAYER_PRESET_REF_SCHEMA = z.union([
     z.string().min(1).transform(presetId => ({ styleId: "", presetId }))
 ]);
 
-/** Returns whether the layer id refers to source or meta-data rather than a feature layer. */
+/** Recognize source/meta-data layer spelling by its embedded path segment. */
 export function isSourceOrMetaData(mapLayerNameOrLayerId: string): boolean {
     return mapLayerNameOrLayerId.includes('/SourceData-') ||
         mapLayerNameOrLayerId.includes('/Metadata-');

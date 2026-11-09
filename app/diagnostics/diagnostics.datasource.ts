@@ -55,7 +55,7 @@ export class DiagnosticsDatasource implements OnDestroy {
     private lastBackendConnected = this.mapService.isTileStreamConnected();
     private diagnosticsRefreshPending = false;
 
-    /** Subscribe to low-frequency diagnostics sources while keeping timers outside Angular. */
+    /** Bind collaborators; initialize() starts the sampling timers and subscriptions. */
     constructor(
         protected readonly mapService: MapTileStreamService,
         protected readonly renderService: TileSubsetLayerRenderService,
@@ -341,7 +341,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         this.refreshLogs();
     }
 
-    /** Assemble current-generation progress without retaining historical tile state. */
+    /** Assemble progress and finish viewport timing when backend and browser queues are done. */
     private buildSnapshot(): DiagnosticsSnapshot {
         const summary = this.viewDiagnostics.currentSummary();
         const expected = summary.expected;
@@ -451,7 +451,7 @@ export class DiagnosticsDatasource implements OnDestroy {
         this.appendLogEntries(entries);
     }
 
-    /** Append bounded logs while preserving chronological order. */
+    /** Append in arrival order and retain the most recent MAX_LOGS entries. */
     private appendLogEntries(entries: LogEntry[]): void {
         if (entries.length) {
             this.logs$.next(
@@ -460,7 +460,10 @@ export class DiagnosticsDatasource implements OnDestroy {
         }
     }
 
-    /** Install one process-wide console tap while routing entries to the live instance. */
+    /**
+     * Install one process-wide console tap, routed to the most recently initialized
+     * datasource. The tap and handler remain installed after ngOnDestroy().
+     */
     private patchConsoleLogging(): void {
         DiagnosticsDatasource.consoleLogHandler = (level, args) => {
             this.appendLogEntries([{

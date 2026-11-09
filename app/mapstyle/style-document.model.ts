@@ -47,7 +47,10 @@ export class StyleDocumentModel {
     isRecord(path: StylePath): boolean { return isMap(this.node(path)); }
     isList(path: StylePath): boolean { return isSeq(this.node(path)); }
 
-    /** Applies a single intentional edit to a fresh AST, retaining unrelated nodes and comments. */
+    /**
+     * Apply one edit to a fresh AST and return reserialized YAML, retaining
+     * unrelated nodes/comments. Success and failure both leave this model unchanged.
+     */
     edit(edit: StyleDocumentEdit): string {
         const next = new StyleDocumentModel(this.source);
         next.makePathLocal(edit.path);
@@ -139,7 +142,10 @@ export class StyleDocumentModel {
     }
 }
 
-/** Parses a typed numeric form input, retaining integers beyond JavaScript's safe range. */
+/**
+ * Parse finite numeric input. Plain integer text beyond the safe range becomes
+ * BigInt; decimal and scientific notation use ordinary Number precision.
+ */
 export function parseStyleNumber(text: string): number | bigint {
     if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(text.trim())) {
         throw new Error("Enter a finite number.");

@@ -44,6 +44,10 @@ export class CoordinatesService implements AppActionContributor {
     auxiliaryCoordinatesFun: ((x: number, y: number) => Array<[string, Array<number>]>) | null = null;
     auxiliaryTileIdsFun: ((x: number, y: number, level: number) => Array<[string, bigint | number]>) | null = null;
 
+    /**
+     * Project subsequent map clicks into marker state without treating the initial
+     * null event as a request to clear a restored marker.
+     */
     constructor(public stateService: AppStateService,
         private configService: AppConfigService,
         public readonly state: CoordinatesState) {

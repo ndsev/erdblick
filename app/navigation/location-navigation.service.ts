@@ -140,6 +140,7 @@ export class LocationNavigationService implements OnDestroy, AppActionContributo
         }
         if (result.notice) this.messages.showInfo(result.notice);
     }
+
     /** Registers semantic operations and their live omnibar candidates. */
     registerActions(actions: AppActionRegistration): void {
         actions.registerAction(
@@ -309,6 +310,11 @@ export class LocationNavigationService implements OnDestroy, AppActionContributo
         this.suggestions = matches;
     }
 
+    /**
+     * Project current-query suggestions or saved history metadata into actions.
+     * Keep a resolvable saved identity when metadata is stale, letting execution
+     * perform fresh lookup instead of reusing suggestions from another query.
+     */
     private locationCandidates(
         query: string,
         history?: ActionCandidateHistory

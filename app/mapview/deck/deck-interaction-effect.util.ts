@@ -17,6 +17,7 @@ export interface DeckInteractionEffect {
     haloColor?: DeckRgba;
     haloRadius: number;
     haloOpacity: number;
+
     /** Whether semantic boundaries may cast halo into another masked object. */
     interiorHalo?: boolean;
     stripeColor?: DeckRgba;
@@ -109,6 +110,10 @@ export function interactionColor(
     ];
 }
 
+/**
+ * Convert the first four finite array/typed-array values to clamped 8-bit RGBA;
+ * return undefined when the effect has no usable color.
+ */
 function deckRgba(value: unknown): DeckRgba | undefined {
     if (!Array.isArray(value) && !ArrayBuffer.isView(value)) {
         return undefined;
@@ -122,6 +127,10 @@ function deckRgba(value: unknown): DeckRgba | undefined {
         Math.max(0, Math.min(255, Math.round(Number(item))))) as DeckRgba;
 }
 
+/**
+ * Coerce a finite numeric effect value into its supported range, otherwise use
+ * the supplied default.
+ */
 function boundedNumber(
     value: unknown,
     fallback: number,

@@ -173,8 +173,9 @@ interface PreparedContextMenuPosition {
     standalone: false
 })
 /**
- * Host component for one interactive map view.
- * It owns renderer creation, hover details, right-click context-menu preparation, and view-local mode toggles.
+ * Host for one logical map view, with a layer controller retained across renderer
+ * generations. It owns renderer setup/teardown, hover UI and context-menu bindings;
+ * renderer rebuilds are serialized and obsolete generations cannot be installed.
  */
 export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     private static readonly RIGHT_DRAG_SUPPRESS_THRESHOLD_PX = 4;
@@ -450,9 +451,14 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /**
-     * Recreate the viewer with different projection for 2D/3D modes
+     * Tear down the previous renderer and set up the requested projection outside
+     * Angular. Return the installed view, or undefined if this generation became
+     * obsolete; setup failures propagate to the queue's error UI.
      */
-    private async createViewerForMode(is2D: boolean, setupGeneration: number): Promise<IRenderView | undefined> {
+    private async createViewerForMode(
+        is2D: boolean,
+        setupGeneration: number
+    ): Promise<IRenderView | undefined> {
         this.unregisterRenderView?.();
         this.unregisterRenderView = undefined;
         this.rendererInvalidatedSubscription?.unsubscribe();
@@ -463,6 +469,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.hoverDetailsContent = [];
         this.firstPersonViewActiveSubscription?.unsubscribe();
         this.firstPersonViewActiveSubscription = undefined;
+
         if (this.mapView) {
             this.layerController?.detachScene();
             await this.ngZone.runOutsideAngular(() => this.mapView!.destroy());
@@ -471,6 +478,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         if (setupGeneration !== this.viewerSetupGeneration) {
             return undefined;
         }
+
         const mapView: IRenderView = is2D
             ? new DeckMapView2D(
                 this.viewIndex(), this.canvasId, this.mapService, this.mapViewState, this.tileStream,
@@ -488,6 +496,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             );
         mapView.setDesktopDrillPickingEnabled(!this.isNarrow);
         this.initializingMapView = mapView;
+
         // Keep renderer setup out of Angular zone to avoid global change detection on pointer/move loops.
         try {
             await this.ngZone.runOutsideAngular(() => mapView.setup());
@@ -499,6 +508,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             await this.ngZone.runOutsideAngular(() => mapView.destroy());
             return undefined;
         }
+
         const retainedCamera = this.mapViewState.takeRetainedCamera(this.viewIndex());
         if (retainedCamera) {
             mapView.restoreCameraState(retainedCamera);
@@ -515,18 +525,21 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         return mapView;
     }
 
-    /**
-     * Component cleanup when destroyed
-     */
+    /** Retire this logical view and its UI bindings when Angular destroys the host. */
     ngOnDestroy() {
         this.disposeView();
     }
 
-    /** Stops view subscriptions and renderer ownership before destruction or reindexing. */
+    /**
+     * Invalidate queued setup and release this view's subscriptions and layer owner.
+     * Active renderer destruction runs asynchronously; a setup already in progress
+     * sees the changed generation and retires itself after successful setup.
+     */
     private disposeView(): void {
         this.unregisterRenderView?.();
         this.unregisterRenderView = undefined;
         this.viewerSetupGeneration++;
+
         this.pendingContextMenuOpenEvent = null;
         this.clearPendingContextMenuOpenTimeout();
         this.viewerContextMenu?.hide();
@@ -540,6 +553,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         }
         this.hoverHudLayoutObserver?.disconnect();
         this.hoverHudLayoutObserver = undefined;
+
         this.modeSubscription?.unsubscribe();
         this.hoverSubscription?.unsubscribe();
         this.firstPersonViewActiveSubscription?.unsubscribe();
@@ -548,6 +562,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.rendererInvalidatedSubscription?.unsubscribe();
         this.subscriptions.splice(0).forEach(subscription =>
             subscription.unsubscribe());
+
         if (this.mapView) {
             const mapView = this.mapView;
             this.mapView = undefined;
@@ -559,8 +574,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /**
-     * Rebuilds view-local UI bindings after the renderer instance changed.
-     * This includes hover popovers, sync toggles, and the initial viewport refresh.
+     * Queue a renderer rebuild and refresh UI bindings only for the latest setup
+     * generation. Rapid preference changes skip obsolete queued work; an active
+     * setup is allowed to settle before the next one starts.
      */
     private initializeViewer(mode2d: boolean) {
         const setupGeneration = ++this.viewerSetupGeneration;
@@ -656,8 +672,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /**
-     * Installs capturing pointer listeners directly on the viewer DOM element.
-     * This avoids PrimeNG/Cesium/deck interaction quirks and lets us suppress context menus after drags.
+     * Install capture-phase listeners outside Angular. A right press moving more
+     * than four CSS pixels on either axis suppresses the menu; menu UI changes
+     * explicitly re-enter Angular. The matching teardown removes these listeners.
      */
     private setupViewerContextMenuHandling(): void {
         const viewer = this.viewerElement?.nativeElement;
@@ -760,7 +777,11 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.resetRightPressTracking();
     }
 
-    /** Prepares source-data context and opens the PrimeNG context menu at the supplied screen position. */
+    /**
+     * Drill-pick asynchronously, discarding replies superseded within this host or
+     * produced by a replaced renderer. Pick failures abort opening; source-data or
+     * search preparation failures still allow the remaining menu actions to open.
+     */
     private async openContextMenu(menu: ContextMenu, event: { clientX: number; clientY: number; pageX: number; pageY: number }) {
         this.menuService.closeAllContextMenus();
         const screenPos = this.contextMenuScreenPosition(event);
@@ -780,6 +801,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             return;
         }
         if (view !== this.mapView || serial !== this.contextMenuPickSerial) return;
+
         this.menuService.setPickedFeatures(featureIds);
         let contextPosition: PreparedContextMenuPosition | null = null;
         try {
@@ -792,6 +814,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             this.menuService.tileIdsForSourceData.next([]);
             this.menuService.setTileDiagnosticsOptions([]);
         }
+
         this.prepareFirstPersonViewContextMenu(contextPosition);
         this.menuService.setExternalViewerLocation(contextPosition
             ? { lon: contextPosition.cartographic.lon, lat: contextPosition.cartographic.lat }
@@ -818,7 +841,11 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         };
     }
 
-    /** Resolves the WGS84 position represented by a context-menu canvas position. */
+    /**
+     * Resolve a canvas-relative CSS position to WGS84 degrees and altitude metres.
+     * In 3D, prefer the renderer's physical navigation anchor; otherwise use its
+     * cartographic pick. No resolved position yields null.
+     */
     private contextMenuPosition(
         screenPos: { x: number; y: number },
         featureIds: TileFeatureId[]
@@ -861,7 +888,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.ngZone.runOutsideAngular(() => mapView.exitFirstPersonView());
     }
 
-    /** Prepares enter only for an exact 3D feature target, while exit remains available over empty space. */
+    /**
+     * Offer entry for a renderer-resolved 3D navigation target, which need not have
+     * a feature identity. Exit remains available over empty space.
+     */
     private prepareFirstPersonViewContextMenu(contextPosition: PreparedContextMenuPosition | null): void {
         if (!this.mapView) {
             this.menuService.setFirstPersonViewContext(null);
@@ -902,8 +932,9 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
     }
 
     /**
-     * Derives source-data tile choices from the clicked world position and updates the menu service.
-     * The preferred tile tries to match picked feature tiles first, then visible feature levels.
+     * Build source-data choices for levels 0–15 at the clicked world position.
+     * Prefer the deepest enabled picked tile, then an enabled visible feature level;
+     * the menu service applies its remembered-level/default fallback afterward.
      */
     private prepareSourceDataContextMenu(contextPosition: PreparedContextMenuPosition | null): void {
         if (!this.mapView || this.appModeService.isVisualizationOnly) {
@@ -944,7 +975,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         this.prepareTileDiagnosticsContextMenu(cartographic.lon, cartographic.lat);
     }
 
-    /** Builds grouped tile diagnostics entries for enabled loaded feature layers at the clicked position. */
+    /**
+     * Group visible feature-layer tiles at the clicked position only when occupancy
+     * is known to be non-empty. Unknown, empty and error states do not create rows.
+     */
     private prepareTileDiagnosticsContextMenu(lon: number, lat: number): void {
         const viewIndex = this.viewIndex();
         const groupsByTileId = new Map<string, TileDiagnosticsMenuOption>();
@@ -1027,7 +1061,10 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
         return bestTileId;
     }
 
-    /** Falls back to the deepest source-data tile whose level matches currently visible feature data. */
+    /**
+     * Choose the last enabled option at a visible feature level. The caller supplies
+     * choices in ascending level order, making this the deepest eligible tile.
+     */
     private preferredVisibleLevelTileId(tileIds: SourceDataDropdownOption[]): number | null {
         const visibleLevels = this.mapViewState.visibleFeatureLevelsInView(this.viewIndex());
         const preferredTile = [...tileIds]

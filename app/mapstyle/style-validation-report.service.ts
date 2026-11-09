@@ -13,7 +13,7 @@ const MAX_STYLE_VALIDATION_ISSUES = 500;
 export class StyleValidationReportService {
     readonly reports$ = new BehaviorSubject<StyleValidationIssue[]>([]);
 
-    /** Stores a full validation report for a style source. */
+    /** Append the report's issues to the bounded store and return its source-adjusted copy. */
     recordReport(report: StyleValidationReport, sourceOverride?: Partial<StyleSourceRef>): StyleValidationReport {
         const source = {...report.source, ...sourceOverride} as StyleSourceRef;
         const issues = report.issues.map(issue => ({
@@ -45,7 +45,7 @@ export class StyleValidationReportService {
         }));
     }
 
-    /** Clears duplicate runtime issues from the report stream. */
+    /** Keep the first matching runtime issue per source/rule/property/message/map/layer key. */
     clearRuntimeDuplicates(): void {
         const seen = new Set<string>();
         const result: StyleValidationIssue[] = [];
@@ -83,7 +83,7 @@ export class StyleValidationReportService {
         return `Style validation: ${source}${path ? ` ${path}${property}` : ''}${location}: ${issue.message}`;
     }
 
-    /** Appends new issues while preserving existing unrelated issues. */
+    /** Append issues and retain the most recent 500 across all sources. */
     private appendIssues(issues: StyleValidationIssue[]): void {
         if (!issues.length) {
             return;
@@ -92,7 +92,7 @@ export class StyleValidationReportService {
         this.reports$.next(merged.slice(-MAX_STYLE_VALIDATION_ISSUES));
     }
 
-    /** Builds the internal report key for a validation source. */
+    /** Select the first available identity: URL, hash, style name, config ID, then source kind. */
     private sourceKey(sourceRef: Partial<StyleSourceRef>): string {
         return sourceRef.url
             || sourceRef.sourceHash

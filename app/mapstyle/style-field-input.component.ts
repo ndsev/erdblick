@@ -144,12 +144,15 @@ export class StyleFieldInputComponent implements OnChanges, OnDestroy {
 
     /** Locates a vector component or scale cell. */
     child(...parts: (string | number)[]): StylePath { return [...this.path, ...parts]; }
+
     /** Displays a scalar exactly, including bigint category keys. */
     text(path: StylePath = this.path): string {
         return this.numericInputs.get(path.join("."))?.text ?? String(this.model.value(path) ?? "");
     }
+
     /** Extracts user text from a native input event. */
     eventText(event: Event): string { return (event.target as HTMLInputElement).value; }
+
     /** Publishes an intentional field edit and clears a corrected local input error. */
     set(value: unknown, path: StylePath = this.path): void {
         const key = path.join(".");
@@ -159,6 +162,7 @@ export class StyleFieldInputComponent implements OnChanges, OnDestroy {
         this.report();
         this.edit.emit({op: "set", path, value, remove: path === this.path ? this.field.exclusive : []});
     }
+
     /** Validates only the input's primitive number shape; native validation owns its domain. */
     number(event: Event, path: StylePath): void {
         const input = {path, text: this.eventText(event), sourceValue: String(this.model.value(path) ?? ""), message: ""};
@@ -173,6 +177,7 @@ export class StyleFieldInputComponent implements OnChanges, OnDestroy {
             this.report();
         }
     }
+
     /** Preserves scalar enum syntax until a user adds a second choice. */
     toggleChoice(choice: string, event: Event): void {
         const values = Array.isArray(this.value) ? [...this.value] : [this.value];
@@ -180,47 +185,60 @@ export class StyleFieldInputComponent implements OnChanges, OnDestroy {
             ? [...values.filter(value => value !== choice), choice] : values.filter(value => value !== choice);
         this.set(next.length === 1 && !Array.isArray(this.value) ? next[0] : next);
     }
+
     /** Tests a native enum scalar or list without changing its representation. */
     includes(choice: string): boolean { return Array.isArray(this.value) ? this.value.includes(choice) : this.value === choice; }
+
     /** Returns authored vector/stop indices. */
     indices(): number[] { return Array.from({length: this.model.length(this.path)}, (_, i) => i); }
+
     /** Uses zero to represent the scalar alternative of a vector field. */
     vectorLength(): number { return Array.isArray(this.value) ? this.value.length : 0; }
+
     /** Changes a vector's explicit shape, preserving existing components where possible. */
     resize(size: number): void {
         const values = Array.isArray(this.value) ? this.value : [this.value];
         this.set(size === 0 ? values[0] ?? 0 : Array.from({length: size}, (_, i) => values[i] ?? 0));
     }
+
     /** Reports the exact category key type instead of inferring it from its displayed text. */
     stopKeyType(index: number): string {
         const type = typeof this.model.value([...this.path, index, 0]);
         return type === "bigint" ? "number" : type;
     }
+
     /** Makes category type changes explicit and resets the key to an unambiguous value. */
     changeStopType(index: number, type: string): void {
         this.set(type === "number" ? 0 : type === "boolean" ? false : "", [...this.path, index, 0]);
     }
+
     /** Writes a numeric or string stop key using its selected type. */
     stopKey(index: number, event: Event): void {
         const path = [...this.path, index, 0];
         if (this.stopKeyType(index) === "number") this.number(event, path);
         else this.set(this.eventText(event), path);
     }
+
     /** Writes the native scale's color/width stop value. */
     stopValue(index: number, event: Event): void {
         if (this.field.valueKind === "number") this.number(event, [...this.path, index, 1]);
         else this.set(this.eventText(event), [...this.path, index, 1]);
     }
+
     /** Appends one editable typed stop. */
     addStop(): void { this.edit.emit({op: "append", path: this.path, value: [0, this.field.valueKind === "color" ? "#000000" : 1]}); }
+
     /** Reorders stops without regenerating their AST nodes. */
     move(index: number, to: number): void { this.edit.emit({op: "move", path: this.path, index, to}); }
+
     /** Removes precisely the chosen stop. */
     remove(index: number): void { this.edit.emit({op: "remove", path: [...this.path, index]}); }
+
     /** Shows an RGB picker only as a convenience; the text field retains native color syntax. */
     pickerColor(): string {
         return stylePickerColor(this.value);
     }
+
     /** Drops stale buffers after external source edits, retaining other unfinished numeric cells. */
     ngOnChanges(): void {
         let removed = false;
@@ -232,8 +250,10 @@ export class StyleFieldInputComponent implements OnChanges, OnDestroy {
         }
         if (removed) this.report();
     }
+
     /** Clears local form errors when a field/rule is removed. */
     ngOnDestroy(): void { this.problem.emit({path: this.id, message: ""}); }
+
     /** Reports all cells together so correcting one cannot hide another invalid value. */
     private report(): void {
         this.problem.emit({path: this.id, message: this.error});

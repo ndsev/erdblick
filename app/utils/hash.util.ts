@@ -52,11 +52,15 @@ function utf8Bytes(s: string): Uint8Array {
                 buf[o++] = 0x80 | (cp & 0x3f);
             } else {
                 // Lone high surrogate -> U+FFFD
-                buf[o++] = 0xef; buf[o++] = 0xbf; buf[o++] = 0xbd;
+                buf[o++] = 0xef;
+                buf[o++] = 0xbf;
+                buf[o++] = 0xbd;
             }
         } else if ((c & 0xfc00) === 0xdc00) {
             // Lone low surrogate -> U+FFFD
-            buf[o++] = 0xef; buf[o++] = 0xbf; buf[o++] = 0xbd;
+            buf[o++] = 0xef;
+            buf[o++] = 0xbf;
+            buf[o++] = 0xbd;
         } else {
             buf[o++] = 0xe0 | (c >> 12);
             buf[o++] = 0x80 | ((c >> 6) & 0x3f);
@@ -93,19 +97,32 @@ function deriveKey128(key: string): { k0: bigint; k1: bigint } {
     return { k0: readLE64(k, 0), k1: readLE64(k, 8) };
 }
 
-/** SipHash-2-4 (64-bit) keyed hash. */
+/** Deployed SipHash-derived 64-bit hash; preserve its length handling for persisted IDs. */
 function siphash24(msg: Uint8Array, k0: bigint, k1: bigint): bigint {
     let v0 = 0x736f6d6570736575n ^ k0;
     let v1 = 0x646f72616e646f6dn ^ k1;
     let v2 = 0x6c7967656e657261n ^ k0;
     let v3 = 0x7465646279746573n ^ k1;
 
-    /** Rounds hash coordinates to the configured precision. */
+    /** Mix the four 64-bit state words through one add/rotate/XOR round. */
     const round = () => {
-        v0 = (v0 + v1) & MASK64; v1 = ROTL(v1, 13); v1 ^= v0; v0 = ROTL(v0, 32);
-        v2 = (v2 + v3) & MASK64; v3 = ROTL(v3, 16); v3 ^= v2;
-        v0 = (v0 + v3) & MASK64; v3 = ROTL(v3, 21); v3 ^= v0;
-        v2 = (v2 + v1) & MASK64; v1 = ROTL(v1, 17); v1 ^= v2; v2 = ROTL(v2, 32);
+        v0 = (v0 + v1) & MASK64;
+        v1 = ROTL(v1, 13);
+        v1 ^= v0;
+        v0 = ROTL(v0, 32);
+
+        v2 = (v2 + v3) & MASK64;
+        v3 = ROTL(v3, 16);
+        v3 ^= v2;
+
+        v0 = (v0 + v3) & MASK64;
+        v3 = ROTL(v3, 21);
+        v3 ^= v0;
+
+        v2 = (v2 + v1) & MASK64;
+        v1 = ROTL(v1, 17);
+        v1 ^= v2;
+        v2 = ROTL(v2, 32);
     };
 
     // Process 8-byte blocks.
@@ -113,11 +130,15 @@ function siphash24(msg: Uint8Array, k0: bigint, k1: bigint): bigint {
     const len = msg.length;
     while (i + 8 <= len) {
         const m = readLE64(msg, i);
-        v3 ^= m; round(); round(); v0 ^= m;
+        v3 ^= m;
+        round();
+        round();
+        v0 ^= m;
         i += 8;
     }
 
-    // Final block with length in top byte (SipHash spec).
+    // Preserve the deployed unmasked length shift. For long inputs this can
+    // carry bits beyond the 64-bit block, unlike a single length byte.
     let b = BigInt(len) << 56n;
     let shift = 0n;
     while (i < len) {
@@ -125,19 +146,26 @@ function siphash24(msg: Uint8Array, k0: bigint, k1: bigint): bigint {
         shift += 8n;
     }
 
-    v3 ^= b; round(); round(); v0 ^= b;
+    v3 ^= b;
+    round();
+    round();
+    v0 ^= b;
     v2 ^= 0xffn;
     // 4 finalization rounds.
-    round(); round(); round(); round();
+    round();
+    round();
+    round();
+    round();
 
     return (v0 ^ v1 ^ v2 ^ v3) & MASK64;
 }
 
 /**
- * 4-char short ID (20 bits) using keyed SipHash-2-4.
+ * 4-char short ID (20 bits) using the deployed keyed hash above.
  * - `key` is any string; keep it constant to keep IDs stable.
  * - Accepts string or pre-encoded bytes to avoid double work.
- * - For ~100–1000 items, collision risk is tiny (space size ≈ 1,048,576).
+ * - The 20-bit output has only 1,048,576 values; callers requiring uniqueness
+ *   must detect and resolve collisions.
  */
 export function shortId4(
     input: string | Uint8Array,
@@ -151,7 +179,7 @@ export function shortId4(
 }
 
 /**
- * 64-bit SipHash digest as 16-char lowercase hex.
+ * Deployed 64-bit SipHash-derived digest as 16-char lowercase hex.
  * - `key` is any string; keep it stable for consistent hashes.
  * - Accepts string or pre-encoded bytes to avoid double work.
  */

@@ -19,7 +19,7 @@ export class GpuRangeAllocator {
     private readonly freeRanges: GpuRecordRange[] = [];
     private nextRecord = 0;
 
-    /** Reserve one contiguous range, reusing the lowest suitable hole first. */
+    /** Reserve a positive count, truncated to an integer, reusing the lowest suitable hole first. */
     allocate(recordCount: number): GpuRecordRange {
         const count = this.validCount(recordCount);
         for (let index = 0; index < this.freeRanges.length; ++index) {
@@ -46,7 +46,10 @@ export class GpuRangeAllocator {
         return result;
     }
 
-    /** Return one allocation and coalesce it with neighboring holes. */
+    /**
+     * Return a caller-owned allocation and coalesce it with neighboring holes.
+     * Rejects out-of-bounds and overlapping releases; callers must supply a finite valid start.
+     */
     release(range: GpuRecordRange): void {
         const recordCount = this.validCount(range.recordCount);
         const firstRecord = Math.trunc(range.firstRecord);

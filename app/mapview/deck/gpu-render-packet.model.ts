@@ -128,10 +128,13 @@ export interface GpuPickRecordView {
   channelOrdinal: number;
   entryOrdinal: number;
   endpointRole: number;
+
   /** Finite only after this semantic row materialized visible presentation. */
   navigationAltitude: number;
+
   /** Contribution-local slot of the highest emitted z-index, or uint32 max. */
   presentationZIndexSlot: number;
+
   /** One-based surface-before-vector pass used only when z-index values tie. */
   presentationPrimitiveOrder: number;
 }

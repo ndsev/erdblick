@@ -86,6 +86,7 @@ export interface TileSubsetLayerRenderRequest {
 interface PendingRender {
     task: TileSubsetLayerRenderTask;
     schemas: MapSchemaArtifact[];
+
     /** Deferred until the worker acknowledges native catalog/schema installation. */
     dispatch?: () => void;
     admit: (packet: Uint8Array) => void;
@@ -238,6 +239,7 @@ export class TileSubsetLayerRenderService {
         if (old?.view === view && old.bytes === bytes) return;
         this.pointCloudDemand.set(id, {view, bytes});
     }
+
     /** Retire input ownership and reclaim the worker when its cloud is no longer visible. */
     unregisterPointCloud(id: string): void {
         const worker = this.pointCloudWorkerByVisualization.get(id);
@@ -245,6 +247,7 @@ export class TileSubsetLayerRenderService {
         if (worker !== undefined && !this.runningTaskIdByWorker[worker]) this.retireWorker(worker);
         this.pointCloudDemand.delete(id);
     }
+
     /** Apply the per-object fidelity policy independently of visible work and memory admission. */
     pointCloudPolicyFor(id: string, _metersPerPixel: number | null, _previousSpacing = 0): PointCloudRenderPolicy {
         return {enabled: this.pointCloudPolicy.enabled, maxPoints: POINT_CLOUD_MAX_POINTS,

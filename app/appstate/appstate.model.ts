@@ -16,6 +16,7 @@ import { environment } from "../environments/environment";
 
 /** Converts an app-state value into the representation stored in URL or local storage. */
 export type AppStateToStorageFun<T> = (value: T) => unknown;
+
 /** Restores an app-state value from persisted storage using the current value as context. */
 export type AppStateFromStorageFun<T> = (value: ZodTypeAny, currentValue: T) => T;
 export type AppStateSerializedValue = string | null;
@@ -322,6 +323,7 @@ export class AppState<T> extends Observable<T> {
     private currentValue: T;
     private readonly normalize?: (value: T) => T;
     private readonly changes: Subject<T>;
+
     /** The persistence registry installs a synchronous publication boundary. */
     writeValue: ((value: T) => void) | undefined;
     readonly name: string;
@@ -699,6 +701,11 @@ export class PerViewState<T> {
     readonly appState: AppState<Record<string, T>>;
     private readonly defaultValue: T;
 
+    /**
+     * Wrap one value per logical view while preserving the deployed array storage
+     * format. Resolve positions against viewIds only at serialization/import time;
+     * missing imported positions retain the current value or a copied default.
+     */
     constructor(
         pool: Map<string, AppState<unknown>>,
         options: AppStateOptions<T>,
@@ -725,6 +732,7 @@ export class PerViewState<T> {
         });
     }
 
+    /** Resolve a current UI index or identity and reject views that no longer exist. */
     private resolve(view: number | string): string {
         const id = typeof view === "number" ? this.viewIds()[view] : view;
         if (id === undefined || !this.viewIds().includes(id)) throw new Error(`View ${view} is unavailable.`);
@@ -740,6 +748,10 @@ export class PerViewState<T> {
         return this.pipe(view).subscribe(callback);
     }
 
+    /**
+     * Observe the logical identity resolved now, even if views are later reordered.
+     * Deep equality suppresses unchanged values when another view updates the map.
+     */
     pipe<R = T>(view: number | string, ...operators: OperatorFunction<T, any>[]): Observable<R> {
         const id = this.resolve(view);
         const changes = this.appState.pipe(
@@ -836,10 +848,15 @@ export class StyleState extends AppState<Map<string, Record<string, StyleOptionV
         return new Map([...this.value].map(([key, values]) => [key, this.viewIds().map(id => values[id])]));
     }
 
+    /** Import option arrays against the current view order, replacing stored options. */
     replacePositional(values: ReadonlyMap<string, readonly StyleOptionValue[]>): void {
         this.next(this.fromPositional(values));
     }
 
+    /**
+     * Associate defined array entries with current view IDs; omit missing positions
+     * so later default materialization can fill them.
+     */
     private fromPositional(values: ReadonlyMap<string, readonly StyleOptionValue[]>): Map<string, Record<string, StyleOptionValue>> {
         return new Map([...values].map(([key, values]) => [key, Object.fromEntries(
             this.viewIds().flatMap((id, index) => values[index] === undefined ? [] : [[id, values[index]]])
@@ -868,6 +885,11 @@ export class StyleState extends AppState<Map<string, Record<string, StyleOptionV
         return this.fromPositional(new Map(Object.entries(parsed)));
     }
 
+    /**
+     * Encode options into the deployed style/layer/view URL layout described above.
+     * Ignore retired layers and omit option rows missing a value for any current view;
+     * extra view values are truncated rather than shifting the remaining positions.
+     */
     override serialize(_: boolean): Record<string, string> | undefined {
         const result: Record<string, string> = {};
         if (this.value.size === 0) {
@@ -960,6 +982,11 @@ export class StyleState extends AppState<Map<string, Record<string, StyleOptionV
         return result;
     }
 
+    /**
+     * Merge recognized option parameters into current values using layerNames and
+     * view order. A single view body broadcasts to all views for legacy links.
+     * Malformed records are skipped or logged, and values publish once after decoding.
+     */
     override deserialize(raw: string | Params) {
         try {
             // A raw local storage string must be converted to the Record<string, string>
@@ -1001,6 +1028,7 @@ export class StyleState extends AppState<Map<string, Record<string, StyleOptionV
                     const optionId = this.normalizeStyleOptionId(optionIds[oi]);
                     const optionBody = optionValueSegments[oi] ?? '';
                     const perView = optionBody.split(':'); // per-view strings
+                    // Older single-view links apply their options to every current view.
                     const effectivePerView = perView.length === 1 && numViews > 1
                         ? Array.from({ length: numViews }, () => perView[0])
                         : perView;

@@ -168,8 +168,9 @@ void main(void) {
 `;
 
 /**
- * Owns an offscreen MSAA scene target whose color is presented unchanged while
- * its resolved depth drives an inexpensive screen-space contact-shading pass.
+ * Owns an offscreen scene target with the canvas sample count. Resolved depth
+ * drives screen-space darkening of the resolved color; scene alpha is preserved.
+ * A failed target stays disabled until this compositor is replaced.
  */
 export class DeckContactShading {
     private readonly depthFormat: ContactDepthFormat | null;
@@ -205,7 +206,9 @@ export class DeckContactShading {
         this.model.predraw(device.commandEncoder);
     }
 
-    /** Allocates or resizes Deck's offscreen scene target and returns it for the next frame. */
+    /** Return a borrowed scene target for this drawing-buffer size, or null when
+     * unsupported, failed, or zero-sized. Its attachments remain owned here.
+     */
     prepare(): Framebuffer | null {
         if (!this.depthFormat || this.targetFailed) {
             return null;
@@ -224,7 +227,10 @@ export class DeckContactShading {
         return this.targetFailed ? null : this.deckFramebuffer;
     }
 
-    /** Resolves the completed scene and shades nearby lower surfaces when the pipeline is ready. */
+    /** Resolve the completed scene and composite it to the canvas using this viewport
+     * projection. Missing resources/invalid projection terms skip presentation;
+     * this method does not fall back to a plain color blit.
+     */
     render(viewport: Viewport): void {
         if (this.targetFailed || !this.colorTexture || !this.depthTexture
             || !this.sceneFramebuffer || !this.resolvedFramebuffer) {

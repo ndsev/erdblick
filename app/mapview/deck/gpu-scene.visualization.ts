@@ -378,8 +378,10 @@ interface ScenePickRecord {
   contributionIdentity: string;
   mapTileKey: string;
   featureIds: readonly FeaturePickIdentity[];
+
   /** Canonical target-map identities learned after an interacted foreign pick was located. */
   locatedTargets?: Map<string, TileFeatureId[]>;
+
   /** Exact persisted targets which resolve to this canonical merged scene row. */
   interactionAliases?: Set<string>;
   navigationAltitude?: number;

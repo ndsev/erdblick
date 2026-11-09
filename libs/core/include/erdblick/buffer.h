@@ -30,7 +30,11 @@ public:
     /** Return the current buffer size in bytes. */
     [[nodiscard]] uint32_t getSize() const;
 
-    /** Expose the raw storage pointer for bindings that need an address. */
+    /**
+     * Borrow the address of the current bytes for a WASM heap view.
+     * A write may reallocate storage; destruction invalidates the address.
+     * JavaScript must also recreate its heap view after WASM memory grows.
+     */
     uintptr_t getPointer();
 
     /** Replace the buffer contents with the bytes in the half-open range `[start, end)`. */
@@ -45,7 +49,7 @@ public:
     /** Interpret the current bytes as a string without applying any transcoding. */
     std::string toString() const;
 
-    /** Provide direct read access to the underlying byte storage. */
+    /** Borrow the vector; its contents and element addresses can change on the next write. */
     std::vector<uint8_t> const& bytes() const;
 
 private:

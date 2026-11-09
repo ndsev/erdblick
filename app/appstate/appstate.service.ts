@@ -50,16 +50,22 @@ type MutationOrigin = "user" | "system" | "hydration" | "config";
 export interface AppUrlProjection {
     /** Encodes current shareable values, extending the supplied non-state query parameters. */
     serialize(params: Record<string, string | string[]>): Record<string, string | string[]>;
+
     /** Restores a validated URL into its domain owners, including legacy positional links. */
     hydrate(params: Params): void;
+
     /** Runs startup migrations with accepted URL params, or an empty set after URL rejection. */
     initialize(params: Params): void;
+
     /** Aligns snapshot values and identities; replacement may generate IDs for omitted views. */
     prepareSnapshot(values: Record<string, unknown>, replaceMissing: boolean): Record<string, unknown>;
+
     /** Applies coordinated owner values and returns the keys already consumed before generic codecs run. */
     applySnapshot(values: Record<string, unknown>): ReadonlySet<string>;
+
     /** Validates an incoming query before navigation or resetting omitted values. */
     prepareUrl(params: Params, resetMissing: boolean): Params;
+
     /** Aligns legacy stored arrays with the identities selected by storage, config and URL. */
     prepareStoredViews(values: Map<string, string>, params: Params, configKeys: ReadonlySet<string>): void;
 }
@@ -86,10 +92,13 @@ export interface AppUrlProjection {
 export class AppStateService implements OnDestroy {
 
     private transactionDepth = 0;
+
     /** Slot notifications may stage derived values; drain them before the commit. */
     private publishing = false;
+
     /** Commit observers must all see the same values; their writes form the next edit. */
     private announcingCommit = false;
+
     /** New observers inside an edit wait for its completed or rolled-back values. */
     private readonly pendingInitialObservers = new Set<() => void>();
     private readonly deferredWrites: Array<() => void> = [];
@@ -97,10 +106,12 @@ export class AppStateService implements OnDestroy {
     private readonly publishedOrigins = new Map<AppState<unknown>, MutationOrigin>();
     private readonly projectionSources = new Map<AppState<unknown>, AppState<unknown>>();
     private readonly commits = new Subject<void>();
+
     /** Each nesting level records only the original values it actually touches. */
     private readonly rollbackFrames: Array<Map<AppState<unknown>, unknown>> = [];
     private urlProjection?: AppUrlProjection;
     private registrationSealed = false;
+
     /** Snapshot owners reconcile dependent values inside the enclosing import transaction. */
     readonly snapshotReplaced = new Subject<void>();
 
@@ -279,6 +290,7 @@ export class AppStateService implements OnDestroy {
 
     /** Becomes true once the initial config/storage/URL merge and migrations finish. */
     readonly ready = new BehaviorSubject<boolean>(false);
+
     /** Emits synchronously after an externally supplied state replacement has completed. */
     readonly stateApplied = new Subject<void>();
 
@@ -304,6 +316,7 @@ export class AppStateService implements OnDestroy {
     private readonly CONFIG_DEFAULT_STATE_META_KEY = "erdblickConfigDefaultStateMeta";
     private readonly SNAPSHOT_UNSAFE_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
     private readonly RETIRED_URL_PARAM_KEYS = new Set(["s"]);
+
     /**
      * Old snapshots/config defaults may contain values that are now runtime
      * metadata, removed preferences or server-owned catalogs. Ignore these keys
@@ -459,7 +472,7 @@ export class AppStateService implements OnDestroy {
         this.statePool.values().forEach(state => this.onStateChanged(state, true));
     }
 
-    /** Cancels pending persistence work when the service is destroyed. */
+    /** Releases slot subscriptions and the URL timer; queued storage microtasks may still run. */
     ngOnDestroy(): void {
         this.stateSubscriptions.forEach(subscription => subscription.unsubscribe());
         if (this.urlSyncHandle !== null) {
@@ -640,7 +653,7 @@ export class AppStateService implements OnDestroy {
         });
     }
 
-    /** Cancels any pending batched URL/storage synchronization timers. */
+    /** Discards queued writes and cancels the URL timer; an already scheduled storage flush may still run. */
     private cancelPendingStateSync(): void {
         // Prevent stale, queued writes from a previous URL hydration cycle.
         this.pendingStorageSyncStates.clear();
@@ -980,7 +993,7 @@ export class AppStateService implements OnDestroy {
 
     /**
      * Exports snapshot-eligible values through their deployed compatibility codecs.
-     * Local-only preferences stay out; style options retain their compact keys.
+     * Ineligible slots stay out; style options retain their compact keys.
      * This is a detached state document, separate from the browser's share URL.
      */
     exportSnapshot(): Record<string, unknown> {
@@ -1167,7 +1180,7 @@ export class AppStateService implements OnDestroy {
 
     /**
      * Validates a detached snapshot without writing any live value.
-     * Bound size/depth, reject unsafe object keys, discard retired or ineligible
+     * Bound serialized character count and depth, reject unsafe object keys, discard retired or ineligible
      * entries, validate coordinated view identities, then run each slot's schema.
      * Compact style-option keys are the one supported family outside the registry.
      */
@@ -1221,8 +1234,11 @@ export class AppStateService implements OnDestroy {
             return { errors };
         }
 
-        try { this.urlProjection?.prepareSnapshot(normalized, false); }
-        catch (error) { errors.push(error instanceof Error ? error.message : String(error)); }
+        try {
+            this.urlProjection?.prepareSnapshot(normalized, false);
+        } catch (error) {
+            errors.push(error instanceof Error ? error.message : String(error));
+        }
 
         // Validate all present entries before import to keep mutation transactional.
         for (const key of Object.keys(normalized)) {

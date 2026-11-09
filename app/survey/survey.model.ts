@@ -25,7 +25,7 @@ export const SURVEY_CONFIG_SCHEMA = z.object({
     background: z.string().optional()
 });
 
-/** Server and frontend allow-list for HTML fragments allowed in survey banners. */
+/** Checks a bounded fragment for allowed attribute-free tags; it does not validate nesting. */
 export function isAllowedSurveyLinkHtml(linkHtml: string): boolean {
     if (!linkHtml || linkHtml.length > 1024) {
         return false;
@@ -83,7 +83,7 @@ export function isAllowedSurveyLinkHtml(linkHtml: string): boolean {
     return true;
 }
 
-/** Normalizes configured survey links. */
+/** Keeps schema-valid entries with allowed banner markup; link URLs and calendar dates are not validated here. */
 export function normalizeSurveys(rawSurveys: unknown[] | undefined): SurveyConfig[] {
     if (!Array.isArray(rawSurveys)) {
         return [];

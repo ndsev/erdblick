@@ -11,9 +11,9 @@ namespace erdblick::base64
 {
 
 /**
- * Encode a vector to a base64 string.
+ * Encode a byte span to a base64 string.
  *
- * @param data  Vector to encode
+ * @param data  Bytes to encode
  */
 inline std::string encode(std::span<const std::uint8_t> data)
 {
@@ -21,7 +21,7 @@ inline std::string encode(std::span<const std::uint8_t> data)
 }
 
 /**
- * Decode a base64 encoded vector to an uint8 vector.
+ * Decode a base64 string into a byte vector.
  *
  * @param data  Base64 string to decode.
  */

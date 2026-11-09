@@ -3,6 +3,7 @@ import {z} from "zod";
 /** Application-wide point-cloud preferences; view allocations are derived at runtime. */
 export interface PointCloudPolicy {
     enabled: boolean;
+
     /** Retained for saved-state compatibility; count-based sampling ignores screen-space spacing. */
     detailPixels: number;
     workingMemoryMiB: number;

@@ -196,10 +196,13 @@ JsValue makeTypedArray(std::span<const T> data)
 #ifdef EMSCRIPTEN
 /** Tag type naming the JS constructor used by `makeTypedArray`. */
 struct Float32ArrayCtor { static constexpr auto value = "Float32Array"; };
+
 /** Tag type naming the JS constructor used by `makeTypedArray`. */
 struct Float64ArrayCtor { static constexpr auto value = "Float64Array"; };
+
 /** Tag type naming the JS constructor used by `makeTypedArray`. */
 struct Uint32ArrayCtor { static constexpr auto value = "Uint32Array"; };
+
 /** Tag type naming the JS constructor used by `makeTypedArray`. */
 struct Uint8ArrayCtor { static constexpr auto value = "Uint8Array"; };
 #endif

@@ -52,6 +52,11 @@ struct StyleValidationReport
     bool failedWholeStyleSheet = false;
     std::vector<StyleValidationIssue> issues;
 
+    /**
+     * Append an issue with a report-local ID and timestamp. Error severity marks
+     * the report invalid, but only markStylesheetFailed() makes it unloadable.
+     * The returned reference may be invalidated when another issue is appended.
+     */
     StyleValidationIssue& addIssue(
         std::string severity,
         std::string phase,
@@ -59,25 +64,44 @@ struct StyleValidationReport
         std::string message,
         std::optional<StyleSourceLocation> location = std::nullopt);
 
+    /** Mark a fatal document-level failure; callers can still retain collected issues. */
     void markStylesheetFailed();
+
     [[nodiscard]] NativeJsValue toJsValue() const;
 
 private:
     uint32_t nextIssueId_ = 1;
 };
 
+/** Convert a valid YAML mark to UI coordinates; an invalid mark yields no fields. */
 [[nodiscard]] StyleSourceLocation locationFromMark(YAML::Mark const& mark);
+
+/** Locate the beginning of a YAML node in the original source. */
 [[nodiscard]] StyleSourceLocation locationForNode(YAML::Node const& node);
+
+/**
+ * Map an expression-relative byte range using the first literal scalar match
+ * at or after its YAML mark. Return nullopt when no match exists; escaped or
+ * folded YAML scalars need not appear verbatim in the source.
+ */
 [[nodiscard]] std::optional<StyleSourceLocation> locationForExpression(
     YAML::Node const& node,
     std::string const& source,
     uint32_t expressionOffset,
     uint32_t expressionLength);
 
+/**
+ * Validate the document envelope before parsing rules. Failure adds an error
+ * and marks the whole stylesheet unloadable; individual rules are checked later.
+ */
 [[nodiscard]] bool validateTopLevelStyleYaml(
     YAML::Node const& styleYaml,
     StyleValidationReport& report);
 
+/**
+ * Check one option declaration. Invalid options produce warnings and return
+ * false so the caller can skip them while retaining the rest of the stylesheet.
+ */
 [[nodiscard]] bool validateStyleOptionYaml(
     YAML::Node const& optionYaml,
     uint32_t optionIndex,
@@ -92,6 +116,11 @@ private:
     std::set<std::string> const& editableBooleanOptionIds,
     StyleValidationReport& report);
 
+/**
+ * Validate one top-level rule and its nested styles, appending located issues.
+ * False tells the caller to skip this source rule; other top-level rules may load.
+ * sourceRuleIndex and rulePath identify the original YAML, not the compacted list.
+ */
 [[nodiscard]] bool validateStyleRuleYaml(
     YAML::Node const& ruleYaml,
     uint32_t sourceRuleIndex,

@@ -63,6 +63,7 @@ export class StyleDocumentEditorComponent implements OnChanges, OnDestroy {
         }
         this.scheduleValidation();
     }
+
     /** Publishes one AST patch through the ordinary editor session. */
     apply(edit: StyleDocumentEdit): void {
         if (!this.model || this.parseError) return;
@@ -78,14 +79,17 @@ export class StyleDocumentEditorComponent implements OnChanges, OnDestroy {
             this.invalidChange.emit(true);
         }
     }
+
     /** Keeps incomplete numeric input from silently applying the previous source value. */
     onProblem(problem: StyleInputProblem): void {
         if (problem.message) this.inputProblems.set(problem.path, problem.message);
         else this.inputProblems.delete(problem.path);
         this.reportValidity();
     }
+
     /** Releases pending work when the editor closes. */
     ngOnDestroy(): void { if (this.validationTimer) clearTimeout(this.validationTimer); }
+
     /** Debounces native parsing; it remains the sole semantic validator for both editor tabs. */
     private scheduleValidation(): void {
         if (this.validationTimer) clearTimeout(this.validationTimer);
@@ -107,6 +111,7 @@ export class StyleDocumentEditorComponent implements OnChanges, OnDestroy {
             this.reportValidity();
         }, 200);
     }
+
     /** Combines parse, native and local-buffer validity for the parent's Apply button. */
     private reportValidity(): void {
         this.invalidChange.emit(!!this.parseError || !!this.editError || !this.nativeValid || this.inputProblems.size > 0);

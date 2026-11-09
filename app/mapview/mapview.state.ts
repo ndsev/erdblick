@@ -43,8 +43,7 @@ import {
 
 /**
  * Logical map identity, allocated as a decimal integer. Keep its string form
- * distinct from positional numeric indices in per-view state APIs. Existing
- * links may still carry older named/UUID identities.
+ * distinct from positional numeric indices in per-view state APIs.
  */
 export type ViewId = string;
 

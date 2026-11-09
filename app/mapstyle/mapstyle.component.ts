@@ -712,6 +712,10 @@ export class StyleComponent implements OnDestroy {
 
     // Group visibility is derived from leaf styles; bind directly to node.visible.
 
+    /**
+     * Bind editor-open requests and refresh catalog-dependent quick forms while
+     * keeping their source/save session lifetime under the dialog open/close flow.
+     */
     constructor(public mapService: MapViewService,
         private messageService: InfoMessageService,
         public styleService: MapStyleService,
@@ -1261,6 +1265,10 @@ export class StyleComponent implements OnDestroy {
         this.closeEditorDialog(event);
     }
 
+    /**
+     * Retire the editor target and release its source/save subscriptions before
+     * closing the shared editor session; discard transient quick-form state.
+     */
     onEditorDialogHide() {
         this.styleEditorVisible = false;
         this.warningDialogVisible = false;
@@ -1766,6 +1774,7 @@ export class StyleComponent implements OnDestroy {
             this.messageService.showInfo('This style issue has no source location.');
             return;
         }
+
         /** Moves the editor cursor to the requested validation issue. */
         const reveal = () => this.editorService.revealLocation(this.styleEditorSessionId, {
             line: issue.location!.line!,

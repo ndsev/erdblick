@@ -31,7 +31,10 @@ import {
 /** Coordinates the shared URL layer/style/selection dictionary and legacy share-link migration. */
 @Injectable({ providedIn: "root" })
 export class AppUrlStateService implements AppActionContributor {
-    /** Validates identity first, so a malformed share link cannot partially replace state. */
+    /**
+     * Validates view identities before changing membership, then decodes the remaining
+     * slots independently. Invalid slot payloads can be skipped after valid values apply.
+     */
     hydrate(params: Params): void {
         if (!Object.keys(params).length) return;
         if (Array.isArray(params["vid"])) throw new Error("The share link contains more than one view ID list.");
@@ -55,8 +58,10 @@ export class AppUrlStateService implements AppActionContributor {
         const count = values["numberOfViews"] ?? (Array.isArray(ids) ? ids.length : replaceMissing ? 1 : this.viewSettings.numViews);
         const nextIds = this.viewSettings.prepareImportedViews(count, ids, replaceMissing);
         return {
-            viewIds: nextIds, numberOfViews: nextIds.length,
-            focus: Math.max(0, nextIds.indexOf(this.viewSettings.focusedViewIdState.value)), ...values
+            viewIds: nextIds,
+            numberOfViews: nextIds.length,
+            focus: Math.max(0, nextIds.indexOf(this.viewSettings.focusedViewIdState.value)),
+            ...values
         };
     }
 
@@ -328,7 +333,8 @@ export class AppUrlStateService implements AppActionContributor {
     private hasStyleOptionParams(params: Params): boolean {
         return Object.keys(params).some(key => this.layerState.stylesState.isStyleOptionUrlParamKey(key));
     }
-    /** Registers semantic operations and their live omnibar candidates. */
+
+    /** Registers the read-only action that reports the current browser share link. */
     registerActions(actions: AppActionRegistration): void {
         actions.registerAction(
             {

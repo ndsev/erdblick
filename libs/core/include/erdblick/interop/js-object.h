@@ -27,13 +27,9 @@ template<typename T>
 struct always_false : std::false_type {};
 
 /**
- * Class representing an emscripten JavaScript object,
- * or a mock object based on an nlohmann::json value 
- * for debugging or compiling without emscripten support.
- *
- * The mock object has two JSON fields:
- * - `properties` is a dict recording all field accesses.
- * - `methodCalls` is a list containing dicts like {`methodName`: ..., `arguments`: [...]}.
+ * Wraps an Emscripten JavaScript value or a native-build JSON stand-in.
+ * Native properties are stored directly; call() additionally records invocations
+ * in `methodCalls`. Copies share JS object handles but copy native JSON values.
  */
 struct JsValue
 {
@@ -50,14 +46,14 @@ struct JsValue
 
     /**
      * Construct an Object from a global JavaScript name using em::val::global.
-     * If EMSCRIPTEN is not defined, simply returns an empty JSON object.
+     * Native builds return a JSON object with a `globalName` marker.
      */
     static JsValue fromGlobal(std::string const& globalName);
 
     /** Convert a tagged native partition without narrowing an object ID. */
     static JsValue fromPartition(mapget::PartitionId const& partition);
 
-    /** Project one exact type for inspection/style UI without exporting its schema graph. */
+    /** Projects one type without its graph; large integers use decimal strings and masks use hex strings. */
     static JsValue fromSchema(simfil::SchemaType const& type);
 
     /** Preserve a mask's raw uint64 bits and exact schema/type identity at the JS boundary. */
@@ -72,6 +68,7 @@ struct JsValue
 
     /**
      * Construct an Object as a new JS or JSON dictionary with provided initializers.
+     * An empty native dictionary is represented by JSON null until a field is set.
      * @param initializers An initializer list of key-value pairs.
      */
     static JsValue Dict(std::initializer_list<std::pair<std::string, JsValue>> initializers = {});
@@ -83,35 +80,35 @@ struct JsValue
     static JsValue List(std::initializer_list<JsValue> initializers = {});
 
     /**
-     * Construct an Object as a new JS Float32 TypedArray.
+     * Copy data into a JS Float32Array, or a plain JSON array in native builds.
      * @param data Float32 buffer to fill the typed array.
      */
     static JsValue Float32Array(std::span<const float> data);
 
     /**
-     * Construct an Object as a new JS Float64 TypedArray.
+     * Copy data into a JS Float64Array, or a plain JSON array in native builds.
      * @param coordinates Float64 buffer to fill the typed array.
      */
     static JsValue Float64Array(std::span<const double> data);
 
     /**
-     * Construct a Uint32Array object, filled with the data passed.
+     * Copy data into a JS Uint32Array, or a plain JSON array in native builds.
      * @param data Data to pass to the Uint32Array
      */
     static JsValue Uint32Array(std::span<const std::uint32_t> data);
 
     /**
-     * Construct a Uint8Array object, filled with the data passed.
+     * Copy data into a JS Uint8Array, or a base64 JSON string in native builds.
      * @param data Data to pass to the Uint8Array
      */
     static JsValue Uint8Array(std::span<const std::uint8_t> data);
 
     /**
-     * Construct an undefined value.
+     * Construct JS undefined, or the literal string "<undefined>" in native builds.
      */
     static JsValue Undefined();
 
-    /** Construct a JsValue from a variant with specific alternatives. */
+    /** Converts string/string_view/int64 variants; integers are narrowed to double on both backends. */
     template<typename T>
     static JsValue fromVariant(T const& variant) {
         JsValue result;
@@ -151,14 +148,15 @@ struct JsValue
     /**
      * Templated method for making arbitrary method calls.
      * For EMSCRIPTEN, it will utilize the value_.call<ReturnType>(Args...) function.
-     * For the mock version, it will add the method call to `methodCalls` and return an empty Object.
+     * The native version records the call in `methodCalls` and default-constructs ReturnType.
      */
     template<typename ReturnType=NativeJsValue, typename... Args>
     ReturnType call(std::string const& methodName, Args... args);
 
     /**
      * Property access using operator[].
-     * Read-access to a non-existing mock property will add the property as an empty object (if non-const).
+     * A missing native property becomes null on non-const access; const access
+     * returns null without inserting it. JS access preserves ordinary JS semantics.
      */
     JsValue operator[](std::string const& propertyName);
     JsValue operator[](std::string const& propertyName) const;
@@ -183,7 +181,7 @@ struct JsValue
     /**
      * Append a value, assuming that this value is a JS list.
      * For EMSCRIPTEN, it will use value_.push(o.value_).
-     * For the mock version, it will append the push action to `methodCalls`.
+     * Native builds append directly to the JSON array.
      */
     void push(const JsValue& o);
 
@@ -228,15 +226,13 @@ struct JsValue
     #endif
     }
 
-    /**
-     * Dereference operator to access the underlying value.
-     */
     /** Access the wrapped native object for low-level interop code. */
     inline NativeJsValue& operator*() {return value_;};
+
     /** Access the wrapped native object for low-level interop code. */
     inline const NativeJsValue& operator*() const {return value_;};
 
-    /** Turn a [key, value, keyN, valueN, ...] list into KeyValuePairs. */
+    /** Converts an even-length list with string keys; retains string/int64 values and skips other types. */
     [[nodiscard]] mapget::KeyValuePairs toKeyValuePairs() const;
 
     /**

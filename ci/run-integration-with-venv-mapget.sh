@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Use the repository venv's mapget package for integration tests; create its launcher if absent.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ ! -x "$ROOT/venv/bin/python" ]]; then

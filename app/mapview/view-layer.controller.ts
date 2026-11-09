@@ -186,15 +186,19 @@ export class ViewLayerController {
                 if (workingMiB > previousCloudWorkingMiB) {
                     for (const owned of this.styledLayers.values()) {
                         if ([...owned.layer.tileStates.values()].some(state =>
-                            state.pointCloudInputRejected && !state.backendPending)) owned.layer.refresh();
+                            state.pointCloudInputRejected && !state.backendPending))
+                            owned.layer.refresh();
                     }
                 }
                 previousCloudWorkingMiB = workingMiB;
+
                 const owners = [...this.styledLayers.values(),
-                ...[...this.retiringRegularLayers.values()].map(value => value.owned)];
+                    ...[...this.retiringRegularLayers.values()].map(value => value.owned)];
                 for (const owned of owners)
                     for (const visualization of owned.visualizations.values())
-                        visualization.setPointCloudScale(this.viewState.viewStateFor(this.viewIndex)?.metersPerPixel ?? null, reclaim);
+                        visualization.setPointCloudScale(
+                            this.viewState.viewStateFor(this.viewIndex)?.metersPerPixel ?? null,
+                            reclaim);
                 this.scheduleReconcile();
             }),
             this.renderService.capacityChanged.subscribe(() =>
@@ -204,7 +208,10 @@ export class ViewLayerController {
         this.scheduleReconcile();
     }
 
-    /** Attach a fresh renderer generation and replay every retained contribution. */
+    /**
+     * Rebind retained active and fallback visualizations to a new scene and queue
+     * their replay under the shared worker budget; replay is not complete on return.
+     */
     attachScene(sceneHandle: IRenderSceneHandle): void {
         this.ngZone.runOutsideAngular(() => {
             this.sceneHandle = sceneHandle;
@@ -224,14 +231,18 @@ export class ViewLayerController {
         });
     }
 
-    /** Stop publishing into a renderer generation that is being destroyed. */
+    /**
+     * Stop dispatching new work to this renderer. The caller still owns renderer
+     * teardown; this does not cancel work already held by its visualizations.
+     */
     detachScene(): void {
         this.sceneHandle = null;
     }
 
     /**
-     * Tear down one map's active presentation and request a fresh transport
-     * generation without changing coverage, styles, visibility, or view state.
+     * Clear this map's regular/interaction presentations and request fresh
+     * transport generations with their existing demand. SearchService retains its
+     * search presentations; this method skips them and removes regular fallbacks.
      */
     refreshMap(mapId: string): void {
         if (this.disposed || !mapId) {
@@ -299,7 +310,10 @@ export class ViewLayerController {
             .filter(layer => layer.identity.presentationKind === "regular");
     }
 
-    /** Current presentation state exposed read-only to diagnostics. */
+    /**
+     * Snapshot references to current styled layers, excluding retiring fallbacks.
+     * Diagnostics must treat the borrowed layer objects as read-only.
+     */
     diagnosticStyledLayers(): Iterable<StyledMapgetLayer> {
         return [...this.styledLayers.values()].map(owned => owned.layer);
     }
@@ -360,12 +374,17 @@ export class ViewLayerController {
         return "unknown";
     }
 
-    /** Release every logical layer, worker request, diagnostic hook, and subscription. */
+    /**
+     * Retire this view's visualizations, queued work and subscriptions once.
+     * Controller-owned layers are disposed; search-layer transport ownership stays
+     * with SearchService. In-flight object discovery is ignored when it settles.
+     */
     dispose(): void {
         if (this.disposed) {
             return;
         }
         this.disposed = true;
+
         this.subscriptions.splice(0).forEach(subscription => subscription.unsubscribe());
         for (const owned of this.styledLayers.values()) {
             this.destroyOwnedLayer(owned);
@@ -377,12 +396,14 @@ export class ViewLayerController {
         this.retiringRegularLayers.clear();
         this.pendingVisualizationRenders.clear();
         this.localInteractionOverlaysByLayer.clear();
+
         for (const state of this.objectCoverageByLayer.values()) {
             if (state.timer !== null) {
                 clearTimeout(state.timer);
             }
         }
         this.objectCoverageByLayer.clear();
+
         this.hoverDetails.clearView(this.viewIndex);
         this.renderService.clearDeckFrameTime(this.viewIndex);
         this.renderService.clearDeckPresentationDiagnostics(this.viewIndex);
@@ -453,11 +474,11 @@ export class ViewLayerController {
     }
 
     /**
-     * Exact cheap signature for presentation demand affected by viewport
-     * motion. Regular coverage is versioned by ViewVisualizationState, while
+     * Signature of the viewport inputs used to decide whether demand needs another
+     * reconciliation. Regular coverage is versioned by ViewVisualizationState, while
      * integer planning and quantized presentation LOD are explicit because
      * density may change without changing the exact visible tile set.
-     * search coverage is versioned by its StyledMapgetLayer and its density
+     * Search coverage is versioned by its StyledMapgetLayer and its density
      * decision is represented once per occupied source level.
      */
     private viewportPresentationSignature(): string {
@@ -588,7 +609,8 @@ export class ViewLayerController {
                 ) as StyleFilterPlan;
                 if (!this.renderService.pointCloudPolicy.enabled) {
                     for (const channel of plan.channels)
-                        if (channel.pointCloudMaxPoints !== undefined) channel.pointCloudMaxPoints = 0;
+                        if (channel.pointCloudMaxPoints !== undefined)
+                            channel.pointCloudMaxPoints = 0;
                 }
                 if (!plan.channels.length) {
                     continue;
@@ -628,6 +650,7 @@ export class ViewLayerController {
             });
         }
         this.hoverDetails.reconcileView(this.viewIndex, hoverDetailCoverage);
+
         // A fast LOD reversal can reuse the still-present retiring owner
         // before the current successor is retired in the pass below.
         for (const [key, next] of desired) {
@@ -732,6 +755,7 @@ export class ViewLayerController {
             this.reconcileOwnedVisualizations(owned);
             this.releaseRegularFallbackWhenReady(owned);
         }
+
         const desiredReplacementSlots = new Set(
             [...desired.values()].map(next => next.replacementSlot)
         );
@@ -743,6 +767,7 @@ export class ViewLayerController {
             this.retiringRegularLayers.delete(slot);
             this.destroyOwnedLayer(fallback.owned);
         }
+
         this.reconcileSearchLayers(orderedStyles.length);
         const interactionViewportSignature =
             this.interactionViewportSignature();
@@ -836,7 +861,10 @@ export class ViewLayerController {
         }
     }
 
-    /** Keeps one fully rendered regular owner as the visual replacement fallback. */
+    /**
+     * Suspend one retiring regular owner and retain its existing presentation as
+     * fallback. This does not require all of its tiles to have finished rendering.
+     */
     private retainAsRegularFallback(
         slot: string,
         key: string,
@@ -980,7 +1008,10 @@ export class ViewLayerController {
         return `search/${layer.ownerId}`;
     }
 
-    /** Reconciles exact-ID hover and selection bundles through the normal filter path. */
+    /**
+     * Use local masks for retained semantic targets and immutable filter owners for
+     * authored interaction geometry. Whole-feature relation rules remain additive.
+     */
     private reconcileHighlightLayers(orderedStyles: readonly ErdblickStyle[]): void {
         const selectedTargets = this.inspection.selectionIdsTopic.getValue()
             .flatMap(panel => panel.features);
@@ -1699,7 +1730,7 @@ export class ViewLayerController {
         this.schedulePendingTiles();
     }
 
-    /** Re-render a changed ready tile or reserve its first worker credit. */
+    /** Queue a changed ready tile; worker credit is consumed later during dispatch. */
     private reconcileReadyTile(
         owned: OwnedStyledLayer,
         state: FilterTileState
@@ -1785,7 +1816,10 @@ export class ViewLayerController {
         });
     }
 
-    /** Dispatch changed and newly visible singleton tiles under one worker budget. */
+    /**
+     * Spend available worker slots on queued rerenders first, then pending tiles.
+     * Newly admitted tiles rotate across active styled layers.
+     */
     private drainPendingTiles(): void {
         if (!this.sceneHandle) {
             return;
@@ -1887,7 +1921,11 @@ export class ViewLayerController {
         this.scheduleInteractionPresenceReconcile(owned.layer, key);
     }
 
-    /** Remove one coverage delta as a single scene and diagnostics transaction. */
+    /**
+     * Retire local tile owners and batch their persistent vector removals. GLTF,
+     * mask and pending-successor cleanup occurs separately; this is not a rollback
+     * boundary for the whole coverage change.
+     */
     private removeTileVisualizations(
         owned: OwnedStyledLayer,
         states: readonly FilterTileState[]
@@ -1922,7 +1960,10 @@ export class ViewLayerController {
         }
     }
 
-    /** Replace one tile owner while retaining its installed contribution until admission. */
+    /**
+     * Replace a tile owner, preserving its GPU identity only when requeueing the
+     * same still-demanded ready state. Otherwise retire the old contribution now.
+     */
     private replaceVisualization(
         owned: OwnedStyledLayer,
         key: string,
@@ -2068,8 +2109,9 @@ export class ViewLayerController {
     }
 
     /**
-     * Return the last complete object union and asynchronously refresh it when
-     * the fixed-level discovery footprint or semantic TTL changes.
+     * Return the last completed object union while refreshing a changed discovery
+     * footprint or expired semantic TTL. Superseded replies are ignored, not aborted.
+     * A failed refresh retains old coverage and retries after one second.
      */
     private objectPartitionsForViewport(
         layer: MapgetLayer
@@ -2149,7 +2191,10 @@ export class ViewLayerController {
         return state.partitions;
     }
 
-    /** Preserve cached viewport-array identity across its tagged representation. */
+    /**
+     * Cache tagged partitions by viewport-array identity. Callers must replace
+     * coverage arrays rather than mutate them in place.
+     */
     private tilePartitionsForCoverage(
         tileIds: readonly number[]
     ): readonly PartitionId[] {
@@ -2161,7 +2206,10 @@ export class ViewLayerController {
         return partitions;
     }
 
-    /** Avoid rescanning unchanged large coverage arrays on non-viewport reconciliations. */
+    /**
+     * Forward coverage only when either immutable array identity changes; array
+     * contents are not compared for in-place edits.
+     */
     private setRegularCoverage(
         layer: StyledMapgetLayer,
         partitions: readonly PartitionId[],

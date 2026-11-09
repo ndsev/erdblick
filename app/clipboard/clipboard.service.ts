@@ -8,7 +8,10 @@ export class ClipboardService {
 
     constructor(private messageService: InfoMessageService) {}
 
-    /** Copies text to the system clipboard or opens a manual-copy dialog on failure. */
+    /**
+     * Copy asynchronously, falling back to a manual dialog when unavailable or
+     * rejected. Synchronous setup failures are logged; completion is not awaited.
+     */
     copyToClipboard(text: string, info?: string) {
         try {
             const hint = "The clipboard is not available due to missing secure context (HTTPS). Copy the content manually:";

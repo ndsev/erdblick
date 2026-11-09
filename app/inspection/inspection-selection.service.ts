@@ -58,6 +58,7 @@ export class InspectionSelectionService implements AppActionContributor {
     readonly hoverIdsTopic = new BehaviorSubject<TileFeatureId[]>([]);
     readonly selectionIdsTopic =
         new BehaviorSubject<InspectionPanelModel<TileFeatureId>[]>([]);
+
     /** Allows remote style filters only while an inspection-owned hover is active. */
     remoteHoverHighlightAllowed = false;
 
@@ -80,7 +81,7 @@ export class InspectionSelectionService implements AppActionContributor {
         this.keyboardService.registerShortcut("Ctrl+j", this.zoomToFocusedInspectionPanel.bind(this));
     }
 
-    /** Wires app-state selection projection once the tile stream can serve feature loads. */
+    /** Call once after tile-stream initialization to subscribe selection projection and expiry ownership. */
     initialize(): void {
         this.inspectionState.state.selectionState.subscribe((selected) => {
             this.ngZone.run(() => this.selectionIdsTopic.next(selected));
@@ -268,7 +269,7 @@ export class InspectionSelectionService implements AppActionContributor {
         return featureIds.map(feature => `${feature.mapTileKey}\u0000${feature.featureId}`).sort().join("\u0001");
     }
 
-    /** Shares one in-flight restricted load across rapid panel-state emissions. */
+    /** Shares one in-flight load for the same unordered feature identities across panel-state emissions. */
     private loadFeaturesOnce(featureIds: TileFeatureId[]): Promise<FeatureWrapper[]> {
         const key = this.featureLoadKey(featureIds);
         const pending = this.pendingFeatureLoads.get(key);
@@ -408,7 +409,7 @@ export class InspectionSelectionService implements AppActionContributor {
         this.hoverIdsTopic.next(hoverTargets);
     }
 
-    /** Reconciles one shared-heap handle per retained inspection tile value. */
+    /** Reconciles one expiry owner per panel/tile group, using its earliest feature expiry. */
     private reconcileInspectionExpiries(
         values: Array<{ panelId: number; feature: FeatureWrapper }>
     ): void {
@@ -481,7 +482,7 @@ export class InspectionSelectionService implements AppActionContributor {
         }
     }
 
-    /** Refreshes one still-retained tile and atomically replaces matching wrappers. */
+    /** Reloads one retained panel/tile group; missing refreshed features keep their existing wrappers. */
     private async renewInspectionOwner(
         owner: InspectionExpiryOwner,
         tokens: ReadonlyArray<{
@@ -538,12 +539,15 @@ export class InspectionSelectionService implements AppActionContributor {
         });
     }
 
-    /** Loads a feature and centers the target view on its reported center point. */
+    /** Loads a feature, then moves surviving captured views to its approximate fit target. */
     async focusOnFeature(viewIndex: number | undefined, tileFeatureId: TileFeatureId) {
         // Capture every eligible renderer before loading. An unspecified target still
         // means all matching visible views, with the captured focused view as fallback.
         const targets = (viewIndex === undefined ? this.viewSettings.viewIds : [this.viewSettings.viewIds[viewIndex]])
-            .flatMap(id => { const target = id ? this.viewState.captureView(id) : undefined; return target ? [target] : []; });
+            .flatMap(id => {
+                const target = id ? this.viewState.captureView(id) : undefined;
+                return target ? [target] : [];
+            });
         const focusedId = this.viewSettings.viewIdAt(this.viewSettings.focusedView);
         if (!targets.length) return;
         this.viewState.navigationStarted.next();
@@ -592,7 +596,7 @@ export class InspectionSelectionService implements AppActionContributor {
 
     /**
      * Moves one or more views to a feature using Deck's WGS84 camera path.
-     * Passing `undefined` targets every view that currently shows the feature tile.
+     * Passing `undefined` targets views showing the tile, or the focused view if none do.
      */
     zoomToFeature(viewIndex: number | undefined, featureWrapper: FeatureWrapper) {
         const targetViews = this.targetViewsForFeatureZoom(viewIndex, featureWrapper.featureTile);
@@ -603,7 +607,7 @@ export class InspectionSelectionService implements AppActionContributor {
         if (target) targetViews.forEach(vi => this.viewState.moveToWgs84PositionTopic.next({ targetView: vi, ...target }));
     }
 
-    /** Computes the ordinary fit target for a small explicit feature set before any camera/focus mutation. */
+    /** Computes an approximate fit from native centers/radii; returns undefined if any center is unavailable. */
     featureSetZoomTarget(features: readonly FeatureWrapper[]): Wgs84Point | undefined {
         const spheres = features.flatMap(wrapper => wrapper.peek((feature: Feature) => {
             const center = feature.center() as Wgs84Point;
@@ -675,7 +679,7 @@ export class InspectionSelectionService implements AppActionContributor {
         });
     }
 
-    /** Validates the WGS84 point shape returned by the WASM feature bindings. */
+    /** Checks finite longitude/latitude components; coordinate ranges and height are not validated here. */
     private isFiniteWgs84Point(point: Wgs84Point | undefined): point is Wgs84Point {
         return !!point && Number.isFinite(point.x) && Number.isFinite(point.y);
     }
@@ -705,7 +709,8 @@ export class InspectionSelectionService implements AppActionContributor {
     private showErrorMessage(message: string) {
         this.messageService.showError(message);
     }
-    /** Registers semantic operations and their live omnibar candidates. */
+
+    /** Registers inspection and source-data actions backed by the existing selection owners. */
     registerActions(actions: AppActionRegistration): void {
         actions.registerAction(
             {
@@ -795,7 +800,7 @@ export class InspectionSelectionService implements AppActionContributor {
         );
     }
 
-    /** Registers typed state readers and writers without exposing persistence keys. */
+    /** Registers a read-only summary of inspection identities and loading state. */
     registerControls(actions: AppActionRegistration): void {
         actions.registerControl(
             {

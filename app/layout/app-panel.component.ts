@@ -293,6 +293,10 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
         this.scheduleBodySizeChange();
     }
 
+    /**
+     * Expand toward the owner's preferred height, measured content or default,
+     * without shrinking an already larger panel.
+     */
     private expandToPreferredHeight(): void {
         const preferredHeight = this.preferredBodyHeightPx()
             ?? this.measuredContentHeightPx()
@@ -378,6 +382,10 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
         document.body.style.userSelect = session.bodyUserSelect;
     }
 
+    /**
+     * Clamp a valid requested height, persist the resulting panel state, and notify
+     * children on the next animation frame so renderers can measure the new body.
+     */
     private applyBodyLayout(heightPx: number, expanded: boolean): void {
         if (!Number.isFinite(heightPx) || heightPx <= 0) {
             return;
@@ -388,6 +396,10 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
         this.scheduleBodySizeChange();
     }
 
+    /**
+     * Publish expansion changes in a microtask to avoid changing parent bindings
+     * during the current component update.
+     */
     private applyExpanded(expanded: boolean): void {
         if (this.expanded === expanded) {
             return;
@@ -396,6 +408,10 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
         queueMicrotask(() => this.expandedChange.emit(expanded));
     }
 
+    /**
+     * Persist the measured pixel size and expansion flag only for opted-in panels
+     * with a stable layout ID and a known body height.
+     */
     private persistBodyLayout(): void {
         if (!this.persistLayout || !this.layoutId || !this.panelBodyHeightPx) {
             return;
@@ -410,6 +426,10 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
         });
     }
 
+    /**
+     * Use content width, then container width, then a 30-em fallback before the
+     * panel has been measured; persisted widths are rounded to whole pixels.
+     */
     private currentBodyWidthPx(): number {
         const contentWidth = this.contentRef?.nativeElement.getBoundingClientRect().width;
         if (Number.isFinite(contentWidth) && contentWidth! > 0) {
@@ -422,6 +442,10 @@ export class AppPanelComponent implements AfterViewInit, OnChanges, OnDestroy {
         return Math.round(30 * this.layout.baseFontSize);
     }
 
+    /**
+     * Evaluate the owner's optional height preference in em and convert to pixels;
+     * invalid or non-positive preferences let the caller use measured content.
+     */
     private preferredBodyHeightPx(): number | undefined {
         const preferred = typeof this.preferredBodyHeightEm === 'function'
             ? this.preferredBodyHeightEm()

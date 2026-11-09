@@ -139,6 +139,7 @@ InspectionConverter::InspectionNode& convertSourceDataReferences(const model_ptr
     return node;
 }
 
+/** Uses a signed big-endian decimal summary when possible, otherwise hexadecimal bytes. */
 auto byteArrayToDisplayString(const simfil::ByteArray& value) -> std::string
 {
     if (auto decoded = value.decodeBigEndianI64())
@@ -1023,6 +1024,8 @@ BubblePropagation buildPropagatedValueBubbles(InspectionNode& node, std::string_
         for (auto const& bubble : childPropagation.bubbles_) {
             childRank = std::min(childRank, bubbleContributionRank(bubble, isCountField));
         }
+        // Prefer meaningful values over counts/complete validity/empty masks. A
+        // better-ranked sibling replaces earlier summaries and restores their budget.
         if (!bestContributionRank || childRank < *bestContributionRank) {
             bestContributionRank = childRank;
             childContributions.clear();
@@ -1248,6 +1251,7 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
         });
     }
 
+    // Assign row IDs before summaries copy their navigation targets.
     finalizeTree(root_);
     return root_.childrenToJsValue(tile_->mapId());
 }

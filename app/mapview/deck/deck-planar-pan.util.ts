@@ -8,6 +8,7 @@ import type {WebMercatorViewport} from "@deck.gl/core";
 /**
  * Translates a perspective Web-Mercator camera parallel to the world plane so the
  * centre-ground point moves by the requested view-local pixel offset.
+ * Returns null when the viewport cannot project its center onto finite ground coordinates.
  */
 export function planarPanViewState(
     viewport: WebMercatorViewport,

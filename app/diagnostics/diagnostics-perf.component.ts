@@ -236,6 +236,10 @@ export class DiagnosticsPerformanceDialogComponent implements OnDestroy {
     private readonly subscriptions: Subscription[] = [];
     private appliedPerformanceScopeRequestId: number | null = null;
 
+    /**
+     * Rebuild performance choices/tree when measurements change, and apply an
+     * explicit requested scope after its available map/layer/tile choices are refreshed.
+     */
     constructor(public readonly diagnostics: DiagnosticsFacadeService,
         public readonly stateService: AppStateService,
         private readonly dialogStack: DialogStackService,

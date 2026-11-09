@@ -89,6 +89,10 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
 
     private readonly subscription: Subscription;
 
+    /**
+     * Project each export request into dialog options and the session's layer choices.
+     * The component owns and releases this subscription when destroyed.
+     */
     constructor(public readonly searchService: SearchService,
         public readonly stateService: AppStateService,
         private readonly dialogStack: DialogStackService,
@@ -179,6 +183,10 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
         };
     }
 
+    /**
+     * Rebuild export choices from the requested search session and initially select
+     * all of its source layers; retired sessions produce an empty choice list.
+     */
     private refreshMapLayerOptions(request: FeatureSearchExportDialogRequest | null): void {
         const session = request ? this.searchService.getSession(request.searchId) : undefined;
         this.mapLayerOptions = (session?.definition.selectedMapLayers ?? []).map(ref => ({
@@ -208,6 +216,10 @@ export class FeatureSearchExportDialogComponent implements OnDestroy {
         };
     }
 
+    /**
+     * Serialize search values with the shared JSON replacer, trigger a browser download
+     * and release the temporary link/object URL after dispatch.
+     */
     private downloadJsonFile(filename: string, payload: unknown): void {
         const source = JSON.stringify(payload, featureSearchJsonReplacer, 2) ?? "null";
         const blob = new Blob([source], { type: "application/json;charset=utf-8" });

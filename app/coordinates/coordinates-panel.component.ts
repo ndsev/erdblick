@@ -110,6 +110,10 @@ export class CoordinatesPanelComponent implements OnDestroy {
     readonly ndsCoordinatesOption = NDS_COORDINATES_OPTION;
     private subscriptions: Subscription[] = [];
 
+    /**
+     * Project persisted marker edits and frame-coalesced pointer samples into the
+     * coordinate HUD; this component releases the collected subscriptions on destroy.
+     */
     constructor(public mapService: MapViewService,
         public coordinatesService: CoordinatesService,
         public clipboardService: ClipboardService,

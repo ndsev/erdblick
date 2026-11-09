@@ -170,6 +170,7 @@ export function normalizeTileFeatureId(value: TileFeatureIdLike | string | null 
  * Parses the inspection suffix shared by native picking, search results, and
  * inspection panels. The comma before `validity` is accepted for old URLs;
  * newly formatted targets always use a colon.
+ * This parses syntax only; callers validate index range and target existence.
  */
 export function parseFeatureInspectionTarget(targetId: string): FeatureInspectionTarget {
     const match = targetId.match(

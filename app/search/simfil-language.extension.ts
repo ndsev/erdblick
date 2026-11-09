@@ -21,6 +21,10 @@ const simfilKeywords = new Set([
 
 /** Lightweight SIMFIL tokenizer for inline expression highlighting. */
 export const simfilLanguage = StreamLanguage.define({
+    /**
+     * Consume one editor token, tolerating an unfinished quoted string while typing.
+     * Unknown characters still advance the stream; validation remains in SIMFIL.
+     */
     token(stream: StringStream): string | null {
         if (stream.eatSpace()) {
             return null;

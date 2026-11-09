@@ -38,6 +38,7 @@ const SEMANTIC_PASS_PARAMETERS: RenderPipelineParameters = {
     cullMode: "none",
     blend: false
 };
+
 /**
  * Normalized fixed-depth bias shared by the visible and picking composites.
  *

@@ -39,7 +39,7 @@ const iconCatalog = new Map<string, TileSubsetGpuIconCatalogEntry>();
 let iconCatalogVersion = -1;
 let cachedPointCloudInput: {key: string; subset: ReturnType<TileLayerParser["readTileSubsetLayer"]>} | null = null;
 
-/** Install a complete small catalog snapshot only when the main version advances. */
+/** Replace the icon catalog when supplied, then require its version to match the render task. */
 function installIconCatalog(task: TileSubsetLayerRenderTask): void {
     if (task.iconCatalogEntries) {
         iconCatalog.clear();
@@ -56,7 +56,11 @@ function installIconCatalog(task: TileSubsetLayerRenderTask): void {
     }
 }
 
-/** Validate a complete map/schema snapshot before acknowledging task admission. */
+/**
+ * Bind a new map/schema snapshot before retiring that map's previous parser.
+ * Repeated installs for the same revision add schemas to its existing parser;
+ * that path keeps earlier additions if a later artifact fails.
+ */
 function installCatalog(message: TileSubsetLayerRenderCatalogInstall): void {
     const key = `${message.catalogRevision}:${message.mapId}`;
     const existing = parserCache.get(key);
@@ -135,7 +139,11 @@ function installFieldDict(
     );
 }
 
-/** Resolve an immutable compiled stylesheet, requiring source on the first use. */
+/**
+ * Resolve a compiled stylesheet, requiring source on first use of its key.
+ * Keys must identify immutable source: later supplied text is ignored on a hit.
+ * Compiled styles remain cached for the worker's lifetime.
+ */
 function styleFor(key: string, source?: string): FeatureLayerStyle {
     const cached = styleCache.get(key);
     if (cached) {
@@ -157,7 +165,7 @@ function styleFor(key: string, source?: string): FeatureLayerStyle {
     return style;
 }
 
-/** Reuse native scratch and packet storage for one immutable style context. */
+/** Reuse native scratch by style, highlight mode, LOD and point-cloud revision, evicting least-recently used renderers. */
 function rendererFor(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderer {
     const key = JSON.stringify([
         task.styleKey,
@@ -191,7 +199,11 @@ function rendererFor(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderer {
     return renderer;
 }
 
-/** Deserialize and render exactly one tile contribution into bounded packet fragments. */
+/**
+ * Deserialize one contribution and return its packets/bridge data or a task error.
+ * Point-cloud input remains native-owned for reuse by matching revisions; other
+ * subset handles are released after rendering, and renderer scratch is reset.
+ */
 function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
     const startedAt = performance.now();
     let subset: ReturnType<TileLayerParser["readTileSubsetLayer"]> | null = null;
@@ -262,6 +274,8 @@ function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
         const runStartedAt = performance.now();
         renderer.run();
         const runMs = performance.now() - runStartedAt;
+
+        // Materialize the packet and bridge buffers before resetting native renderer scratch.
         const packetStartedAt = performance.now();
         const packets = Array.from(
             renderer.renderPackets() as ArrayLike<Uint8Array>
@@ -352,6 +366,8 @@ self.onmessage = async (event: MessageEvent<TileSubsetLayerRenderWorkerInbound>)
             error: error instanceof Error ? error.message : String(error)
         };
     }
+
+    // Transfer each backing buffer once; the worker relinquishes ownership to the main thread.
     const transferables = result.packets && result.bridge
         ? [
             ...result.packets.map(packet => packet.buffer),

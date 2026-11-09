@@ -105,6 +105,9 @@ export class FilterTileState {
      * Same-generation responses are ordered by semantic lifetime rather than
      * transport arrival. Returning false is a benign supersession; identity
      * mismatches still throw because the current handoff cannot be acknowledged.
+     * The presentation owner rejects stale generations before calling this method.
+     * Bytes and metadata are retained by reference and must remain immutable.
+     * Memory rejection installs an error state and returns true without retaining bytes.
      */
     install(
         delivery: TileSubsetDelivery,

@@ -276,6 +276,10 @@ export class PresentationStateBridgeService implements OnDestroy {
         this.flightFrame = browserWindow.requestAnimationFrame(frame);
     }
 
+    /**
+     * Invalidate pending animation callbacks, cancel the scheduled frame and
+     * restore ordinary page presentation when a flight ends or is superseded.
+     */
     private stopCameraFlight(): void {
         this.motionGeneration++;
         if (this.flightFrame !== undefined && this.browserWindow) {

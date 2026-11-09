@@ -61,7 +61,7 @@ inline constexpr uint16_t kGpuScreenLengthAnchorFlags =
     static_cast<uint16_t>(GpuMaterialFlag::ScreenLengthEndAnchor) |
     static_cast<uint16_t>(GpuMaterialFlag::ScreenLengthCenterAnchor);
 
-/** Exact fixed strides associated with each primitive program in ABI v15. */
+/** Fixed record strides, in bytes, for the current GPU packet ABI. */
 inline constexpr uint32_t kGpuPointRecordBytes = 40U;
 inline constexpr uint32_t kGpuSimplePathSegmentRecordBytes = 52U;
 inline constexpr uint32_t kGpuCompactPathSegmentRecordBytes = 76U;
@@ -158,8 +158,10 @@ struct GpuPickRecord {
     uint32_t entryOrdinal = 0U;
     uint32_t endpointRole = 0U;
     float navigationAltitude = std::numeric_limits<float>::quiet_NaN();
+
     /** Contribution-local slot of the highest emitted z-index, or uint32 max. */
     uint32_t presentationZIndexSlot = std::numeric_limits<uint32_t>::max();
+
     /** One-based surface-before-vector pass used only when z-index values tie. */
     uint32_t presentationPrimitiveOrder = 0U;
 };
@@ -265,7 +267,10 @@ public:
     [[nodiscard]] static std::vector<std::byte> encode(
         GpuRenderPacketData const& packet);
 
-    /** Encode using a previously computed exact size to avoid rescanning the packet. */
+    /**
+     * Encode using encodedSize(packet) without repeating the size scan.
+     * The packet must remain unchanged between measuring and encoding it.
+     */
     [[nodiscard]] static std::vector<std::byte> encode(
         GpuRenderPacketData const& packet,
         uint64_t exactEncodedSize);

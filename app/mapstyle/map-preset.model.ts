@@ -46,7 +46,10 @@ const MAP_PRESET_SCHEMA = z.object({
     layerPresets: z.array(MAP_PRESET_LAYER_SCHEMA).min(1).max(100)
 }).strict();
 
-/** Structurally validates an inline mapPresets array without consulting current maps or styles. */
+/**
+ * Validate structure without consulting maps/styles. Return valid siblings plus
+ * issues; callers requiring an all-or-nothing catalog must reject any issues.
+ */
 export function parseMapPresetDefinitions(source: unknown): MapPresetParseResult {
     if (!Array.isArray(source)) {
         return {presets: [], issues: [{message: "mapPresets must be a list."}]};

@@ -451,7 +451,10 @@ export function featureSelectionLayerNames(panels: readonly UrlV2InspectionPanel
     return result;
 }
 
-/** Encodes inspection selections in the v2 compact selection format. */
+/**
+ * Encodes panel contents, layout and colors against the supplied map/layer dictionaries.
+ * Entries missing from those dictionaries are omitted; lock and focus state are not encoded.
+ */
 export function encodeSelectionsV2(
     panels: readonly UrlV2InspectionPanel[],
     layerNames: readonly string[],
@@ -506,7 +509,10 @@ export function encodeSelectionsV2(
     return encodedPanels.length ? encodedPanels.join(";") : null;
 }
 
-/** Decodes the compact v2 selection parameter into inspection panel state. */
+/**
+ * Restores compact selections as locked panels, skipping unrecognized entries.
+ * Invalid source addresses and errors from the tile-key factory propagate to the caller.
+ */
 export function decodeSelectionsV2(
     raw: string | undefined,
     layerNames: readonly string[],
@@ -698,7 +704,10 @@ export function encodeStyleOptionsV2(
     return result;
 }
 
-/** Decodes v2 style option params and merges them into the provided style map. */
+/**
+ * Returns a new map with decoded options merged into the existing entries. The copy
+ * is shallow: arrays already in currentStyles are reused and may be updated in place.
+ */
 export function decodeStyleOptionsV2(
     params: Params,
     layerNames: readonly string[],

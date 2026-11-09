@@ -13,6 +13,7 @@ const STATIC_MAP_PRESETS_READ_ONLY_MESSAGE =
     "Using static configuration. Modify the configuration to update map presets";
 
 export const NO_PRESET_ID = "";
+
 /** One embedded layer preset resolved together with its owning active style. */
 export interface ResolvedLayerPreset extends LayerPresetDefinition {
     styleId: string;
@@ -108,6 +109,10 @@ export class MapPresetService {
             : STATIC_MAP_PRESETS_READ_ONLY_MESSAGE;
     }
 
+    /**
+     * Explain the first edit barrier, prioritizing invalid configuration over
+     * ephemeral-launcher and deployment write-policy restrictions.
+     */
     get readOnlyReason(): string | null {
         const status = this.configService.snapshot.mapPresetConfig;
         if (!status.valid) {
@@ -142,6 +147,10 @@ export class MapPresetService {
         return preset.enabled;
     }
 
+    /**
+     * Persist an enabled-state change through the complete definitions document.
+     * An unchanged existing preset succeeds; a missing preset returns false.
+     */
     async setAvailable(presetId: string, available: boolean): Promise<boolean> {
         const preset = this.presetById(presetId);
         if (!preset || preset.enabled === available) {
@@ -185,6 +194,10 @@ export class MapPresetService {
             preset.styleId === ref.styleId && preset.id === ref.presetId);
     }
 
+    /**
+     * Check a resolved layer preset against this view's values using both style and
+     * option IDs. Missing options fail the match even when names collide across styles.
+     */
     matchesPresetValues(
         preset: ResolvedLayerPreset,
         options: readonly LayerPresetOptionCandidate[],

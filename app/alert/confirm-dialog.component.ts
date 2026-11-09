@@ -37,6 +37,7 @@ import {AppDialogComponent} from "../layout/app-dialog.component";
     standalone: true,
     imports: [AppDialogComponent, ButtonModule]
 })
+/** One-shot dynamic confirmation; create a fresh instance for each prompt. */
 export class ConfirmDialogComponent {
     headerText = input<string>("Confirm");
     messageText = input<string>("");
@@ -45,6 +46,7 @@ export class ConfirmDialogComponent {
     @Output() result = new EventEmitter<boolean>();
     private settled = false;
 
+    /** Emit acceptance once; the resulting hide event cannot also reject it. */
     accept(): void {
         if (this.settled) {
             return;
@@ -54,6 +56,7 @@ export class ConfirmDialogComponent {
         this.result.emit(true);
     }
 
+    /** Emit rejection once, including dismissal through the dialog's hide event. */
     reject(): void {
         if (this.settled) {
             return;

@@ -119,6 +119,10 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
     private loadController = new AbortController();
     private valueEpoch = 0;
 
+    /**
+     * Start a new source-data load revision for each selection and abort the old
+     * request/expiry owner before resetting the displayed tree.
+     */
     constructor(private mapService: MapDataService,
         public stateService: AppStateService,
         private tileStream: MapTileStreamService,
@@ -153,6 +157,10 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
         this.tileStream.cancelRetainedTileExpiries?.(this);
     }
 
+    /**
+     * Renew the current source-data snapshot only for its matching value epoch.
+     * Keep the current tree visible while the replacement is being fetched.
+     */
     expireTiles(tokens: ReadonlyArray<{
         tileId: string | number;
         valueVersion: number;

@@ -149,6 +149,10 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
         return this.layout.state.mapsOpenState.getValue();
     }
 
+    /**
+     * Initialize responsive menu state and rebuild action groups when views, searches
+     * or styles change; dock visibility updates the mobile menu layout.
+     */
     constructor(public mapService: MapDataService,
         public stateService: AppStateService,
         private mapViewState: MapViewService,

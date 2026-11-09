@@ -22,7 +22,7 @@ export interface DebugWindow extends Window {
 
 /** Stable browser-console facade for renderer, camera, and transport diagnostics. */
 export class ErdblickDebugApi {
-    /** Bind supported debug operations without exposing service internals directly. */
+    /** Binds the live application services used by console and test operations. */
     constructor(
         private readonly tileStream: MapTileStreamService,
         private readonly subsetRenderer: TileSubsetLayerRenderService,
@@ -37,7 +37,7 @@ export class ErdblickDebugApi {
         return this.actions.execute(name, input);
     }
 
-    /** Apply one serialized camera state after validating its logical view index. */
+    /** Applies serialized camera state; the caller supplies a nonnegative integer view index. */
     setCamera(viewIndex: number, cameraInfoStr: string): void {
         if (viewIndex >= this.viewSettings.numViews) {
             console.error(
@@ -100,7 +100,7 @@ export class ErdblickDebugApi {
         return this.subsetRenderer.currentFrameTimeMs();
     }
 
-    /** Construct a canonical feature-layer key through the authoritative WASM API. */
+    /** Constructs a feature-layer key through WASM; tileId must be exactly representable as a Number. */
     mapTileKey(
         mapId: string,
         layerId: string,

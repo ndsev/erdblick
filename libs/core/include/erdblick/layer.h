@@ -105,8 +105,10 @@ public:
     /** Decode the backend manifest and verify the selected target identity. */
     IncomingInspection(std::string const& manifest, std::string const& targetKey,
                        std::string const& featureId);
+
     /** Retain an immutable feature snapshot independently of its temporary WASM wrapper. */
     void addSnapshot(TileFeatureLayer const& layer);
+
     /** Validate the complete bundle and render source-owned incoming rows. */
     NativeJsValue inspectionModel() const;
 private:
@@ -178,7 +180,7 @@ struct TileSubsetLayer
     /** Return the number of ordered channels. */
     uint32_t numChannels() const;
 
-    /** Return the number of terminal entries across all channels. */
+    /** Return the terminal-entry count across all channels, saturated at uint32_t's maximum. */
     uint32_t numEntries() const;
 
     /** Return the inherited source and subset-local numeric metadata. */
@@ -193,15 +195,17 @@ struct TileSubsetLayer
     /** Return the optional attachment name, or an empty string. */
     std::string glbAttachmentName() const;
 
-    /** Return one channel's concrete scope and ordered projection schemas. */
+    /** Return one channel's scope and ordered projection schemas, or undefined for a missing channel. */
     NativeJsValue channelSchema(uint32_t channelOrdinal) const;
 
     /**
-     * Return a bounded range of terminal rows for consumer-owned ingestion.
+     * Copy terminal rows in channel order, starting at offset. A zero limit
+     * includes the remaining channel; a missing channel returns an empty list.
+     * Entries without a feature identity are omitted, so fewer rows may be returned.
      *
-     * Values are aligned with `channelSchema()`'s active entry schema. Exact
-     * display positions are optional because broad searches normally use the
-     * much cheaper output-tile center for density aggregation.
+     * Values follow `channelSchema()`'s featureFields for feature scope and
+     * entryFields for other scopes. Optional positions use a representative
+     * geometry center; broad searches normally use the cheaper output-tile center.
      */
     NativeJsValue entryRange(
         uint32_t channelOrdinal,
@@ -209,7 +213,21 @@ struct TileSubsetLayer
         uint32_t limit,
         bool includePosition) const;
 
-    /** Summarize one channel's projected values and request traces. */
+    /**
+     * Summarize channel projections and subset-wide request traces, grouped by
+     * schema type. A missing channel returns undefined. Empty expression streams
+     * count as missing; returned arrays remain individual list-valued results.
+     *
+     * Keep the first distinctLimit histogram keys per group, then return up to
+     * histogramLimit of those keys by frequency. Keys are display strings;
+     * otherCount includes discarded observations and omitted retained buckets.
+     * A zero limit selects the default (16 histogram / 512 distinct); nonzero
+     * limits are clamped to [1, 256] and [1, 8192], respectively.
+     *
+     * Numeric aggregates exclude non-finite values, unsafe JS integers, schema
+     * specials and values outside declared ordinary ranges. Raw kind counts and
+     * histograms still include those values.
+     */
     NativeJsValue valueSummaries(
         uint32_t channelOrdinal,
         uint32_t histogramLimit,
@@ -219,7 +237,10 @@ struct TileSubsetLayer
      * Resolve one renderer picking tuple against this exact immutable subset.
      *
      * `endpointRole` is zero for the terminal/representative feature, one for
-     * a relation source, and two for a relation target.
+     * a relation source, and two for a relation target. Relation roles other than
+     * two select the source; non-relation scopes ignore the role.
+     * A missing channel returns undefined. An absent entry leaves only the
+     * picking tuple and channel ID in the result, without a feature identity.
      */
     NativeJsValue resolvePick(
         uint32_t channelOrdinal,
@@ -229,9 +250,10 @@ struct TileSubsetLayer
     /**
      * Find compact renderer rows which resolve to one persisted interaction target.
      *
-     * The optional indices are `-1` when the target addresses a whole feature
-     * or omits a validity suffix. The browser intersects these source rows
-     * with the rows actually emitted by the active style.
+     * Only local feature identities match. entryIndex selects an attribute or
+     * relation descriptor; validityIndex < 0 selects an attribute without a
+     * validity. Indices are ignored for whole-feature targets. The browser
+     * intersects these source rows with rows emitted by the active style.
      */
     NativeJsValue findPickReferences(
         std::string const& featureId,
@@ -242,7 +264,10 @@ struct TileSubsetLayer
     /** Return a compact JSON representation for diagnostics and tests. */
     std::string toJson() const;
 
-    /** Copy serialized SIMFIL diagnostics into a JS-visible byte buffer. */
+    /**
+     * Replace the output buffer with serialized SIMFIL diagnostics. Return false
+     * without changing output when serialization fails.
+     */
     bool copyDiagnostics(SharedUint8Array& output) const;
 
     /** Release the wrapped smart pointer. */

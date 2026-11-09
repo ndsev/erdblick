@@ -52,7 +52,10 @@ std::optional<uint32_t> relationIndexForSource(
     return ordinal;
 }
 
-/** Convert nlohmann JSON into the small JS value helper used by embind-facing APIs. */
+/**
+ * Copy JSON into embind-facing values. Integers outside JS's exact number range
+ * become decimal strings so feature identities and raw values do not lose bits.
+ */
 auto jsonToJsValue(nlohmann::json const& json) -> erdblick::JsValue
 {
     using erdblick::JsValue;
@@ -97,7 +100,7 @@ auto jsonToJsValue(nlohmann::json const& json) -> erdblick::JsValue
     return JsValue();
 }
 
-/** Pick a representative WGS84 center for one copied subset geometry collection. */
+/** Use the first geometry with a usable WGS84 center; this is not a collection centroid. */
 auto subsetGeometryCenter(
     mapget::model_ptr<mapget::GeometryCollection> const& collection)
     -> std::optional<mapget::Point>
@@ -209,6 +212,11 @@ void addNumeric(ValueSummary& summary, double value)
     summary.numericMax = std::max(summary.numericMax, value);
 }
 
+/**
+ * Admit the first distinct keys up to the cap, while continuing to count admitted
+ * keys afterward. Dropped observations are reported separately; this is not a
+ * streaming top-K algorithm.
+ */
 void addHistogram(
     ValueSummary& summary,
     std::string value,
@@ -386,6 +394,11 @@ void summarizeNode(
     }
 }
 
+/**
+ * Rank the retained histogram by frequency and fold both capacity drops and
+ * output-truncated buckets into otherCount. Numeric aggregates are independent
+ * of histogram admission.
+ */
 auto summaryToJsValue(
     ValueSummary const& summary,
     uint32_t histogramLimit) -> erdblick::JsValue
@@ -1006,6 +1019,8 @@ NativeJsValue TileSubsetLayer::valueSummaries(
         distinctLimit == 0 ? 512U : distinctLimit,
         1U,
         8192U);
+    // Projection slots contain expression result streams. Keep schema identities
+    // separate so the UI can distinguish ordinary values from schema specials.
     auto const fields =
         channel->scope() == mapget::Scope::Feature
             ? channel->featureFields()
@@ -1065,6 +1080,8 @@ NativeJsValue TileSubsetLayer::valueSummaries(
             }));
         }
     }
+    // Traces belong to the subset request, not to the selected channel. Reuse
+    // the same bounded aggregation so either source can drive the value editor.
     auto traces = JsValue::List();
     for (size_t traceIndex = 0;
          traceIndex < model_->traceCount();

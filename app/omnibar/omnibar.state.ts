@@ -28,6 +28,7 @@ export class OmnibarState {
     get isOpen(): boolean {
         return this.openState.value;
     }
+
     set isOpen(value: boolean) {
         this.openState.next(value);
     }
@@ -55,7 +56,7 @@ export class OmnibarState {
         this.historyState.next(this.normalizeHistory(entries));
     }
 
-    /** Place a recently executed command first, keeping its current target payload. */
+    /** Places the command first with its current payload, dropping unresolved numeric legacy entries. */
     remember(entry: OmnibarHistoryEntry): void {
         this.replaceHistory([
             entry,

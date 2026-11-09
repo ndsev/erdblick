@@ -51,7 +51,7 @@ export class KeyboardService {
                 return;
             }
 
-            // Let non-ctrl key events or text editing shortcuts do their default things.
+            // Leave explicitly suppressed shortcuts with the text-editing surface.
             if (isTextEditingSurface && this.preventOnInputShortcuts.has(key)) {
                 return;
             }
@@ -73,7 +73,7 @@ export class KeyboardService {
         });
     }
 
-    /** Normalizes a keyboard event into the shortcut key used by the registry. */
+    /** Match the case-sensitive event key, prefixed only by Ctrl when held. */
     private getKeyCombination(event: KeyboardEvent): string {
         let key = '';
         if (event.ctrlKey) {
@@ -94,7 +94,10 @@ export class KeyboardService {
         return target.closest('.cm-editor,[contenteditable=\"true\"]') !== null;
     }
 
-    /** Registers a shortcut and optionally ignores it while the user edits text inputs. */
+    /**
+     * Replace the key's callback and optionally suppress it while editing text.
+     * Existing suppression remains until unregisterShortcut removes the key.
+     */
     registerShortcut(keys: string, callback: (event: KeyboardEvent) => void, preventOnInput: boolean = false): void {
         this.shortcuts.set(keys, callback);
         if (preventOnInput) {
