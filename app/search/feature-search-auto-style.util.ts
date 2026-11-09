@@ -197,8 +197,10 @@ function isNativeAttributeScalar(option: FeatureSearchAutoStyleOption): boolean 
 }
 
 /**
- * Prefer the field named by the query/schema before falling back to useful
- * schema types. Attribute names such as WARNING_SIGN naturally map to leaf
+ * Prefer an enum containing the queried label before matching field names.
+ * A generic leaf such as `value` can also name numeric references in the same
+ * attribute; those must not compete with the enum carrying SPEED_LIMIT.
+ * Attribute names such as WARNING_SIGN naturally map to leaf
  * fields such as warningSign. Otherwise use the native attribute scalar before
  * choosing a type-based fallback: validity enums and source addresses must not
  * displace the speed value of a SPEED_LIMIT_METRIC attribute. Explicit query
@@ -209,18 +211,18 @@ function searchAutoStyleFieldRank(
     scope: FeatureSearchAttributeScopeCandidate,
     analysis: FeatureSearchAutoStyleAnalysis
 ): number {
+    const matchedEnums = new Set(analysis.matchedEnumValues);
+    if (option.enumValues?.some(value => matchedEnums.has(value))) {
+        return 0;
+    }
     const leaf = option.value.split(".").at(-1) ?? option.value;
     const normalizedLeaf = normalizedSemanticName(leaf);
     if (normalizedLeaf &&
         normalizedLeaf === normalizedSemanticName(scope.attrName)) {
-        return 0;
+        return 1;
     }
     if (analysis.matchedFieldNames.some(name =>
         normalizedSemanticName(name) === normalizedLeaf)) {
-        return 1;
-    }
-    const matchedEnums = new Set(analysis.matchedEnumValues);
-    if (option.enumValues?.some(value => matchedEnums.has(value))) {
         return 2;
     }
     if (option.primaryValue) {
@@ -259,7 +261,7 @@ export function preparedSearchAutoStyleRules(
     inventory: FeatureSearchStyleFieldInventory | undefined,
     analysis: FeatureSearchAutoStyleAnalysis,
     color: string,
-    applicability: NonNullable<FeatureSearchStyleRule["applicability"]>
+    applicability: FeatureSearchMapLayerRef & {scope: "feature" | "attribute"}
 ): PreparedAutoStyleRule[] {
     const options: FeatureSearchAutoStyleOption[] = inventory ? searchStyleFieldCandidates(inventory).flatMap(field =>
         field.contexts.filter(context => context.mapId === applicability.mapId && context.layerId === applicability.layerId)
@@ -280,7 +282,8 @@ export function preparedSearchAutoStyleRules(
         const localOptions = options.filter(option => owner &&
             option.mapId === owner.mapId && option.layerId === owner.layerId &&
             option.featureType === owner.featureType && option.attrLayerName === owner.attrLayerName &&
-            option.attrName === owner.attrName);
+            option.attrName === owner.attrName &&
+            (owner.queriedPaths === undefined || owner.queriedPaths.includes(option.value)));
         const fields = owner ? searchAutoStyleFieldOptions(localOptions, {...analysis, attributeScopes: [owner]}) : [];
         const rules: PreparedAutoStyleRule[] = [];
         for (const field of fields.length ? fields : [undefined]) {
@@ -341,19 +344,19 @@ export function combinePreparedSearchAutoStyles(
 ): FeatureSearchStyleRule[] {
     const allRules = groups.flat();
     const mixedScopes = new Set(allRules.map(rule => rule.applicability?.scope)).size > 1;
-    // Feature and attribute predicates evaluate at different roots. Preserve
-    // per-source applicability when a search uses both; within one scope the
-    // request already routes the rules to its selected map/layer coverage.
-    const partitions = mixedScopes ? groups : [allRules];
+    // Feature and attribute predicates evaluate at different roots. Keep that
+    // boundary while still merging equivalent appearances across sources in
+    // each scope. Adding a POI layer must not duplicate every Road/Lane rule.
+    const partitions = mixedScopes
+        ? ["feature", "attribute"].map(scope => allRules.filter(rule => rule.applicability?.scope === scope))
+        : [allRules];
     return partitions.flatMap(partition => {
         const rows = partition.map(rule => {
             const source = rule.applicability;
             const prefix = source?.scope === "attribute" ? "$feature." : "";
             const selectors: FeatureSearchRuleFilter[] = [
-                ...(source ? [
-                    {field: `${prefix}mapId`, op: "=" as const, value: source.mapId},
-                    {field: `${prefix}layerId`, op: "=" as const, value: source.layerId}
-                ] : []),
+                ...(source?.mapId ? [{field: `${prefix}mapId`, op: "=" as const, value: source.mapId}] : []),
+                ...(source?.layerId ? [{field: `${prefix}layerId`, op: "=" as const, value: source.layerId}] : []),
                 ...rule.filter
             ];
             return {
@@ -433,7 +436,7 @@ export function combinePreparedSearchAutoStyles(
                 color,
                 name: filter.length ? first.name
                     : `Auto: ${first.color.mode === "solid" ? "solid" : first.color.field}`,
-                applicability: mixedScopes ? first.applicability : undefined,
+                applicability: mixedScopes && first.applicability ? {scope: first.applicability.scope} : undefined,
                 filter
             };
         });

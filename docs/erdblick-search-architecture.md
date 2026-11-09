@@ -290,11 +290,25 @@ and attribute owner until all sources have contributed their rules. Equal
 appearances then merge, and a discovery condition is removed only when doing
 so admits no prepared context requiring a different appearance. Reduction
 prefers attribute names over source IDs and owner layout; one conjunction
-remains ordinary editable filter rows. Exact color type guards stay intact,
-and mixed feature/attribute roots retain their source applicability. Each
+remains ordinary editable filter rows. Exact color type guards stay intact.
+Mixed feature/attribute roots retain their result scope, while equal rules can
+still merge across sources within that scope. Live rendering and YAML export
+use the same applicability check; optional map/layer selectors retain explicit
+source restrictions. Each
 attribute context may supply `primaryValuePath`,
 the unambiguous native scalar shorthand, so common validity/source metadata does
 not displace the attribute value in automatic coloring.
+
+Prepared attribute owners also carry `queriedPaths`, derived from native
+Simfil references at the branch's actual result root. Positive comparisons
+exclude paths whose declared types cannot match their literal. An explicit
+predicate therefore cannot select unrelated numeric references merely because
+they share a leaf name such as `value`. An empty path list uses solid styling;
+absence permits the primary scalar for a whole-attribute query. Unknown
+metadata remains conservative for search membership, without inventing a
+color scale. These query-specific paths are separate from the cached owner
+inventory, so the field picker still exposes all declared fields.
+
 Scalar requests omit container descriptors while retaining navigable branches.
 `complete` concerns declared paths in the requested subtree, not whether an open
 schema lists every possible runtime field. Recursive cycles are reported and can

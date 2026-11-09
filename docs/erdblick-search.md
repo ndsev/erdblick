@@ -252,6 +252,12 @@ Search style rules are evaluated only for the result layer of the current search
 
 Initial automatic rules use schema-declared primary values or fields identified by the chosen meaning. Owners and source layers sharing the same field, compatible value meaning and appearance share one point rule and one line/surface rule. Numeric types must agree on units, ranges and special values. Symbolic enum catalogs combine their labels, even when a newer version adds entries or changes wire ordinals; equal labels keep equal colors. Different field paths or incompatible numeric meanings retain their own guarded rules. If no value field can be selected confidently, they use the search color. Receiving results or opening the Visualization tab does not change the selected field or color mode. Manual edits remain authoritative when a new query is confirmed.
 
+Explicit predicates select compatible fields referenced by the query, rather
+than every field with the same leaf name. For example, a string comparison on
+`**.value` does not create numeric scales for reference IDs. Adding a layer
+whose results are whole features keeps their rules separate from attribute
+results, while equivalent attribute rules continue to be shared across maps.
+
 For example, a query matching both `movableWarningSign` and `warningSign` needs
 four initial rules: two field paths, each with point and line/surface styling.
 Adding a map with another compatible warning-sign catalog extends those rules'

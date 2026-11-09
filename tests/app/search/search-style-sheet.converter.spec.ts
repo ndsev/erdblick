@@ -158,13 +158,17 @@ describe("search style sheet codec", () => {
         style.delete();
     });
 
-    it("exports each prepared source in its own evaluation scope", () => {
+    it.each([true, false])("exports shared and source-specific rules at their result roots (shared=%s)", shared => {
         const featureRule: FeatureSearchStyleRule = {...rules[0], applicability: {
             mapId: "Classic", layerId: "Routing", scope: "feature"
         }};
         const attributeRule: FeatureSearchStyleRule = {...rules[1], applicability: {
             mapId: "Live", layerId: "Road", scope: "attribute"
         }};
+        if (shared) {
+            featureRule.applicability = {scope: "feature"};
+            attributeRule.applicability = {scope: "attribute"};
+        }
         const saved = convertSearchStyleRulesToYaml(saveOptions("Mixed meanings"), [featureRule, attributeRule], {
             concreteScope: "feature", backendQuery: "unused representative predicate", selectedFeatureTypes: [],
             branches: [

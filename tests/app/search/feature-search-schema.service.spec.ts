@@ -104,7 +104,8 @@ describe("schema worker admission", () => {
             id: mapId, label: mapId, kind: "expression" as const, schemaId: mapId,
             expression: 'warningSign == "ANIMALS"', featureTypes: ["Road"],
             attributeScopes: ["WARNING_SIGN", "MOVABLE_WARNING_SIGN"].map(attrName => ({
-                mapId, layerId: "Road", featureType: "Road", attrLayerName: "Rules", attrName
+                mapId, layerId: "Road", featureType: "Road", attrLayerName: "Rules", attrName,
+                queriedPaths: ["attributeValue.warningSign"]
             })), matchedFieldNames: [], matchedEnumValues: ["ANIMALS"]
         }));
         const fields = service.requestPreparedSearchStyleFields(branches, {recursive: true, values: "scalar"});
@@ -114,11 +115,14 @@ describe("schema worker admission", () => {
         await finishFields(worker);
         expect(worker.messages[1]).toMatchObject({query: "", scope: "attribute",
             selectedMapLayers: [{mapId: "A", layerId: "Road"}, {mapId: "B", layerId: "Road"}],
-            options: {preparedContexts: branches.flatMap(branch => branch.attributeScopes)}
+            options: {preparedContexts: branches.flatMap(branch => branch.attributeScopes)
+                .map(({queriedPaths: _query, ...owner}) => owner)}
         });
         expect(await fields).toEqual(emptyInventory);
         await service.requestPreparedSearchStyleFields(branches.map(branch => ({...branch,
-            query: 'warningSign == "SPEED_LIMIT"'})), {recursive: true, values: "scalar"});
+            query: 'warningSign == "SPEED_LIMIT"',
+            attributeScopes: branch.attributeScopes.map(owner => ({...owner, queriedPaths: []}))
+        })), {recursive: true, values: "scalar"});
         expect(worker.messages).toHaveLength(2);
     });
 

@@ -19,6 +19,48 @@ import type {FeatureSearchStyleFieldInventory} from "../../../app/search/search.
 void AppModule;
 
 describe("Feature Search automatic rule geometry", () => {
+    it("shares queried categories and uncertain-owner fallbacks when another map adds feature scope", () => {
+        const groups = ["First", "Second"].flatMap(mapId => ["Road", "Lane"].map(layerId => {
+            const contexts = ["WARNING_SIGN", "CLEARANCE", "SIGNPOST"].map(attrName => ({
+                mapId, layerId, featureType: layerId, attrLayerName: "Rules", attrName,
+                primaryValuePath: attrName === "WARNING_SIGN" ? "sign.value" : "reference.value"
+            }));
+            const inventory: FeatureSearchStyleFieldInventory = {
+                contexts,
+                types: [
+                    {valueKind: "enum", enumValues: ["SPEED_LIMIT", "ANIMALS"],
+                        schemaType: {schemaId: mapId, typeId: 1, typeName: "WarningSign", namedValues: []}},
+                    {valueKind: "integer", enumValues: [], numericRange: {min: 0, max: 100}, schemaType: undefined}
+                ],
+                fields: [
+                    {path: "sign.value", metadata: 0, contexts: [0]},
+                    {path: "reference.value", metadata: 1, contexts: [0, 1, 2]}
+                ],
+                branches: [], complete: true, incompleteReason: ""
+            };
+            return preparedSearchAutoStyleRules(inventory, {
+                status: "ready", concreteScope: "attribute",
+                matchedFieldNames: ["value"], matchedEnumValues: ["SPEED_LIMIT"],
+                attributeScopes: contexts.map((owner, index) => ({...owner,
+                    // Unknown paths keep the owner eligible, but cannot justify
+                    // selecting its unrelated primary scalar or reference IDs.
+                    queriedPaths: index === 0 ? ["sign.value"] : ["unknown.value"]
+                }))
+            }, "#123456", {mapId, layerId, scope: "attribute"});
+        }));
+        groups.push(preparedSearchAutoStyleRules(undefined, {
+            status: "ready", concreteScope: "feature", attributeScopes: [],
+            matchedFieldNames: ["value"], matchedEnumValues: ["SPEED_LIMIT"]
+        }, "#123456", {mapId: "Second", layerId: "POI", scope: "feature"}));
+
+        const rules = combinePreparedSearchAutoStyles(groups);
+        expect(rules).toHaveLength(6);
+        expect(rules.filter(rule => rule.color.mode === "categories")).toHaveLength(2);
+        expect(rules.filter(rule => rule.applicability?.scope === "attribute")).toHaveLength(4);
+        expect(rules.every(rule => rule.color.mode !== "gradient")).toBe(true);
+        expect(rules.every(rule => !rule.applicability?.mapId && !rule.applicability?.layerId)).toBe(true);
+    });
+
     it("keeps four warning-sign rules when adding a map with an older symbolic catalog", () => {
         const groups = ["Germany", "Large Map", "Munich"].flatMap((mapId, version) =>
             ["Road", "Lane"].map(layerId => {

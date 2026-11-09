@@ -6,6 +6,38 @@ import {TEST_MAP_NAMES, TEST_LAYER_NAMES} from '../utils/test-params';
 test.use({stateSnapshot: null});
 test.skip(process.env['EB_MAPGET_MCP_LOCAL'] !== '1', 'Uses the real native MCP/browser connection');
 
+/** Generic enum predicates must not generate scales for unrelated numeric `value` fields. */
+test('portable enum expression styles only compatible attribute owners', async ({page, request}) => {
+    await page.goto('/?v2=1&vid=0&n=1&f=0&lon=11&lat=48&alt=1000&bg=~0&l=');
+    await waitForAppReady(page);
+    await enableMapLayer(page, TEST_MAP_NAMES[0], TEST_LAYER_NAMES[0]);
+    const mcp = mcpClient(request);
+    await expect.poll(async () => (await mcp.sessions()).length).toBe(1);
+    const clientId = (await mcp.sessions())[0].clientId;
+    const query = '(**.value == "SPEED_LIMIT") or (**.warningSign == "SPEED_LIMIT")';
+    const started = await mcp.call('viewer_start_search', {
+        clientId, query, scope: 'auto',
+        mapLayers: [{mapId: TEST_MAP_NAMES[0], layerId: TEST_LAYER_NAMES[0]}],
+        viewIds: ['0'], tileLevels: [13]
+    });
+    expect(started.isError, JSON.stringify(started.structuredContent)).not.toBe(true);
+    const searchId = started.structuredContent.searchId;
+    const read = async () => {
+        const response = await mcp.call('viewer_get_search', {clientId, searchId});
+        expect(response.isError, JSON.stringify(response.structuredContent)).not.toBe(true);
+        return response.structuredContent;
+    };
+    await expect.poll(async () => (await read()).preparation.status).toBe('ready');
+    await expect.poll(async () => (await read()).searchComplete).toBe(true);
+    const prepared = await read();
+    expect(prepared.status.query).toBe(query);
+    expect(prepared.status.resultCount).toBeGreaterThan(0);
+    expect(prepared.settings.searchStyleRules).toHaveLength(2);
+    expect(prepared.settings.searchStyleRules.every((rule: {color: {mode: string; field?: string}}) =>
+        rule.color.mode === 'categories' && rule.color.field === 'attributeValue.warningSign')).toBe(true);
+    await expect(page.getByText('Search preparation failed', {exact: true})).toHaveCount(0);
+});
+
 /** The synthetic map deliberately declares an attribute and an enum named SPEED_LIMIT. */
 test('confirmed input chooses its meaning before dispatch and prepares category styling', async ({page, request}) => {
     await page.addInitScript(() => {

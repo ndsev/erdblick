@@ -182,6 +182,12 @@ export interface FeatureSearchAttributeScopeCandidate {
     featureType: string;
     mapId: string;
     layerId: string;
+    /**
+     * Native references in the accepted predicate, relative to this owner.
+     * An empty list requests solid styling; absence allows the primary scalar
+     * of a whole-attribute query such as WARNING_SIGN. Never execution scope.
+     */
+    queriedPaths?: string[];
 }
 
 export type FeatureSearchStyleValueKind =

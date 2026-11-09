@@ -114,14 +114,43 @@ describe("automatic style filter reduction", () => {
             geometry: ["point"], filter: [], color: {mode: "solid", color: "#112233"}
         };
         const attribute = automaticRule("Attributes", "Road", "warningSign");
-        const rules = combinePreparedSearchAutoStyles([[feature], [attribute]]);
+        const anotherSource = automaticRule("Other attributes", "Lane", "warningSign");
+        const rules = combinePreparedSearchAutoStyles([[feature], [attribute], [anotherSource]]);
         expect(rules).toHaveLength(2);
-        expect(rules.map(rule => rule.applicability)).toEqual([feature.applicability, attribute.applicability]);
+        expect(rules.map(rule => rule.applicability)).toEqual([{scope: "feature"}, {scope: "attribute"}]);
         expect(rules.every(rule => !rule.filter.length)).toBe(true);
     });
 });
 
 describe("feature search auto-style helpers", () => {
+    it("prefers the queried enum over numeric siblings sharing the value leaf", () => {
+        const analysis: FeatureSearchAutoStyleAnalysis = {
+            ...readyAttributeAnalysis,
+            matchedFieldNames: ["value", "warningSign"],
+            matchedEnumValues: ["SPEED_LIMIT"]
+        };
+        const numeric = option({
+            value: "reference.value",
+            valueKind: "integer",
+            attrName: pedestrianWayScope.attrName
+        });
+        const primary = option({
+            value: "pedestrianWay",
+            valueKind: "enum",
+            attrName: pedestrianWayScope.attrName,
+            enumValues: ["OTHER"],
+            primaryValue: true
+        });
+        const sign = option({
+            value: "properties.*.value",
+            valueKind: "enum",
+            attrName: pedestrianWayScope.attrName,
+            enumValues: ["SPEED_LIMIT", "ANIMALS"]
+        });
+
+        expect(searchAutoStyleFieldOptions([numeric, primary, sign], analysis)).toEqual([sign]);
+    });
+
     it("prefers the native speed scalar over shared validity enums and source addresses", () => {
         const analysis: FeatureSearchAutoStyleAnalysis = {
             ...readyAttributeAnalysis,

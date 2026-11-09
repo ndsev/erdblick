@@ -7,7 +7,8 @@ import {
     FeatureSearchColorMode,
     FeatureSearchGeometryKind,
     FeatureSearchRuleFilter,
-    FeatureSearchStyleRule
+    FeatureSearchStyleRule,
+    searchStyleRuleAppliesTo
 } from "./search-definition.model";
 import {searchStyleColorProperties} from "./search-style-color.util";
 import {colorScaleTypesSchema} from "../mapdata/schema-type.model";
@@ -110,8 +111,7 @@ export function convertSearchStyleRulesToYaml(
     const layerIds = normalizedLayerAffinity(options.layerIds);
     const nativeRules = context.branches?.flatMap(branch => {
         if (layerIds.length && !layerIds.includes(branch.layerId)) return [];
-        const applicable = rules.filter(rule => !rule.applicability ||
-            (rule.applicability.mapId === branch.mapId && rule.applicability.layerId === branch.layerId && rule.applicability.scope === branch.scope));
+        const applicable = rules.filter(rule => searchStyleRuleAppliesTo(rule, branch));
         const types = context.selectedFeatureTypes.length
             ? context.selectedFeatureTypes.filter(type => !branch.featureTypes.length || branch.featureTypes.includes(type))
             : branch.featureTypes;

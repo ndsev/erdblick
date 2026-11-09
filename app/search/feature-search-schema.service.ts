@@ -182,7 +182,10 @@ export class FeatureSearchSchemaService {
     ): Promise<FeatureSearchStyleFieldInventory> {
         const attributeBranches = branches.filter(branch => branch.scope === "attribute" && branch.attributeScopes.length);
         const featureBranches = branches.filter(branch => branch.scope === "feature");
+        // Query references select automatic fields, but do not change the
+        // reusable inventory. Browsing an owner still exposes all its fields.
         const owners = [...new Map(attributeBranches.flatMap(branch => branch.attributeScopes)
+            .map(({queriedPaths: _query, ...owner}) => owner)
             .map(owner => [JSON.stringify(owner), owner])).values()];
         const requests: Promise<FeatureSearchStyleFieldInventory>[] = [];
         if (attributeBranches.length) {

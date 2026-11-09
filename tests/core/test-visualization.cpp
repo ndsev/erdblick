@@ -1772,6 +1772,7 @@ TEST_CASE("Feature search auto-scope accepts one attribute across different attr
         CHECK(choice.at("expression") == "**.SPEED_LIMIT_METRIC");
         CHECK(choice.at("query") == "$name == \"SPEED_LIMIT_METRIC\"");
         CHECK_FALSE(choice.at("schemaId").get<std::string>().empty());
+        CHECK_FALSE(choice.at("attributeScopes").front().contains("queriedPaths"));
     }
     auto explicitQuery = parser.prepareSearchQuery("**.speedLimitKmh > 80", "auto", options);
     REQUIRE(explicitQuery.size() == 2);
@@ -1779,7 +1780,48 @@ TEST_CASE("Feature search auto-scope accepts one attribute across different attr
         CHECK(branch.at("expression") == "**.speedLimitKmh > 80");
         CHECK(branch.at("query") == "**.speedLimitKmh > 80");
         CHECK(branch.at("matchedFieldNames") == nlohmann::json::array({"speedLimitKmh"}));
+        CHECK(
+            branch.at("attributeScopes").front().at("queriedPaths") ==
+            nlohmann::json::array({"attributeValue.speedLimitKmh"}));
     }
+}
+
+TEST_CASE(
+    "Prepared style fields keep query paths separate from conservative owners",
+    "[erdblick.search]")
+{
+    auto layer = speedLimitLayerInfoJson("Road", "Road", "Rules");
+    auto& attribute = layer["featureModelSchema"]["$defs"]["SpeedLimitMetric"]["properties"];
+    attribute["sign"] = {
+        {"type", "object"},
+        {"properties", {{"value", {{"type", "string"}, {"enum", {"SPEED_LIMIT", "ANIMALS"}}}}}}};
+    attribute["reference"] = {
+        {"type", "object"},
+        {"properties", {{"value", {{"type", "integer"}}}}}};
+    auto datasource = nlohmann::json{
+        {"stringPoolId", "PreparedFields"},
+        {"mapId", "Map"},
+        {"layers", {{"Road", layer}}}};
+    TileLayerParser parser;
+    parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({datasource}).dump()));
+
+    auto prepared =
+        parser.prepareSearchQuery("**.value == \"SPEED_LIMIT\"", "auto", nlohmann::json::object());
+    REQUIRE(prepared.size() == 1);
+    REQUIRE(prepared.front().at("attributeScopes").size() == 1);
+    CHECK(
+        prepared.front().at("attributeScopes").front().at("queriedPaths") ==
+        nlohmann::json::array({"sign.value"}));
+    // Query evidence does not shrink the reusable field picker inventory.
+    auto inventory = parser.searchStyleFieldsForQuery(
+        "",
+        "attribute",
+        {{"recursive", true},
+         {"values", "scalar"},
+         {"preparedContexts", prepared.front().at("attributeScopes")}});
+    CHECK(std::ranges::any_of(
+        inventory.at("fields"),
+        [](auto const& field) { return field.at("path") == "reference.value"; }));
 }
 
 TEST_CASE("Style fields use normalized attribute owners and the native payload scalar", "[erdblick.search]")

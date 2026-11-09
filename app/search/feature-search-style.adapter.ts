@@ -6,7 +6,7 @@
 import type {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
 import {coreLib, uint8ArrayToWasm} from "../integrations/wasm.adapter";
 import type { ErdblickStyle } from "../mapstyle/mapstyle.model";
-import type {FeatureSearchStyleRule} from "./search-definition.model";
+import {searchStyleRuleAppliesTo, type FeatureSearchStyleRule} from "./search-definition.model";
 import type {FeatureSearchResolvedDefinition} from "./feature-search-runtime-state.model";
 import type {MapgetLayer} from "../mapdata/mapget-layer.model";
 import type {FilterChannelDefinition} from "../mapdata/filter-subscription.model";
@@ -48,9 +48,9 @@ export function compileFeatureSearchStyle(
     },
     featureTypes: readonly string[]
 ): CompiledFeatureSearchStyle {
-    const rules = definition.searchStyleRules.filter(rule => !rule.applicability ||
-        (rule.applicability.mapId === mapgetLayer.mapId && rule.applicability.layerId === mapgetLayer.layerId &&
-         rule.applicability.scope === definition.concreteScope));
+    const rules = definition.searchStyleRules.filter(rule => searchStyleRuleAppliesTo(rule, {
+        mapId: mapgetLayer.mapId, layerId: mapgetLayer.layerId, scope: definition.concreteScope
+    }));
     const hasRenderRules = rules.length > 0;
     const runtimeRules = featureSearchRulesToStyleRules(
         hasRenderRules ? rules : [invisiblePlaceholderRule()],

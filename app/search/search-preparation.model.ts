@@ -11,7 +11,8 @@ const attributeOwnerSchema = z.object({
     layerId: z.string(),
     featureType: z.string(),
     attrName: z.string(),
-    attrLayerName: z.string()
+    attrLayerName: z.string(),
+    queriedPaths: z.array(z.string()).optional()
 });
 
 /**

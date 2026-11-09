@@ -895,6 +895,57 @@ class TileLayerParser::StyleFieldDiscovery
     using Fields = std::unordered_map<std::string, std::vector<FieldMeaning>>;
 
 public:
+    /**
+     * Resolve the accepted predicate at an attribute's actual query root.
+     * Owner inference is conservative: an unknown property can keep an owner
+     * eligible, but that does not make its numeric reference IDs or default
+     * payload useful color fields. Only paths the predicate can use compete
+     * for automatic styling. This never restricts search execution.
+     *
+     * No payload reference (for example `$name == "WARNING_SIGN"`) leaves the
+     * native primary scalar available. An explicit empty list instead asks for
+     * solid styling: the query has no known compatible payload field here.
+     */
+    static std::optional<JsValue> queriedPaths(
+        simfil::Environment& environment,
+        simfil::AST const& expression,
+        simfil::SchemaType root)
+    {
+        if (!root)
+            return JsValue::List();
+        auto references = simfil::referencedSchemaPaths(environment, expression, root);
+        if (!references)
+            throw std::runtime_error(references.error().message);
+        bool hasPayloadReference = false;
+        std::set<std::string> paths;
+        for (auto const& reference : references->paths) {
+            auto const& first = reference.path.front();
+            if (first.kind == simfil::SchemaPathSegment::Kind::Field &&
+                root.fieldRole(first.field) == simfil::SchemaType::FieldRole::Context)
+                continue;
+            hasPayloadReference = true;
+            if (!reference.predicateCanMatch)
+                continue;
+            std::string path;
+            for (auto const& segment : reference.path) {
+                path = appendStep(
+                    path,
+                    segment.kind == simfil::SchemaPathSegment::Kind::ArrayElement ?
+                        std::nullopt :
+                        std::optional(
+                            std::string(root.pool()->dictionary().resolve(segment.field).value())));
+            }
+            paths.insert(std::move(path));
+        }
+        if (!hasPayloadReference && !references->hasBroadWildcardAccess &&
+            !references->hasDynamicAccess && !references->hasUnresolvedAccess)
+            return std::nullopt;
+        auto result = JsValue::List();
+        for (auto const& path : paths)
+            result.push(JsValue(path));
+        return result;
+    }
+
     /** Capture one UI request; schema semantics are resolved only in collect. */
     explicit StyleFieldDiscovery(JsValue const& options)
         : recursive_(!options.has("recursive") || options["recursive"].as<bool>()),
@@ -2131,6 +2182,12 @@ NativeJsValue TileLayerParser::prepareSearchQuery(
                     simfil::CompileOptions{.any = false, .rewriteMode = simfil::RewriteMode::None});
                 if (!expression)
                     throw std::runtime_error(expression.error().message);
+                auto predicate = simfil::compile(
+                    *environment,
+                    meaning.query_,
+                    simfil::CompileOptions{.any = false, .rewriteMode = simfil::RewriteMode::None});
+                if (!predicate)
+                    throw std::runtime_error(predicate.error().message);
                 auto terms = simfil::referencedQueryTerms(**expression);
                 auto fields = JsValue::List(), literals = JsValue::List();
                 for (auto const& field : terms.leafFields)
@@ -2157,6 +2214,14 @@ NativeJsValue TileLayerParser::prepareSearchQuery(
                     value.set("featureType", JsValue(owner.featureType_));
                     value.set("attrLayerName", JsValue(owner.attributeLayerName_));
                     value.set("attrName", JsValue(owner.attributeName_));
+                    auto root =
+                        registry->attributeQuerySchema(owner.featureType_, owner.attributeSchema_);
+                    auto paths = StyleFieldDiscovery::queriedPaths(
+                        *environment,
+                        **predicate,
+                        registry->mapSchema()->schemaType(root));
+                    if (paths)
+                        value.set("queriedPaths", *paths);
                     scopes.push(value);
                 }
                 auto value = JsValue::Dict();
