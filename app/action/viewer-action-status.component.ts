@@ -4,7 +4,7 @@ import {McpActionService} from "./mcp-action.service";
 import {ClipboardService} from "../clipboard/clipboard.service";
 import {Popover} from "primeng/popover";
 
-/** Compact opt-out-free activity and connection details for the optional MCP adapter. */
+/** MCP connection details, client setup commands and recent agent activity in a popover. */
 @Component({
     selector: "viewer-action-status",
     standalone: false,
@@ -66,22 +66,12 @@ import {Popover} from "primeng/popover";
             }
         }
     `,
-    styles: [`
-        .mcp-trigger {display:inline-flex;margin:.375rem .5rem;--p-button-sm-padding-y:.125rem}
-        .action-details {display:flex;flex-direction:column;gap:.6rem;width:min(32rem,calc(100vw - 3rem))}
-        .action-details p {margin:0}
-        .action-commands {display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .6rem}
-        .action-commands > span {white-space:nowrap;font-size:.875rem}
-        .action-buttons {display:flex;gap:.4rem}
-        ul {list-style:none;padding:0;margin:0;max-height:15rem;overflow:auto}
-        li {display:flex;justify-content:space-between;gap:1rem;font-size:.85rem;padding:.25rem 0}
-        li span:first-child {overflow-wrap:anywhere}
-    `]
+    styleUrls: ["../scss/viewer-action-status.component.scss"]
 })
 export class ViewerActionStatusComponent {
     constructor(readonly actions: McpActionService, private readonly clipboard: ClipboardService, readonly webMcp: WebMcpService) {}
 
-    /** Registration means available, not active; pending viewer calls own the green state. */
+    /** Show danger for unavailable controls, success while a call runs, and secondary when idle. */
     get buttonSeverity(): "secondary" | "success" | "danger" {
         const availability = this.actions.availability$.value;
         if (availability.enabled ? !availability.ready : !this.webMcp.status$.value.viewerTools) return "danger";
@@ -100,7 +90,7 @@ export class ViewerActionStatusComponent {
         container.style.setProperty('--p-popover-arrow-left', `calc(${center}px - var(--p-popover-arrow-offset))`);
     }
 
-    /** Builds client setup commands from fixed syntax and quoted metadata, never a server command template. */
+    /** Build a POSIX-shell client setup command with a validated endpoint and quoted arguments. */
     connectionText(kind: "codex" | "claude" | "copilot" | "cursor"): string {
         const info = this.actions.connectionInfo;
         if (!info.enabled) return "";

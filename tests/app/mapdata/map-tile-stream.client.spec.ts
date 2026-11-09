@@ -52,6 +52,24 @@ function packedFrames(...frames: Uint8Array[]): ArrayBuffer {
     return result.buffer;
 }
 
+/**
+ * Preserve the browser's close-code restriction in failure-path tests.
+ * An unconditional close spy used to hide InvalidAccessError, leaving the real
+ * socket open while its payload loop and MCP identity had already been cleared.
+ */
+function browserRestrictedSocket() {
+    const socket = {
+        readyState: WebSocket.OPEN as number,
+        close: vi.fn((code?: number, _reason?: string) => {
+            if (code !== undefined && code !== 1000 && (code < 3000 || code > 4999)) {
+                throw new DOMException('Invalid browser close code', 'InvalidAccessError');
+            }
+            socket.readyState = WebSocket.CLOSING;
+        })
+    };
+    return socket;
+}
+
 describe('MapTileStreamClient', () => {
     it('aborts pending payload requests before the websocket close event', async () => {
         const client = new MapTileStreamClient('/interactive');
@@ -197,18 +215,19 @@ describe('MapTileStreamClient', () => {
         const client = new MapTileStreamClient('/interactive');
         const controller = new AbortController();
         const failure = new TypeError('Network unavailable');
-        const close = vi.fn();
+        const socket = browserRestrictedSocket();
         const error = vi.spyOn(console, 'error').mockImplementation(() => {});
         vi.stubGlobal('fetch', vi.fn().mockRejectedValue(failure));
         try {
-            client['socket'] = {readyState: WebSocket.OPEN, close} as unknown as WebSocket;
+            client['socket'] = socket as unknown as WebSocket;
             client['pullClientId'] = 'b3e68f32-3b51-472d-8cab-14b597f7de91';
             client['pullController'] = controller;
 
             await client['runPullLoop'](controller);
 
             expect(error).toHaveBeenCalledExactlyOnceWith('Interactive payload fetch failed.', failure);
-            expect(close).toHaveBeenCalledExactlyOnceWith(1011, 'interactive transport failure');
+            expect(socket.close).toHaveBeenCalledExactlyOnceWith(4000, 'interactive transport failure');
+            expect(client.isOpen()).toBe(false);
             expect(controller.signal.aborted).toBe(true);
         } finally {
             client['socket'] = null;
@@ -1091,7 +1110,7 @@ describe('MapTileStreamClient', () => {
             await tileStream.frameMessageChain;
 
             expect(close).toHaveBeenCalledWith(
-                1011,
+                4000,
                 "interactive transport failure"
             );
             expect(client.getPendingFrameQueueSize()).toBe(0);
@@ -1119,7 +1138,7 @@ describe('MapTileStreamClient', () => {
             );
 
             expect(failingClose).toHaveBeenCalledWith(
-                1011,
+                4000,
                 "interactive transport failure"
             );
         } finally {
@@ -1152,9 +1171,9 @@ describe('MapTileStreamClient', () => {
         const tileStream = client as any;
         let mismatch: unknown = null;
         let statusReceived = false;
-        const close = vi.fn();
+        const socket = browserRestrictedSocket();
         try {
-            tileStream.socket = {readyState: 1, close};
+            tileStream.socket = socket;
             client.withProtocolMismatchCallback(payload => {
                 mismatch = payload;
             });
@@ -1175,10 +1194,11 @@ describe('MapTileStreamClient', () => {
                 }
             });
             expect(statusReceived).toBe(false);
-            expect(close).toHaveBeenCalledWith(
-                1002,
+            expect(socket.close).toHaveBeenCalledWith(
+                4002,
                 "unsupported mapget tile-stream protocol"
             );
+            expect(client.isOpen()).toBe(false);
             await expect(client.connect()).rejects.toThrow(
                 "incompatible tile-stream protocol"
             );

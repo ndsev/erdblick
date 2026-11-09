@@ -60,7 +60,7 @@ function setup() {
         events: new Subject(), routerState: { snapshot: { root: { queryParams: {} } } }, navigate: vi.fn()
     } as never, { showError: vi.fn() } as never);
     const owners = stateOwners(state);
-    owners.viewSettings.importViews(['view-0', 'view-1']);
+    owners.viewSettings.importViews(['0', '1']);
     owners.viewSettings.viewSyncState.next([]);
     owners.viewSettings.cameraViewDataState.next(0, camera(10, 40, 500));
     owners.viewSettings.cameraViewDataState.next(1, camera(20, 50, 1000));
@@ -316,7 +316,7 @@ describe("McpActionService", () => {
         const send = (callId: string, action = "viewer_get_controls", args: object = {}) => stream.actionControlReceived.next({
             payload: { type: "mapget.actions.invoke", version: 1, callId, action, arguments: args, timeoutMs: 30000 }, receivedAt: performance.now()
         });
-        const args = { target: { control: "view.camera", viewId: "view-0" }, value: camera() };
+        const args = { target: { control: "view.camera", viewId: "0" }, value: camera() };
         send("write-1", "viewer_set_control", args);
         send("write-2", "viewer_set_control", args);
         expect(stream.sendActionControl).toHaveBeenCalledWith(clientId, expect.objectContaining({ callId: "write-2", error: expect.objectContaining({ code: "busy" }) }));
@@ -335,7 +335,7 @@ describe("McpActionService", () => {
         stream.actionControlReceived.next({
             payload: {
                 type: "mapget.actions.invoke", version: 1, callId: "write", action: "viewer_set_control", timeoutMs: 100,
-                arguments: { target: { control: "view.camera", viewId: "view-0" }, value: camera() }
+                arguments: { target: { control: "view.camera", viewId: "0" }, value: camera() }
             }, receivedAt: performance.now() - (operation === "expired" ? 1000 : 0)
         });
         if (operation === "cancel") stream.actionControlReceived.next({ payload: { type: "mapget.actions.cancel", version: 1, callId: "write", reason: "cancelled" }, receivedAt: performance.now() });
@@ -353,7 +353,7 @@ describe("McpActionService", () => {
         const invoke = (callId: string) => stream.actionControlReceived.next({
             payload: {
                 type: "mapget.actions.invoke", version: 1, callId, action: "viewer_set_control", timeoutMs: 30000,
-                arguments: { target: { control: "view.camera", viewId: "view-0" }, value: camera() }
+                arguments: { target: { control: "view.camera", viewId: "0" }, value: camera() }
             }, receivedAt: performance.now()
         });
         invoke("accepted");
@@ -385,7 +385,7 @@ describe("McpActionService", () => {
         const message = {
             payload: {
                 type: "mapget.actions.invoke", version: 1, callId: "once", action: "viewer_set_control", timeoutMs: 30000,
-                arguments: { target: { control: "view.camera", viewId: "view-0" }, value: camera() }
+                arguments: { target: { control: "view.camera", viewId: "0" }, value: camera() }
             }, receivedAt: performance.now()
         };
         stream.actionControlReceived.next(message);
@@ -442,7 +442,7 @@ describe("McpActionService", () => {
         const { service, state, renderers } = fixture();
         renderers[0].getLiveCameraState.mockReturnValue(camera(12, 49, 300));
         const previous = structuredClone(stateOwners(state).viewSettings.cameraViewDataState.getValue(0));
-        const result = read(service, [{ control: "view.camera", viewId: "view-0" }]);
+        const result = read(service, [{ control: "view.camera", viewId: "0" }]);
         expect(result.values[0]).toMatchObject({ value: { destination: { lon: 12, lat: 49, alt: 300 } } });
         expect(stateOwners(state).viewSettings.cameraViewDataState.getValue(0)).toEqual(previous);
     });
@@ -467,7 +467,7 @@ describe("McpActionService", () => {
         stateOwners(state).viewSettings.numViews = 1;
         const setter = vi.spyOn(stateOwners(state).viewSettings, "setView");
         expect(() => service.execute("viewer_set_control", {
-            target: { control: "view.camera", viewId: "view-1" }, value: camera()
+            target: { control: "view.camera", viewId: "1" }, value: camera()
         })).toThrow(expect.objectContaining({ detail: expect.objectContaining({ reason: "view_unavailable", outcome: "not_applied" }) }));
         expect(setter).not.toHaveBeenCalled();
         expect(stateOwners(state).viewSettings.focusedView).toBe(0);
@@ -477,7 +477,7 @@ describe("McpActionService", () => {
         const { service, state, views, zone } = fixture();
         stateOwners(state).viewSettings.viewSyncState.next(sync);
         const result = viewerActions.viewer_set_control.outputSchema.parse(service.execute("viewer_set_control", {
-            target: { control: "view.camera", viewId: "view-1" }, value: camera(21, 52, 700)
+            target: { control: "view.camera", viewId: "1" }, value: camera(21, 52, 700)
         }));
         expect(stateOwners(state).viewSettings.focusedView).toBe(1);
         expect(result.changed).toBe(true);
@@ -491,7 +491,7 @@ describe("McpActionService", () => {
     it("reports an unchanged camera as a successful no-op", () => {
         const { service, state, views } = fixture();
         const result = service.execute("viewer_set_control", {
-            target: { control: "view.camera", viewId: "view-0" }, value: stateOwners(state).viewSettings.cameraViewDataState.getValue(0)
+            target: { control: "view.camera", viewId: "0" }, value: stateOwners(state).viewSettings.cameraViewDataState.getValue(0)
         });
         expect(result).toMatchObject({ status: "applied", changed: false });
     });
@@ -499,7 +499,7 @@ describe("McpActionService", () => {
     it("does not override a human gesture or first-person view in the sync group", () => {
         const { service, state, views, renderers } = fixture();
         stateOwners(state).viewSettings.viewSyncState.next([VIEW_SYNC_POSITION]);
-        const args = { target: { control: "view.camera", viewId: "view-1" }, value: camera() };
+        const args = { target: { control: "view.camera", viewId: "1" }, value: camera() };
         const setter = vi.spyOn(stateOwners(state).viewSettings, "setView");
         renderers[0].isCameraInteractionActive.mockReturnValue(true);
         expect(() => service.execute("viewer_set_control", args)).toThrow(expect.objectContaining({ detail: expect.objectContaining({ code: "busy" }) }));
@@ -513,7 +513,7 @@ describe("McpActionService", () => {
     it("does not misreport a first-person map camera as an empty success", () => {
         const { service, renderers } = fixture();
         renderers[0].getLiveCameraState.mockReturnValue(undefined);
-        expect(read(service, [{ control: "view.camera", viewId: "view-0" }])).toMatchObject({
+        expect(read(service, [{ control: "view.camera", viewId: "0" }])).toMatchObject({
             complete: false, values: [{ unavailable: "first_person" }]
         });
     });
@@ -522,7 +522,7 @@ describe("McpActionService", () => {
         const { service, state, views } = fixture();
         stateOwners(state).viewSettings.mode2dState.next(0, true);
         const setter = vi.spyOn(stateOwners(state).viewSettings, "setView");
-        for (const target of [{ control: "view.camera", viewId: "view-0" }, { control: "app.searches" }, { control: "__proto__" }]) {
+        for (const target of [{ control: "view.camera", viewId: "0" }, { control: "app.searches" }, { control: "__proto__" }]) {
             expect(() => service.execute("viewer_set_control", { target, value: camera() }))
                 .toThrow(ViewerActionFailure);
         }
@@ -593,10 +593,10 @@ describe("McpActionService", () => {
 
     it("reports each unavailable setting without dropping successful sibling reads", () => {
         const { service } = fixture();
-        expect(read(service, [{ control: "view.layer", viewId: "view-0", mapId: "missing", layerId: "missing" },
+        expect(read(service, [{ control: "view.layer", viewId: "0", mapId: "missing", layerId: "missing" },
         { control: "inspection.panel", panelId: 999 }, { control: "app.focusedView" }])).toMatchObject({
             complete: false, values: [
-                { unavailable: "target_unavailable" }, { unavailable: "target_unavailable" }, { value: "view-0" }
+                { unavailable: "target_unavailable" }, { unavailable: "target_unavailable" }, { value: "0" }
             ]
         });
     });
@@ -606,7 +606,7 @@ describe("McpActionService", () => {
         expect(service.execute("viewer_list_backgrounds", {})).toMatchObject({ complete: true, items: [{ id: "osm", name: "OpenStreetMap", kind: "xyz" }] });
         const previous = stateOwners(state).viewSettings.getBackgroundState(0);
         expect(() => service.execute("viewer_set_control", {
-            target: { control: "view.background", viewId: "view-0" },
+            target: { control: "view.background", viewId: "0" },
             value: { layerId: "unknown", opacity: 50 }
         })).toThrow(ViewerActionFailure);
         expect(stateOwners(state).viewSettings.getBackgroundState(0)).toEqual(previous);
@@ -680,12 +680,12 @@ describe("McpActionService", () => {
         const internal = new StyleOptionNode("map", "Road", { ...option.info, id: "private", internal: true }, "style", "s", false);
         maps.maps.maps.set("map", { id: "map", layers: new Map([["Road", { id: "Road", mapId: "map", children: [option, internal] }]]) } as never);
         const result = viewerActions.viewer_list_style_options.outputSchema.parse(service.execute("viewer_list_style_options", {
-            mapId: "map", layerId: "Road", viewId: "view-1"
+            mapId: "map", layerId: "Road", viewId: "1"
         }));
         expect(result.items).toHaveLength(1);
         expect(result.items[0]).toMatchObject({
             id: "labels", value: true, writeTarget: {
-                control: "view.styleOption", viewId: "view-1", mapId: "map", layerId: "Road", styleId: "style", optionId: "labels"
+                control: "view.styleOption", viewId: "1", mapId: "map", layerId: "Road", styleId: "style", optionId: "labels"
             }
         });
         expect(viewerActions.viewer_set_control.inputSchema.safeParse({
@@ -709,7 +709,7 @@ describe("McpActionService", () => {
         expect(service.execute("viewer_list_styles", { layerId: "Road", styleId: "hidden" }))
             .toMatchObject({ complete: true, items: [{ id: "hidden", visible: false }] });
         for (const tool of ["viewer_list_style_options", "viewer_list_presets"] as const) {
-            expect(service.execute(tool, { mapId: "map", layerId: "Road", viewId: "view-0" })).toMatchObject({ items: [] });
+            expect(service.execute(tool, { mapId: "map", layerId: "Road", viewId: "0" })).toMatchObject({ items: [] });
         }
         expect(styles.toggleStyle).not.toHaveBeenCalled();
     });
@@ -727,16 +727,16 @@ describe("McpActionService", () => {
 
     it("guards focus and view creation/removal with stable identities", () => {
         const { service, state } = fixture();
-        expect(service.execute("viewer_set_control", { target: { control: "app.focusedView" }, value: "view-1" })).toMatchObject({ changed: true });
-        service.execute("viewer_manage_view", { operation: "remove", viewId: "view-0" });
+        expect(service.execute("viewer_set_control", { target: { control: "app.focusedView" }, value: "1" })).toMatchObject({ changed: true });
+        service.execute("viewer_manage_view", { operation: "remove", viewId: "0" });
         expect(stateOwners(state).viewSettings.numViews).toBe(1);
-        expect(() => service.execute("viewer_manage_view", { operation: "create", viewId: "view-0" })).toThrow(ViewerActionFailure);
-        service.execute("viewer_manage_view", { operation: "create", viewId: "view-1" });
+        expect(() => service.execute("viewer_manage_view", { operation: "create", viewId: "0" })).toThrow(ViewerActionFailure);
+        service.execute("viewer_manage_view", { operation: "create", viewId: "1" });
         expect(stateOwners(state).viewSettings.numViews).toBe(2);
-        service.execute("viewer_manage_view", { operation: "create", viewId: "view-1" });
+        service.execute("viewer_manage_view", { operation: "create", viewId: "1" });
         expect(stateOwners(state).viewSettings.numViews).toBe(3);
         stateOwners(state).viewSettings.numViews = 32;
-        expect(() => service.execute("viewer_manage_view", { operation: "create", viewId: "view-1" })).toThrow(ViewerActionFailure);
+        expect(() => service.execute("viewer_manage_view", { operation: "create", viewId: "1" })).toThrow(ViewerActionFailure);
     });
 
     it.each(["isCameraInteractionActive", "isFirstPersonViewActive"] as const)("honors a synchronized sibling's %s before changing projection or focus", method => {
@@ -745,7 +745,7 @@ describe("McpActionService", () => {
         renderers[0][method].mockReturnValue(true);
         const setter = vi.spyOn(stateOwners(state).viewSettings, "setProjectionMode");
         expect(() => service.execute("viewer_set_control", {
-            target: { control: "view.projection", viewId: "view-1" },
+            target: { control: "view.projection", viewId: "1" },
             value: "2d"
         })).toThrow(ViewerActionFailure);
         expect(setter).not.toHaveBeenCalled();
@@ -857,14 +857,14 @@ describe("McpActionService", () => {
         const moved = vi.fn();
         views.moveToRectangleTopic.subscribe(moved);
         expect(await service.execute("viewer_navigate", {
-            viewId: "view-0",
+            viewId: "0",
             target: { bounds: { west: 10, south: 40, east: 11, north: 41 } }
         })).toMatchObject({ status: "applied" });
         expect(moved).toHaveBeenCalledOnce();
         let resolve!: (value: Array<{ mapTileKey: string; featureId: string }>) => void;
         stream.locateFeature.mockReturnValue(new Promise(done => { resolve = done; }));
         const pending = service.execute("viewer_navigate", {
-            viewId: "view-1",
+            viewId: "1",
             target: { features: [{ mapId: "map", featureId: "Road.1" }] }
         });
         renderers[1].isCameraInteractionActive.mockReturnValue(true);
@@ -894,8 +894,9 @@ describe("McpActionService", () => {
         const session = {
             id: "s", definition, runId: "run-1", refresh: 2, complete: true, paused: false,
             schemaAnalysis: readySearchAnalysis(definition.query),
+            preparation: {signature: "ready", status: "ready", interpretations: [], selectedIds: [], branches: [], initialStyles: []},
             searchResults: [result, { ...result, resultKey: "r2" }], errors: new Set<string>(), progressDone: 2, progressTotal: 2
-        } satisfies Partial<FeatureSearchSession> as FeatureSearchSession;
+        } satisfies Partial<FeatureSearchSession> as unknown as FeatureSearchSession;
         searches.getSession.mockReturnValue(session);
         expect(viewerActions.viewer_get_search.outputSchema.parse(service.execute("viewer_get_search", { searchId: "s" }))).toMatchObject({ responseComplete: true, searchComplete: true, settings: { scope: "auto" }, status: { resultCount: 2 } });
         searches.getSession.mockReturnValue({ ...session, complete: false } as FeatureSearchSession);
@@ -980,7 +981,7 @@ describe("McpActionService", () => {
         const definition = createFeatureSearchStateEntry({id: "speed", query: "SPEED_LIMIT_METRIC",
             searchStyleRules: [{geometry: ["line"], filter: [], color: {
                 mode: "gradient", field: "attributeValue.speedLimitKmh",
-                schemaType: {schemaId: "speed-schema", typeId: 198},
+                schemaTypes: [{schemaId: "speed-schema", typeId: 198}],
                 stops: [{value: 1, color: "#0000ff"}, {value: 253, color: "#ff0000"}],
                 specials: [{value: 255, color: "#00ffff"}]
             }}]});
@@ -1159,14 +1160,14 @@ describe("McpActionService", () => {
 
     it("samples diagnostic counters/caches without scene traversal or treating missing GPU data as zero", () => {
         const { service, render, viewDiagnostics } = fixture();
-        const result = viewerActions.viewer_get_diagnostics.outputSchema.parse(service.execute("viewer_get_diagnostics", { viewId: "view-0" }));
+        const result = viewerActions.viewer_get_diagnostics.outputSchema.parse(service.execute("viewer_get_diagnostics", { viewId: "0" }));
         expect(result).toMatchObject({ complete: true, errors: [] });
         expect(result.executionContext).toBe("browser");
         expect(result.interpretation).toContain("Backend queues, CPU and memory were not sampled");
         expect(result.metrics).toContainEqual(expect.objectContaining({ name: "latestWasmMs", value: 12 }));
         expect(result.metrics.some(metric => metric.name === "latestNativeMs")).toBe(false);
         expect(result.metrics).toContainEqual(expect.objectContaining({ name: "queued", value: 3 }));
-        expect(result.metrics).toContainEqual(expect.objectContaining({ name: "frameIntervalP90Ms", value: null, scope: "view", viewId: "view-0" }));
+        expect(result.metrics).toContainEqual(expect.objectContaining({ name: "frameIntervalP90Ms", value: null, scope: "view", viewId: "0" }));
         expect(result.unavailable.join(" ")).toContain("Scoped GPU allocation is unavailable");
         expect(render.debugSnapshot).not.toHaveBeenCalled();
         expect(viewDiagnostics.snapshot).not.toHaveBeenCalled();

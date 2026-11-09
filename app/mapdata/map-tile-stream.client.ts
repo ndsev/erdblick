@@ -40,6 +40,12 @@ import { FrameBudgetLoop } from "../utils/frame-budget-loop.util";
 const TARGET_TILE_REQUEST_CHUNK_BYTES = 1024 * 1024;
 const MAX_TILE_REQUEST_MESSAGE_BYTES = 9 * 1024 * 1024;
 
+// Browser WebSocket.close() accepts only 1000 or application codes 3000–4999.
+// Wire-protocol codes such as 1002 and 1011 throw before closing the socket,
+// preventing the close callback from restarting a failed payload session.
+const INTERACTIVE_TRANSPORT_FAILURE_CLOSE_CODE = 4000;
+const INTERACTIVE_PROTOCOL_MISMATCH_CLOSE_CODE = 4002;
+
 interface TileRequestChunk {
     index: number;
     isLast: boolean;
@@ -131,7 +137,10 @@ export abstract class MapTileStreamClientBase {
         return this;
     }
 
-    /** Decode every complete frame and retain a trailing partial frame for streamed HTTP chunks. */
+    /**
+     * Return borrowed slices for complete frames and the consumed-byte count.
+     * The caller retains any trailing partial frame and owns the backing bytes.
+     */
     protected decodeAvailableFrames(bytes: Uint8Array): DecodedTransportFrames {
         const frames: QueuedTransportFrame[] = [];
         let offset = 0;
@@ -423,7 +432,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         this.rejectCompletion(
             error instanceof Error ? error : new Error(message)
         );
-        this.close(1011, "interactive transport failure");
+        this.close(INTERACTIVE_TRANSPORT_FAILURE_CLOSE_CODE, "interactive transport failure");
     }
 
     /** Tears down websocket, pull loops, parser state, and any pending completion promise. */
@@ -1226,7 +1235,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         this.rejectCompletion(new Error(
             `Unsupported mapget tile-stream protocol ${version.major}.${version.minor}.${version.patch}; `
             + `expected ${this.protocolVersion.major}.${this.protocolVersion.minor}.x.`));
-        this.close(1002, "unsupported mapget tile-stream protocol");
+        this.close(INTERACTIVE_PROTOCOL_MISMATCH_CLOSE_CODE, "unsupported mapget tile-stream protocol");
     }
 
     /** Dispatches one parsed transport frame to the parser, callbacks, or completion tracking. */
