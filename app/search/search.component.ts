@@ -2,6 +2,7 @@ import type {FeatureSearchResolvedDefinition} from "./feature-search-runtime-sta
 import {schemaScalarMeaning} from "../mapdata/schema-type.model";
 import {
     AfterViewInit,
+    ChangeDetectionStrategy,
     ChangeDetectorRef,
     Component,
     ElementRef,
@@ -164,6 +165,7 @@ interface FeatureSearchResultTreeItem {
 
 @Component({
     selector: "feature-search",
+    changeDetection: ChangeDetectionStrategy.OnPush,
     template: `
         @if (session) {
             @if (isDocked()) {
@@ -960,7 +962,8 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
     private pendingBookmarkedCloseSessionId: string | null = null;
     private featureSearchHeaderActionsSignature = "";
     private featureSearchHeaderActionsCache: AppSurfaceHeaderAction[] = [];
-    private sessionSyncTimer: ReturnType<typeof setTimeout> | null = null;
+    private sessionSyncRaf: number | null = null;
+    private searchStyleOptionsScope?: "feature" | "attribute";
     private progressDisplayRefreshQueued = false;
     private pendingProgressDisplaySession?: FeatureSearchSession;
     private destroyed = false;
@@ -996,7 +999,10 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         public readonly viewSettings: MapViewState,
         public readonly inspectionState: InspectionPanelService) {
         this.selectedGroupingOptions = this.groupingOptionsFromValues(this.searchService.state.featureSearchGrouping);
-        this.subscriptions.add(this.styleService.styleGroups.subscribe(() => this.refreshSearchStyleOptions()));
+        this.subscriptions.add(this.styleService.styleGroups.subscribe(() => {
+            this.refreshSearchStyleOptions();
+            this.changeDetector.markForCheck();
+        }));
         this.subscriptions.add(this.searchService.state.featureSearchGroupingState.subscribe(groupingValues => {
             const nextOptions = this.groupingOptionsFromValues(groupingValues);
             if (this.sameGroupingOptions(this.selectedGroupingOptions, nextOptions)) {
@@ -1004,6 +1010,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
             }
             this.selectedGroupingOptions = nextOptions;
             this.rebuildResultsTreeIncrementally();
+            this.changeDetector.markForCheck();
         }));
 
         this.subscriptions.add(this.searchService.progress.subscribe(updatedSession => {
@@ -1027,12 +1034,14 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
                 this.syncSelectedFeatureTypesFromSession(this.session);
                 this.syncSelectedTileLevelsFromSession(this.session);
             }
+            this.changeDetector.markForCheck();
         }));
         this.subscriptions.add(this.viewSettings.numViewsState.subscribe(() => {
             this.refreshSearchViewOptions();
             if (this.session) {
                 this.syncSelectedViewIndicesFromSession(this.session);
             }
+            this.changeDetector.markForCheck();
         }));
     }
 
@@ -1264,6 +1273,13 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
      * turn. Coalescing here keeps the meter, label, and tooltip on one session
      * snapshot and prevents a late child lifecycle hook from changing one of these
      * bindings between Angular's check and check-no-changes passes.
+     *
+     * Streaming search results must not check every open panel on every frame.
+     * Like the coordinate HUD, check only this component. markForCheck would
+     * also mark its ancestors and schedule an application pass, including with
+     * Angular 21's default zoneless scheduling.
+     * OnPush also keeps idle searches out of checks triggered elsewhere in the UI;
+     * user events and the catalog subscriptions still notify Angular normally.
      */
     private scheduleProgressDisplayRefresh(session: FeatureSearchSession): void {
         this.pendingProgressDisplaySession = session;
@@ -1271,21 +1287,16 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
             return;
         }
         this.progressDisplayRefreshQueued = true;
-        queueMicrotask(() => {
+        this.ngZone.runOutsideAngular(() => queueMicrotask(() => {
             this.progressDisplayRefreshQueued = false;
             const pendingSession = this.pendingProgressDisplaySession;
             this.pendingProgressDisplaySession = undefined;
             if (this.destroyed || !pendingSession || pendingSession !== this.session) {
                 return;
             }
-            this.ngZone.run(() => {
-                if (this.destroyed || pendingSession !== this.session) {
-                    return;
-                }
-                this.refreshProgressDisplay(pendingSession);
-                this.changeDetector.markForCheck();
-            });
-        });
+            this.refreshProgressDisplay(pendingSession);
+            this.changeDetector.detectChanges();
+        }));
     }
 
     /** Tracks how far the PrimeNG result tree has consumed the streamed result array. */
@@ -1660,6 +1671,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
     /** Rebuilds dropdown compatibility from the current authoritative imported YAML sources. */
     private refreshSearchStyleOptions(): void {
         const scope = this.resolvedStyleSearchScope();
+        this.searchStyleOptionsScope = scope;
         const searchStyles: ErdblickStyle[] = [...this.styleService.styles.values()]
             .filter(style => style.category === "search")
             .sort((left, right) => left.id.localeCompare(right.id));
@@ -1892,7 +1904,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         this.searchSchema.requestPreparedSearchStyleFields(session.preparation?.branches ?? [], {
             selectedFeatureTypes: session.definition.selectedFeatureTypes, recursive: true, values: "scalar"
         }).then(inventory => {
-            if (signature !== this.styleAttributeOptionsSessionSignature) {
+            if (this.destroyed || signature !== this.styleAttributeOptionsSessionSignature) {
                 return;
             }
             const currentSession = this.session?.id === session.id
@@ -1900,15 +1912,18 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
                 : this.searchService.getSession(session.id);
             if (!currentSession) {
                 this.styleAttributeOptionsLoading = false;
+                this.changeDetector.markForCheck();
                 return;
             }
             this.styleAttributeOptionsError = "";
             this.applyStyleAttributeOptions(currentSession, inventory, patchMissingFields);
+            this.changeDetector.markForCheck();
         }).catch(error => {
-            if (signature !== this.styleAttributeOptionsSessionSignature) return;
+            if (this.destroyed || signature !== this.styleAttributeOptionsSessionSignature) return;
             this.styleAttributeOptionsLoading = false;
             this.styleAttributeOptionsError = `Schema fields are unavailable. ${String(error)}`;
             // Retain manual rules and the last choices; failure is not an empty schema.
+            this.changeDetector.markForCheck();
         });
     }
 
@@ -2127,6 +2142,7 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
                 : this.searchService.getSession(sessionId);
             if (!session) {
                 this.styleAttributeOptionsLoading = false;
+                this.changeDetector.markForCheck();
                 return;
             }
             this.refreshStyleAttributeOptions(session, shouldPatchMissingFields);
@@ -2910,24 +2926,31 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         this.syncFromSession(session);
     }
 
-    /** Coalesces external session emissions behind the active Angular check. */
+    /**
+     * Read the latest session once per frame, after the active Angular check.
+     * Backend progress and viewport coverage can emit several times in one turn;
+     * only the UI projection is coalesced, never result ingestion or map rendering.
+     * The deferred progress refresh checks this panel directly rather than
+     * asking Angular to check the application for each stream notification.
+     */
     private scheduleSessionSync(): void {
-        if (this.sessionSyncTimer !== null) {
+        if (this.destroyed || this.sessionSyncRaf !== null) {
             return;
         }
-        this.sessionSyncTimer = setTimeout(() => {
-            this.sessionSyncTimer = null;
-            const session = this.searchService.getSession(this.searchId);
-            if (session) {
-                this.syncFromSession(session);
-            }
-        }, 0);
+        this.sessionSyncRaf = this.ngZone.runOutsideAngular(() =>
+            requestAnimationFrame(() => {
+                this.sessionSyncRaf = null;
+                const session = this.searchService.getSession(this.searchId);
+                if (session) {
+                    this.syncFromSession(session);
+                }
+            })
+        );
     }
 
     /** Copies session state into the local view model without crossing streams between searches. */
     private syncFromSession(session: FeatureSearchSession): void {
         this.session = session;
-        this.refreshSearchStyleOptions();
         // Search sessions are mutable service-owned objects. Snapshot scalar
         // diagnostics only at our deferred synchronization boundary so a
         // service timer cannot mutate a template binding mid Angular check.
@@ -2958,6 +2981,11 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
             const hasStyleRules = (session.definition.searchStyleRules?.length ?? 0) > 0;
             this.refreshStyleAttributeOptionsIfNeeded(session, hasStyleRules);
 
+        }
+        // Saved YAML compatibility depends on feature/attribute scope, not on
+        // tile counts or camera movement. Catalog edits refresh it separately.
+        if (this.searchStyleOptionsScope !== this.resolvedStyleSearchScope()) {
+            this.refreshSearchStyleOptions();
         }
         if (this.activeSearchGroupId !== session.runId) {
             this.activeSearchGroupId = session.runId;
@@ -3043,9 +3071,9 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
         this.pendingProgressDisplaySession = undefined;
         this.subscriptions.unsubscribe();
         this.cancelResultTreeAppend();
-        if (this.sessionSyncTimer !== null) {
-            clearTimeout(this.sessionSyncTimer);
-            this.sessionSyncTimer = null;
+        if (this.sessionSyncRaf !== null) {
+            cancelAnimationFrame(this.sessionSyncRaf);
+            this.sessionSyncRaf = null;
         }
         this.resizeObserver?.disconnect();
         this.resizeObserver = undefined;
@@ -3914,7 +3942,6 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
             requestAnimationFrame(() => {
                 this.resultTreeAppendRaf = null;
                 this.appendStreamingResultsChunk();
-                this.ngZone.run(() => this.changeDetector.markForCheck());
             })
         );
     }
@@ -4132,7 +4159,11 @@ export class SearchComponent implements AfterViewInit, OnChanges, OnDestroy {
             this.layout.baseFontSize * 6,
             Math.floor(hostHeight - filterHeight - treeVerticalPadding)
         );
-        this.scrollHeight = `${nextHeight}px`;
+        const scrollHeight = `${nextHeight}px`;
+        if (this.scrollHeight !== scrollHeight) {
+            this.scrollHeight = scrollHeight;
+            this.changeDetector.markForCheck();
+        }
 
         window.requestAnimationFrame(() => {
             const scroller = (this.tree as any)?.scroller as Scroller | undefined;
