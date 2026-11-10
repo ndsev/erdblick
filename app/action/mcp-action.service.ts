@@ -27,6 +27,13 @@ export interface ViewerActionActivity {
     status: "running" | "applied" | "completed" | ViewerActionError["code"];
 }
 
+/** Remote viewer registration state; diagnostic text never becomes a status value. */
+export interface ViewerMcpAvailability {
+    enabled: boolean;
+    message: "waiting" | "connecting" | "ready";
+    detail?: string;
+}
+
 /** One admitted call, including its reply destination, deadline and cancellation cleanup. */
 interface PendingViewerAction {
     callId: string;
@@ -51,7 +58,7 @@ interface PendingViewerAction {
 export class McpActionService implements OnDestroy {
     private readonly encoder = new TextEncoder();
     readonly activity$ = new BehaviorSubject<readonly ViewerActionActivity[]>([]);
-    readonly availability$ = new BehaviorSubject({ enabled: false, ready: false, message: "MCP is not enabled" });
+    readonly availability$ = new BehaviorSubject<ViewerMcpAvailability>({ enabled: false, message: "waiting" });
     private readonly subscriptions = new Subscription();
     private readonly pending = new Map<string, PendingViewerAction>();
     // Remember recent replies so a repeated invocation frame cannot run the same
@@ -60,7 +67,6 @@ export class McpActionService implements OnDestroy {
     private readonly completedCalls = new Set<string>();
     private readonly infoAbort = new AbortController();
     private clientId: string | null = null;
-    private registered = false;
     private initialized = false;
     private info: ViewerMcpInfo = { enabled: false };
     private sessionLabel = "erdblick";
@@ -68,6 +74,7 @@ export class McpActionService implements OnDestroy {
     get connectionInfo(): ViewerMcpInfo { return this.info; }
     get hasPendingAction(): boolean { return this.pending.size > 0; }
     get label(): string { return this.sessionLabel; }
+    private get registered(): boolean { return this.availability$.value.message === "ready"; }
 
     constructor(
         private readonly state: AppStateService,
@@ -98,7 +105,6 @@ export class McpActionService implements OnDestroy {
             }, false);
             this.completedCalls.clear();
             this.ui.clear();
-            this.registered = false;
             this.clientId = clientId;
             this.register();
         }));
@@ -172,26 +178,28 @@ export class McpActionService implements OnDestroy {
      * those actions and the display label with the current interactive connection.
      */
     private register(): void {
-        this.registered = false;
-        if (!this.info.enabled) return;
+        if (!this.info.enabled) {
+            this.availability("waiting", "MCP is not enabled");
+            return;
+        }
         if (!this.info.catalogId) {
-            this.availability("Browser controls are not configured on this backend");
+            this.availability("waiting", "Browser controls are not configured on this backend");
             return;
         }
         if (this.info.catalogId !== VIEWER_ACTION_CATALOG_ID) {
-            this.availability("The backend and browser action catalogs do not match");
+            this.availability("waiting", "The backend and browser action catalogs do not match");
             return;
         }
         if (!this.clientId) {
-            this.availability("Waiting for the interactive connection");
+            this.availability("waiting", "Waiting for the interactive connection");
             return;
         }
-
-        this.availability("Connecting MCP controls");
-        this.stream.sendActionControl(this.clientId, {
+        this.availability("connecting");
+        const sent = this.stream.sendActionControl(this.clientId, {
             type: "mapget.actions.register", version: 1, catalogId: VIEWER_ACTION_CATALOG_ID,
             actions: Object.keys(this.actions.publicActions), label: this.sessionLabel
         });
+        if (!sent) this.availability("waiting", "Could not send MCP registration; waiting for the interactive connection");
     }
 
     /**
@@ -202,21 +210,19 @@ export class McpActionService implements OnDestroy {
         const parsed = viewerActionServerMessageSchema.safeParse(payload);
         if (!parsed.success) {
             this.stopCurrentAction();
-            this.registered = false;
-            this.availability("Invalid MCP control message");
+            this.availability("waiting", "Invalid MCP control message");
             return;
         }
         const message = parsed.data;
         if (message.type === "mapget.actions.registered" || message.type === "mapget.actions.updated") {
-            this.registered = this.info.enabled && this.info.catalogId === VIEWER_ACTION_CATALOG_ID
+            const registered = this.info.enabled && this.info.catalogId === VIEWER_ACTION_CATALOG_ID
                 && message.catalogId === VIEWER_ACTION_CATALOG_ID && message.clientId === this.clientId;
-            this.availability(this.registered ? "MCP controls ready" : "MCP registration does not match this connection");
+            this.availability(registered ? "ready" : "waiting", registered ? undefined : "MCP registration does not match this connection");
         } else if (message.type === "mapget.actions.error") {
             // Catalog replacement affects future admission, not already accepted work.
             const catalogChanged = message.error.reason === "catalog_changed";
             if (!catalogChanged) this.stopCurrentAction();
-            this.registered = false;
-            this.availability(catalogChanged ? "MCP action catalog changed; reload the viewer" : `MCP controls unavailable: ${message.error.code}`);
+            this.availability("waiting", catalogChanged ? "MCP action catalog changed; reload the viewer" : `MCP controls unavailable: ${message.error.code}`);
         } else if (message.type === "mapget.actions.cancel") {
             const call = this.pending.get(message.callId);
             if (call) this.finish(call, undefined, { code: "cancelled", message: "Action cancelled", outcome: "not_applied" });
@@ -363,12 +369,9 @@ export class McpActionService implements OnDestroy {
         this.zone.run(() => this.activity$.next([...this.activity$.value]));
     }
 
-    /**
-     * Publish MCP availability changes inside Angular so the status component
-     * refreshes, without processing streamed tile/camera frames here.
-     */
-    private availability(message: string): void {
-        this.zone.run(() => this.availability$.next({ enabled: this.info.enabled, ready: this.registered, message }));
+    /** Publishes readiness inside Angular for admission and UI, clearing obsolete diagnostics. */
+    private availability(message: ViewerMcpAvailability["message"], detail?: string): void {
+        this.zone.run(() => this.availability$.next({ enabled: this.info.enabled, message, detail }));
     }
 
     /**

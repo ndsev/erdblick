@@ -67,14 +67,15 @@ declare let window: DebugWindow;
             <location-terms-dialog></location-terms-dialog>
             <survey></survey>
             <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
-            <p-toast position="top-right" key="gpu-buffer-exhausted" [baseZIndex]="9500">
+            <p-toast position="top-right" key="gpu-buffer-exhausted" [baseZIndex]="9500"
+                     [preventOpenDuplicates]="true">
                 <ng-template #message let-message>
                     <i class="pi pi-exclamation-triangle p-toast-message-icon" aria-hidden="true"></i>
                     <div class="p-toast-message-text" data-testid="gpu-buffer-warning">
                         <div class="p-toast-summary">{{ message.summary }}</div>
                         <div class="p-toast-detail">{{ message.detail }}</div>
                         <button type="button" class="gpu-buffer-action"
-                                (click)="preferences.openRendering()">
+                                (click)="infoMessageService.clearGpuBufferExhausted(); preferences.openRendering()">
                             Adjust downsampling to reduce GPU load
                         </button>
                     </div>
@@ -138,7 +139,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         private styleService: MapStyleService,
         private keyboardService: KeyboardService,
         private viewContainerRef: ViewContainerRef,
-        private infoMessageService: InfoMessageService,
+        protected readonly infoMessageService: InfoMessageService,
         private dialogStack: DialogStackService,
         private configService: AppConfigService,
         private readonly diagnosticsState: DiagnosticsState,

@@ -43,9 +43,12 @@ test.describe('Snapshot – style component', () => {
         await expect(editorDialog.getByTestId('style-editor-header').locator('.app-surface-header'))
             .toBeVisible();
         await expect(editorDialog.getByTestId('style-editor-enabled')).toBeVisible();
-        await expect(editorDialog.getByTestId('style-editor-quick-name')).toBeVisible();
-        await expect(editorDialog.getByTestId('style-editor-quick-layers')).toBeVisible();
+        await expect(editorDialog.getByTestId('surface-title-edit')).toBeVisible();
+        await expect(editorDialog.getByRole('tab', {name: 'Rules', exact: true})).toHaveAttribute('aria-selected', 'true');
         await expect(editorDialog.locator('.style-form-error')).toHaveCount(0);
+        const branches = editorDialog.locator('[data-rule-path="rules.0"] > details');
+        await expect(branches).toHaveJSProperty('open', false);
+        await expect(editorDialog.locator('[data-rule-path="rules.0.all-of.0"]')).toHaveCount(0);
 
         await page.mouse.move(0, 0);
         await expect(page).toHaveScreenshot('style-component-editor.png', {
@@ -70,8 +73,13 @@ test.describe('Snapshot – style component', () => {
                 placement: 'left'
             },
             {
-                locator: editorDialog.getByTestId('style-editor-metadata'),
-                label: 'Style metadata',
+                locator: editorDialog.getByTestId('surface-title-edit'),
+                label: 'Rename style',
+                placement: 'top'
+            },
+            {
+                locator: editorDialog.getByTestId('style-editor-tabs').locator('p-tablist'),
+                label: 'Editor sections',
                 placement: 'left'
             },
             {
@@ -92,9 +100,8 @@ test.describe('Snapshot – style component', () => {
                 placement: 'left'
             },
             {
-                locator: editorDialog.locator('[data-style-bubble="rules.0.all-of.0.filter"]'),
-                through: editorDialog.locator('[data-style-bubble="rules.0.all-of.0.label-text-expression"]'),
-                label: 'Branch properties',
+                locator: branches.locator(':scope > summary'),
+                label: 'Expand branches',
                 placement: 'left'
             },
             {

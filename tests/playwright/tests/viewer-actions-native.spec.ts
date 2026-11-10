@@ -22,7 +22,7 @@ async function openViewer(page: Page, label: string, sync = false, origin?: stri
     await page.goto(origin ? new URL(path, origin).href : path);
     await waitForAppReady(page);
     await page.getByTestId('viewer-action-status').click();
-    await expect(page.getByTestId('viewer-action-details')).toContainText('MCP controls ready');
+    await expect(page.getByTestId('viewer-action-availability')).toHaveText('ready');
     await page.getByLabel('Tab label', { exact: true }).fill(label);
     await page.getByLabel('Tab label', { exact: true }).press('Tab');
 }
@@ -153,7 +153,7 @@ test('a failed payload fetch reconnects MCP and resumes map delivery without rel
     if (!await page.getByTestId('viewer-action-details').isVisible()) {
         await page.getByTestId('viewer-action-status').click();
     }
-    await expect(page.getByTestId('viewer-action-details')).toContainText('MCP controls ready');
+    await expect(page.getByTestId('viewer-action-availability')).toHaveText('ready');
     await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions))
         .toBeGreaterThan(0);
 

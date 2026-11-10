@@ -223,8 +223,9 @@ find nearby pick candidates. Under **Rendering**, **Max Tiles to Load** bounds
 the workload when exploring dense maps; it does not change the per-object
 point-cloud sampling quota.
 
-If a GPU material buffer fills up, a **GPU material buffer exhausted** warning stays
-visible until dismissed. Its **Adjust downsampling to reduce GPU load** link opens
+If a GPU material buffer fills up, one **GPU material buffer exhausted** warning stays
+visible until dismissed; further warnings do not stack while it is open. Its
+**Adjust downsampling to reduce GPU load** link dismisses the warning and opens
 **Preferences → Rendering**. Enable point-cloud downsampling, lower **Maximum points
 per cloud object**, and press **Apply** to reload with fewer points. **Max Tiles to Load**
 can also reduce the total rendering load. The warning does not change settings automatically.

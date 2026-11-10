@@ -168,10 +168,68 @@ describe("McpActionService", () => {
                 type: "mapget.actions.registered", version: 1, clientId, catalogId: VIEWER_ACTION_CATALOG_ID
             }, receivedAt: performance.now()
         });
-        expect(result.service.availability$.value.ready).toBe(true);
+        expect(result.service.availability$.value.message).toBe("ready");
         result.stream.sendActionControl.mockClear();
         return { ...result, clientId };
     }
+
+    it("publishes waiting, connecting and ready across registration, disconnect and recovery", async () => {
+        const {service, stream} = fixture();
+        expect(service.availability$.value).toEqual({enabled: false, message: "waiting"});
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+            enabled: true, endpoint: "http://localhost:8099/mcp", authentication: "local", scopes: [], catalogId: VIEWER_ACTION_CATALOG_ID
+        }))));
+        service.initialize();
+        await vi.waitFor(() => expect(service.availability$.value).toMatchObject({enabled: true, message: "waiting"}));
+        expect(service.availability$.value.detail).toContain("interactive connection");
+        for (const clientId of ["b3e68f32-3b51-472d-8cab-14b597f7de91", "b3e68f32-3b51-472d-8cab-14b597f7de92"]) {
+            stream.actionClientId$.next(clientId);
+            expect(service.availability$.value).toMatchObject({enabled: true, message: "connecting"});
+            expect(service.availability$.value.detail).toBeUndefined();
+            stream.actionControlReceived.next({payload: {
+                type: "mapget.actions.registered", version: 1, clientId, catalogId: VIEWER_ACTION_CATALOG_ID
+            }, receivedAt: performance.now()});
+            expect(service.availability$.value).toMatchObject({enabled: true, message: "ready"});
+            expect(service.availability$.value.detail).toBeUndefined();
+            stream.actionClientId$.next(null);
+            expect(service.availability$.value.message).toBe("waiting");
+        }
+    });
+
+    it.each([
+        {metadata: {enabled: false}, detail: "MCP is not enabled"},
+        {metadata: {enabled: true}, detail: "Browser controls are not configured on this backend"},
+        {metadata: {enabled: true, catalogId: `sha256:${"a".repeat(64)}`}, detail: "The backend and browser action catalogs do not match"}
+    ])("keeps blocked registration in waiting with a separate detail: $detail", async ({metadata, detail}) => {
+        const {service, stream} = fixture();
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+            ...(metadata.enabled ? {endpoint: "http://localhost:8099/mcp", authentication: "local", scopes: []} : {}), ...metadata
+        }))));
+        service.initialize();
+        await vi.waitFor(() => expect(service.availability$.value).toMatchObject({message: "waiting", detail}));
+        stream.actionClientId$.next("b3e68f32-3b51-472d-8cab-14b597f7de91");
+        expect(service.availability$.value).toMatchObject({message: "waiting", detail});
+        expect(stream.sendActionControl).not.toHaveBeenCalled();
+    });
+
+    it("returns to waiting if the stream refuses registration instead of remaining connecting", async () => {
+        const {service, stream} = await activeFixture();
+        stream.sendActionControl.mockReturnValue(false);
+        stream.actionClientId$.next(null);
+        stream.actionClientId$.next("b3e68f32-3b51-472d-8cab-14b597f7de92");
+        expect(service.availability$.value).toMatchObject({message: "waiting", detail: expect.stringContaining("Could not send MCP registration")});
+    });
+
+    it("keeps malformed control diagnostics separate and clears them after valid registration", async () => {
+        const {service, stream, clientId} = await activeFixture();
+        stream.actionControlReceived.next({payload: {type: "invalid"}, receivedAt: performance.now()});
+        expect(service.availability$.value).toMatchObject({message: "waiting", detail: "Invalid MCP control message"});
+        stream.actionControlReceived.next({payload: {
+            type: "mapget.actions.registered", version: 1, clientId, catalogId: VIEWER_ACTION_CATALOG_ID
+        }, receivedAt: performance.now()});
+        expect(service.availability$.value.message).toBe("ready");
+        expect(service.availability$.value.detail).toBeUndefined();
+    });
 
     it("runs WebMCP locally without backend registration or a clientId", async () => {
         const { service, stream } = fixture();
@@ -208,7 +266,7 @@ describe("McpActionService", () => {
         expect(execute).not.toHaveBeenCalled();
         expect(service.hasPendingAction).toBe(false);
         expect(service.activity$.value).toEqual([]);
-        expect(service.availability$.value).toMatchObject({ enabled: false, ready: false });
+        expect(service.availability$.value).toMatchObject({ enabled: false, message: "waiting" });
     });
 
     it("shares mutation admission, user stop and cancellation between WebMCP and the relay", async () => {
@@ -417,7 +475,7 @@ describe("McpActionService", () => {
                 error: { code: "not_available", message: "Registration retired", reason }
             }, receivedAt: performance.now()
         });
-        expect(service.availability$.value.ready).toBe(false);
+        expect(service.availability$.value.message).toBe("waiting");
         invoke("after-retirement");
         expect(stream.sendActionControl).toHaveBeenLastCalledWith(clientId, expect.objectContaining({
             callId: "after-retirement", error: expect.objectContaining({ code: "not_available" })
@@ -426,7 +484,7 @@ describe("McpActionService", () => {
         expect(service.hasPendingAction).toBe(false);
         expect(setter).toHaveBeenCalledTimes(reason === "catalog_changed" ? 1 : 0);
         if (reason === "catalog_changed") {
-            expect(service.availability$.value.message).toContain("reload the viewer");
+            expect(service.availability$.value.detail).toContain("reload the viewer");
             expect(stream.sendActionControl).toHaveBeenLastCalledWith(clientId, expect.objectContaining({
                 callId: "accepted", result: expect.objectContaining({ status: "applied" })
             }));
@@ -461,7 +519,7 @@ describe("McpActionService", () => {
         stream.actionClientId$.next(nextClientId);
         expect(stream.sendActionControl).toHaveBeenLastCalledWith(nextClientId, expect.objectContaining({ type: "mapget.actions.register" }));
         stream.actionControlReceived.next({ payload: { type: "mapget.actions.registered", version: 1, clientId, catalogId: VIEWER_ACTION_CATALOG_ID }, receivedAt: performance.now() });
-        expect(service.availability$.value.ready).toBe(false);
+        expect(service.availability$.value.message).toBe("waiting");
     });
 
     it("keeps activity bounded and excludes arguments/session identity", async () => {

@@ -54,7 +54,7 @@ async function openViewer(page: Page, label: string, origin?: string): Promise<v
     await page.goto(origin ? new URL(legacyTwoViews, origin).href : legacyTwoViews);
     await waitForAppReady(page);
     await page.getByTestId('viewer-action-status').click();
-    await expect(page.getByTestId('viewer-action-details')).toContainText('MCP controls ready');
+    await expect(page.getByTestId('viewer-action-availability')).toHaveText('ready');
     await page.getByLabel('Tab label', {exact: true}).fill(label);
     await page.getByLabel('Tab label', {exact: true}).press('Tab');
 }

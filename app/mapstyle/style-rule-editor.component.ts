@@ -89,9 +89,17 @@ export class StyleRuleEditorComponent implements OnChanges {
         if (!STYLE_RULE_STRUCTURES[property.key]) { this.open(property, target); return; }
         if (this.draft) return;
         const other = property.key === 'first-of' ? 'all-of' : property.key === 'all-of' ? 'first-of' : '';
-        this.action.emit({kind: 'edit', edit: other && this.model.has([...this.path, other])
-            ? {op: 'rename', path: [...this.path, other], key: property.key}
-            : {op: 'set', path: [...this.path, property.key], value: property.field.kind === 'list' ? [] : {}}});
+        if (other && this.model.has([...this.path, other])) { this.switchBranchKind(other); return; }
+        this.action.emit({kind: 'edit', edit: {op: 'set', path: [...this.path, property.key], value: property.field.kind === 'list' ? [] : {}}});
+    }
+
+    /** Retains the subsection's expansion choice when its branch kind is renamed. */
+    switchBranchKind(key: string): void {
+        if (this.draft) return;
+        const next = key === 'first-of' ? 'all-of' : 'first-of';
+        this.expandedSections.set(next, this.sectionOpen(key));
+        if (this.visitedSections.has(key)) this.visitedSections.add(next);
+        this.action.emit({kind: 'edit', edit: {op: 'rename', path: this.fieldPath(key), key: next}});
     }
 
     /** Locates a structural field without constructing paths in Angular templates. */
@@ -113,9 +121,9 @@ export class StyleRuleEditorComponent implements OnChanges {
         return !!this.draft && prefix.every((part, i) => this.draft!.rulePath[i] === part);
     }
 
-    /** Starts with the first level visible and retains the user's subsection choices. */
+    /** Starts every subsection collapsed and retains the user's expansion choices. */
     sectionOpen(key: string): boolean {
-        return this.containsDraft(key) || (this.expandedSections.get(key) ?? this.path.length <= 2);
+        return this.containsDraft(key) || (this.expandedSections.get(key) ?? false);
     }
 
     /** Rejects a collapse that would hide the only draft controls. */

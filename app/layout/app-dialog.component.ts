@@ -4,6 +4,7 @@ import {
     ContentChild,
     EventEmitter,
     Input,
+    model,
     OnChanges,
     OnDestroy,
     Output,
@@ -25,6 +26,7 @@ import {
 import { AppDialogLayout } from "./layout.model";
 import { LayoutService } from "./layout.service";
 import { AppStateService } from "../appstate/appstate.service";
+import { AppSurfaceHeaderComponent } from './app-surface-header.component';
 
 interface AppDialogResizeSession {
     pointerId: number;
@@ -48,9 +50,10 @@ interface AppDialogResizeSession {
         <p-dialog #dialog
                   [visible]="visible"
                   (visibleChange)="handleVisibleChange($event)"
-                  [header]="header"
+                  [header]="header()"
                   [modal]="modal"
                   [closable]="closable"
+                  closeAriaLabel="Close"
                   [draggable]="draggable"
                   [resizable]="false"
                   [style]="effectiveStyle"
@@ -75,6 +78,11 @@ interface AppDialogResizeSession {
                 <ng-template #header>
                     <ng-container *ngTemplateOutlet="projectedHeaderTemplate"></ng-container>
                 </ng-template>
+            } @else if (editableTitle) {
+                <ng-template #header>
+                    <app-surface-header [title]="this.header()" (titleChange)="this.header.set($event)" [editableTitle]="true" [titleEditDisabled]="titleEditDisabled"
+                                        [closeVisible]="false" [dragEnabled]="draggable" (dragPointerDown)="startDrag($event)"/>
+                </ng-template>
             }
             @if (projectedContentTemplate) {
                 <ng-template #content>
@@ -90,7 +98,7 @@ interface AppDialogResizeSession {
         </p-dialog>
     `,
     standalone: true,
-    imports: [DialogModule, NgTemplateOutlet]
+    imports: [DialogModule, NgTemplateOutlet, AppSurfaceHeaderComponent]
 })
 /** Wraps PrimeNG dialogs with shared layout persistence behavior. */
 export class AppDialogComponent implements OnChanges, OnDestroy {
@@ -101,7 +109,9 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     @Input() visible = false;
     @Output() visibleChange = new EventEmitter<boolean>();
 
-    @Input() header = '';
+    readonly header = model('');
+    @Input() editableTitle = false;
+    @Input() titleEditDisabled = false;
     @Input() modal = false;
     @Input() closable = true;
     @Input() draggable = true;

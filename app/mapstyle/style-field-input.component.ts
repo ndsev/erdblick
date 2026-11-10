@@ -1,4 +1,5 @@
 import {Component, EventEmitter, Input, OnChanges, OnDestroy, Output} from "@angular/core";
+import {NgTemplateOutlet} from "@angular/common";
 import {FormsModule} from "@angular/forms";
 import {ColorPickerModule} from "primeng/colorpicker";
 import {StyleField} from "./style-authoring-schema.adapter";
@@ -11,7 +12,7 @@ export interface StyleInputProblem {path: string; message: string;}
 @Component({
     selector: "style-field-input",
     standalone: true,
-    imports: [FormsModule, ColorPickerModule, SimfilExpressionInputComponent],
+    imports: [FormsModule, NgTemplateOutlet, ColorPickerModule, SimfilExpressionInputComponent],
     template: `
         @switch (kind) {
             @case ('expression') {
@@ -82,8 +83,15 @@ export interface StyleInputProblem {path: string; message: string;}
                                 <input aria-label="Stop key" [value]="text(child(index, 0))"
                                     (input)="stopKey(index, $event)">
                             }
-                            <input [attr.aria-label]="field.valueKind === 'color' ? 'Stop color' : 'Stop width'"
-                                [value]="text(child(index, 1))" (input)="stopValue(index, $event)">
+                            @if (field.valueKind === 'color') {
+                                <div class="style-color">
+                                    <ng-container *ngTemplateOutlet="colorPicker; context: {$implicit: child(index, 1), label: 'stop ' + (index + 1)}"/>
+                                    <input aria-label="Stop color" [value]="text(child(index, 1))" (input)="stopValue(index, $event)"
+                                        placeholder="Named color or RGB hex">
+                                </div>
+                            } @else {
+                                <input aria-label="Stop width" [value]="text(child(index, 1))" (input)="stopValue(index, $event)">
+                            }
                             <button type="button" aria-label="Move stop up" [disabled]="!!error || index === 0" (click)="move(index, index - 1)">↑</button>
                             <button type="button" aria-label="Move stop down" [disabled]="!!error || index === indices().length - 1" (click)="move(index, index + 1)">↓</button>
                             <button type="button" aria-label="Remove stop" (click)="remove(index)">×</button>
@@ -103,18 +111,15 @@ export interface StyleInputProblem {path: string; message: string;}
                         <input aria-label="Color option ID" [value]="text(child('option'))"
                             (change)="set(eventText($event), child('option'))">
                     } @else {
-                        <input [attr.aria-label]="label" [ngModel]="text()" (ngModelChange)="set($event)">
+                        <ng-container *ngTemplateOutlet="colorPicker; context: {$implicit: path, label: label}"/>
+                        <input [attr.aria-label]="label" [ngModel]="text()" (ngModelChange)="set($event)"
+                            placeholder="Named color or RGB hex">
                     }
                 </div>
             }
             @case ('color') {
                 <div class="style-color">
-                    <!-- Escape belongs to the picker, not the editor window's close shortcut. -->
-                    <p-colorpicker [ngModel]="pickerColor()" format="hex" appendTo="body"
-                        [overlayOptions]="{baseZIndex: 31000}"
-                        [pt]="{preview: {'aria-label': 'Color picker for ' + label}}"
-                        (keydown.escape)="$event.stopPropagation()"
-                        (onChange)="set($event.value)"/>
+                    <ng-container *ngTemplateOutlet="colorPicker; context: {$implicit: path, label: label}"/>
                     <input [attr.aria-label]="label" [ngModel]="text()" (ngModelChange)="set($event)"
                         placeholder="Named color or RGB hex">
                 </div>
@@ -123,6 +128,14 @@ export interface StyleInputProblem {path: string; message: string;}
                 <input [attr.aria-label]="label" [ngModel]="text()" (ngModelChange)="set($event)" autocomplete="off">
             }
         }
+        <ng-template #colorPicker let-colorPath let-colorLabel="label">
+            <!-- Escape belongs to the picker, not the editor window's close shortcut. -->
+            <p-colorpicker [ngModel]="pickerColor(colorPath)" format="hex" appendTo="body"
+                [overlayOptions]="{baseZIndex: 31000}"
+                [pt]="{preview: {'aria-label': 'Color picker for ' + colorLabel}}"
+                (keydown.escape)="$event.stopPropagation()"
+                (onChange)="set($event.value, colorPath)"/>
+        </ng-template>
         @if (error) { <small class="style-form-error" role="alert">{{ error }}</small> }
     `
 })
@@ -256,8 +269,8 @@ export class StyleFieldInputComponent implements OnChanges, OnDestroy {
      * in the text field. Preview normalization never edits the authored source;
      * only the picker's explicit onChange commits a color.
      */
-    pickerColor(): string {
-        return stylePickerColor(this.value);
+    pickerColor(path: StylePath = this.path): string {
+        return stylePickerColor(this.model.value(path));
     }
 
     /** Drops stale buffers after external source edits, retaining other unfinished numeric cells. */

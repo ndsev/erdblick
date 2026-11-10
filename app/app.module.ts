@@ -107,6 +107,7 @@ import { initializeLibrary } from "./integrations/wasm.adapter";
 import { KeyboardComponent } from "./keyboard/keyboard.component";
 import { OnEnterClickDirective } from "./keyboard/keyboard.service";
 import { AppDialogComponent } from "./layout/app-dialog.component";
+import { McpConfigurationDialogComponent } from "./action/mcp-configuration-dialog.component";
 import { MainBarComponent } from "./layout/app-mainbar.component";
 import { AppPanelComponent } from "./layout/app-panel.component";
 import { AppSurfaceHeaderComponent } from "./layout/app-surface-header.component";
@@ -297,6 +298,7 @@ export const initializeServices = () => {
         AppRoutingModule,
         CacheResetComponent,
         AppDialogComponent,
+        McpConfigurationDialogComponent,
         AppPanelComponent,
         AppSurfaceHeaderComponent,
         AppConfirmPopupComponent,

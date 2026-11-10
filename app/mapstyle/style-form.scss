@@ -6,7 +6,7 @@ style-document-editor, style-record-editor, style-field-input {
   display: block;
   min-width: 0;
 }
-style-record-editor[hidden] { display: none; }
+style-record-editor[hidden], style-document-editor[hidden] { display: none; }
 
 .style-form {
   --style-form-soft-background: color-mix(in srgb, var(--p-content-background) 60%, var(--p-content-hover-background));
@@ -209,6 +209,7 @@ style-record-editor[hidden] { display: none; }
   .style-color > input, .style-color > select { flex: 1 1 6rem; width: 6rem; }
   .style-stop-list { display: grid; gap: 0.5rem; }
   .style-stop input, .style-stop select { flex: 1 1 4rem; width: 4rem; }
+  .style-stop > .style-color { flex: 2 1 10rem; min-width: 0; }
 
   @container style-record (max-width: 28rem) {
     .style-metadata-fields { grid-template-columns: minmax(0, 1fr); }
@@ -243,15 +244,33 @@ style-record-editor[hidden] { display: none; }
   .style-rule-bubble {
     @include bubble.base(true);
     --inspection-value-bubble-color: var(--style-category-color);
+    --style-bubble-background: color-mix(in srgb, var(--style-category-color) 26%, var(--p-content-background));
     border-radius: 0.22rem;
     min-height: 1.75rem;
-    padding: 0.15rem 0.4rem;
+    padding: 0;
     max-width: min(100%, 30rem);
-    display: block;
+    display: inline-flex;
+    gap: 0;
+    align-items: stretch;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
-    &:enabled:hover { background: color-mix(in srgb, var(--style-category-color) 30%, var(--p-content-background)); }
+    color: var(--p-text-color);
+    .style-rule-bubble-label, .style-rule-bubble-value {
+      padding: 0.15rem 0.4rem;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .style-rule-bubble-label {
+      flex: 0 0 auto;
+      background: var(--style-bubble-background);
+    }
+    .style-rule-bubble-value {
+      flex: 0 1 auto;
+      min-width: 0;
+      background: color-mix(in srgb, var(--style-bubble-background) 92%, #fff);
+    }
+    &:enabled:hover { --style-bubble-background: color-mix(in srgb, var(--style-category-color) 30%, var(--p-content-background)); }
     &.is-selected { outline: 2px solid var(--p-primary-color); outline-offset: 1px; }
   }
   @each $index, $color in (0: blue, 1: cyan, 2: green, 3: purple, 4: orange, 5: teal, 6: yellow, 7: pink, 8: lime, 9: red) {

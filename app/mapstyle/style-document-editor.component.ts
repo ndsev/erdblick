@@ -1,9 +1,10 @@
-import {Component, EventEmitter, Input, OnChanges, OnDestroy, Output, TemplateRef} from "@angular/core";
+import {Component, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges, TemplateRef} from "@angular/core";
+import {TabsModule} from 'primeng/tabs';
 import {z} from "zod";
 import {coreLib, ErdblickCore_, uint8ArrayToWasmOrThrow} from "../integrations/wasm.adapter";
 import {styleAuthoringSchema} from "./style-authoring-schema.adapter";
 import {StyleDocumentEdit, StyleDocumentModel} from "./style-document.model";
-import {StyleRecordEditorComponent} from "./style-record-editor.component";
+import {StyleEditorSection, StyleRecordEditorComponent} from "./style-record-editor.component";
 import {StyleFieldInputComponent, StyleInputProblem} from "./style-field-input.component";
 
 import {StylePropertyDraft, StyleRuleAction} from './style-property-draft.controller';
@@ -18,7 +19,7 @@ const reportSchema = z.object({valid: z.boolean(), issues: z.array(z.object({
 @Component({
     selector: "style-document-editor",
     standalone: true,
-    imports: [StyleFieldInputComponent, StyleRecordEditorComponent, AppConfirmPopupComponent],
+    imports: [StyleFieldInputComponent, StyleRecordEditorComponent, AppConfirmPopupComponent, TabsModule],
     template: `
         <div class="style-form" data-testid="style-document-editor">
             @if (parseError) { <p class="style-form-error" role="alert">{{ parseError }}</p> }
@@ -35,8 +36,14 @@ const reportSchema = z.object({valid: z.boolean(), issues: z.array(z.object({
             }
             @if (model) {
                 <fieldset [disabled]="!!parseError && !draft" class="style-form-body">
-                    <style-record-editor [model]="model" [catalog]="catalog" [skipMetadata]="skipMetadata" [metadataHeader]="metadataHeader" [ruleDraft]="draft" [propertyTemplate]="propertyEditor"
-                        (edit)="apply($event)" (problem)="onProblem($event)" (ruleAction)="onRuleAction($event)"/>
+                    @for (section of sections; track section) {
+                        <p-tabpanel [value]="section">
+                            @if (visitedSections.has(section)) {
+                                <style-record-editor [model]="model" [catalog]="catalog" [section]="section" [skipMetadata]="skipMetadata" [metadataHeader]="metadataHeader" [ruleDraft]="draft" [propertyTemplate]="propertyEditor"
+                                    (edit)="apply($event)" (problem)="onProblem($event)" (ruleAction)="onRuleAction($event)"/>
+                            }
+                        </p-tabpanel>
+                    }
                 </fieldset>
             }
             <ng-template #propertyEditor let-panel let-scope="scope">
@@ -62,6 +69,9 @@ export class StyleDocumentEditorComponent implements OnChanges, OnDestroy {
     @Input() source = "";
     @Input() skipMetadata = false;
     @Input() metadataHeader?: TemplateRef<unknown>;
+    @Input() activeSection: StyleEditorSection | 'advanced' = 'rules';
+    readonly sections: StyleEditorSection[] = ['rules', 'options', 'metadata'];
+    readonly visitedSections = new Set<StyleEditorSection>(['rules']);
     @Output() sourceChange = new EventEmitter<string>();
     @Output() invalidChange = new EventEmitter<boolean>();
     @Output() panelChange = new EventEmitter<{open: boolean; dirty: boolean}>();
@@ -165,7 +175,9 @@ export class StyleDocumentEditorComponent implements OnChanges, OnDestroy {
     }
 
     /** Refreshes the form from source, retaining its last parsed view during incomplete YAML edits. */
-    ngOnChanges(): void {
+    ngOnChanges(changes?: SimpleChanges): void {
+        if (this.activeSection !== 'advanced') this.visitedSections.add(this.activeSection);
+        if (changes && !changes['source'] && this.model) return;
         try {
             this.model = new StyleDocumentModel(this.source);
             this.parseError = "";

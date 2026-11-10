@@ -895,62 +895,97 @@ false rollback guarantee.
 
 The main-bar MCP button is gray when controls are ready but idle, green while a
 viewer action is pending, and red when enabled controls are unavailable. Backend
-registration alone does not indicate agent activity. Its popover shows availability, a
-renameable tab label, bounded recent action names/outcomes and Stop current action.
+registration alone does not indicate agent activity. Its popover shows **MCP tools**
+with a PrimeNG Tag, a renameable tab label inside an IftaLabel, bounded recent
+action names/outcomes and Stop current action. Configure sits opposite the MCP
+tools status; the help icon beside Stop exposes its explanation on hover or focus.
 Stop cancels pending agent work, not completed edits or human searches. Catalog
 mismatch disables agent controls only; ordinary viewing remains available.
 
-The compact Codex, Claude, Copilot and Cursor buttons copy setup for **Codex CLI**,
-**Claude Code**, **GitHub Copilot CLI** and the **Cursor editor**, respectively.
-They share the label
-**Copy Add-MCP-Command:** and stay together in one row (the label can wrap above
-them on narrow screens). They use the server's public connection metadata and fixed, POSIX-shell-quoted command
-syntax. Local mode copies only the add command. For Codex and Claude, OAuth mode
-copies add and login commands joined by `&&`, using the configured scopes and
-optional pre-registered public client ID.
-Codex passes comma-separated scopes to `mcp login --scopes`; Claude Code uses
-`mcp add-json` with space-separated `oauth.scopes`, then `mcp login`. Empty scopes
-and absent client IDs are omitted, leaving client discovery defaults intact.
-Copilot's `mcp add` has no OAuth options, so its OAuth command instead starts
-Copilot with `--additional-mcp-config` for that session only; it does not alter
-the saved configuration. The JSON carries the public client ID and scope array.
-Copilot requires a client ID for explicit scopes; without one, server discovery
-supplies both. Run `/mcp auth mapviewer` inside Copilot if sign-in is required.
-Cursor copies `cursor --open-url` with an MCP installation link, which opens an
-installation confirmation in the editor. The link contains the server URL and,
-when a public client ID is configured, `auth.CLIENT_ID` and optional `auth.scopes`.
-Without that ID, Cursor uses OAuth discovery. Its inherited `--add-mcp` option
-targets the separate VS Code configuration store, so this button uses Cursor's
-own installation flow instead.
-Run the copied snippet in a POSIX shell and complete login in the client; the
-browser UI only copies commands and never handles OAuth credentials. For the
-local server on port 8099 shown above, the basic setup is:
+`McpActionService.availability$` carries the typed `ViewerMcpAvailability` value:
+`enabled`, `message` (`waiting` | `connecting` | `ready`), and optional `detail`.
+The tag maps these three states to `warn`, `info`, and `success`. Registration and
+remote action admission derive readiness from `message === "ready"`; there is no separate
+mutable registration or public `ready` flag. Missing prerequisites, disconnects,
+rejected registration sends, incompatible acknowledgements and control errors
+produce `waiting`. A sent registration produces `connecting`; a matching
+acknowledgement produces `ready`. Human-readable diagnostics belong to `detail`,
+shown beneath the tag and in the trigger tooltip, and are cleared when the state
+recovers. WebMCP retains its separate browser capability/status report.
+
+**Configure** closes the popover and opens
+[`McpConfigurationDialogComponent`](../app/action/mcp-configuration-dialog.component.ts),
+which uses the shared `AppDialog`. A fresh opening shows only **Platform**
+(Windows, macOS, Linux). Selecting it reveals **Agent** (Codex CLI, ChatGPT App,
+Claude Code, Claude App, Cursor CLI, Cursor IDE, Copilot CLI, VS Code, Vibe CLI) in one joined
+3×3 SelectButton grid. The two apps require a third **Connection**
+selection, **Remote MCP** or **WebMCP**, before showing instructions; other agents
+show their recipe immediately. Platform changes retain the agent and connection
+while refreshing commands, paths and shortcuts. Agent changes clear the connection
+choice; reopening clears all choices. These choices remain component-local, never AppState. No size or layout
+is persisted: the nonresizable dialog grows naturally and scrolls within the viewport.
+WSL uses Linux instructions.
+
+Vibe's local recipe uses `vibe mcp add` with Streamable HTTP and a non-secret
+`X-Client` header to select static authentication. Its `--no-login` option only
+defers OAuth sign-in. Vibe OAuth recipes remain metadata plus provider guidance
+until that deployment is qualified.
+
+WebMCP recipes are independent of remote server availability. They read
+`AppUrlStateService.currentUrl`, the same browser-address source used by
+`viewer_get_share_link`, again at copy time. Normal URL synchronization owns route
+serialization; setup does not flush state, rewrite URLs, or embed browser-local
+styles/searches. The destination app browser must support `document.modelContext`.
+ChatGPT's provider link documents Site tools; Claude's browser instructions retain
+an explicit capability check and Remote MCP fallback, without claiming native
+WebMCP qualification.
+
+[`mcp-client-setup.presentation.ts`](../app/action/mcp-client-setup.presentation.ts) owns the typed recipe
+matrix. It derives the endpoint and public OAuth metadata from the current
+`ViewerMcpInfo`; it does not read credentials or run commands. Each recipe provides
+readonly URL, command or configuration fields, concise finish steps and a fixed
+provider documentation link. Each Copy button resolves the current recipe again
+before using `ClipboardService`, including its manual-copy fallback. Disabled,
+invalid, credential-bearing or non-HTTP remote endpoints do not produce setup commands.
+
+Windows commands use PowerShell quoting; macOS/Linux use POSIX quoting. Paths and
+keyboard shortcuts follow the selected platform. Claude Desktop uses the pinned
+`mcp-remote@0.16.0` local stdio bridge and documents the Node/PATH prerequisite.
+Cursor's CLI and IDE share `mcpServers` JSON; VS Code's default-profile file uses
+`servers`. Do not substitute portable Copilot config for that editor format.
+Claude Code's HTTP add command explicitly uses user scope across projects:
 
 ```sh
 codex mcp add mapviewer --url 'http://127.0.0.1:8099/mcp'
-claude mcp add --transport http --scope local mapviewer 'http://127.0.0.1:8099/mcp'
+claude mcp add --transport http --scope user mapviewer 'http://127.0.0.1:8099/mcp'
 ```
 
-Run the command for your client. Claude's `--scope local` stores the entry for
-the current project; use `--scope user` if it should be available across projects.
-This flag controls configuration storage, while `oauth.scopes` controls requested
-authorization. The copied Claude command uses its default local storage scope.
-Check the saved entry with `codex mcp get mapviewer` or
-`claude mcp get mapviewer`, then inspect `/mcp` in a new client session and run
-the [control smoke test](#discover-and-verify-a-control). A saved entry alone
-does not establish that a model can discover and call every tool.
+OAuth add/setup and login are separate fields. Codex passes comma-separated
+scopes to `mcp login --scopes`. Claude Code uses `mcp add-json` with
+space-separated `oauth.scopes` on POSIX; Windows uses a project `.mcp.json` to
+avoid native-command JSON argument conversion. Its project storage scope is
+explicit in the instructions. Empty scopes and absent client IDs are omitted.
+Copilot's OAuth setup uses session-only `--additional-mcp-config`, with an
+`@mapviewer-mcp.json` file on Windows. It does not replace saved configuration;
+run `/mcp auth mapviewer` inside Copilot. Explicit Copilot scopes require a
+client ID; otherwise discovery supplies them. The five desktop/Cursor recipes
+were qualified in local mode only: with OAuth they show public connection fields
+and provider instructions, without inventing a local bridge OAuth recipe.
 
-The loopback address must be reachable from the environment running the client.
-For a client running in another container, VM or hosted service, use the
-[hosted authentication setup](../../mapget/docs/mapget-mcp.md#hosted-authentication)
-and its configured public endpoint. Desktop apps and their browser integrations
-need acceptance in their own execution environment; CLI success does not verify
-those surfaces. See the official
-[Codex MCP instructions](https://learn.chatgpt.com/docs/extend/mcp?surface=cli),
-[Claude Code MCP instructions](https://code.claude.com/docs/en/mcp),
-[Copilot CLI MCP reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-command-reference#mcp-server-configuration),
-[Cursor installation links](https://cursor.com/docs/mcp/install-links), and
-[Cursor MCP authentication](https://cursor.com/docs/mcp).
+Keep the viewer open, inspect `/mcp` or the client's tool list in a fresh session,
+and run the [control smoke test](#discover-and-verify-a-control). A saved entry
+alone does not establish successful model calls. Local-loopback addresses must
+be reachable from the agent's environment. For a container, VM or hosted service,
+use the [hosted authentication setup](../../mapget/docs/mapget-mcp.md#hosted-authentication)
+and its configured public endpoint. Linux client evidence and user-reported
+Desktop/IDE smokes do not establish native Windows/macOS acceptance; the latter
+recipes are documentation-checked and covered by formatting tests.
+
+Maintain recipe/unit coverage in `tests/app/action/mcp-client-setup.presentation.spec.ts`,
+selection/copy regression in `tests/app/action/mcp-configuration-dialog.component.spec.ts`, browser
+interaction/layout checks in `tests/playwright/tests/viewer-actions.spec.ts`,
+and the real-relay documentation capture in
+`tests/playwright/snap-tests/mcp-setup.snap.spec.ts`.
 
 ## Render pipeline
 
@@ -1326,3 +1361,26 @@ MAPGET_BIN=/path/to/current/mapget EB_MAPGET_CONFIG=tests/playwright/fixtures/ma
 This test enables Chrome's WebMCP feature and uses real `getTools`/`executeTool`
 calls. Its erdblick-owned GridDataSource fixture needs no Python datasource or
 external map service. Run it separately from other integration pipelines.
+
+## Editable dialog titles
+
+`AppDialogComponent` exposes its title as the Angular `header` model signal,
+including `headerChange`, and enables editing through the opt-in `editableTitle`
+input. `AppSurfaceHeaderComponent` supplies the shared pencil/input interaction
+through its `title` model signal and `titleChange`. Custom projected dialog headers
+can bind `[(title)]="dialog.header"` and forward the dialog's `editableTitle` and
+`titleEditDisabled` inputs. `titlePrefix` keeps a fixed context label outside the
+editable name. Existing headers remain read-only by default; only the Style Editor
+currently enables this feature.
+
+The surface owns the temporary input: Enter or blur publishes a trimmed title,
+Escape discards it, and external title/disabled changes retire the local draft.
+Title controls stop drag gestures and keep Escape local. Consumers own validation
+and persistence. The Style Editor patches YAML `name` through its existing source
+session; applying the document performs the actual stylesheet rename.
+
+Its Rules, Options and Presets, and Metadata panels share one
+`StyleDocumentEditorComponent`, one source model, and one property draft. Visited
+form sections are retained. Before leaving Advanced for a form tab, refresh from
+the authoritative editor session and cancel pending projections; synchronous form
+commits must also retire queued projections.

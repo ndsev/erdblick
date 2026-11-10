@@ -26,7 +26,7 @@ you can toggle, edit, and reset style sheets without touching files on disk:
 
 1. Open the Styles dialog via **Edit -> Styles Configurator**.
 2. Activate or deactivate style sheets to control which rules run.
-3. Use the pencil button for Quick rule editing or Advanced YAML editing,
+3. Use the pencil button to open the Style Editor for rule or Advanced YAML editing,
    validation, completion, and export.
 4. Reset browser-stored versions from Preferences when required.
 
@@ -217,17 +217,28 @@ Root `default` determines whether the whole stylesheet is enabled when first
 saved or loaded; `options[].default` seeds the per-layer control once that
 stylesheet is active.
 
-The Style Editor has **Quick** and **Advanced** tabs for every loaded base or
-search style. Its header switch controls current visibility without changing YAML
-`default`. Both tabs edit the same source; Apply updates the stylesheet.
+The Style Editor has **Rules**, **Options and Presets**, **Metadata**, and
+**Advanced** tabs for every loaded base or search style. They share one source;
+Apply updates the stylesheet. Advanced retains the YAML editor and its undo history.
+The header switch controls current visibility without changing YAML `default`.
 
-Quick groups the name, layer affinity, version, category, enabled-by-default setting,
-and LOD thresholds in the metadata area at the top. No selected layer means
-Any, and a custom regular expression can be edited directly or replaced with exact
-IDs. Each rule shows configured properties as compact **value bubbles**, sorted
-by category and property rather than insertion order. Category colors stay the same
-across rules, making their settings easy to compare. Unset defaults and inherited
-values do not create bubbles; explicit false, zero, and empty values remain visible.
+The stylesheet name is edited in the header. Hover or focus the pencil to outline
+the title, then activate it to edit the name. Enter or leaving the input accepts
+the name into the editor buffer; Escape cancels the title edit without closing the
+dialog. Apply/Save to Source commits the rename with the other stylesheet changes.
+An empty or conflicting name prevents Apply. Title editing is unavailable while a
+property panel is open or the YAML cannot be parsed.
+
+**Metadata** contains layer affinity, version, category, enabled-by-default, and
+LOD thresholds. No selected layer means Any, and a custom regular expression can
+be edited directly or replaced with exact IDs. **Rules** contains the rule overview
+and the existing Interaction controls. Each rule shows configured properties as
+compact **value bubbles**, sorted by category and property rather than insertion
+order. Labels use the normal category tint, with a subtly lighter value segment.
+Property labels keep their full width; long values truncate instead. Category colors
+stay consistent across rules. Unset defaults and inherited values do not create
+bubbles; explicit false, zero, and empty
+values remain visible.
 
 Click a bubble to open its inline editing panel below that rule. The Material icons
 **close**, **save**, and **delete** dismiss the field draft, accept it into the editor,
@@ -242,11 +253,14 @@ can reveal inheritance or a native default.
 choice and child rules displayed as their own bubble rows. Rule lists support add,
 duplicate, reorder, and removal. Switching `first-of`/`all-of` retains child rules and
 comments. Relation **Source style**, **Target style**, and **End markers** appear as
-named subsections. A top-level relation rule cannot have branches; its source/target
+named subsections. These subsections and branches start collapsed. Expand their
+headings to see the child bubbles; expansion choices are retained while editing,
+and a section containing the active property panel stays open.
+A top-level relation rule cannot have branches; its source/target
 styles can. Only one property panel is open at a time, at any depth. Child edits save
 directly to the document buffer without an additional parent Save.
 
-Save or dismiss a dirty property panel before editing another property or Advanced,
+Save or dismiss a dirty property panel before editing another property, switching tabs,
 changing metadata, or modifying rule structure. Other rules stay visible for
 comparison. Escape first closes an active input popup, then dismisses the property
 panel; Ctrl/Cmd+S saves the property while its panel is open. The existing editor
@@ -255,10 +269,13 @@ invalid drafts can be staged to reconcile related fields, but full native valida
 still prevents applying an invalid stylesheet. Incomplete numeric text must be fixed
 or dismissed, and cannot silently save the previous numeric value.
 
-**Options and presets** and **Interaction** expose options of all three native types
-(Boolean, color, string), local presets, and hover/selection effects. Maps & Layers provides
-runtime controls for all non-internal option types. Color text accepts native named
-colors and RGB hex forms. Opening or dismissing a color picker preserves authored
+**Options and Presets** exposes options of all three native types (Boolean, color,
+string) and local presets. **Interaction** in Rules provides hover/selection effects. Maps & Layers provides
+runtime controls for all non-internal option types. Every literal color entry has
+a picker alongside its text field, including scale stops, label/glow colors,
+fallbacks, color-option defaults, and interaction tint/halo/stripe colors. Color
+text accepts native named colors and RGB hex forms. Option references retain their
+option-ID field. Opening or dismissing a color picker preserves authored
 text; choosing a color stages RGB hex. Scale rows retain numeric, string, and Boolean
 category keys and optional fallbacks. Numeric controls use native validation rather
 than search-editor slider limits.
@@ -270,7 +287,7 @@ content, comments, exact numeric types, and unknown fields. Editing an alias mak
 local copy without changing other uses. Invalid YAML syntax temporarily disables
 form editing until corrected in Advanced.
 
-![Quick Style Editor with property bubbles and an inline edit panel](screenshots/style-component-editor-controls.png)
+![Style Editor Rules tab with split-color property bubbles and an inline edit panel](screenshots/style-component-editor-controls.png)
 
 <!-- mcp:
 title: "Style document shape"

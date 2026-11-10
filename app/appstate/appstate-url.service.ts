@@ -364,6 +364,11 @@ export class AppUrlStateService implements AppActionContributor {
     }
 
 
+    /** The browser address is the single source for sharing the current route state. */
+    get currentUrl(): string {
+        return window.location.href;
+    }
+
     /**
      * Copies the address the user can already see. Normal state synchronization
      * owns URL encoding; sharing must not build a second projection or discard
@@ -371,7 +376,7 @@ export class AppUrlStateService implements AppActionContributor {
      * the browser address, not a request to flush pending state into the router.
      */
     getShareLink() {
-        const url = window.location.href;
+        const url = this.currentUrl;
         if (new TextEncoder().encode(url).length > 48000)
             rejectAction("The share link exceeds the response budget; reduce URL-backed state first");
         const hostname = new URL(url).hostname;

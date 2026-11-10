@@ -95,6 +95,11 @@ export class InfoMessageService {
         });
     }
 
+    /** Dismisses the GPU capacity warning when its Rendering preferences shortcut is used. */
+    clearGpuBufferExhausted() {
+        this.messageService.clear("gpu-buffer-exhausted");
+    }
+
     /** Emits a success toast through PrimeNG's global message service. */
     showSuccess(message: string) {
         this.messageService.add({ key: 'tc', severity: 'success', summary: 'Success', detail: message });

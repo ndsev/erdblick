@@ -375,13 +375,16 @@ interface QuickPresetOption {
                 [style]="{'font-size': '0.9em'}" appendTo="body"></p-menu>
         <app-dialog [(visible)]="styleEditorVisible" [modal]="false" #editorDialog
                   data-testid="style-editor-dialog" class="editor-dialog"
+                  [header]="quickStyleName" (headerChange)="onQuickStyleNameChange($event)"
+                  [editableTitle]="styleEditorQuickAvailable" [titleEditDisabled]="propertyPanelOpen || quickProjectionStale"
                   [closable]="false" [closeOnEscape]="false"
                   [focusOnShow]="styleEditorFocusOnShow"
                   [persistLayout]="true" [layoutId]="styleEditorDialogLayoutId"
                   (onShow)="onEditorDialogShow()" (onHide)="onEditorDialogHide()">
             <ng-template #header>
                 <app-surface-header data-testid="style-editor-header"
-                                    [title]="styleEditorHeaderTitle()"
+                                    [(title)]="editorDialog.header" [editableTitle]="editorDialog.editableTitle"
+                                    [titleEditDisabled]="editorDialog.titleEditDisabled" titlePrefix="Style Editor — "
                                     [hasSmartControl]="!!currentEditorStyle()"
                                     [dragEnabled]="true"
                                     (dragPointerDown)="editorDialog.startDrag($event)"
@@ -404,90 +407,76 @@ interface QuickPresetOption {
             <p-tabs [value]="styleEditorTab" (valueChange)="onStyleEditorTabChange($event)" class="style-editor-tabs" data-testid="style-editor-tabs">
                 <p-tablist>
                     @if (styleEditorQuickAvailable) {
-                        <p-tab value="quick">Quick</p-tab>
+                        <p-tab value="rules">Rules</p-tab>
+                        <p-tab value="options" [disabled]="propertyPanelDirty">Options and Presets</p-tab>
+                        <p-tab value="metadata" [disabled]="propertyPanelDirty">Metadata</p-tab>
                     }
                     <p-tab value="advanced" [disabled]="propertyPanelDirty">Advanced</p-tab>
                 </p-tablist>
                 <p-tabpanels>
                     @if (styleEditorQuickAvailable) {
-                        <p-tabpanel value="quick" class="style-editor-quick-panel">
-                            <div class="style-editor-quick-content"
-                                 [class.read-only]="quickProjectionStale">
-                                @if (quickProjectionStale) {
-                                    <div class="style-editor-quick-stale">
-                                        Quick is read-only until Advanced contains valid YAML: {{ quickProjectionError }}
-                                    </div>
-                                }
-                                <ng-template #metadataHeader>
-                                    <div class="style-editor-quick-field">
-                                        <label for="style-editor-quick-name">Name</label>
-                                        <input id="style-editor-quick-name"
-                                               data-testid="style-editor-quick-name"
-                                               pInputText
-                                               autocomplete="off"
-                                               [ngModel]="quickStyleName"
-                                               (ngModelChange)="onQuickStyleNameChange($event)"
-                                               [disabled]="quickProjectionStale || propertyPanelOpen">
-                                        @if (quickStyleNameIssue(); as issue) {
-                                            <small class="style-editor-quick-error" role="alert">{{ issue }}</small>
+                        <div class="style-editor-form-content" [hidden]="styleEditorTab === 'advanced'">
+                            @if (quickProjectionStale) {
+                                <div class="style-editor-quick-stale">
+                                    Form editing is unavailable until Advanced contains valid YAML: {{ quickProjectionError }}
+                                </div>
+                            }
+                            <ng-template #metadataHeader>
+                                <div class="style-editor-quick-field style-editor-quick-affinity">
+                                    <label for="style-editor-quick-layers">Layer affinity</label>
+                                    @if (quickLayerAffinityKind === 'custom' && !quickReplacingCustomAffinity) {
+                                        <div class="style-editor-custom-affinity" data-testid="style-editor-custom-affinity">
+                                            <input aria-label="Custom layer affinity" pInputText
+                                                [ngModel]="quickCustomLayerAffinity"
+                                                (ngModelChange)="onQuickCustomAffinityChange($event)"
+                                                [disabled]="quickProjectionStale || propertyPanelOpen">
+                                            <span [pTooltip]="quickCustomLayerAffinity">
+                                                Custom affinity (regular expression)
+                                            </span>
+                                            <p-button label="Choose exact layers"
+                                                      size="small"
+                                                      severity="secondary"
+                                                      [text]="true"
+                                                      [disabled]="quickProjectionStale || propertyPanelOpen"
+                                                      (click)="beginReplacingQuickAffinity()"/>
+                                            <p-button label="Any layer"
+                                                      size="small"
+                                                      severity="secondary"
+                                                      [text]="true"
+                                                      [disabled]="quickProjectionStale || propertyPanelOpen"
+                                                      (click)="setQuickAffinityAny()"/>
+                                        </div>
+                                    } @else {
+                                        <p-multiSelect inputId="style-editor-quick-layers"
+                                                       data-testid="style-editor-quick-layers"
+                                                       [options]="quickLayerOptions"
+                                                       [ngModel]="quickLayerAffinityIds"
+                                                       (ngModelChange)="onQuickLayerAffinityChange($event)"
+                                                       optionLabel="label"
+                                                       optionValue="value"
+                                                       placeholder="Any layer"
+                                                       [filter]="true"
+                                                       [showToggleAll]="true"
+                                                       [maxSelectedLabels]="3"
+                                                       [disabled]="quickProjectionStale || propertyPanelOpen"
+                                                       appendTo="body">
+                                        </p-multiSelect>
+                                        <small>No selection means any layer.</small>
+                                        @if (quickReplacingCustomAffinity) {
+                                            <p-button label="Clear custom affinity to Any"
+                                                      size="small"
+                                                      severity="secondary"
+                                                      [text]="true"
+                                                      (click)="setQuickAffinityAny()"/>
                                         }
-                                    </div>
-                                    <div class="style-editor-quick-field style-editor-quick-affinity">
-                                        <label for="style-editor-quick-layers">Layer affinity</label>
-                                        @if (quickLayerAffinityKind === 'custom' && !quickReplacingCustomAffinity) {
-                                            <div class="style-editor-custom-affinity" data-testid="style-editor-custom-affinity">
-                                                <input aria-label="Custom layer affinity" pInputText
-                                                    [ngModel]="quickCustomLayerAffinity"
-                                                    (ngModelChange)="onQuickCustomAffinityChange($event)"
-                                                    [disabled]="quickProjectionStale || propertyPanelOpen">
-                                                <span [pTooltip]="quickCustomLayerAffinity">
-                                                    Custom affinity (regular expression)
-                                                </span>
-                                                <p-button label="Choose exact layers"
-                                                          size="small"
-                                                          severity="secondary"
-                                                          [text]="true"
-                                                          [disabled]="quickProjectionStale || propertyPanelOpen"
-                                                          (click)="beginReplacingQuickAffinity()"/>
-                                                <p-button label="Any layer"
-                                                          size="small"
-                                                          severity="secondary"
-                                                          [text]="true"
-                                                          [disabled]="quickProjectionStale || propertyPanelOpen"
-                                                          (click)="setQuickAffinityAny()"/>
-                                            </div>
-                                        } @else {
-                                            <p-multiSelect inputId="style-editor-quick-layers"
-                                                           data-testid="style-editor-quick-layers"
-                                                           [options]="quickLayerOptions"
-                                                           [ngModel]="quickLayerAffinityIds"
-                                                           (ngModelChange)="onQuickLayerAffinityChange($event)"
-                                                           optionLabel="label"
-                                                           optionValue="value"
-                                                           placeholder="Any layer"
-                                                           [filter]="true"
-                                                           [showToggleAll]="true"
-                                                           [maxSelectedLabels]="3"
-                                                           [disabled]="quickProjectionStale || propertyPanelOpen"
-                                                           appendTo="body">
-                                            </p-multiSelect>
-                                            <small>No selection means any layer.</small>
-                                            @if (quickReplacingCustomAffinity) {
-                                                <p-button label="Clear custom affinity to Any"
-                                                          size="small"
-                                                          severity="secondary"
-                                                          [text]="true"
-                                                          (click)="setQuickAffinityAny()"/>
-                                            }
-                                        }
-                                    </div>
-                                </ng-template>
-                                <style-document-editor [source]="quickSource" [skipMetadata]="true" [metadataHeader]="metadataHeader"
-                                    (sourceChange)="commitQuickSource($event)"
-                                    (invalidChange)="quickFormInvalid = $event" (panelChange)="onPropertyPanelChange($event)"/>
+                                    }
+                                </div>
+                            </ng-template>
+                            <style-document-editor [source]="quickSource" [skipMetadata]="true" [metadataHeader]="metadataHeader" [activeSection]="styleEditorTab"
+                                (sourceChange)="commitQuickSource($event)"
+                                (invalidChange)="quickFormInvalid = $event" (panelChange)="onPropertyPanelChange($event)"/>
 
-                            </div>
-                        </p-tabpanel>
+                        </div>
                     }
                     <p-tabpanel value="advanced" class="style-editor-advanced-panel">
                         @if (styleEditorAdvancedVisited) {
@@ -496,6 +485,9 @@ interface QuickPresetOption {
                     </p-tabpanel>
                 </p-tabpanels>
             </p-tabs>
+            @if (styleEditorQuickAvailable && quickStyleNameIssue(); as issue) {
+                <small class="style-editor-quick-error" role="alert" data-testid="style-editor-name-error">{{ issue }}</small>
+            }
             <div class="editor-actions style-editor-actions">
                 <div class="editor-actions-left">
                     <p-button
@@ -657,7 +649,7 @@ export class StyleComponent implements OnDestroy {
     styleEditorSaveSubscription: Subscription = new Subscription();
     sourceWasModified: boolean = false;
     private styleEditorOriginalSource: string = '';
-    styleEditorTab: "quick" | "advanced" = "quick";
+    styleEditorTab: "rules" | "options" | "metadata" | "advanced" = "rules";
     styleEditorAdvancedVisited = false;
     styleEditorFocusOnShow = true;
     private styleEditorShown = false;
@@ -1256,9 +1248,14 @@ export class StyleComponent implements OnDestroy {
 
     /** Switching to YAML first resolves any unfinished property edit. */
     onStyleEditorTabChange(value: string | number | undefined): void {
-        if (value !== 'quick' && value !== 'advanced') return;
-        if (value === 'advanced' && this.propertyPanelDirty) return;
+        if (value !== 'rules' && value !== 'options' && value !== 'metadata' && value !== 'advanced') return;
+        if (value === this.styleEditorTab || this.propertyPanelDirty) return;
         if (this.propertyPanelOpen) this.styleDocumentEditor?.dismissPanel(false);
+        // A form must never commit a projection older than the authoritative source.
+        if (this.styleEditorTab === 'advanced' && value !== 'advanced') {
+            this.cancelQuickProjectionRefresh();
+            this.refreshQuickProjection(this.editorService.getSessionSource(this.styleEditorSessionId));
+        }
         this.styleEditorTab = value;
         // Keep CodeMirror and its undo/selection state after the first visit.
         if (value === 'advanced') this.styleEditorAdvancedVisited = true;
@@ -1401,7 +1398,7 @@ export class StyleComponent implements OnDestroy {
         }) ?? new Subscription();
         this.sourceWasModified = false;
         this.styleEditorQuickAvailable = !!this.styleService.state.styleEditorTargetId;
-        this.styleEditorTab = this.styleEditorQuickAvailable ? "quick" : "advanced";
+        this.styleEditorTab = this.styleEditorQuickAvailable ? "rules" : "advanced";
         this.styleEditorAdvancedVisited = this.styleEditorTab === 'advanced';
         this.refreshQuickProjection(source);
         return true;
@@ -1444,12 +1441,6 @@ export class StyleComponent implements OnDestroy {
         return styleId ? this.styleService.styles.get(styleId) : undefined;
     }
 
-    /** Builds the shared surface-header title from the currently persisted editor identity. */
-    protected styleEditorHeaderTitle(): string {
-        const styleId = this.styleService.state.styleEditorTargetId;
-        return styleId ? `Style Editor — ${styleId}` : "Style Editor";
-    }
-
     /** Applies header visibility through the ordinary persisted style lifecycle. */
     protected toggleEditorStyle(enabled: boolean): void {
         const styleId = this.styleService.state.styleEditorTargetId;
@@ -1471,6 +1462,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Patches the root YAML name immediately, preserving every unrelated AST node. */
     protected onQuickStyleNameChange(name: string): void {
+        if (this.propertyPanelOpen || this.quickProjectionStale) return;
         this.quickStyleName = name ?? "";
         this.updateQuickMetadata({ name: this.quickStyleName });
     }
@@ -1521,6 +1513,7 @@ export class StyleComponent implements OnDestroy {
 
     /** Updates CodeMirror synchronously while suppressing its delayed projection refresh. */
     protected commitQuickSource(updatedSource: string): void {
+        this.cancelQuickProjectionRefresh();
         this.updatingSourceFromQuick = true;
         try {
             this.editorService.updateSessionSource(this.styleEditorSessionId, updatedSource);

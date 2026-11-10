@@ -18,7 +18,7 @@
                     [class]="'style-rule-bubble style-rule-category-' + property.categoryIndex"
                     [attr.aria-label]="'Edit ' + property.label + ': ' + property.summary" [attr.aria-expanded]="activeDraft?.key === property.key"
                     [attr.aria-controls]="id + '-panel'" [pTooltip]="property.label + ': ' + property.summary" tooltipEvent="both"
-                    (click)="open(property, bubble)">{{ property.label }}: {{ property.summary }}</button>
+                    (click)="open(property, bubble)"><span class="style-rule-bubble-label">{{ property.label }}</span><span class="style-rule-bubble-value">{{ property.summary }}</span></button>
             } @empty {
                 <small>No local properties</small>
             }
@@ -62,7 +62,7 @@
                         @if (structure.field.kind === 'list') {
                             <button type="button" [disabled]="!!draft" (click)="action.emit({kind: 'edit', edit: {op: 'append', path: fieldPath(structure.key), value: {}}})">Add branch</button>
                             <button type="button" [disabled]="!!draft || model.has(fieldPath(structure.key === 'first-of' ? 'all-of' : 'first-of'))"
-                                (click)="action.emit({kind: 'edit', edit: {op: 'rename', path: fieldPath(structure.key), key: structure.key === 'first-of' ? 'all-of' : 'first-of'}})">
+                                (click)="switchBranchKind(structure.key)">
                                 Switch to {{ structure.key === 'first-of' ? 'all matching' : 'first matching' }}
                             </button>
                         }

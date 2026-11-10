@@ -9,7 +9,7 @@ import {
 import {InfoMessageService} from "../../../app/diagnostics/info.service";
 
 describe("GPU buffer warnings", () => {
-    it("keeps each warning until dismissed without replacing or suppressing previous messages", () => {
+    it("emits sticky GPU warnings without clearing other messages", () => {
         const messages = {clear: vi.fn(), add: vi.fn()};
         const service = new InfoMessageService(messages as never, {} as never);
 

@@ -4,6 +4,7 @@ import {beforeAll, describe, expect, it} from "vitest";
 import {coreLib, initializeLibrary, uint8ArrayToWasm} from "../../../app/integrations/wasm.adapter";
 import {styleAuthoringCompletions, styleAuthoringSchema} from "../../../app/mapstyle/style-authoring-schema.adapter";
 import {StyleFieldInputComponent} from "../../../app/mapstyle/style-field-input.component";
+import {StyleRecordEditorComponent} from "../../../app/mapstyle/style-record-editor.component";
 import {StyleRuleEditorComponent} from "../../../app/mapstyle/style-rule-editor.component";
 import {StyleDocumentModel} from "../../../app/mapstyle/style-document.model";
 import {convertSearchStyleRulesToYaml, projectStyleSourceForSearch} from "../../../app/search/search-style-sheet.converter";

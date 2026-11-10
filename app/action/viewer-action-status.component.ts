@@ -1,10 +1,9 @@
 import {Component} from "@angular/core";
 import {WebMcpService} from "./web-mcp.service";
-import {McpActionService} from "./mcp-action.service";
-import {ClipboardService} from "../clipboard/clipboard.service";
+import {McpActionService, type ViewerMcpAvailability} from "./mcp-action.service";
 import {Popover} from "primeng/popover";
 
-/** MCP connection details, client setup commands and recent agent activity in a popover. */
+/** MCP connection status, configuration shortcut and recent agent activity in a popover. */
 @Component({
     selector: "viewer-action-status",
     standalone: false,
@@ -15,45 +14,42 @@ import {Popover} from "primeng/popover";
             @if (availability.enabled || web?.supported) {
                 <p-button label="MCP" size="small" class="mcp-trigger"
                           [severity]="buttonSeverity"
-                          [pTooltip]="availability.enabled ? availability.message : web?.message" (onClick)="details.toggle($event)"
+                          [pTooltip]="availability.enabled ? (availability.detail ?? ('MCP tools ' + availability.message)) : web?.message" (onClick)="details.toggle($event)"
                           data-testid="viewer-action-status"/>
                 <p-popover #details appendTo="body" (onShow)="alignDetailsArrow(details)">
                     <section class="action-details" data-testid="viewer-action-details">
                         <strong>Agent controls</strong>
                         @if (web && web.supported) { <p role="status">{{ web.message }} ({{ web.viewerTools }} viewer, {{ web.mapgetTools }} mapget tools)</p> }
-                        @if (availability.enabled) {
-                        <p role="status">{{ availability.message }}</p>
-                        <label for="viewer-action-label">Tab label</label>
-                        <!-- HTML counts UTF-16 units; the service enforces the 120-code-point label limit. -->
-                        <input pInputText id="viewer-action-label" #label [value]="actions.label" maxlength="240"
-                               (change)="actions.renameSession(label.value); label.value = actions.label"/>
-                        }
-                        @if (availability.enabled) {
-                        <div class="action-commands" role="group" aria-label="Copy Add-MCP-Command">
-                            <span>Copy Add-MCP-Command:</span>
-                            <div class="action-buttons">
-                            <p-button label="Codex" ariaLabel="Copy Codex MCP-Add Command" size="small" (onClick)="copy('codex')"
-                                      data-testid="viewer-action-copy-codex"/>
-                            <p-button label="Claude" ariaLabel="Copy Claude MCP-Add Command" size="small" (onClick)="copy('claude')"
-                                      data-testid="viewer-action-copy-claude"/>
-                            <p-button label="Copilot" ariaLabel="Copy Copilot MCP-Add Command" size="small" (onClick)="copy('copilot')"
-                                      data-testid="viewer-action-copy-copilot"/>
-                            <p-button label="Cursor" ariaLabel="Copy Cursor MCP-Add Command" size="small" (onClick)="copy('cursor')"
-                                      data-testid="viewer-action-copy-cursor"/>
+                        <div class="mcp-connection">
+                            <div class="mcp-connection-row" data-testid="mcp-controls-row">
+                                <div class="mcp-connection-label" role="status" aria-live="polite" data-testid="viewer-action-connection">
+                                    <span>MCP tools</span>
+                                    @if (availability.enabled) {
+                                        <p-tag [severity]="availabilitySeverity[availability.message]" data-testid="viewer-action-availability">{{ availability.message }}</p-tag>
+                                    }
+                                </div>
+                                <p-button label="Configure" icon="pi pi-cog" size="small"
+                                          (onClick)="details.hide(); configuration.open()" data-testid="mcp-configure"/>
                             </div>
+                            @if (availability.enabled && availability.detail) { <small data-testid="viewer-action-connection-detail">{{ availability.detail }}</small> }
                         </div>
-                        <small>Commands use POSIX-shell quoting. OAuth sign-in happens in your client.</small>
-                        <small>Cursor opens an installation confirmation in the editor.</small>
-                        @let connection = actions.connectionInfo;
-                        @if (connection.enabled && connection.authentication === 'oauth') {
-                            <small>Copilot's OAuth command starts a session-only configuration.
-                                Sign in with <code>/mcp auth mapviewer</code> inside Copilot.</small>
+                        @if (availability.enabled) {
+                            <p-iftalabel data-testid="viewer-action-tab-label">
+                                <!-- HTML counts UTF-16 units; the service enforces the 120-code-point label limit. -->
+                                <input pInputText id="viewer-action-label" #label [value]="actions.label" maxlength="240"
+                                       (change)="actions.renameSession(label.value); label.value = actions.label"/>
+                                <label for="viewer-action-label">Tab label</label>
+                            </p-iftalabel>
                         }
-                        }
-                        <p-button label="Stop current action" severity="danger" size="small"
-                                  [disabled]="!actions.hasPendingAction" (onClick)="actions.stopCurrentAction()"
-                                  data-testid="viewer-action-stop"/>
-                        <small>Stop cancels pending work, not completed changes or human searches.</small>
+                        <div class="action-stop-controls" data-testid="viewer-action-stop-controls">
+                            <p-button label="Stop current action" severity="danger" size="small"
+                                      [disabled]="!actions.hasPendingAction" (onClick)="actions.stopCurrentAction()"
+                                      data-testid="viewer-action-stop"/>
+                            <span class="material-symbols-outlined action-help" tabindex="0" role="img"
+                                  [attr.aria-label]="stopHelp" data-testid="viewer-action-stop-help"
+                                  [pTooltip]="stopHelp"
+                                  tooltipPosition="top" tooltipEvent="both">help</span>
+                        </div>
                         @if (activity) {
                             <ul aria-label="Recent agent activity">
                                 @for (entry of activity; track $index) {
@@ -65,11 +61,17 @@ import {Popover} from "primeng/popover";
                 </p-popover>
             }
         }
+        <mcp-configuration-dialog #configuration/>
     `,
     styleUrls: ["../scss/viewer-action-status.component.scss"]
 })
 export class ViewerActionStatusComponent {
-    constructor(readonly actions: McpActionService, private readonly clipboard: ClipboardService, readonly webMcp: WebMcpService) {}
+    readonly stopHelp = "Stop cancels only the currently pending queued actions. Your agent may still queue new actions";
+    readonly availabilitySeverity: Record<ViewerMcpAvailability["message"], "warn" | "info" | "success"> = {
+        waiting: "warn", connecting: "info", ready: "success"
+    };
+
+    constructor(readonly actions: McpActionService, readonly webMcp: WebMcpService) {}
 
     /**
      * Registration means available, not active; pending viewer calls own the green
@@ -77,7 +79,7 @@ export class ViewerActionStatusComponent {
      */
     get buttonSeverity(): "secondary" | "success" | "danger" {
         const availability = this.actions.availability$.value;
-        if (availability.enabled ? !availability.ready : !this.webMcp.status$.value.viewerTools) return "danger";
+        if (availability.enabled ? availability.message !== "ready" : !this.webMcp.status$.value.viewerTools) return "danger";
         return this.actions.hasPendingAction ? "success" : "secondary";
     }
 
@@ -93,75 +95,4 @@ export class ViewerActionStatusComponent {
         container.style.setProperty('--p-popover-arrow-left', `calc(${center}px - var(--p-popover-arrow-offset))`);
     }
 
-    /**
-     * Build client setup commands from fixed syntax and quoted metadata, never a
-     * server command template. Validate the endpoint and use POSIX-shell quoting.
-     */
-    connectionText(kind: "codex" | "claude" | "copilot" | "cursor"): string {
-        const info = this.actions.connectionInfo;
-        if (!info.enabled) return "";
-        let endpoint: URL;
-        try { endpoint = new URL(info.endpoint); } catch { return ""; }
-        if (!['http:', 'https:'].includes(endpoint.protocol) || endpoint.username || endpoint.password) return "";
-        const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-        const serverName = "mapviewer";
-        const oauth = info.authentication === "oauth" ? info : undefined;
-        if (kind === "cursor") {
-            // Cursor's installation link targets its own MCP configuration. Its inherited
-            // --add-mcp flag instead writes the separate VS Code configuration store.
-            // Static OAuth requires a client ID; otherwise Cursor uses server discovery.
-            const config = {
-                url: endpoint.href,
-                auth: oauth?.oauthClientId ? {
-                    CLIENT_ID: oauth.oauthClientId,
-                    scopes: oauth.scopes.length ? oauth.scopes : undefined
-                } : undefined
-            };
-            // The link carries base64-encoded UTF-8 JSON, including non-ASCII client IDs.
-            const bytes = new TextEncoder().encode(JSON.stringify(config));
-            const encodedConfig = btoa(Array.from(bytes, byte => String.fromCharCode(byte)).join(""));
-            const installUrl = new URL("cursor://anysphere.cursor-deeplink/mcp/install");
-            installUrl.searchParams.set("name", serverName);
-            installUrl.searchParams.set("config", encodedConfig);
-            return `cursor --open-url ${quote(installUrl.href)}`;
-        }
-        if (kind === "copilot") {
-            if (!oauth) return `copilot mcp add --transport http ${serverName} ${quote(endpoint.href)}`;
-            // Copilot's add subcommand has no OAuth options. Its session config supports
-            // a public client ID; scopes require that ID (otherwise use server discovery).
-            const config = {mcpServers: {[serverName]: {
-                type: "http",
-                url: endpoint.href,
-                tools: ["*"],
-                oauthClientId: oauth.oauthClientId,
-                oauthScopes: oauth.oauthClientId && oauth.scopes.length ? oauth.scopes : undefined
-            }}};
-            return `# Session-only MCP setup; sign in with /mcp auth ${serverName} inside Copilot.\n` +
-                `copilot --additional-mcp-config ${quote(JSON.stringify(config))}`;
-        }
-        let addCommand = kind === "codex"
-            ? `codex mcp add ${serverName} --url ${quote(endpoint.href)}${oauth?.oauthClientId ? ` --oauth-client-id ${quote(oauth.oauthClientId)}` : ""}`
-            : `claude mcp add --transport http ${serverName} ${quote(endpoint.href)}`;
-        if (!oauth) return addCommand;
-        if (kind === "claude") {
-            // Claude's --scope selects config storage; OAuth scopes belong in its JSON config.
-            const config = {
-                type: "http",
-                url: endpoint.href,
-                oauth: oauth.oauthClientId || oauth.scopes.length ? {
-                    clientId: oauth.oauthClientId,
-                    scopes: oauth.scopes.length ? oauth.scopes.join(" ") : undefined
-                } : undefined
-            };
-            addCommand = `claude mcp add-json ${serverName} ${quote(JSON.stringify(config))}`;
-        }
-        const scopes = kind === "codex" && oauth.scopes.length ? ` --scopes ${quote(oauth.scopes.join(","))}` : "";
-        return `${addCommand} &&\n${kind} mcp login ${serverName}${scopes}`;
-    }
-
-    /** Uses the existing clipboard/manual-copy fallback, without invoking any client command. */
-    copy(kind: "codex" | "claude" | "copilot" | "cursor"): void {
-        const text = this.connectionText(kind);
-        if (text) this.clipboard.copyToClipboard(text);
-    }
 }

@@ -11,13 +11,14 @@ import {styleFieldSeed} from './style-rule.presentation';
 
 interface FormField {key: string; label: string; wide: boolean; present: boolean; definition: StyleField;}
 interface FormGroup {name: string; fields: FormField[]; presentFields: FormField[]; optionalFields: FormField[];}
+export type StyleEditorSection = 'rules' | 'options' | 'metadata';
 
 @Component({
     selector: "style-record-editor",
     standalone: true,
     imports: [CommonModule, StyleFieldInputComponent, TooltipModule, StyleRuleEditorComponent],
     template: `
-        @if (record === 'stylesheet') {
+        @if (record === 'stylesheet' && (!section || section === 'metadata')) {
             <section class="style-editor-quick-metadata" aria-label="Style metadata" data-testid="style-editor-metadata">
                 <ng-container *ngTemplateOutlet="metadataHeader || null"/>
                 <div class="style-metadata-fields">
@@ -26,7 +27,7 @@ interface FormGroup {name: string; fields: FormField[]; presentFields: FormField
             </section>
         }
         @for (group of groups; track group.name) {
-            @if (group.name === 'Common') {
+            @if (group.name === 'Common' || section === 'options') {
                 <ng-container *ngTemplateOutlet="fields; context: {$implicit: group.presentFields}"/>
                 @if (group.optionalFields.length) {
                     <details class="style-form-group style-optional-fields" [open]="expandedGroups.has('Common optional')"
@@ -150,6 +151,7 @@ export class StyleRecordEditorComponent implements OnChanges {
     @Input({required: true}) model!: StyleDocumentModel;
     @Input({required: true}) catalog!: StyleAuthoringSchema;
     @Input() record = "stylesheet";
+    @Input() section?: StyleEditorSection;
     @Input() path: StylePath = [];
     @Input() propertyTemplate?: TemplateRef<unknown>;
     @Input() ruleDraft?: StylePropertyDraft;
@@ -186,9 +188,11 @@ export class StyleRecordEditorComponent implements OnChanges {
             group.push(item);
             groups.set(definition.group, group);
         }
-        this.groups = [...groups].map(([name, fields]) => ({name, fields,
+        this.groups = [...groups].filter(([name]) => !this.section || (this.section === 'rules'
+            ? name === 'Common' || name === 'Interaction' : this.section === 'options' && name === 'Options and presets'))
+            .map(([name, fields]) => ({name, fields,
             presentFields: fields.filter(field => field.present), optionalFields: fields.filter(field => !field.present)}));
-        this.unknownKeys = this.model.keys(this.path).filter(key => !fields[key]);
+        this.unknownKeys = !this.section || this.section === 'metadata' ? this.model.keys(this.path).filter(key => !fields[key]) : [];
     }
 
     /** Locates a field relative to this record. */
