@@ -118,7 +118,7 @@ function setup() {
     const actions = new AppActionRegistry(state);
     actions.registerContributors([jumps, external, views, maps, searches, inspections, styles, diagnostics, navigation, ui,
         owners.inspectionState, owners.coordinates, owners.url]);
-    const service = new McpActionService(state, actions, zone as never, stream as never, ui);
+    const service = new McpActionService(state, actions, zone as never, stream as never, ui, config);
     return { state, views, maps, renderers, searches, inspections, zone, service, stream, styles, config, render, diagnostics, viewDiagnostics, styleReports };
 }
 
@@ -181,6 +181,34 @@ describe("McpActionService", () => {
         expect(service.activity$.value.at(-1)).toMatchObject({ action: "viewer_get_controls", status: "completed" });
         await expect(service.invokeLocal("viewer_get_controls", { clientId: "another-tab" }, new AbortController().signal))
             .rejects.toMatchObject({ detail: { code: "invalid_arguments" } });
+    });
+
+    it("does not discover, register or admit MCP calls when the deployment disables it", () => {
+        const { service, stream, config } = fixture();
+        vi.spyOn(config, "snapshot", "get").mockReturnValue({ ...config.snapshot, mcpEnabled: false });
+        const fetchMock = vi.fn();
+        vi.stubGlobal("fetch", fetchMock);
+        const execute = vi.spyOn(service, "execute");
+
+        service.initialize();
+        service.initialize();
+        stream.actionClientId$.next("b3e68f32-3b51-472d-8cab-14b597f7de91");
+        stream.actionControlReceived.next({
+            payload: {
+                type: "mapget.actions.invoke", version: 1, callId: "disabled-relay",
+                action: "viewer_get_controls", arguments: {}, timeoutMs: 30000
+            },
+            receivedAt: performance.now()
+        });
+
+        expect(() => service.invokeLocal("viewer_get_controls", {}, new AbortController().signal))
+            .toThrowError("MCP is disabled for this deployment");
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(stream.sendActionControl).not.toHaveBeenCalled();
+        expect(execute).not.toHaveBeenCalled();
+        expect(service.hasPendingAction).toBe(false);
+        expect(service.activity$.value).toEqual([]);
+        expect(service.availability$.value).toMatchObject({ enabled: false, ready: false });
     });
 
     it("shares mutation admission, user stop and cancellation between WebMCP and the relay", async () => {

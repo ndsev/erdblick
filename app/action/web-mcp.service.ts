@@ -5,6 +5,7 @@ import { AppActionRegistry } from "./action-registry.service";
 import { McpActionService } from "./mcp-action.service";
 import { ViewerActionFailure } from "./viewer-action-relay.contract";
 import { viewerJsonSchema } from "./control-actions.util";
+import { AppConfigService } from "../config/appconfig.service";
 
 /** The WebMCP document API subset used here; kept local until TypeScript's DOM library includes it. */
 interface ModelContext {
@@ -48,12 +49,22 @@ export class WebMcpService implements OnDestroy {
     private refreshing = false;
     private lastRefresh = -Infinity;
 
-    constructor(private readonly actions: McpActionService, private readonly zone: NgZone, private readonly registry: AppActionRegistry) {}
+    constructor(
+        private readonly actions: McpActionService,
+        private readonly zone: NgZone,
+        private readonly registry: AppActionRegistry,
+        private readonly config: AppConfigService
+    ) {}
 
     /** Register only after normal app initialization; unsupported browsers do no discovery work. */
     initialize(): void {
         if (this.initialized) return;
         this.initialized = true;
+
+        // Browser-native tools work without backend MCP, so they need the same
+        // deployment check before even advertising document API availability.
+        if (!this.config.snapshot.mcpEnabled) return;
+
         this.context = (document as Document & {modelContext?: ModelContext}).modelContext;
         if (!this.context) return;
         this.status$.next({...this.status$.value, supported: true, message: "Starting WebMCP"});

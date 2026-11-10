@@ -42,6 +42,45 @@ const mapPresetCapability = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("AppConfigService", () => {
+    it.each([
+        { staticFlag: undefined, serverFlag: undefined, enabled: true },
+        { staticFlag: true, serverFlag: true, enabled: true },
+        { staticFlag: false, serverFlag: undefined, enabled: false },
+        { staticFlag: false, serverFlag: true, enabled: false },
+        { staticFlag: true, serverFlag: false, enabled: false },
+        { staticFlag: undefined, serverFlag: false, enabled: false },
+        { staticFlag: "false", serverFlag: true, enabled: false },
+        { staticFlag: true, serverFlag: "true", enabled: false }
+    ])("resolves deployment MCP support with static=$staticFlag, server=$serverFlag", async ({ staticFlag, serverFlag, enabled }) => {
+        const { service, httpClient } = createService();
+        httpClient.get.mockImplementation((url: string) => url === "/static-config/config.json"
+            ? of({ mcpEnabled: staticFlag })
+            : of(new HttpResponse({ status: 200, body: { erdblick: { mcpEnabled: serverFlag } } })));
+
+        expect((await service.load()).mcpEnabled).toBe(enabled);
+    });
+
+    it.each(["static", "server"])("preserves a %s MCP restriction when another config field is malformed", async source => {
+        const { service, httpClient } = createService();
+        const restricted = { mcpEnabled: false, backgroundLayers: "invalid" };
+        httpClient.get.mockImplementation((url: string) => url === "/static-config/config.json"
+            ? of(source === "static" ? restricted : { mcpEnabled: true })
+            : of(new HttpResponse({ status: 200, body: {
+                erdblick: source === "server" ? restricted : { mcpEnabled: true }
+            } })));
+
+        expect((await service.load()).mcpEnabled).toBe(false);
+    });
+
+    it("keeps packaged MCP disabled when the server config cannot be fetched", async () => {
+        const { service, httpClient } = createService();
+        httpClient.get.mockImplementation((url: string) => url === "/static-config/config.json"
+            ? of({ mcpEnabled: false })
+            : throwError(() => new Error("offline")));
+
+        expect((await service.load()).mcpEnabled).toBe(false);
+    });
+
     it("falls back to static config.json when /config request fails", async () => {
         const {service, httpClient} = createService();
         httpClient.get.mockImplementation((url: string) => {

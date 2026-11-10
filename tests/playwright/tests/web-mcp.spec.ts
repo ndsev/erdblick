@@ -1,4 +1,4 @@
-import {waitForAppReady} from "../utils/ui-helpers";
+import {openOmnibar, waitForAppReady} from "../utils/ui-helpers";
 import { expect, test } from '../fixtures/test';
 import type { Page } from '@playwright/test';
 import { viewerActions } from "../utils/viewer-contract";
@@ -23,6 +23,41 @@ async function call(page: Page, name: string, input: Record<string, unknown> = {
         const chromeMajor = Number(navigator.userAgent.match(/Chrome\/(\d+)/)?.[1]);
         return JSON.parse(await context.executeTool(tool, chromeMajor >= 155 ? input : JSON.stringify(input)));
     }, { name, input });
+}
+
+for (const restrictedSource of ['static', 'server']) {
+    test(`deployment restriction in ${restrictedSource} config disables MCP without disabling human actions`, async ({page}) => {
+        // Keep the real native MCP backend and browser document API available.
+        // A deployment restriction must suppress both independently of them.
+        await page.route('**/static-config/config.json', async route => {
+            const response = await route.fetch();
+            await route.fulfill({response, json: {
+                ...await response.json(), mcpEnabled: restrictedSource !== 'static'
+            }});
+        });
+        await page.route('**/config', route => route.fulfill({json: {
+            erdblick: {mcpEnabled: restrictedSource !== 'server'}
+        }}));
+        const mcpRequests: string[] = [];
+        page.on('request', request => {
+            if (new URL(request.url()).pathname.startsWith('/mcp/')) mcpRequests.push(request.url());
+        });
+
+        await page.goto('/?v2=1&n=1&vid=0&lon=10&lat=40&alt=500&m2d=0&bg=~0&l=');
+        await waitForAppReady(page);
+        await expect(page.getByTestId('viewer-action-status')).toBeHidden();
+        const tools = await page.evaluate(async () =>
+            (await (document as Document & {modelContext: ModelContext}).modelContext.getTools()).map(tool => tool.name));
+        expect(tools).toEqual([]);
+
+        // The omnibar uses the same action registry, but is a human UI rather
+        // than an MCP adapter. It must remain usable in restricted deployments.
+        await openOmnibar(page, '48,11');
+        await page.getByTestId('omnibar-menu-panel').locator('[data-action-id="j:wgs84-lat-lon"]').click();
+        await expect.poll(() => Number(new URL(page.url()).searchParams.get('lon'))).toBeCloseTo(11, 5);
+        await expect.poll(() => Number(new URL(page.url()).searchParams.get('lat'))).toBeCloseTo(48, 5);
+        expect(mcpRequests).toEqual([]);
+    });
 }
 
 test('native WebMCP discovers all tools, controls only this document and calls real mapget', async ({ page, context }) => {

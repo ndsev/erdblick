@@ -3,6 +3,7 @@ import { BehaviorSubject, Subscription } from "rxjs";
 import { MapTileStreamService } from "../mapdata/map-tile-stream.service";
 import { unicodePrefix } from "../utils/unicode-string.util";
 import { AppStateService } from "../appstate/appstate.service";
+import { AppConfigService } from "../config/appconfig.service";
 import { AppActionRegistry } from "./action-registry.service";
 import { rejectAction } from "./action.model";
 import { VIEWER_ACTION_CATALOG_ID } from "./generated/catalog-id";
@@ -73,17 +74,22 @@ export class McpActionService implements OnDestroy {
         private readonly actions: AppActionRegistry,
         private readonly zone: NgZone,
         private readonly stream: MapTileStreamService,
-        private readonly ui: UiAutomationService
+        private readonly ui: UiAutomationService,
+        private readonly config: AppConfigService
     ) { }
 
     /**
      * Subscribe to relay connection changes and discover the backend's MCP catalog.
-     * Application startup calls this once after the map stream is initialized;
+     * Application startup calls this once after deployment config and the map stream are initialized;
      * discovery runs asynchronously while the viewer continues loading.
      */
     initialize(): void {
         if (this.initialized) return;
         this.initialized = true;
+
+        // Community deployments keep the ordinary tile connection, but must
+        // neither discover MCP nor listen for agent commands on that connection.
+        if (!this.config.snapshot.mcpEnabled) return;
 
         this.subscriptions.add(this.stream.actionClientId$.subscribe(clientId => {
             if (clientId === this.clientId) return;
@@ -228,6 +234,9 @@ export class McpActionService implements OnDestroy {
      */
     invokeLocal(action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
         signal.throwIfAborted();
+        if (!this.config.snapshot.mcpEnabled) {
+            rejectAction("MCP is disabled for this deployment", "not_available");
+        }
         if (this.encoder.encode(JSON.stringify(input)).length > VIEWER_ACTION_INVOCATION_BYTES) {
             rejectAction("Viewer arguments exceed the request budget", "invalid_arguments");
         }

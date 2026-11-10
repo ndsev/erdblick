@@ -299,12 +299,18 @@ export class AppConfigService {
      * mapPresets value becomes [] with _mapPresetsInvalid set to true.
      */
     private parseRawConfig(rawConfig: unknown, sourceLabel: string): RawAppConfig {
+        // A broken style/provider setting must not discard a deployment's MCP
+        // restriction. Only an explicit boolean true enables a present flag;
+        // absent flags retain standalone erdblick's existing behavior.
+        const mcpEnabled = isPlainObject(rawConfig) && rawConfig["mcpEnabled"] !== undefined
+            ? rawConfig["mcpEnabled"] === true
+            : undefined;
         const mapPresetsPresent = isPlainObject(rawConfig)
             && Object.prototype.hasOwnProperty.call(rawConfig, "mapPresets");
         const parsed = RAW_APP_CONFIG_SCHEMA.safeParse(rawConfig);
         if (!parsed.success) {
             console.error(`[AppConfigService] Invalid ${sourceLabel}; ignoring payload`, parsed.error);
-            return {};
+            return { mcpEnabled };
         }
         if (mapPresetsPresent && !Array.isArray(parsed.data.mapPresets)) {
             return { ...parsed.data, mapPresets: [], _mapPresetsInvalid: true };
@@ -320,6 +326,9 @@ export class AppConfigService {
     ): RawAppConfig {
         const merged: RawAppConfig = {
             ...staticConfig,
+            // Either deployment source may restrict MCP. A server override
+            // cannot re-enable tools excluded by the packaged static config.
+            mcpEnabled: staticConfig.mcpEnabled !== false && serverErdblickConfig.mcpEnabled !== false,
             extensionModules: { ...(staticConfig.extensionModules ?? {}) },
             styles: staticConfig.styles ? [...staticConfig.styles] : undefined,
             additionalStyles: staticConfig.additionalStyles ? [...staticConfig.additionalStyles] : undefined,
@@ -475,6 +484,7 @@ export class AppConfigService {
         const locationSearch = normalizeLocationSearch(rawConfig.locationSearch);
         const externalViewers = normalizeExternalViewers(rawConfig.externalViewers);
         return {
+            mcpEnabled: rawConfig.mcpEnabled !== false,
             extensionModules,
             surveys,
             styles,

@@ -517,6 +517,16 @@ does not grant permissions based on browser-supplied identity claims.
 Optional `/mcp/info` discovery allows up to 30 seconds for source/schema startup.
 Discovery runs asynchronously and does not block ordinary map startup.
 
+Deployments can disable both adapters with `mcpEnabled: false` in
+`/static-config/config.json` or `/config.erdblick`. A false value in either source
+wins; an absent flag preserves standalone erdblick's MCP support. The setting is
+read after config loading, outside URL and persisted user state. When disabled,
+erdblick neither discovers or registers remote controls nor registers browser-native
+WebMCP tools, and the MCP button stays hidden. The ordinary action registry,
+omnibar and tile connection continue to work. This frontend setting complements
+the host's MCP availability policy; backend authentication and edition enforcement
+remain server responsibilities.
+
 Settings use `viewer_describe_controls`, `viewer_get_controls` and
 `viewer_set_control`; semantic operations use the commands below.
 Mapget adds/removes the routing `clientId` at the MCP

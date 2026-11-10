@@ -32,6 +32,8 @@ export interface ExtensionModulesConfig {
 
 /** Raw config shape before defaults are applied. */
 export interface RawAppConfig {
+    /** Deployment capability; false disables both remote MCP and browser-native tools. */
+    mcpEnabled?: boolean;
     extensionModules?: ExtensionModulesConfig;
     surveys?: unknown[];
     styles?: Array<StyleConfigEntry | string>;
@@ -81,6 +83,8 @@ export interface AppServerConfigStatus {
 
 /** Normalized application config consumed by the Angular services. */
 export interface AppConfig {
+    /** Resolved at startup from deployment config, never from URL or saved user state. */
+    mcpEnabled: boolean;
     extensionModules: ExtensionModulesConfig;
     surveys: SurveyConfig[];
     styles: StyleConfigEntry[];
@@ -97,6 +101,7 @@ export interface AppConfig {
 }
 
 export const RAW_APP_CONFIG_SCHEMA = z.object({
+    mcpEnabled: z.boolean().optional().catch(false),
     extensionModules: z.object({
         jumpTargets: z.string().optional(),
         distribVersions: z.string().optional()
@@ -135,6 +140,7 @@ export const DEFAULT_SERVER_CONFIG_STATUS: AppServerConfigStatus = {
 };
 
 export const DEFAULT_APP_CONFIG: AppConfig = {
+    mcpEnabled: true,
     extensionModules: {},
     surveys: [],
     styles: [],

@@ -16,7 +16,7 @@ type Tool = {
 };
 
 /** Simulate registration ownership without replacing any viewer tool handler. */
-function fixture(supported = true) {
+function fixture(supported = true, mcpEnabled = true) {
     const tools = new Map<string, Tool>();
     const registerTool = vi.fn(async (tool: Tool, { signal }: { signal: AbortSignal }) => {
         signal.throwIfAborted();
@@ -27,7 +27,12 @@ function fixture(supported = true) {
     Object.defineProperty(document, "modelContext", { value: supported ? { registerTool } : undefined, configurable: true });
     const actions = { invokeLocal: vi.fn().mockResolvedValue({ status: "applied" }) };
     const zone = { run: (fn: () => unknown) => fn(), runOutsideAngular: (fn: () => unknown) => fn() };
-    const service = new WebMcpService(actions as never, zone as never, { publicActions: viewerActions } as never);
+    const service = new WebMcpService(
+        actions as never,
+        zone as never,
+        { publicActions: viewerActions } as never,
+        { snapshot: { mcpEnabled } } as never
+    );
     const fetchMock = vi.fn(async (_url: URL, init: RequestInit) => {
         const request = JSON.parse(String(init.body));
         return new Response(JSON.stringify({
@@ -81,6 +86,20 @@ describe("WebMcpService", () => {
         const { tools, fetchMock } = start(false);
         expect(tools.size).toBe(0);
         expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("does not advertise or register document tools when the deployment disables MCP", () => {
+        const { service, tools, registerTool, fetchMock } = fixture(true, false);
+        services.push(service);
+
+        service.initialize();
+        service.initialize();
+        window.dispatchEvent(new Event("focus"));
+
+        expect(registerTool).not.toHaveBeenCalled();
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(tools.size).toBe(0);
+        expect(service.status$.value).toMatchObject({ supported: false, viewerTools: 0, mapgetTools: 0 });
     });
 
     it("preserves current-tab tools when backend discovery is denied", async () => {
