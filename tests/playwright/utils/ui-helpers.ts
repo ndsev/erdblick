@@ -117,22 +117,19 @@ export async function disableUiAnimations(page: Page): Promise<void> {
     });
 }
 
+/** Dismisses a visible survey and verifies that it cannot obstruct later interactions. */
 export async function dismissSurveyIfPresent(page: Page): Promise<void> {
     const survey = page.locator('#survey').first();
-    if (await survey.count() === 0) {
+    if (!(await survey.isVisible())) {
         return;
     }
 
     // The banner is time-based (config.json start/end). Dismiss it when present so
     // snapshots remain stable across dates.
     const closeButton = survey.locator('.material-symbols-outlined', { hasText: 'close' }).first();
-    try {
-        if (await closeButton.isVisible({ timeout: 500 })) {
-            await closeButton.click({ timeout: 500 });
-        }
-    } catch {
-        // Ignore flakiness if the banner disappears mid-test.
-    }
+    // A failed close is a setup failure, not permission to continue with pointer gestures.
+    await closeButton.click();
+    await expect(survey).toBeHidden();
 }
 
 export async function revealPrefButtons(page: Page): Promise<Locator> {
