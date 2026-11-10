@@ -20,8 +20,6 @@ test.describe('Snapshot – style component', () => {
         await installStyleSupportFixture(page);
         await navigateToStateSnapshotRoot(page);
         await enableMapLayer(page, TEST_MAP_NAMES[MAP_INDEX], TEST_LAYER_NAMES[LAYER_INDEX]);
-        await expect.poll(() => page.evaluate(() =>
-            window.ebDebug?.subsetRenderPresentation().activeContributions ?? 0)).toBeGreaterThan(0);
 
         const stylesDialog = await openStylesDialog(page);
         // Wait for the configured style bundle to replace the transient empty
@@ -43,23 +41,12 @@ test.describe('Snapshot – style component', () => {
         await expect(editorDialog.getByTestId('style-editor-header').locator('.app-surface-header'))
             .toBeVisible();
         await expect(editorDialog.getByTestId('style-editor-enabled')).toBeVisible();
-        await expect(editorDialog.getByTestId('surface-title-edit')).toBeVisible();
-        await expect(editorDialog.getByRole('tab', {name: 'Rules', exact: true})).toHaveAttribute('aria-selected', 'true');
+        await expect(editorDialog.getByTestId('style-editor-quick-name')).toBeVisible();
+        await expect(editorDialog.getByTestId('style-editor-quick-layers')).toBeVisible();
         await expect(editorDialog.locator('.style-form-error')).toHaveCount(0);
-        const branches = editorDialog.locator('[data-rule-path="rules.0"] > details');
-        await expect(branches).toHaveJSProperty('open', false);
-        await expect(editorDialog.locator('[data-rule-path="rules.0.all-of.0"]')).toHaveCount(0);
 
         await page.mouse.move(0, 0);
         await expect(page).toHaveScreenshot('style-component-editor.png', {
-            maxDiffPixelRatio: 0.01
-        });
-
-        await editorDialog.locator('[data-style-bubble="rules.0.width"]').click();
-        await expect(editorDialog.getByTestId('style-property-panel')).toBeVisible();
-        await editorDialog.locator('[data-style-path="rules.0.width"] input').focus();
-        await page.mouse.move(0, 0);
-        await expect(page).toHaveScreenshot('style-component-property-panel.png', {
             maxDiffPixelRatio: 0.01
         });
 
@@ -73,41 +60,37 @@ test.describe('Snapshot – style component', () => {
                 placement: 'left'
             },
             {
-                locator: editorDialog.getByTestId('surface-title-edit'),
-                label: 'Rename style',
-                placement: 'top'
+                locator: editorDialog.getByTestId('style-editor-quick-name'),
+                label: 'Edit style name'
             },
             {
-                locator: editorDialog.getByTestId('style-editor-tabs').locator('p-tablist'),
-                label: 'Editor sections',
+                locator: editorDialog.getByTestId('style-editor-quick-layers'),
+                label: 'Set layer affinity'
+            },
+            {
+                locator: editorDialog.locator('[data-style-path="rules.0.geometry"]'),
+                label: 'Choose geometry',
                 placement: 'left'
             },
             {
-                locator: editorDialog.locator('[data-style-bubble="rules.0.scope"]'),
-                through: editorDialog.locator('[data-style-bubble="rules.0.width"]'),
-                label: 'Click a property to edit',
+                locator: editorDialog.locator('[data-style-path="rules.0.attribute-filter"]'),
+                label: 'Edit attribute predicate',
                 placement: 'left'
             },
             {
-                locator: editorDialog.getByTestId('style-add-property-rules.0'),
-                label: 'Add a property',
-                placement: 'top'
-            },
-            {
-                locator: editorDialog.getByTestId('style-property-dismiss'),
-                through: editorDialog.getByTestId('style-property-delete'),
-                label: 'Dismiss / Save / Delete',
-                placement: 'left'
-            },
-            {
-                locator: branches.locator(':scope > summary'),
-                label: 'Expand branches',
+                locator: editorDialog.locator('.style-optional-fields > summary').first(),
+                label: 'Add optional properties',
                 placement: 'left'
             },
             {
                 locator: editorDialog.getByTestId('style-editor-apply-button'),
-                label: 'Apply document changes',
+                label: 'Apply changes',
                 placement: 'left'
+            },
+            {
+                locator: editorDialog.getByTestId('style-editor-help-button'),
+                label: 'Open style help',
+                placement: 'top'
             }
         ]);
     });

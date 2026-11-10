@@ -1,5 +1,4 @@
 import {Component, EventEmitter, Input, OnChanges, OnDestroy, Output} from "@angular/core";
-import {NgTemplateOutlet} from "@angular/common";
 import {FormsModule} from "@angular/forms";
 import {ColorPickerModule} from "primeng/colorpicker";
 import {StyleField} from "./style-authoring-schema.adapter";
@@ -12,7 +11,7 @@ export interface StyleInputProblem {path: string; message: string;}
 @Component({
     selector: "style-field-input",
     standalone: true,
-    imports: [FormsModule, NgTemplateOutlet, ColorPickerModule, SimfilExpressionInputComponent],
+    imports: [FormsModule, ColorPickerModule, SimfilExpressionInputComponent],
     template: `
         @switch (kind) {
             @case ('expression') {
@@ -47,7 +46,7 @@ export interface StyleInputProblem {path: string; message: string;}
             @case ('vector') {
                 <div class="style-vector">
                     @if (field.sizes.length > 1) {
-                        <select aria-label="Vector shape" [disabled]="!!error" [ngModel]="vectorLength()" (ngModelChange)="resize($event)">
+                        <select aria-label="Vector shape" [ngModel]="vectorLength()" (ngModelChange)="resize($event)">
                             @for (size of field.sizes; track size) {
                                 <option [ngValue]="size">{{ size === 0 ? 'Scalar' : size + ' components' }}</option>
                             }
@@ -83,17 +82,10 @@ export interface StyleInputProblem {path: string; message: string;}
                                 <input aria-label="Stop key" [value]="text(child(index, 0))"
                                     (input)="stopKey(index, $event)">
                             }
-                            @if (field.valueKind === 'color') {
-                                <div class="style-color">
-                                    <ng-container *ngTemplateOutlet="colorPicker; context: {$implicit: child(index, 1), label: 'stop ' + (index + 1)}"/>
-                                    <input aria-label="Stop color" [value]="text(child(index, 1))" (input)="stopValue(index, $event)"
-                                        placeholder="Named color or RGB hex">
-                                </div>
-                            } @else {
-                                <input aria-label="Stop width" [value]="text(child(index, 1))" (input)="stopValue(index, $event)">
-                            }
-                            <button type="button" aria-label="Move stop up" [disabled]="!!error || index === 0" (click)="move(index, index - 1)">↑</button>
-                            <button type="button" aria-label="Move stop down" [disabled]="!!error || index === indices().length - 1" (click)="move(index, index + 1)">↓</button>
+                            <input [attr.aria-label]="field.valueKind === 'color' ? 'Stop color' : 'Stop width'"
+                                [value]="text(child(index, 1))" (input)="stopValue(index, $event)">
+                            <button type="button" aria-label="Move stop up" [disabled]="index === 0" (click)="move(index, index - 1)">↑</button>
+                            <button type="button" aria-label="Move stop down" [disabled]="index === indices().length - 1" (click)="move(index, index + 1)">↓</button>
                             <button type="button" aria-label="Remove stop" (click)="remove(index)">×</button>
                         </div>
                     }
@@ -111,15 +103,18 @@ export interface StyleInputProblem {path: string; message: string;}
                         <input aria-label="Color option ID" [value]="text(child('option'))"
                             (change)="set(eventText($event), child('option'))">
                     } @else {
-                        <ng-container *ngTemplateOutlet="colorPicker; context: {$implicit: path, label: label}"/>
-                        <input [attr.aria-label]="label" [ngModel]="text()" (ngModelChange)="set($event)"
-                            placeholder="Named color or RGB hex">
+                        <input [attr.aria-label]="label" [ngModel]="text()" (ngModelChange)="set($event)">
                     }
                 </div>
             }
             @case ('color') {
                 <div class="style-color">
-                    <ng-container *ngTemplateOutlet="colorPicker; context: {$implicit: path, label: label}"/>
+                    <!-- Escape belongs to the picker, not the editor window's close shortcut. -->
+                    <p-colorpicker [ngModel]="pickerColor()" format="hex" appendTo="body"
+                        [overlayOptions]="{baseZIndex: 31000}"
+                        [pt]="{preview: {'aria-label': 'Color picker for ' + label}}"
+                        (keydown.escape)="$event.stopPropagation()"
+                        (onChange)="set($event.value)"/>
                     <input [attr.aria-label]="label" [ngModel]="text()" (ngModelChange)="set($event)"
                         placeholder="Named color or RGB hex">
                 </div>
@@ -128,14 +123,6 @@ export interface StyleInputProblem {path: string; message: string;}
                 <input [attr.aria-label]="label" [ngModel]="text()" (ngModelChange)="set($event)" autocomplete="off">
             }
         }
-        <ng-template #colorPicker let-colorPath let-colorLabel="label">
-            <!-- Escape belongs to the picker, not the editor window's close shortcut. -->
-            <p-colorpicker [ngModel]="pickerColor(colorPath)" format="hex" appendTo="body"
-                [overlayOptions]="{baseZIndex: 31000}"
-                [pt]="{preview: {'aria-label': 'Color picker for ' + colorLabel}}"
-                (keydown.escape)="$event.stopPropagation()"
-                (onChange)="set($event.value, colorPath)"/>
-        </ng-template>
         @if (error) { <small class="style-form-error" role="alert">{{ error }}</small> }
     `
 })
@@ -215,7 +202,6 @@ export class StyleFieldInputComponent implements OnChanges, OnDestroy {
 
     /** Changes a vector's explicit shape, preserving existing components where possible. */
     resize(size: number): void {
-        if (this.error) return;
         const values = Array.isArray(this.value) ? this.value : [this.value];
         this.set(size === 0 ? values[0] ?? 0 : Array.from({length: size}, (_, i) => values[i] ?? 0));
     }
@@ -248,29 +234,18 @@ export class StyleFieldInputComponent implements OnChanges, OnDestroy {
     addStop(): void { this.edit.emit({op: "append", path: this.path, value: [0, this.field.valueKind === "color" ? "#000000" : 1]}); }
 
     /** Reorders stops without regenerating their AST nodes. */
-    move(index: number, to: number): void {
-        if (!this.error) this.edit.emit({op: "move", path: this.path, index, to});
-    }
-    /** Removes one stop and keeps unfinished cells attached to their remaining rows. */
-    remove(index: number): void {
-        const inputs = [...this.numericInputs.values()];
-        this.numericInputs.clear();
-        for (const input of inputs) {
-            const row = Number(input.path[this.path.length]);
-            if (row === index) continue;
-            input.path = [...this.path, row > index ? row - 1 : row, ...input.path.slice(this.path.length + 1)];
-            this.numericInputs.set(input.path.join('.'), input);
-        }
-        this.report();
-        this.edit.emit({op: "remove", path: [...this.path, index]});
-    }
+    move(index: number, to: number): void { this.edit.emit({op: "move", path: this.path, index, to}); }
+
+    /** Removes precisely the chosen stop. */
+    remove(index: number): void { this.edit.emit({op: "remove", path: [...this.path, index]}); }
+
     /**
      * Shows an RGB picker as a convenience while retaining native color syntax
      * in the text field. Preview normalization never edits the authored source;
      * only the picker's explicit onChange commits a color.
      */
-    pickerColor(path: StylePath = this.path): string {
-        return stylePickerColor(this.model.value(path));
+    pickerColor(): string {
+        return stylePickerColor(this.value);
     }
 
     /** Drops stale buffers after external source edits, retaining other unfinished numeric cells. */

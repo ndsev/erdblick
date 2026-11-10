@@ -1361,26 +1361,3 @@ MAPGET_BIN=/path/to/current/mapget EB_MAPGET_CONFIG=tests/playwright/fixtures/ma
 This test enables Chrome's WebMCP feature and uses real `getTools`/`executeTool`
 calls. Its erdblick-owned GridDataSource fixture needs no Python datasource or
 external map service. Run it separately from other integration pipelines.
-
-## Editable dialog titles
-
-`AppDialogComponent` exposes its title as the Angular `header` model signal,
-including `headerChange`, and enables editing through the opt-in `editableTitle`
-input. `AppSurfaceHeaderComponent` supplies the shared pencil/input interaction
-through its `title` model signal and `titleChange`. Custom projected dialog headers
-can bind `[(title)]="dialog.header"` and forward the dialog's `editableTitle` and
-`titleEditDisabled` inputs. `titlePrefix` keeps a fixed context label outside the
-editable name. Existing headers remain read-only by default; only the Style Editor
-currently enables this feature.
-
-The surface owns the temporary input: Enter or blur publishes a trimmed title,
-Escape discards it, and external title/disabled changes retire the local draft.
-Title controls stop drag gestures and keep Escape local. Consumers own validation
-and persistence. The Style Editor patches YAML `name` through its existing source
-session; applying the document performs the actual stylesheet rename.
-
-Its Rules, Options and Presets, and Metadata panels share one
-`StyleDocumentEditorComponent`, one source model, and one property draft. Visited
-form sections are retained. Before leaving Advanced for a form tab, refresh from
-the authoritative editor session and cancel pending projections; synchronous form
-commits must also retire queued projections.

@@ -1,12 +1,10 @@
-@use "../scss/inspection-value-bubble.presentation" as bubble;
-
 // Loaded once through styles.scss. Scope the shared recursive form here instead of
 // emitting the same stylesheet for the document, record and leaf components.
 style-document-editor, style-record-editor, style-field-input {
   display: block;
   min-width: 0;
 }
-style-record-editor[hidden], style-document-editor[hidden] { display: none; }
+style-record-editor[hidden] { display: none; }
 
 .style-form {
   --style-form-soft-background: color-mix(in srgb, var(--p-content-background) 60%, var(--p-content-hover-background));
@@ -16,14 +14,6 @@ style-record-editor[hidden], style-document-editor[hidden] { display: none; }
 
   style-record-editor { container: style-record / inline-size; }
   .style-form-body { border: 0; margin: 0; padding: 0; min-width: 0; }
-  .style-editor-quick-metadata { margin-bottom: 0.75rem; }
-  .style-metadata-fields {
-    grid-column: 1 / -1;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    column-gap: 1rem;
-    > [data-style-path="lod-thresholds"]:not(.style-field-unset) { grid-column: 1 / -1; }
-  }
   // Native controls share the label font so their text metrics and row heights agree.
   button, input, select, textarea { font: inherit; }
 
@@ -209,10 +199,8 @@ style-record-editor[hidden], style-document-editor[hidden] { display: none; }
   .style-color > input, .style-color > select { flex: 1 1 6rem; width: 6rem; }
   .style-stop-list { display: grid; gap: 0.5rem; }
   .style-stop input, .style-stop select { flex: 1 1 4rem; width: 4rem; }
-  .style-stop > .style-color { flex: 2 1 10rem; min-width: 0; }
 
   @container style-record (max-width: 28rem) {
-    .style-metadata-fields { grid-template-columns: minmax(0, 1fr); }
     .style-form-field:not(.style-field-wide):not(.style-field-unset) {
       grid-template-columns: minmax(0, 1fr) 2rem;
       > style-field-input { grid-column: 1 / -1; grid-row: 2; }
@@ -221,92 +209,5 @@ style-record-editor[hidden], style-document-editor[hidden] { display: none; }
     .style-item-heading { flex-wrap: wrap; }
     .style-item-title { flex-basis: 10rem; }
     .style-item-actions { margin-left: auto; }
-  }
-}
-
-// Rule bubbles reuse the inspection palette while keeping their editing target explicit.
-.style-form {
-  style-rule-editor { display: block; min-width: 0; }
-  .style-form-field { border: 0; margin: 0; }
-  .material-symbols-outlined { font-size: 1.1rem; }
-  .style-rule {
-    border-bottom: 1px solid var(--p-content-border-color);
-    padding: 0.5rem 0;
-    min-width: 0;
-  }
-  .style-rule-heading, .style-property-panel-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-  }
-  .style-rule-bubbles { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; padding: 0.35rem 0; }
-  .style-rule-bubble {
-    @include bubble.base(true);
-    --inspection-value-bubble-color: var(--style-category-color);
-    --style-bubble-background: color-mix(in srgb, var(--style-category-color) 26%, var(--p-content-background));
-    border-radius: 0.22rem;
-    min-height: 1.75rem;
-    padding: 0;
-    max-width: min(100%, 30rem);
-    display: inline-flex;
-    gap: 0;
-    align-items: stretch;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    color: var(--p-text-color);
-    .style-rule-bubble-label, .style-rule-bubble-value {
-      padding: 0.15rem 0.4rem;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .style-rule-bubble-label {
-      flex: 0 0 auto;
-      background: var(--style-bubble-background);
-    }
-    .style-rule-bubble-value {
-      flex: 0 1 auto;
-      min-width: 0;
-      background: color-mix(in srgb, var(--style-bubble-background) 92%, #fff);
-    }
-    &:enabled:hover { --style-bubble-background: color-mix(in srgb, var(--style-category-color) 30%, var(--p-content-background)); }
-    &.is-selected { outline: 2px solid var(--p-primary-color); outline-offset: 1px; }
-  }
-  @each $index, $color in (0: blue, 1: cyan, 2: green, 3: purple, 4: orange, 5: teal, 6: yellow, 7: pink, 8: lime, 9: red) {
-    .style-rule-category-#{$index} { --style-category-color: var(--p-#{$color}-500); }
-  }
-  .style-rule-category-10 { --style-category-color: var(--p-text-muted-color); }
-  .style-property-panel {
-    border: 1px solid var(--p-primary-color);
-    border-radius: var(--p-border-radius-md, 6px);
-    background: var(--style-form-soft-background);
-    padding: 0.75rem;
-    margin: 0.35rem 0 0.65rem;
-    min-width: 0;
-    > [data-style-path] { padding-top: 0.5rem; }
-  }
-  .style-property-actions { display: flex; justify-content: flex-end; gap: 0.35rem; padding-top: 0.5rem; }
-  .style-rule-section {
-    border-left: 2px solid var(--p-content-border-color);
-    padding-left: 0.65rem;
-    margin: 0.5rem 0;
-    min-width: 0;
-    > summary { cursor: pointer; padding: 0.35rem 0; font-weight: 600; }
-  }
-  .style-rule-section-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
-  .style-form-notice { color: var(--p-primary-color); }
-}
-
-// The add popup is appended to body, outside .style-form and the dialog's clipping region.
-.style-property-menu {
-  font-size: 0.875rem;
-  .p-tieredmenu-submenu {
-    max-height: min(28rem, 65vh);
-    overflow-y: auto;
-  }
-  &.p-tieredmenu-mobile {
-    max-height: calc(100dvh - 3rem);
-    overflow-y: auto;
   }
 }

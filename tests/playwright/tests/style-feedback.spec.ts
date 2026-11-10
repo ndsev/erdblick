@@ -184,13 +184,12 @@ test.describe('Style feedback workflows', () => {
         expectSavedSearchStyle(disabledSource, 'Playwright/Save and Open', false);
         await expect(editor.getByTestId('style-editor-header').locator('.app-surface-header'))
             .toBeVisible();
-        await expect(editor.getByTestId('style-editor-header').locator('.app-surface-header-title-text'))
-            .toHaveText('Playwright/Save and Open');
-        await editor.getByRole('tab', {name: 'Metadata', exact: true}).click();
+        await expect(editor.getByTestId('style-editor-quick-name'))
+            .toHaveValue('Playwright/Save and Open');
         await expect(editor.getByTestId('style-editor-quick-layers')).toBeVisible();
         await expect(editor.getByTestId('style-editor-enabled').locator('input')).not.toBeChecked();
         const editorTabs = editor.locator('.style-editor-tabs .p-tab');
-        await expect(editorTabs).toHaveCount(4);
+        await expect(editorTabs).toHaveCount(2);
         const tabSpacing = await editorTabs.evaluateAll(elements => elements.map(element => {
             const style = getComputedStyle(element);
             const fontSize = Number.parseFloat(style.fontSize);

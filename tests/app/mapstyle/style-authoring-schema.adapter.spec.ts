@@ -1,11 +1,9 @@
 import "@angular/compiler";
-import {SimpleChange} from "@angular/core";
 import {beforeAll, describe, expect, it} from "vitest";
 import {coreLib, initializeLibrary, uint8ArrayToWasm} from "../../../app/integrations/wasm.adapter";
 import {styleAuthoringCompletions, styleAuthoringSchema} from "../../../app/mapstyle/style-authoring-schema.adapter";
 import {StyleFieldInputComponent} from "../../../app/mapstyle/style-field-input.component";
 import {StyleRecordEditorComponent} from "../../../app/mapstyle/style-record-editor.component";
-import {StyleRuleEditorComponent} from "../../../app/mapstyle/style-rule-editor.component";
 import {StyleDocumentModel} from "../../../app/mapstyle/style-document.model";
 import {convertSearchStyleRulesToYaml, projectStyleSourceForSearch} from "../../../app/search/search-style-sheet.converter";
 
@@ -21,14 +19,13 @@ describe("native style authoring contract", () => {
     });
 
     it("does not offer top-level-only fields in branches but retains authored invalid fields for repair", () => {
-        const form = new StyleRuleEditorComponent();
+        const form = new StyleRecordEditorComponent();
         form.catalog = styleAuthoringSchema();
+        form.record = "rule";
         form.path = ["rules", 0, "all-of", 0];
         form.model = new StyleDocumentModel("name: Test\nversion: 2\nrules: [{all-of: [{scope: feature}]}]");
-        form.ngOnChanges({model: new SimpleChange(undefined, form.model, true)});
-        form.prepareAddMenu();
-        const fields = [...form.properties.map(field => field.key),
-            ...form.addMenuItems.flatMap(group => group.items ?? []).map(item => item.automationId)];
+        form.ngOnChanges();
+        const fields = form.groups.flatMap(group => group.fields.map(field => field.key));
         expect(fields).toContain("scope");
         expect(fields).not.toContain("lod-range");
         expect(fields).not.toContain("fidelity");
@@ -128,30 +125,10 @@ describe("native style authoring contract", () => {
         expect(control.error).toBe("");
     });
 
-    it("retains unfinished scale cells when another row is removed and blocks reordering", () => {
-        const control = new StyleFieldInputComponent();
-        control.model = new StyleDocumentModel("name: Test\nrules: [{width-scale: {stops: [[0, 1], [10, 2], [20, 3]]}}]");
-        control.field = styleAuthoringSchema().records["width-scale"]["stops"];
-        control.path = ["rules", 0, "width-scale", "stops"];
-        control.edit.subscribe(edit => {
-            control.model = new StyleDocumentModel(control.model.edit(edit));
-            control.ngOnChanges();
-        });
-        control.number({target: {value: "1e"}} as unknown as Event, control.child(1, 1));
-        const source = control.model.source;
-        control.move(1, 0);
-        expect(control.model.source).toBe(source);
-        control.remove(0);
-        expect(control.text(control.child(0, 1))).toBe("1e");
-        expect(control.error).toBe("Enter a finite number.");
-        control.remove(0);
-        expect(control.error).toBe("");
-        expect(control.text(control.child(0, 1))).toBe("3");
-    });
-
     it("keeps relation marker expressions in relation context and endpoints in feature context", () => {
-        const form = new StyleRuleEditorComponent();
+        const form = new StyleRecordEditorComponent();
         form.catalog = styleAuthoringSchema();
+        form.record = "rule";
         form.path = ["rules", 0];
         form.model = new StyleDocumentModel("name: Test\nrules: [{scope: relation}]");
         expect(form.childScope("relation-line-end-markers")).toBe("relation");

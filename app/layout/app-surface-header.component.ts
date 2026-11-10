@@ -1,14 +1,9 @@
 import {
     Component,
-    ElementRef,
     EventEmitter,
     Input,
-    model,
-    OnChanges,
     OnDestroy,
     Output,
-    signal,
-    SimpleChanges,
     ViewChild
 } from '@angular/core';
 import {NgClass} from '@angular/common';
@@ -64,7 +59,7 @@ export interface AppSurfaceHeaderAction {
                 @if (lockable) {
                     <button type="button"
                             class="app-surface-header-title"
-                            [pTooltip]="titleTooltip || (locked ? 'Unlock ' + title() : 'Lock ' + title())"
+                            [pTooltip]="titleTooltip || (locked ? 'Unlock ' + title : 'Lock ' + title)"
                             [tooltipDisabled]="titleTooltipDisabled"
                             tooltipPosition="bottom"
                             (click)="handleTitleClick($event)"
@@ -76,35 +71,17 @@ export interface AppSurfaceHeaderAction {
                                 lock_open_right
                             }
                         </span>
-                        <span class="app-surface-header-title-text">{{ title() }}</span>
+                        <span class="app-surface-header-title-text">{{ title }}</span>
                     </button>
                 } @else {
                     <div class="app-surface-header-title"
-                         [pTooltip]="titleTooltip || title()"
-                         [tooltipDisabled]="titleTooltipDisabled || editableTitle"
+                         [pTooltip]="titleTooltip || title"
+                         [tooltipDisabled]="titleTooltipDisabled"
                          tooltipPosition="bottom">
                         @if (titleIcon) {
                             <span class="material-symbols-outlined">{{ titleIcon }}</span>
                         }
-                        @if (titlePrefix) { <span class="app-surface-header-title-prefix">{{ titlePrefix }}</span> }
-                        @if (editableTitle) {
-                            <span class="app-surface-header-editable-title"
-                                  (pointerdown)="$event.stopPropagation()" (mousedown)="$event.stopPropagation()">
-                                @if (editingTitle()) {
-                                    <input #titleInput data-testid="surface-title-input" aria-label="Title" autocomplete="off"
-                                           [value]="titleDraft()" (input)="titleDraft.set(titleInput.value)"
-                                           (blur)="commitTitle()" (keydown)="onTitleKeydown($event)">
-                                } @else {
-                                    <span class="app-surface-header-title-text">{{ title() || 'Untitled' }}</span>
-                                }
-                                <button #titleEditButton type="button" data-testid="surface-title-edit" aria-label="Edit title"
-                                        title="Edit title" [disabled]="titleEditDisabled" (click)="beginTitleEdit($event)">
-                                    <span class="material-symbols-outlined" aria-hidden="true">edit</span>
-                                </button>
-                            </span>
-                        } @else {
-                            <span class="app-surface-header-title-text">{{ title() }}</span>
-                        }
+                        <span class="app-surface-header-title-text">{{ title }}</span>
                     </div>
                 }
                 <ng-content select="[surfaceHeaderAfterTitle]"></ng-content>
@@ -195,15 +172,10 @@ export interface AppSurfaceHeaderAction {
     imports: [ButtonModule, MenuModule, NgClass, TooltipModule]
 })
 /** Generic header used by docked panels and floating dialogs. */
-export class AppSurfaceHeaderComponent implements OnChanges, OnDestroy {
+export class AppSurfaceHeaderComponent implements OnDestroy {
     private static readonly titleDragClickThresholdPx = 4;
 
-    readonly title = model('');
-    @Input() editableTitle = false;
-    @Input() titleEditDisabled = false;
-    @Input() titlePrefix = '';
-    protected readonly editingTitle = signal(false);
-    protected readonly titleDraft = signal('');
+    @Input() title = '';
     @Input() titleTooltip = '';
     @Input() titleTooltipDisabled = false;
     @Input() titleIcon = '';
@@ -233,50 +205,10 @@ export class AppSurfaceHeaderComponent implements OnChanges, OnDestroy {
     @Output() closeRequest = new EventEmitter<MouseEvent>();
 
     @ViewChild('extraActionsMenu') private extraActionsMenu?: Menu;
-    @ViewChild('titleInput') private titleInput?: ElementRef<HTMLInputElement>;
-    @ViewChild('titleEditButton') private titleEditButton?: ElementRef<HTMLButtonElement>;
-    private titleFocusFrame?: number;
     private extraActionsMenuAnchor?: HTMLElement;
     private titleDragMoveListener?: (event: PointerEvent) => void;
     private titleDragEndListener?: (event: PointerEvent) => void;
     private suppressNextTitleClick = false;
-
-    /** External title or editability changes retire the local title draft. */
-    ngOnChanges(changes: SimpleChanges): void {
-        if (changes['title'] || !this.editableTitle || this.titleEditDisabled) this.editingTitle.set(false);
-    }
-
-    /** Opens a local title draft without changing the bound model until accepted. */
-    protected beginTitleEdit(event: MouseEvent): void {
-        event.stopPropagation();
-        if (!this.editableTitle || this.titleEditDisabled || this.editingTitle()) return;
-        this.titleDraft.set(this.title());
-        this.editingTitle.set(true);
-        if (this.titleFocusFrame !== undefined) cancelAnimationFrame(this.titleFocusFrame);
-        this.titleFocusFrame = requestAnimationFrame(() => {
-            this.titleInput?.nativeElement.focus();
-            this.titleInput?.nativeElement.select();
-        });
-    }
-
-    /** Publishes an accepted title through Angular's model signal and titleChange output. */
-    protected commitTitle(): void {
-        if (!this.editingTitle()) return;
-        this.editingTitle.set(false);
-        if (this.editableTitle && !this.titleEditDisabled) this.title.set(this.titleDraft().trim());
-    }
-
-    /** Keeps title editing shortcuts local, especially Escape before dialog close. */
-    protected onTitleKeydown(event: KeyboardEvent): void {
-        if (event.isComposing) { event.stopPropagation(); return; }
-        if (event.key !== 'Escape' && event.key !== 'Enter'
-            && !((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's')) return;
-        event.preventDefault();
-        event.stopPropagation();
-        if (event.key === 'Escape') this.editingTitle.set(false);
-        else this.commitTitle();
-        this.titleEditButton?.nativeElement.focus();
-    }
 
     protected get dockTooltip(): string {
         return this.dockMode === 'dock' ? 'Dock' : 'Undock';
@@ -400,7 +332,6 @@ export class AppSurfaceHeaderComponent implements OnChanges, OnDestroy {
 
     /** Removes global drag tracking listeners if the header is destroyed mid-drag. */
     ngOnDestroy(): void {
-        if (this.titleFocusFrame !== undefined) cancelAnimationFrame(this.titleFocusFrame);
         this.clearTitleDragTracking();
     }
 

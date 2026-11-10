@@ -1,4 +1,4 @@
-import {Alias, Document, isAlias, isMap, isNode, isScalar, isSeq, parseDocument} from "yaml";
+import {Document, isAlias, isMap, isNode, isScalar, isSeq, parseDocument} from "yaml";
 
 export type StylePath = readonly (string | number)[];
 export type StyleDocumentEdit =
@@ -12,7 +12,6 @@ export type StyleDocumentEdit =
 /** Source-backed style edits. No projection into search defaults or renderer semantics. */
 export class StyleDocumentModel {
     private readonly document: Document;
-    private readonly resolvedAliases = new Map<Alias, unknown>();
 
     /** Parses syntax only so native-invalid fields remain available for correction in the GUI. */
     constructor(readonly source: string) {
@@ -108,12 +107,7 @@ export class StyleDocumentModel {
             while (isAlias(current)) {
                 if (seen.has(current)) throw new Error("Cyclic aliases cannot be edited as a form.");
                 seen.add(current);
-                // Alias.resolve scans the document. Reads share this immutable AST,
-                // so resolve each alias once; edit() uses a fresh, uncached AST.
-                if (!this.resolvedAliases.has(current)) {
-                    this.resolvedAliases.set(current, current.resolve(this.document));
-                }
-                current = this.resolvedAliases.get(current);
+                current = current.resolve(this.document);
             }
             if (i === path.length) return current;
             current = isMap(current) || isSeq(current) ? current.get(path[i], true) : undefined;
