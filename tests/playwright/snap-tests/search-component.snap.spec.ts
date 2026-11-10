@@ -20,27 +20,25 @@ test.describe('Snapshot – search component', () => {
         await navigateToStateSnapshotRoot(page);
         await enableMapLayer(page, TEST_MAP_NAMES[MAP_INDEX], TEST_LAYER_NAMES[LAYER_INDEX]);
 
-        const searchPalette = await openOmnibar(page, SEARCH_QUERY);
-        // Schema-backed jump providers are initialized asynchronously. Wait
-        // for one datasource-derived option so the snapshot never captures
-        // the transient built-in-only palette.
-        await expect(searchPalette.getByText('Jump to Way', { exact: true }))
-            .toBeVisible();
+        await openOmnibar(page, SEARCH_QUERY);
+        const searchMenu = page.getByTestId('omnibar-menu-panel');
+        const featureSearchAction = searchMenu.getByTestId('omnibar-action')
+            .filter({hasText: 'Search Features and Attributes'});
+        await expect(featureSearchAction).toBeVisible();
+        // This expression is a search, not a feature ID. Matching jump actions
+        // are covered separately; unrelated jump rows must stay out of the palette.
+        await expect(searchMenu.locator('[data-action-id^="fj:"]')).toHaveCount(0);
+        // End leaves this completed single-line expression intact and dismisses
+        // completion, including late replies, before capturing the action menu.
+        await page.getByTestId('omnibar-input').press('End');
+        await expect(page.getByTestId('omnibar-input')).toHaveValue(SEARCH_QUERY);
+        await expect(page.getByTestId('search-completion-popup')).toBeHidden();
         await page.mouse.move(0, 0);
         await expect(page).toHaveScreenshot('search-component-palette.png', {
             maxDiffPixelRatio: 0.01
         });
 
-        const searchInput = page.getByTestId('omnibar-input');
-        const searchMenu = page.getByTestId('omnibar-menu-panel');
-        await expect(searchMenu).toBeVisible();
-
-        const featureSearchAction = searchMenu.locator('.omnibar-menu', {
-            hasText: 'Search Features and Attributes'
-        }).first();
-        await expect(featureSearchAction).toBeVisible();
-
-        await featureSearchAction.locator('.omnibar-option-wrapper').first().click();
+        await featureSearchAction.click();
 
         const featureSearchDialog = page.getByTestId('feature-search-dialog').locator('.p-dialog').first();
         await expect(featureSearchDialog).toBeVisible();

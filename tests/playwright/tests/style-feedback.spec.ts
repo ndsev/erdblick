@@ -1,4 +1,5 @@
 import {expect, test} from '../fixtures/test';
+import {load} from 'js-yaml';
 import {requireMapSource} from '../utils/backend-helpers';
 import {TEST_LAYER_NAMES, TEST_MAP_NAMES} from '../utils/test-params';
 import {
@@ -11,6 +12,25 @@ import {
 } from '../utils/ui-helpers';
 
 const SEARCH_QUERY = '**.layerId == "Road"';
+
+/** Verify the saved visibility option in both save flows, independent of YAML line wrapping. */
+function expectSavedSearchStyle(source: string | undefined, name: string, defaultEnabled: boolean): void {
+    expect(source).toBeDefined();
+    const style = load(source!) as {rules: Array<{filter: string}>};
+    expect(style).toMatchObject({
+        name,
+        category: 'search',
+        version: 2,
+        default: defaultEnabled,
+        options: [{label: `Show ${name}`, id: 'showSearchStyle', type: 'bool', default: true}]
+    });
+    expect(style.rules.length).toBeGreaterThan(0);
+    for (const rule of style.rules) {
+        // Every rule must obey the option, including rules with an additional
+        // search predicate. A long predicate may be serialized as a folded block.
+        expect(rule.filter).toMatch(/^showSearchStyle == true(?: and \([\s\S]+\))?$/);
+    }
+}
 
 test.use({stateSnapshot: 'style_editor_state'});
 
@@ -129,10 +149,7 @@ test.describe('Style feedback workflows', () => {
             return stored.sources.find((source: string) =>
                 source.includes('name: Playwright/Plain Save')) as string | undefined;
         });
-        expect(enabledSource).toContain('\ndefault: true\n');
-        expect(enabledSource).toContain('\noptions:\n  - label: Show Playwright/Plain Save\n');
-        expect(enabledSource).toContain('id: showSearchStyle\n    type: bool\n    default: true');
-        expect(enabledSource).toContain('filter: showSearchStyle == true');
+        expectSavedSearchStyle(enabledSource, 'Playwright/Plain Save', true);
 
         const stylesDialog = await openStylesDialog(page);
         await expect(stylesDialog.getByTestId('style-visibility-playwright-plain-save').locator('input'))
@@ -164,7 +181,7 @@ test.describe('Style feedback workflows', () => {
             return stored.sources.find((source: string) =>
                 source.includes('name: Playwright/Save and Open')) as string | undefined;
         });
-        expect(disabledSource).toContain('\ndefault: false\n');
+        expectSavedSearchStyle(disabledSource, 'Playwright/Save and Open', false);
         await expect(editor.getByTestId('style-editor-header').locator('.app-surface-header'))
             .toBeVisible();
         await expect(editor.getByTestId('style-editor-quick-name'))
