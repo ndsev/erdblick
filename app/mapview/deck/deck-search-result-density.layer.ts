@@ -1,6 +1,7 @@
-import {IconLayer, IconLayerProps, TextLayer, TextLayerProps} from "@deck.gl/layers";
-import type {Parameters as LumaParameters} from "@luma.gl/core";
-import type {SearchResultDensityMarker} from "../../search/search-result-density.model";
+import { IconLayer, IconLayerProps, TextLayer, TextLayerProps } from "@deck.gl/layers";
+import type { Parameters as LumaParameters } from "@luma.gl/core";
+import type { SearchResultDensityMarker } from "../../search/search-results.model";
+import {ScreenSpaceSizeExtension} from "./screen-space-size.extension";
 
 /** Public props for the low-fidelity search-result density layer. */
 export interface SearchResultDensityLayerProps extends IconLayerProps<SearchResultDensityMarker> {
@@ -191,6 +192,8 @@ export function createSearchResultDensityLayer(props: SearchResultDensityLayerPr
             : props.dotColor,
         sizeScale: props.sizeScale ?? SEARCH_RESULT_DENSITY_DEFAULT_SIZE_SCALE,
         sizeUnits: "pixels",
+        billboard: true,
+        extensions: [...(props.extensions ?? []), new ScreenSpaceSizeExtension()],
         alphaCutoff: 0.05
     });
 }
@@ -210,6 +213,7 @@ export function createSearchResultDensityLabelLayer(
         getText: marker => marker.showBucketLabel === false ? "" : searchResultDensityBucketLabel(marker.count),
         getSize: 11,
         sizeUnits: "pixels",
+        extensions: [...(props.extensions ?? []), new ScreenSpaceSizeExtension()],
         getTextAnchor: "middle",
         getAlignmentBaseline: "center",
         getColor: [255, 255, 255, 245],

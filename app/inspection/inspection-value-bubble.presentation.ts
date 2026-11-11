@@ -16,8 +16,8 @@ const NON_VALIDITY_OUTLINES = [0, 1, 2, 3, 4, 5, 7];
 
 /**
  * Returns the stable kind, palette, outline, and stripe classes for a value bubble.
- * The source key is deliberately independent from its display label so aliases do
- * not reshuffle the presentation.
+ * An explicit colorKey keeps aliases stable; otherwise the display label supplies
+ * the key and changing it can change the presentation.
  */
 export function inspectionValueBubbleClasses(
     source: InspectionValueBubblePresentationSource,

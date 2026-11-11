@@ -1,20 +1,42 @@
-import {Subject, Subscription} from "rxjs";
-import type {FilterTileState} from "../mapdata/filter-tile-state.model";
-import type {MapInfoService} from "../mapdata/map-info.service";
-import type {MapTileStreamService} from "../mapdata/map-tile-stream.service";
+import {GPU_BUFFER_EXHAUSTED_NOTICE} from "./gpu-buffer-notice.model";
+import { NgZone } from "@angular/core";
+import { Subject, Subscription } from "rxjs";
+import type { InfoMessageService } from "../diagnostics/info.service";
+import type {
+    InspectionSelectionService
+} from "../inspection/inspection-selection.service";
+import type { InspectionPanelModel, TileFeatureId } from "../inspection/inspection.model";
+import { coreLib } from "../integrations/wasm.adapter";
+import type { FilterTileState } from "../mapdata/filter-tile-state.model";
+import type { HoverDetailService } from "../mapdata/hover-detail.service";
+import type { MapDataService } from "../mapdata/mapdata.service";
+import type { MapTileStreamService } from "../mapdata/map-tile-stream.service";
+import type { MapgetLayer } from "../mapdata/mapget-layer.model";
 import {
-    StyledMapgetLayer,
-    type StyleFilterPlan,
-    type StyledMapgetLayerEvent
-} from "../mapdata/styled-mapget-layer.model";
-import type {MapgetLayer} from "../mapdata/mapget-layer.model";
-import type {StyleService, ErdblickStyle} from "../styledata/style.service";
-import {coreLib} from "../integrations/wasm";
-import type {IRenderSceneHandle} from "./render-view.model";
+    parseMapPartitionKey,
+    partitionKey,
+    tilePartition,
+    type PartitionId
+} from "../mapdata/partition.model";
+import { StyledMapgetLayer } from "../mapdata/styled-mapget-layer.presentation";
+import { type StyleFilterPlan, type StyledMapgetLayerEvent } from "../mapdata/styled-mapget-layer.model";
+import type { SearchService } from "../search/search.service";
+import { MAX_STYLE_LOD } from "../mapstyle/style-lod.model";
+import { tileFeatureInteractionTargetsEqual } from "../inspection/feature-identity.model";
+import { sipHash64Hex } from "../utils/hash.util";
+import type {
+    StyleValidationReportService
+} from "../mapstyle/style-validation-report.service";
+import type { MapStyleService } from "../mapstyle/mapstyle.service";
+import type { ErdblickStyle } from "../mapstyle/mapstyle.model";
 import {
-    MapViewStateService,
-    ViewRecalculationReason
-} from "./map-view-state.service";
+    resolveDeckInteractionEffect,
+    type DeckInteractionEffect
+} from "./deck/deck-interaction-effect.util";
+import type { GpuSceneSnapshot } from "./deck/gpu-scene.visualization";
+import { GpuMaterialBufferExhaustedError } from "./deck/gpu-primitive-store.util";
+import { tileCoordinateOrigin } from "./deck/tile-coordinate-origin.util";
+import { INTERACTION_STYLE_ORDER_BASE } from "./deck/tile-subset-interaction.model";
 import {
     TileSubsetLayerRenderService
 } from "./deck/tile-subset-layer-render.service";
@@ -23,47 +45,18 @@ import {
     type TileSubsetInteractionOverlay
 } from "./deck/tile-subset-layer.visualization";
 import {
-    resolveDeckInteractionEffect,
-    type DeckInteractionEffect
-} from
-    "./deck/deck-interaction-effect";
-import {tileCoordinateOrigin} from "./deck/tile-coordinate-origin";
-import type {FeatureSearchService} from "../search/feature.search.service";
-import type {
-    InspectionSelectionService
-} from "../inspection/inspection-selection.service";
-import type {
-    InspectionPanelModel,
-    TileFeatureId
-} from "../shared/appstate.service";
-import {sipHash64Hex} from "../styledata/hash";
-import {
-    tileFeatureInteractionTargetsEqual
-} from "../shared/tile-feature-id";
-import {
     hasAuthoredInteractionHighlight,
     interactionTargetKey,
     planRemoteInteractionHighlights
-} from "./interaction-highlight-plan";
+} from "./interaction-highlight-plan.util";
+import {
+    MapViewService,
+    ViewRecalculationReason
+} from "./mapview.service";
+import type { IRenderSceneHandle } from "./render-view.model";
 import type {
     ViewLayerDiagnosticsService
 } from "./view-layer-diagnostics.service";
-import type {
-    StyleValidationReportService
-} from "../styledata/style-validation-report.service";
-import type {HoverDetailService} from "../mapdata/hover-detail.service";
-import {NgZone} from "@angular/core";
-import type {GpuSceneSnapshot} from "./deck/gpu-scene";
-import {INTERACTION_STYLE_ORDER_BASE} from
-    "./deck/tile-subset-interaction.model";
-import {MAX_STYLE_LOD} from "../shared/lod-policy";
-import {
-    parseMapPartitionKey,
-    parsePartition,
-    partitionKey,
-    tilePartition,
-    type PartitionId
-} from "../mapdata/partition.model";
 
 export type ViewTileOccupancy = "unknown" | "empty" | "non-empty" | "error";
 
@@ -146,17 +139,18 @@ export class ViewLayerController {
     /** Bind one logical view to catalog, style, search, inspection, and worker state. */
     constructor(
         readonly viewIndex: number,
-        private readonly mapInfo: MapInfoService,
-        private readonly viewState: MapViewStateService,
+        private readonly mapInfo: MapDataService,
+        private readonly viewState: MapViewService,
         private readonly tileStream: MapTileStreamService,
-        private readonly styleService: StyleService,
+        private readonly styleService: MapStyleService,
         private readonly renderService: TileSubsetLayerRenderService,
-        private readonly featureSearch: FeatureSearchService,
+        private readonly featureSearch: SearchService,
         private readonly inspection: InspectionSelectionService,
         private readonly hoverDetails: HoverDetailService,
         private readonly diagnostics: ViewLayerDiagnosticsService,
         private readonly styleValidationReports: StyleValidationReportService,
-        private readonly ngZone: NgZone
+        private readonly ngZone: NgZone,
+        private readonly infoMessages: InfoMessageService
     ) {
         this.unregisterDiagnostics = diagnostics.register(
             viewIndex,
@@ -165,8 +159,8 @@ export class ViewLayerController {
         );
         this.subscriptions.push(
             this.mapInfo.maps$.subscribe(() => this.scheduleReconcile()),
-            this.mapInfo.dataSourceInfoChanged.subscribe(() =>
-                this.resetInteractionStyleCaches()),
+            this.mapInfo.dataSourceInfoChanged.subscribe(mapIds =>
+                this.retireDataSources(mapIds)),
             this.mapInfo.layerStateChanged.subscribe(() => this.scheduleReconcile()),
             this.mapInfo.styleOptionsChanged.subscribe(changes => {
                 if (changes.some(change => change.viewIndex === this.viewIndex)) {
@@ -190,6 +184,7 @@ export class ViewLayerController {
             this.inspection.hoverIdsTopic.subscribe(() =>
                 this.scheduleInteractionReconcile()
             ),
+            this.renderService.pointCloudPolicyChanged.subscribe(() => this.scheduleReconcile()),
             this.renderService.capacityChanged.subscribe(() =>
                 this.schedulePendingTiles()
             )
@@ -197,7 +192,10 @@ export class ViewLayerController {
         this.scheduleReconcile();
     }
 
-    /** Attach a fresh renderer generation and replay every retained contribution. */
+    /**
+     * Rebind retained active and fallback visualizations to a new scene and queue
+     * their replay under the shared worker budget; replay is not complete on return.
+     */
     attachScene(sceneHandle: IRenderSceneHandle): void {
         this.ngZone.runOutsideAngular(() => {
             this.sceneHandle = sceneHandle;
@@ -207,7 +205,7 @@ export class ViewLayerController {
                     this.queueVisualizationRender(visualization);
                 }
             }
-            for (const {owned} of this.retiringRegularLayers.values()) {
+            for (const { owned } of this.retiringRegularLayers.values()) {
                 for (const visualization of owned.visualizations.values()) {
                     visualization.reattach(sceneHandle);
                     this.queueVisualizationRender(visualization);
@@ -217,14 +215,19 @@ export class ViewLayerController {
         });
     }
 
-    /** Stop publishing into a renderer generation that is being destroyed. */
+    /**
+     * Stop dispatching new work to this renderer. The caller still owns renderer
+     * teardown; this does not cancel work already held by its visualizations.
+     */
     detachScene(): void {
         this.sceneHandle = null;
     }
 
     /**
-     * Tear down one map's active presentation and request a fresh transport
-     * generation without changing coverage, styles, visibility, or view state.
+     * Refresh one map's regular/interaction presentations without changing
+     * coverage, styles, visibility, or view state. Fresh transport generations
+     * retain their existing demand. SearchService retains its search
+     * presentations; this method skips them and removes regular fallbacks.
      */
     refreshMap(mapId: string): void {
         if (this.disposed || !mapId) {
@@ -232,8 +235,7 @@ export class ViewLayerController {
         }
 
         for (const [slot, fallback] of
-             [...this.retiringRegularLayers])
-        {
+            [...this.retiringRegularLayers]) {
             if (fallback.owned.layer.identity.mapId !== mapId) {
                 continue;
             }
@@ -244,8 +246,7 @@ export class ViewLayerController {
         let refreshed = false;
         for (const owned of this.styledLayers.values()) {
             if (owned.layer.identity.mapId !== mapId ||
-                owned.layer.identity.presentationKind === "search")
-            {
+                owned.layer.identity.presentationKind === "search") {
                 continue;
             }
             this.clearOwnedVisualizations(owned);
@@ -274,7 +275,7 @@ export class ViewLayerController {
 
     /** Exposes view-owned Deck counters to diagnostics without sampling every frame. */
     setDeckPresentationDiagnosticsProvider(
-        provider: () => {layers: number; scene: GpuSceneSnapshot}
+        provider: () => { layers: number; scene: GpuSceneSnapshot }
     ): void {
         this.renderService.setDeckPresentationDiagnosticsProvider(
             this.viewIndex,
@@ -294,7 +295,10 @@ export class ViewLayerController {
             .filter(layer => layer.identity.presentationKind === "regular");
     }
 
-    /** Current presentation state exposed read-only to diagnostics. */
+    /**
+     * Snapshot references to current styled layers, excluding retiring fallbacks.
+     * Diagnostics must treat the borrowed layer objects as read-only.
+     */
     diagnosticStyledLayers(): Iterable<StyledMapgetLayer> {
         return [...this.styledLayers.values()].map(owned => owned.layer);
     }
@@ -302,7 +306,7 @@ export class ViewLayerController {
     /** Resolves source occupancy without interpreting filtered entry counts. */
     occupancyForTile(
         tileId: number,
-        visibleLayers: ReadonlyArray<{mapId: string; layerId: string}>
+        visibleLayers: ReadonlyArray<{ mapId: string; layerId: string }>
     ): ViewTileOccupancy {
         let sawPending = false;
         let sawObservation = false;
@@ -355,29 +359,36 @@ export class ViewLayerController {
         return "unknown";
     }
 
-    /** Release every logical layer, worker request, diagnostic hook, and subscription. */
+    /**
+     * Retire this view's visualizations, queued work and subscriptions once.
+     * Controller-owned layers are disposed; search-layer transport ownership stays
+     * with SearchService. In-flight object discovery is ignored when it settles.
+     */
     dispose(): void {
         if (this.disposed) {
             return;
         }
         this.disposed = true;
+
         this.subscriptions.splice(0).forEach(subscription => subscription.unsubscribe());
         for (const owned of this.styledLayers.values()) {
             this.destroyOwnedLayer(owned);
         }
         this.styledLayers.clear();
-        for (const {owned} of this.retiringRegularLayers.values()) {
+        for (const { owned } of this.retiringRegularLayers.values()) {
             this.destroyOwnedLayer(owned);
         }
         this.retiringRegularLayers.clear();
         this.pendingVisualizationRenders.clear();
         this.localInteractionOverlaysByLayer.clear();
+
         for (const state of this.objectCoverageByLayer.values()) {
             if (state.timer !== null) {
                 clearTimeout(state.timer);
             }
         }
         this.objectCoverageByLayer.clear();
+
         this.hoverDetails.clearView(this.viewIndex);
         this.renderService.clearDeckFrameTime(this.viewIndex);
         this.renderService.clearDeckPresentationDiagnostics(this.viewIndex);
@@ -448,18 +459,16 @@ export class ViewLayerController {
     }
 
     /**
-     * Exact cheap signature for presentation demand affected by viewport
-     * motion. Regular coverage is versioned by ViewVisualizationState, while
+     * Signature of the viewport inputs used to decide whether demand needs another
+     * reconciliation. Regular coverage is versioned by ViewVisualizationState, while
      * integer planning and quantized presentation LOD are explicit because
      * density may change without changing the exact visible tile set.
-     * search coverage is versioned by its StyledMapgetLayer and its density
+     * Search coverage is versioned by its StyledMapgetLayer and its density
      * decision is represented once per occupied source level.
      */
     private viewportPresentationSignature(): string {
         const viewState = this.viewState.viewStateFor(this.viewIndex);
-        const parts = [
-            String(viewState?.coverageVersion ?? -1)
-        ];
+        const parts = [String(viewState?.coverageVersion ?? -1)];
         const orderedStyles = [...this.styleService.styles.values()]
             .filter(style => style.visible);
         for (const mapgetLayer of this.mapInfo.mapgetLayers()) {
@@ -583,6 +592,14 @@ export class ViewLayerController {
                     coreLib.HighlightMode.NO_HIGHLIGHT.value,
                     plannedLod
                 ) as StyleFilterPlan;
+                // One preference controls both server and worker sampling. An authored
+                // quota must not silently discard more points than the user selected.
+                const pointCloud = this.renderService.pointCloudPolicy;
+                for (const channel of plan.channels) {
+                    if (channel.pointCloudMaxPoints !== undefined) {
+                        channel.pointCloudMaxPoints = pointCloud.enabled ? pointCloud.maxPoints : 0;
+                    }
+                }
                 if (!plan.channels.length) {
                     continue;
                 }
@@ -621,6 +638,7 @@ export class ViewLayerController {
             });
         }
         this.hoverDetails.reconcileView(this.viewIndex, hoverDetailCoverage);
+
         // A fast LOD reversal can reuse the still-present retiring owner
         // before the current successor is retired in the pass below.
         for (const [key, next] of desired) {
@@ -656,8 +674,14 @@ export class ViewLayerController {
                         candidate.replacementSlot === replacementSlot
                 )
                 : undefined;
+            // Sampling edits are also how users reduce memory pressure. Keeping
+            // the old cloud until its replacement fits can prevent that reduction.
+            const samplingChanged = replacement && owned.layer.filterPlan.channels.some(
+                (channel, index) => channel.pointCloudMaxPoints !==
+                    replacement[1].plan.channels[index]?.pointCloudMaxPoints
+            );
             if (replacementSlot && replacement &&
-                replacement[0] !== key) {
+                replacement[0] !== key && !samplingChanged) {
                 this.retainAsRegularFallback(
                     replacementSlot,
                     key,
@@ -725,6 +749,7 @@ export class ViewLayerController {
             this.reconcileOwnedVisualizations(owned);
             this.releaseRegularFallbackWhenReady(owned);
         }
+
         const desiredReplacementSlots = new Set(
             [...desired.values()].map(next => next.replacementSlot)
         );
@@ -736,12 +761,13 @@ export class ViewLayerController {
             this.retiringRegularLayers.delete(slot);
             this.destroyOwnedLayer(fallback.owned);
         }
+
         this.reconcileSearchLayers(orderedStyles.length);
         const interactionViewportSignature =
             this.interactionViewportSignature();
         if (this.interactionReconcileRequired ||
             interactionViewportSignature !==
-                this.lastInteractionViewportSignature) {
+            this.lastInteractionViewportSignature) {
             this.interactionReconcileRequired = false;
             this.reconcileHighlightLayers(orderedStyles);
             this.lastInteractionViewportSignature =
@@ -829,7 +855,10 @@ export class ViewLayerController {
         }
     }
 
-    /** Keeps one fully rendered regular owner as the visual replacement fallback. */
+    /**
+     * Suspend one retiring regular owner and retain its existing presentation as
+     * fallback. This does not require all of its tiles to have finished rendering.
+     */
     private retainAsRegularFallback(
         slot: string,
         key: string,
@@ -840,7 +869,7 @@ export class ViewLayerController {
             this.destroyOwnedLayer(previous.owned);
         }
         owned.layer.setSuspended(true);
-        this.retiringRegularLayers.set(slot, {key, owned});
+        this.retiringRegularLayers.set(slot, { key, owned });
     }
 
     /**
@@ -973,7 +1002,11 @@ export class ViewLayerController {
         return `search/${layer.ownerId}`;
     }
 
-    /** Reconciles exact-ID hover and selection bundles through the normal filter path. */
+    /**
+     * Reconcile hover and selection bundles. Use local masks for retained semantic
+     * targets and immutable filter owners for authored interaction geometry.
+     * Whole-feature relation rules remain additive.
+     */
     private reconcileHighlightLayers(orderedStyles: readonly ErdblickStyle[]): void {
         const selectedTargets = this.inspection.selectionIdsTopic.getValue()
             .flatMap(panel => panel.features);
@@ -984,29 +1017,29 @@ export class ViewLayerController {
             features: TileFeatureId[];
             mode: typeof coreLib.HighlightMode.SELECTION_HIGHLIGHT;
         }> = [
-            ...this.inspection.selectionIdsTopic.getValue().map(
-                (panel: InspectionPanelModel<TileFeatureId>) => ({
-                    kind: "selection" as const,
-                    id: String(panel.id),
-                    color: panel.color,
-                    features: panel.features,
-                    mode: coreLib.HighlightMode.SELECTION_HIGHLIGHT
-                })
-            ),
-            {
-                kind: "hover",
-                id: "current",
-                // Selection dominates hover only for the exact same semantic
-                // target. Nested attribute/validity rows remain hoverable so
-                // their authored inspection visualizations can still run.
-                features: this.inspection.hoverIdsTopic.getValue().filter(
-                    hovered => !selectedTargets.some(selected =>
-                        tileFeatureInteractionTargetsEqual(
-                            hovered,
-                            selected))),
-                mode: coreLib.HighlightMode.HOVER_HIGHLIGHT
-            }
-        ];
+                ...this.inspection.selectionIdsTopic.getValue().map(
+                    (panel: InspectionPanelModel<TileFeatureId>) => ({
+                        kind: "selection" as const,
+                        id: String(panel.id),
+                        color: panel.color,
+                        features: panel.features,
+                        mode: coreLib.HighlightMode.SELECTION_HIGHLIGHT
+                    })
+                ),
+                {
+                    kind: "hover",
+                    id: "current",
+                    // Selection dominates hover only for the exact same semantic
+                    // target. Nested attribute/validity rows remain hoverable so
+                    // their authored inspection visualizations can still run.
+                    features: this.inspection.hoverIdsTopic.getValue().filter(
+                        hovered => !selectedTargets.some(selected =>
+                            tileFeatureInteractionTargetsEqual(
+                                hovered,
+                                selected))),
+                    mode: coreLib.HighlightMode.HOVER_HIGHLIGHT
+                }
+            ];
         const desired = new Map<string, {
             mapgetLayer: MapgetLayer;
             style: ErdblickStyle;
@@ -1016,7 +1049,7 @@ export class ViewLayerController {
             options: Record<string, boolean | number | string>;
             plan: StyleFilterPlan;
             partitions: PartitionId[];
-            roots: Array<{partition: PartitionId; featureId: string}>;
+            roots: Array<{ partition: PartitionId; featureId: string }>;
             styleOrder: number;
             plannedLod: number;
         }>();
@@ -1028,31 +1061,31 @@ export class ViewLayerController {
         for (const group of groups) {
             const byLayer = new Map<string, {
                 mapgetLayer: MapgetLayer;
-                features: Array<TileFeatureId & {partition: PartitionId}>;
+                features: Array<TileFeatureId & { partition: PartitionId }>;
             }>();
             for (const feature of group.features) {
                 const resolved = this.resolveInteractionTargetLayer(feature);
                 if (!resolved) {
                     continue;
                 }
-                const {mapgetLayer, partition} = resolved;
+                const { mapgetLayer, partition } = resolved;
                 let entry = byLayer.get(mapgetLayer.key);
                 if (!entry) {
-                    entry = {mapgetLayer, features: []};
+                    entry = { mapgetLayer, features: [] };
                     byLayer.set(mapgetLayer.key, entry);
                 }
                 if (!entry.features.some(candidate =>
                     candidate.mapTileKey === feature.mapTileKey &&
                     candidate.featureId === feature.featureId
                 )) {
-                    entry.features.push({...feature, partition});
+                    entry.features.push({ ...feature, partition });
                 }
             }
 
-            for (const {mapgetLayer, features} of byLayer.values()) {
+            for (const { mapgetLayer, features } of byLayer.values()) {
                 for (let styleIndex = 0;
-                     styleIndex < orderedStyles.length;
-                     ++styleIndex) {
+                    styleIndex < orderedStyles.length;
+                    ++styleIndex) {
                     const style = orderedStyles[styleIndex];
                     if (!this.hasInteractionLayerAffinity(
                         style,
@@ -1122,7 +1155,7 @@ export class ViewLayerController {
                             remotePlans = planRemoteInteractionHighlights(
                                 rawPlan,
                                 features,
-                                {localTargetKeys}
+                                { localTargetKeys }
                             );
                         }
                     }
@@ -1160,7 +1193,7 @@ export class ViewLayerController {
                             if (existing) {
                                 if (!existing.targets.some(target =>
                                     interactionTargetKey(target) ===
-                                        interactionTargetKey(feature))) {
+                                    interactionTargetKey(feature))) {
                                     byId.set(overlayId, {
                                         ...existing,
                                         targets: [...existing.targets, feature]
@@ -1385,8 +1418,20 @@ export class ViewLayerController {
         return effect;
     }
 
-    /** Drops schema-derived interaction caches after a datasource catalog replacement. */
-    private resetInteractionStyleCaches(): void {
+    /** Retire changed-map work before its parser metadata is replaced; keep sibling scenes live. */
+    private retireDataSources(mapIds: readonly string[]): void {
+        for (const [key, owned] of this.styledLayers) {
+            if (mapIds.includes(owned.layer.mapgetLayer.mapId)) {
+                this.destroyOwnedLayer(owned);
+                this.styledLayers.delete(key);
+            }
+        }
+        for (const [key, fallback] of this.retiringRegularLayers) {
+            if (mapIds.includes(fallback.owned.layer.mapgetLayer.mapId)) {
+                this.destroyOwnedLayer(fallback.owned);
+                this.retiringRegularLayers.delete(key);
+            }
+        }
         this.interactionLayerAffinityCache = new WeakMap();
         this.interactionFilterPlanCache = new WeakMap();
         this.interactionEffectCache = new WeakMap();
@@ -1406,7 +1451,7 @@ export class ViewLayerController {
         const applicable = overlays.flatMap(overlay => {
             const targets = overlay.targets.filter(target =>
                 visualization.hasLocalInteractionTarget(target));
-            return targets.length ? [{...overlay, targets}] : [];
+            return targets.length ? [{ ...overlay, targets }] : [];
         });
         visualization.setInteractionOverlays(applicable);
         if (applicable.length) {
@@ -1462,7 +1507,7 @@ export class ViewLayerController {
         for (const owned of this.styledLayers.values()) {
             collect(owned);
         }
-        for (const {owned} of this.retiringRegularLayers.values()) {
+        for (const { owned } of this.retiringRegularLayers.values()) {
             collect(owned);
         }
         return result;
@@ -1477,7 +1522,7 @@ export class ViewLayerController {
         if (!parsed) {
             return null;
         }
-        const {mapId, layerId, partition} = parsed;
+        const { mapId, layerId, partition } = parsed;
         const mapgetLayer = this.mapInfo.mapgetLayer(mapId, layerId);
         if (!mapgetLayer) {
             return null;
@@ -1485,7 +1530,7 @@ export class ViewLayerController {
         // A hidden ordinary layer has no local contribution by definition;
         // its exact selected/hovered tile is therefore authored-fallback
         // demand, not ineligible interaction demand.
-        return {mapgetLayer, partition};
+        return { mapgetLayer, partition };
     }
 
     /** Test exact entity presence in any regular/search contribution for this map layer. */
@@ -1519,7 +1564,7 @@ export class ViewLayerController {
             }
         }
         return [...this.retiringRegularLayers.values()]
-            .some(({owned}) => matches(owned));
+            .some(({ owned }) => matches(owned));
     }
 
     /** Re-evaluate local-versus-authored highlighting after scene geometry changes. */
@@ -1597,7 +1642,7 @@ export class ViewLayerController {
             .sort((left, right) =>
                 left.mapId.localeCompare(right.mapId) ||
                 left.layerId.localeCompare(right.layerId))
-            .map(({mapId, layerId, partition}) => {
+            .map(({ mapId, layerId, partition }) => {
                 const visible = this.mapInfo.maps.getMapLayerVisibility(
                     this.viewIndex,
                     mapId,
@@ -1650,18 +1695,14 @@ export class ViewLayerController {
                 owned.layer.tileStates.get(state.partitionKey) === state &&
                 this.presentationStillDemanded(owned.layer, state);
             const lod = this.presentationLod(owned.layer, state);
-            const lineSimplificationToleranceMeters =
-                this.lineSimplificationToleranceMeters();
             const terminalIncomplete = state.status === "error";
             visualization.setLod(lod);
-            if (!retained || terminalIncomplete ||
-                !visualization.hasSameState(
-                    state,
-                    lineSimplificationToleranceMeters
-                )) {
+            if (!retained || terminalIncomplete) {
                 this.replaceVisualization(owned, key, true);
                 continue;
             }
+            visualization.setLineSimplificationTolerance(this.lineSimplificationToleranceMeters());
+            visualization.setPointCloudScale(this.viewState.viewStateFor(this.viewIndex)?.metersPerPixel ?? null);
             if (state.status === "ready" && state.subsetBlob &&
                 !visualization.isCurrentPresentationInstalled()) {
                 this.queueVisualizationRender(visualization);
@@ -1684,7 +1725,7 @@ export class ViewLayerController {
         this.schedulePendingTiles();
     }
 
-    /** Re-render a changed ready tile or reserve its first worker credit. */
+    /** Queue a changed ready tile; worker credit is consumed later during dispatch. */
     private reconcileReadyTile(
         owned: OwnedStyledLayer,
         state: FilterTileState
@@ -1707,13 +1748,11 @@ export class ViewLayerController {
         }
         const lod = this.presentationLod(owned.layer, state);
         visualization.setLod(lod);
-        if (!visualization.hasSameState(
-            state,
-            this.lineSimplificationToleranceMeters()
-        )) {
+        if (visualization.state !== state) {
             this.replaceVisualization(owned, existingKey, true);
             return;
         }
+        visualization.setLineSimplificationTolerance(this.lineSimplificationToleranceMeters());
         this.queueVisualizationRender(visualization);
     }
 
@@ -1772,7 +1811,11 @@ export class ViewLayerController {
         });
     }
 
-    /** Dispatch changed and newly visible singleton tiles under one worker budget. */
+    /**
+     * Dispatch changed and newly visible singleton tiles under one worker budget.
+     * Spend available slots on queued rerenders first, then pending tiles; newly
+     * admitted tiles rotate across active styled layers.
+     */
     private drainPendingTiles(): void {
         if (!this.sceneHandle) {
             return;
@@ -1874,7 +1917,11 @@ export class ViewLayerController {
         this.scheduleInteractionPresenceReconcile(owned.layer, key);
     }
 
-    /** Remove one coverage delta as a single scene and diagnostics transaction. */
+    /**
+     * Retire local tile owners and batch their persistent vector removals. GLTF,
+     * mask and pending-successor cleanup occurs separately; this is not a rollback
+     * boundary for the whole coverage change.
+     */
     private removeTileVisualizations(
         owned: OwnedStyledLayer,
         states: readonly FilterTileState[]
@@ -1909,7 +1956,10 @@ export class ViewLayerController {
         }
     }
 
-    /** Replace one tile owner while retaining its installed contribution until admission. */
+    /**
+     * Replace a tile owner, preserving its GPU identity only when requeueing the
+     * same still-demanded ready state. Otherwise retire the old contribution now.
+     */
     private replaceVisualization(
         owned: OwnedStyledLayer,
         key: string,
@@ -1954,6 +2004,7 @@ export class ViewLayerController {
     private queueVisualizationRender(
         visualization: TileSubsetLayerVisualization
     ): void {
+        visualization.setPointCloudScale(this.viewState.viewStateFor(this.viewIndex)?.metersPerPixel ?? null);
         this.pendingVisualizationRenders.add(visualization);
         this.schedulePendingTiles();
     }
@@ -1983,9 +2034,15 @@ export class ViewLayerController {
                 );
                 this.diagnostics.notifyChanged();
             })
-            .catch(error =>
-                console.error("TileSubsetLayer visualization failed.", error)
-            );
+            .catch(error => {
+                if (error instanceof GpuMaterialBufferExhaustedError) {
+                    // Allocation rollback and failed-signature tracking have already
+                    // run. Only presentation enters Angular; rendering stays outside it.
+                    this.ngZone.run(() => this.infoMessages.show(GPU_BUFFER_EXHAUSTED_NOTICE));
+                } else {
+                    console.error("TileSubsetLayer visualization failed.", error);
+                }
+            });
     }
 
     /** Resolve continuous GPU LOD independently of an owner's integer filter plan. */
@@ -2054,8 +2111,10 @@ export class ViewLayerController {
     }
 
     /**
-     * Return the last complete object union and asynchronously refresh it when
-     * the fixed-level discovery footprint or semantic TTL changes.
+     * Return the last completed object union and asynchronously refresh it when
+     * the fixed-level discovery footprint changes or its semantic TTL expires.
+     * Superseded replies are ignored, not aborted. A failed refresh retains old
+     * coverage and retries after one second.
      */
     private objectPartitionsForViewport(
         layer: MapgetLayer
@@ -2135,7 +2194,10 @@ export class ViewLayerController {
         return state.partitions;
     }
 
-    /** Preserve cached viewport-array identity across its tagged representation. */
+    /**
+     * Preserve cached viewport-array identity across its tagged representation.
+     * Callers must replace coverage arrays rather than mutate them in place.
+     */
     private tilePartitionsForCoverage(
         tileIds: readonly number[]
     ): readonly PartitionId[] {
@@ -2147,7 +2209,11 @@ export class ViewLayerController {
         return partitions;
     }
 
-    /** Avoid rescanning unchanged large coverage arrays on non-viewport reconciliations. */
+    /**
+     * Avoid rescanning unchanged large coverage arrays on non-viewport
+     * reconciliations. Forward coverage only when either immutable array identity
+     * changes; contents are not compared for in-place edits.
+     */
     private setRegularCoverage(
         layer: StyledMapgetLayer,
         partitions: readonly PartitionId[],

@@ -9,8 +9,10 @@ namespace erdblick
 {
 
 /**
- * Function to calculate the "side" (or relative position)
- * of a point to a line defined by a start point and a direction vector.
+ * Calculate the side of a point relative to a line defined by a start point and
+ * direction vector. Returns the signed 2D cross product of lineVector and
+ * (p - lineStart): positive means left, negative right, and zero on the line.
+ * Altitude is ignored; the magnitude is not a normalized distance.
  */
 double pointSideOfLine(m::Point const& lineVector, m::Point const& lineStart, m::Point const& p);
 
@@ -21,21 +23,26 @@ double pointSideOfLine(m::Point const& lineVector, m::Point const& lineStart, m:
 bool checkIfTriangleIntersectsWithInfinite2dLine(m::Point const& lineStart, m::Point const& lineVector, m::Point const& triA, m::Point const& triB, m::Point const& triC);
 
 /**
- * Returns true if the given point is inside the given 2d triangle.
+ * Returns whether the given point is inside the given 2D triangle, including its
+ * edges. Tests XY edge half-planes and ignores altitude; callers must supply a
+ * non-degenerate triangle.
  */
 bool isPointInsideTriangle(m::Point const& p, m::Point const& p0, m::Point const& p1, m::Point const& p2);
 
 /**
  * Calculate a reasonable center point for the given geometry.
- * This is used as a location for labels, and as the origin
- * for relation vectors.
+ * Used for labels and relation-vector origins. This is a geometric heuristic,
+ * not a center of mass: lines use their points nearest the arithmetic mean,
+ * while meshes try to keep the result near intersected triangles.
+ * Empty geometry logs a diagnostic and returns the zero point.
  */
 m::Point geometryCenter(m::SelfContainedGeometry const& g);
 
 /**
  * Calculate a point furthest from the center for the given geometry.
  * Used to properly scale the camera in the viewer
- * relative to the feature's bounding sphere.
+ * relative to the feature's bounding sphere. Distance is measured in ECEF
+ * metres from geometryCenter(), and the returned point remains in WGS84.
  */
 m::Point boundingRadiusEndPoint(m::SelfContainedGeometry const& g);
 

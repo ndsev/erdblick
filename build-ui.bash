@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
+# Install dependencies, lint, and build the requested frontend distributions.
+# An omitted mode selects the default application; "all" also builds visualization-only.
 SOURCE_LOC=$1
-BUILD_MODE=$2  # New parameter for build mode
+BUILD_MODE=$2
 if [ -z $SOURCE_LOC ]; then
   echo "No source location supplied."
   exit 1
@@ -32,7 +34,7 @@ build_profile_configuration() {
   NG_BUILD_MANGLE=false npm run build -- -c "${base_configuration},profiling"
 }
 
-# Determine which build mode to use
+# Development takes precedence over profiling when both environment flags are set.
 if [[ "$BUILD_MODE" == "all" ]]; then
   echo "Building all configurations..."
   if [[ -n "$NG_DEVELOP" ]]; then

@@ -1,0 +1,10 @@
+{
+  "numberOfViews": 1,
+  "focus": 0,
+  "cameraView": [{"lon": 0, "lat": 0, "alt": 200000, "h": 0, "p": -1.5707963267948966, "r": 0}],
+  "mode2d": [true],
+  "osm": ["0~0"],
+  "tileBorders": [false],
+  "selected": [],
+  "marker": false
+}

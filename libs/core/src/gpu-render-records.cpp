@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cassert>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -27,6 +28,98 @@ constexpr uint32_t kGpuRecordFlagMask = 0xffU;
 constexpr uint32_t kGpuActivationTokenMax = 0x00ffffffU;
 static_assert(std::has_single_bit(kGpuDepthTieBucketCount));
 
+/** Append-only record storage with stable, bounded allocation sizes.
+ * A single vector doubled from 512 MiB to 1 GiB while retaining the old buffer,
+ * exhausting the 2 GiB WASM heap before a dense cloud could reach the GPU.
+ * Blocks keep that growth local and can be freed as their packets are encoded.
+ * Their size is a storage granularity, not a limit on the number of records.
+ */
+class RecordBuffer
+{
+public:
+    struct Block {
+        std::vector<std::byte> bytes;
+    };
+
+    explicit RecordBuffer(uint32_t stride)
+        : stride_(stride)
+    {
+        // Ask the codec for the envelope size instead of duplicating ABI
+        // constants. A full block then fits in one ordinary record packet.
+        GpuRenderPacketData envelope;
+        envelope.streams.emplace_back();
+        envelope.contributions.emplace_back().spans.emplace_back();
+        auto const payload = kGpuRenderPacketMaxBytes -
+            GpuRenderPacketCodec::encodedSize(envelope);
+        blockBytes_ = static_cast<size_t>(payload / stride * stride);
+    }
+
+    [[nodiscard]] size_t size() const { return size_; }
+    [[nodiscard]] bool empty() const { return size_ == 0U; }
+
+    void clear()
+    {
+        blocks.clear();
+        size_ = 0U;
+    }
+
+    /** Reserve a complete record once; field writes need no block lookup. */
+    [[nodiscard]] std::span<std::byte> appendRecord()
+    {
+        auto& bytes = writableBlock();
+        auto const start = bytes.size();
+        reserve(bytes, start + stride_);
+        bytes.resize(start + stride_, std::byte{0U});
+        size_ += stride_;
+        return std::span<std::byte>{bytes}.subspan(start, stride_);
+    }
+
+    /** Global indices remain usable for patches made after later blocks exist. */
+    [[nodiscard]] std::span<std::byte> record(uint32_t index)
+    {
+        auto const offset = static_cast<size_t>(index) * stride_;
+        return std::span<std::byte>{blocks.at(offset / blockBytes_).bytes}
+            .subspan(offset % blockBytes_, stride_);
+    }
+
+    [[nodiscard]] std::pair<Block*, std::span<std::byte const>> slice(
+        size_t offset, size_t count)
+    {
+        if (offset > size_ || count > size_ - offset) {
+            throw std::out_of_range("GPU record slice exceeds its stream.");
+        }
+        auto& block = blocks.at(offset / blockBytes_);
+        auto const local = offset % blockBytes_;
+        return {&block, std::span<std::byte const>{block.bytes}.subspan(
+            local, std::min(count, block.bytes.size() - local))};
+    }
+
+    std::vector<Block> blocks;
+
+private:
+    std::vector<std::byte>& writableBlock()
+    {
+        if (blocks.empty() || blocks.back().bytes.size() == blockBytes_) {
+            blocks.emplace_back();
+        }
+        return blocks.back().bytes;
+    }
+
+    void reserve(std::vector<std::byte>& bytes, size_t required) const
+    {
+        if (required > bytes.capacity()) {
+            // Small material streams stay small. Geometric growth is confined
+            // to one packet-sized block, never the accumulated tile output.
+            bytes.reserve(std::min(blockBytes_, std::max(
+                required, std::max(size_t{256U}, bytes.capacity() * 2U))));
+        }
+    }
+
+    size_t stride_;
+    size_t blockBytes_;
+    size_t size_ = 0U;
+};
+
 /** Mirror the fixed surface-before-vector render passes as a one-based pick tie-breaker. */
 uint32_t presentationPrimitiveOrder(GpuPrimitiveKind kind)
 {
@@ -41,19 +134,21 @@ uint32_t presentationPrimitiveOrder(GpuPrimitiveKind kind)
 }
 
 template<typename T>
-void appendScalar(std::vector<std::byte>& bytes, T value)
+void appendScalar(std::span<std::byte>& bytes, T value)
 {
     static_assert(std::is_trivially_copyable_v<T>);
     auto raw = std::bit_cast<std::array<std::byte, sizeof(T)>>(value);
     if constexpr (std::endian::native == std::endian::big) {
         std::reverse(raw.begin(), raw.end());
     }
-    bytes.insert(bytes.end(), raw.begin(), raw.end());
+    assert(raw.size() <= bytes.size());
+    std::memcpy(bytes.data(), raw.data(), raw.size());
+    bytes = bytes.subspan(raw.size());
 }
 
 template<typename T>
 void overwriteScalar(
-    std::vector<std::byte>& bytes,
+    std::span<std::byte> bytes,
     size_t offset,
     T value)
 {
@@ -68,7 +163,7 @@ void overwriteScalar(
     std::memcpy(bytes.data() + offset, raw.data(), raw.size());
 }
 
-void appendPoint3(std::vector<std::byte>& bytes, mapget::Point const& point)
+void appendPoint3(std::span<std::byte>& bytes, mapget::Point const& point)
 {
     appendScalar(bytes, static_cast<float>(point.x));
     appendScalar(bytes, static_cast<float>(point.y));
@@ -76,7 +171,7 @@ void appendPoint3(std::vector<std::byte>& bytes, mapget::Point const& point)
 }
 
 void overwritePoint3(
-    std::vector<std::byte>& bytes,
+    std::span<std::byte> bytes,
     size_t offset,
     mapget::Point const& point)
 {
@@ -86,20 +181,12 @@ void overwritePoint3(
 }
 
 void appendColor(
-    std::vector<std::byte>& bytes,
+    std::span<std::byte>& bytes,
     std::array<uint8_t, 4> const& color)
 {
     for (auto const component : color) {
         appendScalar(bytes, component);
     }
-}
-
-void padRecord(std::vector<std::byte>& bytes, size_t recordStart, size_t stride)
-{
-    if (bytes.size() > recordStart + stride) {
-        throw std::logic_error("GPU primitive record exceeded its ABI stride.");
-    }
-    bytes.resize(recordStart + stride, std::byte{0U});
 }
 
 [[nodiscard]] uint16_t materialFlags(
@@ -296,6 +383,11 @@ public:
     };
 
     GpuRenderPacketData packet;
+    std::vector<RecordBuffer> recordBuffers;
+
+    [[nodiscard]] std::optional<GpuRenderPacketData> singlePacket() const;
+    void emitFragments(std::function<void(std::vector<std::byte>&&)> const& emit,
+                       bool consume);
     std::unordered_map<uint64_t, uint32_t> streamIndices;
     std::unordered_map<StreamIdentity, uint32_t, StreamIdentityHash>
         fastStreamIndices;
@@ -363,6 +455,7 @@ public:
             .atlasPage = atlasPage,
             .renderOrder = style.renderOrder,
         });
+        recordBuffers.emplace_back(stride);
         streamIndices.emplace(key, index);
         fastStreamIndices.try_emplace(identity, index);
         if (activeContribution) {
@@ -396,7 +489,7 @@ public:
     {
         auto const& output = packet.streams.at(streamIndex);
         return static_cast<uint32_t>(
-            output.records.size() / output.recordStride);
+            recordBuffers.at(streamIndex).size() / output.recordStride);
     }
 
     /** Intern one authored order and stable rule-order tie in contribution metadata. */
@@ -486,7 +579,7 @@ public:
 
     /** Pack z-order, color, ownership, picking, and activation fields. */
     void appendCommon(
-        std::vector<std::byte>& bytes,
+        std::span<std::byte>& bytes,
         GpuRecordStyle const& style,
         uint32_t recordFlags)
     {
@@ -528,8 +621,7 @@ public:
             flags,
             kGpuArrowRecordBytes,
             arrow.style);
-        auto& bytes = packet.streams[streamIndex].records;
-        auto const start = bytes.size();
+        auto bytes = recordBuffers[streamIndex].appendRecord();
         appendPoint3(bytes, arrow.previous);
         appendPoint3(bytes, arrow.tip);
         appendScalar(bytes, arrow.lateralOffsetVectorPx[0]);
@@ -545,7 +637,7 @@ public:
                     ? static_cast<uint32_t>(
                           GpuArrowRecordFlag::VariableOffset)
                     : 0U));
-        padRecord(bytes, start, kGpuArrowRecordBytes);
+
     }
 };
 
@@ -561,8 +653,8 @@ GpuRenderPacketBuilder& GpuRenderPacketBuilder::operator=(
 
 void GpuRenderPacketBuilder::reset()
 {
-    for (auto& stream : impl_->packet.streams) {
-        stream.records.clear();
+    for (auto& records : impl_->recordBuffers) {
+        records.clear();
     }
     impl_->packet.flags = GpuRenderPacketFlag::RevisionComplete;
     impl_->packet.sceneGeneration = 0U;
@@ -591,9 +683,9 @@ void GpuRenderPacketBuilder::configure(
 {
     if (impl_->activeContribution || !impl_->packet.contributions.empty() ||
         std::ranges::any_of(
-            impl_->packet.streams,
-            [](GpuRecordStream const& stream) {
-                return !stream.records.empty();
+            impl_->recordBuffers,
+            [](RecordBuffer const& records) {
+                return !records.empty();
             }))
     {
         throw std::logic_error(
@@ -677,12 +769,11 @@ void GpuRenderPacketBuilder::appendPoint(
         flags,
         kGpuPointRecordBytes,
         point.style);
-    auto& bytes = impl_->packet.streams[streamIndex].records;
-    auto const start = bytes.size();
+    auto bytes = impl_->recordBuffers[streamIndex].appendRecord();
     appendPoint3(bytes, point.position);
     appendScalar(bytes, point.radius);
     impl_->appendCommon(bytes, point.style, uint32_t{1U});
-    padRecord(bytes, start, kGpuPointRecordBytes);
+
 }
 
 GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
@@ -747,22 +838,18 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
         flags,
         stride,
         path.style);
-    auto& bytes = impl_->packet.streams[streamIndex].records;
+    auto& records = impl_->recordBuffers[streamIndex];
     GpuPathRecordHandle handle{
         .pathStreamIndex = streamIndex,
         .firstPathRecord = impl_->recordCount(streamIndex),
     };
     auto const segmentCount = path.points.size() - 1U;
     if (segmentCount >
-        (std::numeric_limits<size_t>::max() - bytes.size()) /
+        (std::numeric_limits<size_t>::max() - records.size()) /
             stride)
     {
         throw std::length_error("GPU path record stream exceeds address space.");
     }
-    auto const firstByte = bytes.size();
-    bytes.resize(
-        firstByte + segmentCount * stride,
-        std::byte{0U});
 
     auto const arrowPixels = std::max(
         kArrowMinimumPixels,
@@ -778,28 +865,30 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
             "GPU activation token exceeds its packed ABI field.");
     }
     if (simple) {
-        overwritePoint3(bytes, firstByte, path.points.front());
-        overwritePoint3(bytes, firstByte + 12U, path.points.back());
-        overwriteScalar(bytes, firstByte + 24U, path.width);
-        overwriteScalar(bytes, firstByte + 28U, localZIndexWord);
+        auto bytes = records.appendRecord();
+
+        overwritePoint3(bytes, 0U, path.points.front());
+        overwritePoint3(bytes, 12U, path.points.back());
+        overwriteScalar(bytes, 24U, path.width);
+        overwriteScalar(bytes, 28U, localZIndexWord);
         std::memcpy(
-            bytes.data() + static_cast<std::ptrdiff_t>(firstByte + 32U),
+            bytes.data() + 32U,
             path.style.color.data(),
             path.style.color.size());
-        overwriteScalar(bytes, firstByte + 36U, impl_->packet.origin.slot);
-        overwriteScalar(bytes, firstByte + 40U, contribution.slot);
-        overwriteScalar(bytes, firstByte + 44U, path.style.localPickIndex);
+        overwriteScalar(bytes, 36U, impl_->packet.origin.slot);
+        overwriteScalar(bytes, 40U, contribution.slot);
+        overwriteScalar(bytes, 44U, path.style.localPickIndex);
         overwriteScalar(
             bytes,
-            firstByte + 48U,
+            48U,
             pathBits(GpuPathRecordFlag::Active) |
                 pathBits(GpuPathRecordFlag::StartCap) |
                 pathBits(GpuPathRecordFlag::EndCap) |
                 (activationToken << 8U));
         if (dualStroke) {
-            overwriteScalar(bytes, firstByte + 52U, path.overlay->width);
+            overwriteScalar(bytes, 52U, path.overlay->width);
             std::memcpy(
-                bytes.data() + static_cast<std::ptrdiff_t>(firstByte + 56U),
+                bytes.data() + 56U,
                 path.overlay->color.data(),
                 path.overlay->color.size());
         }
@@ -808,30 +897,31 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
     }
     if (compact) {
         for (size_t segment = 0U; segment < segmentCount; ++segment) {
-            auto const start = firstByte + segment * stride;
+            auto bytes = records.appendRecord();
+
             overwritePoint3(
                 bytes,
-                start,
+                0U,
                 segment == 0U
                     ? path.points[segment]
                     : path.points[segment - 1U]);
-            overwritePoint3(bytes, start + 12U, path.points[segment]);
-            overwritePoint3(bytes, start + 24U, path.points[segment + 1U]);
+            overwritePoint3(bytes, 12U, path.points[segment]);
+            overwritePoint3(bytes, 24U, path.points[segment + 1U]);
             overwritePoint3(
                 bytes,
-                start + 36U,
+                36U,
                 segment + 2U < path.points.size()
                     ? path.points[segment + 2U]
                     : path.points[segment + 1U]);
-            overwriteScalar(bytes, start + 48U, path.width);
-            overwriteScalar(bytes, start + 52U, localZIndexWord);
+            overwriteScalar(bytes, 48U, path.width);
+            overwriteScalar(bytes, 52U, localZIndexWord);
             std::memcpy(
-                bytes.data() + static_cast<std::ptrdiff_t>(start + 56U),
+                bytes.data() + 56U,
                 path.style.color.data(),
                 path.style.color.size());
-            overwriteScalar(bytes, start + 60U, impl_->packet.origin.slot);
-            overwriteScalar(bytes, start + 64U, contribution.slot);
-            overwriteScalar(bytes, start + 68U, path.style.localPickIndex);
+            overwriteScalar(bytes, 60U, impl_->packet.origin.slot);
+            overwriteScalar(bytes, 64U, contribution.slot);
+            overwriteScalar(bytes, 68U, path.style.localPickIndex);
             uint32_t recordFlags = pathBits(GpuPathRecordFlag::Active);
             recordFlags |= segment == 0U
                 ? pathBits(GpuPathRecordFlag::StartCap)
@@ -841,12 +931,12 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
                 : 0U;
             overwriteScalar(
                 bytes,
-                start + 72U,
+                72U,
                 recordFlags | (activationToken << 8U));
             if (dualStroke) {
-                overwriteScalar(bytes, start + 76U, path.overlay->width);
+                overwriteScalar(bytes, 76U, path.overlay->width);
                 std::memcpy(
-                    bytes.data() + static_cast<std::ptrdiff_t>(start + 80U),
+                    bytes.data() + 80U,
                     path.overlay->color.data(),
                     path.overlay->color.size());
             }
@@ -862,16 +952,17 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
         std::isfinite(dashPeriodMeters) && dashPeriodMeters > 0.0;
     double dashPhaseMeters = 0.0;
     for (size_t segment = 0U; segment < segmentCount; ++segment) {
-        auto const start = firstByte + segment * stride;
+        auto bytes = records.appendRecord();
+
         overwritePoint3(
             bytes,
-            start,
+            0U,
             segment == 0U ? path.points[segment] : path.points[segment - 1U]);
-        overwritePoint3(bytes, start + 12U, path.points[segment]);
-        overwritePoint3(bytes, start + 24U, path.points[segment + 1U]);
+        overwritePoint3(bytes, 12U, path.points[segment]);
+        overwritePoint3(bytes, 24U, path.points[segment + 1U]);
         overwritePoint3(
             bytes,
-            start + 36U,
+            36U,
             segment + 2U < path.points.size()
                 ? path.points[segment + 2U]
                 : path.points[segment + 1U]);
@@ -884,32 +975,32 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
         for (size_t adjacent = 0U; adjacent < adjacency.size(); ++adjacent) {
             auto const pointIndex = adjacency[adjacent];
             auto const vector = offsetVectorAt(path, pointIndex);
-            overwriteScalar(bytes, start + 48U + adjacent * 8U, vector[0]);
-            overwriteScalar(bytes, start + 52U + adjacent * 8U, vector[1]);
+            overwriteScalar(bytes, 48U + adjacent * 8U, vector[0]);
+            overwriteScalar(bytes, 52U + adjacent * 8U, vector[1]);
         }
         for (size_t adjacent = 0U; adjacent < adjacency.size(); ++adjacent) {
             overwriteScalar(
                 bytes,
-                start + 80U + adjacent * 4U,
+                80U + adjacent * 4U,
                 scalarOffsetAt(path, adjacency[adjacent]));
         }
-        overwriteScalar(bytes, start + 96U, path.width);
-        overwriteScalar(bytes, start + 100U, path.dashLength);
-        overwriteScalar(bytes, start + 104U, path.dashGap);
-        overwriteScalar(bytes, start + 108U, path.lateralOffsetScaleThreshold);
+        overwriteScalar(bytes, 96U, path.width);
+        overwriteScalar(bytes, 100U, path.dashLength);
+        overwriteScalar(bytes, 104U, path.dashGap);
+        overwriteScalar(bytes, 108U, path.lateralOffsetScaleThreshold);
         overwriteScalar(
             bytes,
-            start + 112U,
+            112U,
             segment == 0U && path.backwardArrow ? trimPixels : 0.0F);
         overwriteScalar(
             bytes,
-            start + 116U,
+            116U,
             segment + 2U == path.points.size() && path.forwardArrow
                 ? trimPixels
                 : 0.0F);
         overwriteScalar(
             bytes,
-            start + 120U,
+            120U,
             meterDashes ? static_cast<float>(dashPhaseMeters) : 0.0F);
         uint32_t recordFlags = pathBits(GpuPathRecordFlag::Active);
         recordFlags |= segment == 0U
@@ -933,17 +1024,17 @@ GpuPathRecordHandle GpuRenderPacketBuilder::appendPath(
         recordFlags |= meterDashes
             ? pathBits(GpuPathRecordFlag::DashMeters)
             : 0U;
-        overwriteScalar(bytes, start + 124U, localZIndexWord);
+        overwriteScalar(bytes, 124U, localZIndexWord);
         std::memcpy(
-            bytes.data() + static_cast<std::ptrdiff_t>(start + 128U),
+            bytes.data() + 128U,
             path.style.color.data(),
             path.style.color.size());
-        overwriteScalar(bytes, start + 132U, impl_->packet.origin.slot);
-        overwriteScalar(bytes, start + 136U, contribution.slot);
-        overwriteScalar(bytes, start + 140U, path.style.localPickIndex);
+        overwriteScalar(bytes, 132U, impl_->packet.origin.slot);
+        overwriteScalar(bytes, 136U, contribution.slot);
+        overwriteScalar(bytes, 140U, path.style.localPickIndex);
         overwriteScalar(
             bytes,
-            start + 144U,
+            144U,
             recordFlags | (activationToken << 8U));
         if (meterDashes) {
             auto const& from = path.points[segment];
@@ -1039,18 +1130,17 @@ void GpuRenderPacketBuilder::updateAdaptiveOffsetThreshold(
         for (uint32_t index = 0U; index < handle.pathRecordCount; ++index) {
             auto const record = handle.firstPathRecord + index;
             overwriteScalar(
-                stream.records,
-                static_cast<size_t>(record) * stream.recordStride + 108U,
+                impl_->recordBuffers.at(handle.pathStreamIndex).record(record),
+                108U,
                 safeThreshold);
         }
     }
     if (handle.arrowStreamIndex != 0xffffffffU) {
-        auto& stream = impl_->packet.streams.at(handle.arrowStreamIndex);
         for (uint32_t index = 0U; index < handle.arrowRecordCount; ++index) {
             auto const record = handle.firstArrowRecord + index;
             overwriteScalar(
-                stream.records,
-                static_cast<size_t>(record) * stream.recordStride + 40U,
+                impl_->recordBuffers.at(handle.arrowStreamIndex).record(record),
+                40U,
                 safeThreshold);
         }
     }
@@ -1083,6 +1173,7 @@ void GpuRenderPacketBuilder::appendSurface(
     if (xy == 0.0 && xz == 0.0 && yz == 0.0) {
         return;
     }
+    // Use the largest projected outer-ring area so vertical surfaces also triangulate.
     auto const axes = xy > xz && xy > yz
         ? std::array<uint32_t, 2>{0U, 1U}
         : xz > yz
@@ -1120,8 +1211,8 @@ void GpuRenderPacketBuilder::appendSurface(
         flags,
         kGpuSurfaceTriangleRecordBytes,
         style);
-    auto& bytes = impl_->packet.streams[streamIndex].records;
-    auto const initialByteSize = bytes.size();
+    auto& records = impl_->recordBuffers[streamIndex];
+    auto const initialByteSize = records.size();
     auto const height = std::isfinite(polygonHeight)
         ? std::max(0.0, polygonHeight)
         : 0.0;
@@ -1132,12 +1223,11 @@ void GpuRenderPacketBuilder::appendSurface(
     auto appendTriangle = [&](mapget::Point const& first,
                               mapget::Point const& second,
                               mapget::Point const& third) {
-        auto const start = bytes.size();
+        auto bytes = records.appendRecord();
         appendPoint3(bytes, first);
         appendPoint3(bytes, second);
         appendPoint3(bytes, third);
         impl_->appendCommon(bytes, style, uint32_t{1U});
-        padRecord(bytes, start, kGpuSurfaceTriangleRecordBytes);
     };
     for (size_t index = 0U; index + 2U < indices.size(); index += 3U) {
         if (indices[index] >= points.size() ||
@@ -1152,7 +1242,7 @@ void GpuRenderPacketBuilder::appendSurface(
             lifted(points[indices[index + 2U]]));
     }
     if (height <= 0.0) {
-        if (bytes.size() > initialByteSize) {
+        if (records.size() > initialByteSize) {
             impl_->recordPickPresentation(
                 style,
                 presentationPrimitiveOrder(GpuPrimitiveKind::SurfaceTriangle));
@@ -1181,7 +1271,7 @@ void GpuRenderPacketBuilder::appendSurface(
             appendTriangle(lowerCurrent, upperNext, upperCurrent);
         }
     }
-    if (bytes.size() > initialByteSize) {
+    if (records.size() > initialByteSize) {
         impl_->recordPickPresentation(
             style,
             presentationPrimitiveOrder(GpuPrimitiveKind::SurfaceTriangle));
@@ -1301,14 +1391,13 @@ void GpuRenderPacketBuilder::appendIcon(
         kGpuIconRecordBytes,
         icon.style,
         icon.atlasPage);
-    auto& bytes = impl_->packet.streams[streamIndex].records;
-    auto const start = bytes.size();
+    auto bytes = impl_->recordBuffers[streamIndex].appendRecord();
     appendPoint3(bytes, icon.position);
     for (auto const value : icon.pixelSize) appendScalar(bytes, value);
     for (auto const value : icon.pixelOffset) appendScalar(bytes, value);
     for (auto const value : icon.uv) appendScalar(bytes, value);
     impl_->appendCommon(bytes, icon.style, icon.flags | 1U);
-    padRecord(bytes, start, kGpuIconRecordBytes);
+
 }
 
 void GpuRenderPacketBuilder::appendPick(GpuPickRecord pick)
@@ -1356,29 +1445,66 @@ void GpuRenderPacketBuilder::appendRuntimeIssue(GpuRuntimeIssue issue)
     impl_->packet.issues.push_back(std::move(issue));
 }
 
+std::optional<GpuRenderPacketData>
+GpuRenderPacketBuilder::Impl::singlePacket() const
+{
+    auto result = packet;
+    for (size_t index = 0U; index < recordBuffers.size(); ++index) {
+        auto const& blocks = recordBuffers[index].blocks;
+        if (blocks.size() > 1U) return std::nullopt;
+        if (!blocks.empty()) result.streams[index].recordView = blocks.front().bytes;
+    }
+    return result;
+}
+
 std::vector<std::byte> GpuRenderPacketBuilder::build() const
 {
     if (impl_->activeContribution) {
-        throw std::logic_error(
-            "Cannot encode a GPU packet with an open contribution.");
+        throw std::logic_error("Cannot encode a GPU packet with an open contribution.");
     }
-    return GpuRenderPacketCodec::encode(impl_->packet);
+    auto packet = impl_->singlePacket();
+    if (!packet) throw std::length_error("GpuRenderPacket exceeds its byte limit.");
+    return GpuRenderPacketCodec::encode(*packet);
 }
 
-std::vector<std::vector<std::byte>>
-GpuRenderPacketBuilder::buildFragments() const
+std::vector<std::vector<std::byte>> GpuRenderPacketBuilder::buildFragments() const
 {
-    if (impl_->activeContribution) {
+    std::vector<std::vector<std::byte>> result;
+    impl_->emitFragments([&](std::vector<std::byte>&& bytes) {
+        result.push_back(std::move(bytes));
+    }, false);
+    return result;
+}
+
+void GpuRenderPacketBuilder::consumeFragments(
+    std::function<void(std::vector<std::byte>&&)> const& emit)
+{
+    try {
+        impl_->emitFragments(emit, true);
+    } catch (...) {
+        reset();
+        throw;
+    }
+    reset();
+}
+
+void GpuRenderPacketBuilder::Impl::emitFragments(
+    std::function<void(std::vector<std::byte>&&)> const& emit,
+    bool consume)
+{
+    if (activeContribution) {
         throw std::logic_error(
             "Cannot encode GPU packet fragments with an open contribution.");
     }
-    auto const packetBytes = GpuRenderPacketCodec::encodedSize(impl_->packet);
-    if (packetBytes <= kGpuRenderPacketMaxBytes)
-    {
-        return {GpuRenderPacketCodec::encode(impl_->packet, packetBytes)};
+    if (auto whole = singlePacket()) {
+        auto const bytes = GpuRenderPacketCodec::encodedSize(*whole);
+        if (bytes <= kGpuRenderPacketMaxBytes) {
+            emit(GpuRenderPacketCodec::encode(*whole, bytes));
+            return;
+        }
     }
 
-    auto const& source = impl_->packet;
+    auto const& source = packet;
     if (source.contributions.empty()) {
         throw std::length_error(
             "An oversized GPU packet without contributions cannot be fragmented.");
@@ -1411,7 +1537,11 @@ GpuRenderPacketBuilder::buildFragments() const
             kGpuRenderPacketMaxBytes;
     };
 
+    // Plan descriptors and borrowed slices only. The former splitter copied
+    // the entire remaining cloud, then copied binary-search candidates before
+    // discovering the 4 MiB limit. Payload bytes now move only into the encoder.
     std::vector<GpuRenderPacketData> fragments;
+    std::unordered_map<RecordBuffer::Block*, size_t> lastBlockUse;
     auto appendFragment = [&](GpuRenderPacketData&& fragment) {
         fragments.push_back(std::move(fragment));
     };
@@ -1425,66 +1555,29 @@ GpuRenderPacketBuilder::buildFragments() const
 
         for (auto const& span : contribution.spans) {
             auto const& stream = source.streams.at(span.streamIndex);
+            auto& records = recordBuffers.at(span.streamIndex);
             uint32_t consumed = 0U;
             while (consumed < span.recordCount) {
-                auto appendRecords = [&](GpuRenderPacketData const& base,
-                                         uint32_t recordCount) {
-                    auto candidate = base;
-                    // Copy only the descriptor. Copying the full record vector
-                    // before assigning a slice retains whole-cloud capacity in
-                    // every fragment and exhausts WASM memory for dense clouds.
-                    GpuRecordStream fragmentStream{
-                        .kind = stream.kind,
-                        .flags = stream.flags,
-                        .materialKey = stream.materialKey,
-                        .recordStride = stream.recordStride,
-                        .glowColor = stream.glowColor,
-                        .glowRadius = stream.glowRadius,
-                        .atlasPage = stream.atlasPage,
-                        .renderOrder = stream.renderOrder,
-                    };
-                    auto const firstRecord = span.firstRecord + consumed;
-                    auto const firstByte = static_cast<size_t>(firstRecord) *
-                        stream.recordStride;
-                    auto const byteCount = static_cast<size_t>(recordCount) *
-                        stream.recordStride;
-                    fragmentStream.records.assign(
-                        stream.records.begin() +
-                            static_cast<std::ptrdiff_t>(firstByte),
-                        stream.records.begin() +
-                            static_cast<std::ptrdiff_t>(firstByte + byteCount));
-                    auto const streamIndex = static_cast<uint32_t>(
-                        candidate.streams.size());
-                    candidate.streams.push_back(std::move(fragmentStream));
-                    candidate.contributions.front().spans.push_back({
-                        .streamIndex = streamIndex,
-                        .firstRecord = 0U,
-                        .recordCount = recordCount,
-                    });
-                    return candidate;
-                };
-
-                auto const remaining = span.recordCount - consumed;
-                auto candidate = appendRecords(fragment, remaining);
-                uint32_t accepted = 0U;
-                if (fits(candidate)) {
-                    accepted = remaining;
-                } else {
-                    uint32_t low = 1U;
-                    uint32_t high = remaining;
-                    while (low <= high) {
-                        auto const middle = low + (high - low) / 2U;
-                        auto middleCandidate = appendRecords(fragment, middle);
-                        if (fits(middleCandidate)) {
-                            accepted = middle;
-                            candidate = std::move(middleCandidate);
-                            low = middle + 1U;
-                        } else {
-                            high = middle - 1U;
-                        }
-                    }
-                }
-                if (accepted == 0U) {
+                auto const offset = static_cast<size_t>(span.firstRecord + consumed) *
+                    stream.recordStride;
+                auto const remainingBytes = static_cast<size_t>(span.recordCount - consumed) *
+                    stream.recordStride;
+                auto [block, bytes] = records.slice(offset, remainingBytes);
+                auto const streamIndex = static_cast<uint32_t>(fragment.streams.size());
+                fragment.streams.push_back(stream);
+                fragment.contributions.front().spans.push_back({
+                    .streamIndex = streamIndex,
+                    .firstRecord = 0U,
+                    .recordCount = 0U,
+                });
+                auto const overhead = GpuRenderPacketCodec::encodedSize(fragment);
+                auto const available = overhead < kGpuRenderPacketMaxBytes
+                    ? kGpuRenderPacketMaxBytes - overhead : 0U;
+                auto const count = static_cast<uint32_t>(
+                    std::min<uint64_t>(bytes.size(), available) / stream.recordStride);
+                if (count == 0U) {
+                    fragment.streams.pop_back();
+                    fragment.contributions.front().spans.pop_back();
                     if (!hasPayload(fragment)) {
                         throw std::length_error(
                             "One GPU primitive record cannot fit in a packet fragment.");
@@ -1493,8 +1586,11 @@ GpuRenderPacketBuilder::buildFragments() const
                     fragment = makeFragment(contributionIndex);
                     continue;
                 }
-                fragment = std::move(candidate);
-                consumed += accepted;
+                fragment.streams.back().recordView = bytes.first(
+                    static_cast<size_t>(count) * stream.recordStride);
+                fragment.contributions.front().spans.back().recordCount = count;
+                lastBlockUse[block] = fragments.size();
+                consumed += count;
                 if (consumed < span.recordCount) {
                     appendFragment(std::move(fragment));
                     fragment = makeFragment(contributionIndex);
@@ -1577,6 +1673,8 @@ GpuRenderPacketBuilder::buildFragments() const
         appendOwnedRecords(source.labels, &GpuRenderPacketData::labels);
         appendOwnedRecords(source.issues, &GpuRenderPacketData::issues);
 
+        // Keep each contribution's z-index table intact. Earlier fragments may refer
+        // to it; the consumer assembles the revision before activating its records.
         auto withZIndices = fragment;
         withZIndices.contributions.front().zIndices = contribution.zIndices;
         if (!fits(withZIndices)) {
@@ -1624,12 +1722,17 @@ GpuRenderPacketBuilder::buildFragments() const
     if (fragmentCount < 2U) {
         throw std::length_error("GPU render fragment count is invalid.");
     }
-    std::vector<std::vector<std::byte>> result;
-    result.reserve(fragments.size());
+    std::vector<std::vector<RecordBuffer::Block*>> releaseAfter(fragmentCount);
+    if (consume) {
+        for (auto const& [block, lastUse] : lastBlockUse) {
+            releaseAfter.at(lastUse).push_back(block);
+        }
+    }
     for (uint32_t index = 0U; index < fragmentCount; ++index) {
         auto& fragment = fragments[index];
         fragment.fragmentIndex = index;
         fragment.fragmentCount = fragmentCount;
+        // Only the final fragment commits the assembled revision.
         fragment.flags = index + 1U == fragmentCount
             ? GpuRenderPacketFlag::RevisionComplete
             : GpuRenderPacketFlag::None;
@@ -1644,9 +1747,16 @@ GpuRenderPacketBuilder::buildFragments() const
                 "/" + std::to_string(fragmentCount) +
                 " exceeded its byte limit: " + error.what());
         }
-        result.push_back(std::move(bytes));
+        emit(std::move(bytes));
+        // A block may straddle packets or contributions. Free it only after
+        // its final borrowed slice has been copied by the synchronous consumer.
+        if (consume) {
+            fragment.streams.clear();
+            for (auto* block : releaseAfter[index]) {
+                std::vector<std::byte>{}.swap(block->bytes);
+            }
+        }
     }
-    return result;
 }
 
 uint32_t GpuRenderPacketBuilder::contributionCount() const

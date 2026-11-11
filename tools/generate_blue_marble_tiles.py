@@ -20,7 +20,8 @@ SOURCE_IMAGE_PATH = REPO_ROOT / "images" / "blue_marble_200407_21600x10800.jpg"
 OUTPUT_ROOT = REPO_ROOT / "images" / "backgrounds" / "world-overview"
 
 # The bundled Blue Marble source is intentionally large enough to support one
-# additional zoom level over the previous fallback background.
+# additional zoom level over the previous fallback background. Its 21600x10800
+# pixels exceed Pillow's default guard, so this offline generator permits that size.
 Image.MAX_IMAGE_PIXELS = None
 
 
@@ -55,7 +56,11 @@ def build_mercator_master(source_image: Image.Image, world_size: int) -> Image.I
 
 
 def write_xyz_tiles(mercator_master: Image.Image, output_root: Path) -> None:
-    """Cut the Web Mercator master raster into the bundled `z/x/y` tile pyramid."""
+    """Cut the Web Mercator master raster into the bundled `z/x/y` tile pyramid.
+
+    Replaces output_root with JPEG tiles for zoom levels 0 through MAX_ZOOM.
+    Existing output is removed before writing; a failed conversion leaves a partial pyramid.
+    """
     if output_root.exists():
         shutil.rmtree(output_root)
     output_root.mkdir(parents=True, exist_ok=True)

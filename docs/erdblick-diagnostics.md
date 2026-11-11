@@ -2,6 +2,11 @@
 
 Erdblick exposes loading, rendering, backend, and logging state directly in the UI. Use these tools when you need to understand why tiles are slow, incomplete, empty, or inconsistent.
 
+<!-- mcp:
+title: "Viewer loading and connection diagnostics"
+keywords: ["loading", "connected", "backend", "status", "progress", "ready"]
+hint: "Use viewer_get_diagnostics for bounded cached browser transport/worker/loading/error information. mapget_get_diagnostics separately exposes a backend operational snapshot when global diagnostics permission allows it. Applied state changes are not render-completion fences; combine diagnostics with state and a screenshot when checking visual outcomes."
+-->
 ## Status at a Glance
 
 ![Tile and backend status in the progress popover](screenshots/diagnostics-progress.png)
@@ -11,10 +16,13 @@ together, with actions to open statistics, inspect logs, or export diagnostics.
 
 The top-right side of the main bar contains the diagnostics indicator:
 
-- While tiles are still being fetched or rendered, it shows a spinner.
-- If the tile pipeline is paused, the spinner stays visible but switches to the paused styling.
+- While connected and actively fetching or rendering, it shows a spinner.
+- Pausing the tile pipeline changes its progress presentation, not connection status.
 - Once the current workload is complete, the spinner turns into a status dot.
-- If the backend connection is down, the idle dot switches to the disconnected state.
+- A green dot means the backend is connected with no current datasource/catalog failure.
+- A yellow dot means the backend is connected but a datasource or its browser schema is unavailable, or catalog metadata needs attention. This also applies when every configured datasource has failed; the tooltip says **No datasource available**.
+- A red dot means the backend connection is unavailable or its stream protocol is incompatible.
+- The loading spinner always stays blue, regardless of warning or error status. Waiting for a retry alone does not show a spinner; colors stay steady, including with reduced motion.
 - If erdblick has seen tile errors or log entries with error level, an extra error badge appears next to the indicator.
 
 Click the indicator to open the progress popover. It shows:
@@ -22,9 +30,23 @@ Click the indicator to open the progress popover. It shows:
 - loaded vs. expected tile counts
 - tile error count
 - backend connection state
+- an unavailable-datasource count badge and **Datasource unavailable** or **Datasources unavailable** label; hover over or focus the help icon to read the original failure/retry messages unchanged
+- backend or catalog recovery details when no datasource is unavailable, independently of historical errors
 - backend and rendering progress counters
 - shortcuts to **Open Statistics**, **Open Log**, and **Export**
 
+Individual failed datasource rows remain red in Maps & Layers. Unsupported
+datasources receive no automatic retry. Eligible SmartLayer initialization
+failures use server backoff (5, 10, 20, 40, then 60 seconds by default), while
+browser **Preferences → Connection** controls backend reconnection and transient
+catalog HTTP recovery. Fixing or removing a failed source restores the main
+indicator once no current failure remains; the historical error badge may remain.
+
+<!-- mcp:
+title: "Tile loading error overlays"
+keywords: ["red tile", "empty tile", "error overlay", "tile grid"]
+hint: "Use view.grid to show tile borders and viewer_get_diagnostics to inspect cached errors. An empty tile or failed request is not proof that a searched attribute is absent. Search help for \"Nothing renders\" and \"Recovering from a datasource tile error\"."
+-->
 ## Tile Loading Overlays
 
 Enable the tile grid to see tile-status overlays directly on the map:
@@ -42,6 +64,11 @@ The **status popover (1)** reports failed tiles while the red overlay marks
 the affected area. Other road data remains visible. Check the log for the failing
 datasource before reloading.
 
+<!-- mcp:
+title: "Viewer performance diagnostics"
+keywords: ["performance", "memory", "GPU", "worker", "tile budget", "slow"]
+hint: "viewer_get_diagnostics exposes bounded cached counters and explicit unavailable metrics, not full backend reports or GPU readback. app.preferences.rendering controls tileLimit and renderWorkers; retain unrelated settings when changing them."
+-->
 ## Performance Statistics
 
 Open **Tools -> Performance Statistics** from the main bar, or use **Open Statistics** from the diagnostics popover.
@@ -52,7 +79,13 @@ The statistics dialog is the main place to inspect:
 - backend progress
 - parse and render timings
 - per-style rendering cost
-- frame-time and FPS
+- recent frame intervals
+
+The progress bubbles show delivered data rate (including backend processing and
+long-poll waits), source-feature counts, and the 90th percentile of recent
+completed-frame intervals. Frame intervals include on-demand redraw gaps up to
+two seconds; they are not GPU render time or average FPS. A low delivered data
+rate alone does not establish a network problem.
 
 Under **Load+Convert**, the **Age** row summarizes conversion-age samples for
 the currently filtered loaded tiles:
@@ -62,8 +95,6 @@ the currently filtered loaded tiles:
 - **Min** shows the newest (lowest) conversion age.
 
 The Peak, Average, and Min columns are available for every performance metric.
-
-![Performance statistics for the Munich city scene](screenshots/performance.png)
 
 Use the **layer and tile filters** to narrow the measurements to the data
 you are investigating. Values describe the current session, not a benchmark.
@@ -94,6 +125,15 @@ The log collects:
 
 Use the log when the map looks healthy at first glance but the indicator shows an error badge, or when a datasource intermittently disconnects and reconnects.
 
+For browser reconnection, use [Connection Retry](erdblick-ui-basics.md#connection-retry)
+in Preferences. These settings are separate from server-side datasource startup
+retries and tile expiry; use the reported cause to choose which one to investigate.
+
+<!-- mcp:
+title: "Export diagnostics bundle"
+keywords: ["diagnostics export", "bug report", "logs", "snapshot"]
+hint: "Full diagnostics export is a UI operation. viewer_get_diagnostics is a bounded summary, not the downloadable bundle; do not report that it created an export file."
+-->
 ## Exporting Diagnostics
 
 Open **Tools -> Export Diagnostics** to create a diagnostics bundle for bug reports or offline analysis.

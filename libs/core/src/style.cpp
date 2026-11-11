@@ -534,6 +534,8 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
         }
     }
 
+    // Rule failures are local: keep usable siblings while retaining source indices
+    // for diagnostics and assigning separate dense render identities.
     uint32_t ruleIndex = 0;
     uint32_t renderRuleIndex = 0;
     for (auto const& rule : styleYaml["rules"]) {
@@ -571,6 +573,7 @@ FeatureLayerStyle::FeatureLayerStyle(SharedUint8Array const& yamlArray)
         return;
     }
 
+    // Cache only static mode/LOD gates here; per-feature filters remain deferred.
     for (uint32_t runtimeRuleIndex = 0; runtimeRuleIndex < rules_.size(); ++runtimeRuleIndex) {
         auto const& rule = rules_[runtimeRuleIndex];
         for (size_t modeIndex = 0; modeIndex < kHighlightModeCount; ++modeIndex) {
@@ -760,6 +763,8 @@ std::vector<uint32_t> const& FeatureLayerStyle::candidateRuleIndices(
         return ruleIndicesByModeAndLod_[modeIndex][activeLodIndex];
     }
 
+    // This const query memoizes type matches. Concurrent callers must serialize
+    // access to a shared style instance or use separate instances.
     auto cacheIt = ruleIndicesByTypeCache_.find(featureTypeId);
     if (cacheIt == ruleIndicesByTypeCache_.end()) {
         RuleIndexCacheEntry entry{};
@@ -805,7 +810,7 @@ FeatureStyleOption::FeatureStyleOption(const YAML::Node& yaml)
             type_ = FeatureStyleOptionType::String;
         }
         else {
-            // TODO: Eventually we need to throw an exception here.
+            // Stylesheet validation rejects this path before constructing accepted options.
             std::cout << "Unrecognized option type " << type << std::endl;
         }
     }

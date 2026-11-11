@@ -1,0 +1,177 @@
+import {describe, expect, it} from "vitest";
+
+import {
+    createFeatureSearchStateEntry,
+    defaultFeatureSearchViewIndicesForMapLayers,
+    normalizeFeatureSearchState,
+    searchStyleRuleAppliesTo
+} from "../../../app/search/search-definition.model";
+
+describe("FeatureSearchState", () => {
+    it.each([{specials: []}, {specials: [{value: 255, color: "#00ffff"}]}])("persists portable special colors (%j)", ({specials}) => {
+        const color = {mode: "gradient", field: "speed",
+            stops: [{value: 1, color: "#0000ff"}, {value: 253, color: "#ff0000"}], specials};
+        const [entry] = normalizeFeatureSearchState([{query: "true",
+            searchStyleRules: [{geometry: ["line"], filter: [], color}]}]);
+        expect(entry.searchStyleRules[0].color).toEqual(color);
+        expect(normalizeFeatureSearchState([entry])[0].searchStyleRules).toEqual(entry.searchStyleRules);
+    });
+
+    it("persists shared result scopes without admitting rules at another evaluation root", () => {
+        const [entry] = normalizeFeatureSearchState([{
+            query: "true",
+            searchStyleRules: [{
+                applicability: {scope: "attribute"},
+                geometry: ["line"], filter: [], color: {mode: "solid", color: "#123456"}
+            }]
+        }]);
+        const rule = entry.searchStyleRules[0];
+        expect(rule.applicability).toEqual({scope: "attribute"});
+        for (const mapId of ["First", "Second"]) {
+            expect(searchStyleRuleAppliesTo(rule, {mapId, layerId: "Road", scope: "attribute"})).toBe(true);
+            expect(searchStyleRuleAppliesTo(rule, {mapId, layerId: "POI", scope: "feature"})).toBe(false);
+        }
+        const restricted = {...rule, applicability: {...rule.applicability!, mapId: "First", layerId: "Road"}};
+        expect(searchStyleRuleAppliesTo(restricted, {mapId: "Second", layerId: "Road", scope: "attribute"})).toBe(false);
+        expect(searchStyleRuleAppliesTo(restricted, {mapId: "First", layerId: "Lane", scope: "attribute"})).toBe(false);
+    });
+
+    it.each(["schemaTypes", "schemaType", "domain"])("discards obsolete %s restrictions without losing saved colors", key => {
+        const color = {mode: "gradient", field: "speed",
+            stops: [{value: 1, color: "#0000ff"}, {value: 253, color: "#ff0000"}],
+            specials: [{value: 255, color: "#00ffff"}]};
+        const [entry] = normalizeFeatureSearchState([{query: "true", searchStyleRules: [{
+            geometry: ["line"], filter: [], color: {...color, [key]: {schemaId: "old", typeId: 0}}
+        }]}]);
+        expect(entry.searchStyleRules[0].color).toEqual(color);
+        expect(normalizeFeatureSearchState([entry])[0].searchStyleRules).toEqual(entry.searchStyleRules);
+    });
+
+    it("uses fallback for malformed exceptional-value colors", () => {
+        const [entry] = normalizeFeatureSearchState([{query: "true", searchStyleRules: [{
+            geometry: ["line"], filter: [], color: {mode: "gradient", field: "speed", stops: [],
+                fallbackColor: "#abcdef", specials: {value: 255, color: "#00ffff"}}
+        }]}]);
+        expect(entry.searchStyleRules[0].color).toEqual({mode: "solid", color: "#abcdef"});
+    });
+
+    it("normalizes Simfil equality into the GUI operator without dropping the comparison", () => {
+        const entry = createFeatureSearchStateEntry({query: "true", searchStyleRules: [{
+            geometry: ["line"], filter: [{field: "_.id", op: "==", value: "Lane.1"}],
+            color: {mode: "solid", color: "#0088ff"}
+        }]});
+        expect(entry.searchStyleRules[0].filter).toEqual([{field: "_.id", op: "=", value: "Lane.1"}]);
+    });
+
+    it("defaults selected map-layer intent to automatic", () => {
+        const entry = createFeatureSearchStateEntry({query: "typeId == 'Road'"});
+
+        expect(entry.selectedMapLayersManual).toBe(false);
+    });
+
+    it("preserves manual selected map-layer intent during normalization", () => {
+        const [entry] = normalizeFeatureSearchState([{
+            query: "typeId == 'Road'",
+            selectedMapLayers: [{mapId: "Classic", layerId: "Lane"}],
+            selectedMapLayersManual: true
+        }]);
+
+        expect(entry.selectedMapLayers).toEqual([{mapId: "Classic", layerId: "Lane"}]);
+        expect(entry.selectedMapLayersManual).toBe(true);
+    });
+
+    it("normalizes selected feature types as a sorted unique filter list", () => {
+        const [entry] = normalizeFeatureSearchState([{
+            query: "typeId == 'Road'",
+            selectedFeatureTypes: ["Lane", "", "Road", "Lane"]
+        }]);
+
+        expect(entry.selectedFeatureTypes).toEqual(["Lane", "Road"]);
+    });
+
+    it("normalizes selected tile levels to the NDS search level domain", () => {
+        const [entry] = normalizeFeatureSearchState([{
+            query: "typeId == 'Road'",
+            selectedTileLevels: [13, 15, 16, 22]
+        }]);
+
+        expect(entry.selectedTileLevels).toEqual([13, 15]);
+    });
+
+    it("preserves explicit search-style expression intent without library provenance", () => {
+        const [entry] = normalizeFeatureSearchState([{
+            query: "true",
+            searchStyleConfigurationId: "saved-style",
+            searchStyleConfigurationRevision: 7,
+            searchStyleRules: [{
+                geometry: "mesh",
+                filter: [{field: "speed > 10", op: "=", value: true, customExpression: true}],
+                color: {
+                    mode: "gradient",
+                    field: "speed * 2",
+                    customField: true,
+                    stops: [{value: 1, color: "#123456"}]
+                }
+            }]
+        }]);
+
+        expect(entry).not.toHaveProperty("searchStyleConfigurationId");
+        expect(entry).not.toHaveProperty("searchStyleConfigurationRevision");
+        expect(entry.searchStyleRules[0].geometry).toEqual(["mesh"]);
+        expect(entry.searchStyleRules[0].filter[0].customExpression).toBe(true);
+        expect(entry.searchStyleRules[0].color).toMatchObject({customField: true});
+    });
+
+    it("normalizes multi-geometry rules while retaining legacy scalar values", () => {
+        const [entry] = normalizeFeatureSearchState([{
+            query: "true",
+            searchStyleRules: [{
+                geometry: ["mesh", "line", "mesh"],
+                filter: [],
+                color: {mode: "solid", color: "#123456"}
+            }, {
+                geometry: "point",
+                filter: [],
+                color: {mode: "solid", color: "#654321"}
+            }]
+        }]);
+
+        expect(entry.searchStyleRules.map(rule => rule.geometry)).toEqual([
+            ["line", "mesh"],
+            ["point"]
+        ]);
+    });
+
+    it("defaults selected views from visible selected map layers", () => {
+        const selectedMapLayers = [
+            {mapId: "Classic", layerId: "Road"},
+            {mapId: "Live", layerId: "Lane"}
+        ];
+        const visibleLayers = new Set([
+            JSON.stringify([0, "Classic", "Road"]),
+            JSON.stringify([1, "Live", "Lane"])
+        ]);
+
+        expect(defaultFeatureSearchViewIndicesForMapLayers(
+            selectedMapLayers,
+            2,
+            (viewIndex, ref) => visibleLayers.has(JSON.stringify([viewIndex, ref.mapId, ref.layerId]))
+        )).toEqual([0, 1]);
+    });
+
+    it("falls back to all current views when selected layers are hidden", () => {
+        expect(defaultFeatureSearchViewIndicesForMapLayers(
+            [{mapId: "Classic", layerId: "Road"}],
+            2,
+            () => false
+        )).toEqual([0, 1]);
+    });
+
+    it("normalizes default selected views to the current view count", () => {
+        expect(defaultFeatureSearchViewIndicesForMapLayers(
+            [{mapId: "Classic", layerId: "Road"}],
+            1,
+            () => true
+        )).toEqual([0]);
+    });
+});

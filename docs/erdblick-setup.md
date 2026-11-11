@@ -4,10 +4,13 @@ Erdblick is a self-contained web application that talks to any mapget-compatible
 
 ## Build modes
 
-| Mode | When to use it | How to build/select |
+| Mode | When to use it | Build output |
 | --- | --- | --- |
-| **Full** | Standard interactive UI with panels for maps, styles, inspection, search, statistics, and diagnostics. | From the erdblick repository root: `./build-ui.bash .` |
-| **Visualization only** | Kiosk or embed scenarios where you control the view through URLs and hide editors/search panels. | From the erdblick repository root: `./build-ui.bash . visualization-only` |
+| **Full** | Standard interactive UI with panels for maps, styles, inspection, search, statistics, and diagnostics. | `static/browser/` |
+| **Visualization only** | Kiosk or embed scenarios where you control the view through URLs and hide editors/search panels. | `static-visualization-only/browser/` |
+
+`./ci/20_linux_rebuild.bash` builds both variants from the erdblick repository
+root. See [Running from source](#running-from-source) for the prerequisites.
 
 Both variants connect to the same backend. Map data, sources, and layers are advertised by that backend (typically `mapget serve` running with your YAML config). The visualization-only build simply omits most UI panels; all state must be encoded in the startup URL or provided through the backend configuration.
 
@@ -25,14 +28,43 @@ Some container images or products ship a prebuilt erdblick bundle in a directory
 
 ## Running from source
 
-1. Install Node.js LTS and PNPM (or npm) according to the requirements in `package.json`.
-2. From the erdblick repository root, run `./build-ui.bash .` for an optimized production bundle. Set `NG_DEVELOP=true` before running the script if you need a development build. Advanced setups can also use `./ci/20_linux_rebuild.bash`: its default profiling build keeps the release WASM and production Angular optimizer, but preserves JavaScript identifiers and source maps. Pass `production` for the compact deployment build.
-3. Serve the build output directory with `mapget serve -w <path-to-dist>` or run a development server with:
-   ```bash
-   npm install
-   npm start
-   ```
-   The development server is convenient for short interactive frontend sessions with test data.
+The source build needs Node.js/npm compatible with `package.json`, CMake and
+Ninja, plus Emscripten. Initialize missing repository submodules in a new
+checkout. From the erdblick root on Linux, prepare the SDK only if
+`ci/emsdk/` is not already set up:
+
+```bash
+./ci/00_linux_setup.bash
+```
+
+Then build the generated C++/WASM bindings and both UI variants:
+
+```bash
+./ci/20_linux_rebuild.bash
+```
+
+The wrapper activates the SDK and reuses the existing build tree and generator.
+Its default profiling build keeps release WASM and Angular optimization while
+preserving JavaScript identifiers and source maps. Pass `production` for compact
+deployment bundles or `debug` for debug artifacts.
+
+Serve either output directory with a compatible backend, for example:
+
+```bash
+mapget serve -w static/browser
+```
+
+For interactive frontend iteration, `npm start` provides a development server
+once the generated bindings and WASM in `build/libs/core/` match the checked-out
+native APIs. Those artifacts are not source-controlled; run the wrapper first
+on a clean checkout or after executable native/API changes. Use `npm ci` when
+npm dependencies need refreshing after a checkout or lockfile change.
+
+Whenever iteration requires a validation build, use
+`./ci/20_linux_rebuild.bash`, including for frontend-only changes. Verified
+editorial changes do not require a build by default. See the
+[developer guide](erdblick-dev-guide.md#build-and-test) for validation scope,
+shared-build coordination and matching the running backend to the frontend.
 
 ## Backend configuration
 
@@ -68,7 +100,7 @@ The `config/` directory used to build or host erdblick controls UI-side metadata
   - `styles`: array of `{ "id": "...", "url": "<file>.yaml" }`; plain filenames are requested from `/static-config/styles/` and this list defines the base style set.
   - `additionalStyles`: optional array of extra style entries appended after the base style set. Entries use the same string or `{ "id": "...", "url": "..." }` shape as `styles`, but are tagged as additional in the UI.
   - `mapPresets`: optional inline array of map-agnostic compositions. Each entry has `id`, `name`, optional `enabled`, and a non-empty `layerPresets` list whose entries identify an exact `layerId`, owning `styleId`, and embedded `presetId`. A map uses the components for layers it actually has, requires at least one matching component, and rejects references that are broken for a layer it does have. There is no external preset file or URL.
-  - `extensionModules.distribVersions`: JavaScript file to display version provenance in the footer.
+  - `extensionModules.distribVersions`: JavaScript file to display version provenance in the footer. The standalone bundle uses its own version file; configure this optional module only when its JavaScript file is served below `/static-config`.
   - `extensionModules.jumpTargets`: JavaScript file that supplies additional jump-to shortcuts.
   - `surveys`: optional array configuring the in-app survey banner (`id`, `link`, `linkHtml`, optional `start`/`end` dates, `emoji`, and `background`); omit or leave empty to disable surveys.
   - `backgroundLayers`: optional array of raster backgrounds shown in the Maps panel. Supported types are:

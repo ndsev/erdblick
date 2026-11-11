@@ -133,6 +133,13 @@ vec3 gpuScene_rotateCommonOffset(vec4 commonPosition, vec3 commonOffset) {
   return commonOffset;
 }
 
+// Exact CSS-pixel offsets in normalized device coordinates. Deck's similarly
+// named clip-space helper includes focalDistance; our shaders multiply by the
+// individual vertex's clip W instead so width stays constant at every depth.
+vec2 gpuScene_pixelSizeToNdc(vec2 pixels) {
+  return pixels * 2.0 * project.devicePixelRatio / project.viewportSize;
+}
+
 vec2 gpuScene_clipToPixels(vec4 clipPosition) {
   float reciprocalW = 1.0 / max(abs(clipPosition.w), 0.000001);
   return clipPosition.xy * reciprocalW * project.viewportSize * 0.5 /
@@ -622,7 +629,7 @@ void main(void) {
 
 export const POINT_BILLBOARD_VERTEX_SHADER = POINT_VERTEX_SHADER.replace(
   `vec3 offset = positions * project_pixel_size(radius);\n  offset = gpuScene_rotateCommonOffset(commonPosition, offset);\n  geometry.position = commonPosition + vec4(offset, 0.0);\n  gl_Position = project_common_position_to_clipspace(geometry.position);`,
-  `geometry.position = commonPosition;\n  gl_Position = clipPosition;\n  gl_Position.xy += project_pixel_size_to_clipspace(positions.xy * radius) * gl_Position.w;`,
+  `geometry.position = commonPosition;\n  gl_Position = clipPosition;\n  gl_Position.xy += gpuScene_pixelSizeToNdc(positions.xy * radius) * gl_Position.w;`,
 );
 
 export const POINT_FRAGMENT_SHADER = `\
@@ -742,7 +749,7 @@ void main(void) {
 
 export const ICON_BILLBOARD_VERTEX_SHADER = ICON_VERTEX_SHADER.replace(
   `vec3 offset = vec3(pixelPosition * project_pixel_size(1.0), 0.0);\n  offset = gpuScene_rotateCommonOffset(commonPosition, offset);\n  geometry.position = commonPosition + vec4(offset, 0.0);\n  gl_Position = project_common_position_to_clipspace(geometry.position);`,
-  `geometry.position = commonPosition;\n  gl_Position = clipPosition;\n  gl_Position.xy += project_pixel_size_to_clipspace(pixelPosition) * gl_Position.w;`,
+  `geometry.position = commonPosition;\n  gl_Position = clipPosition;\n  gl_Position.xy += gpuScene_pixelSizeToNdc(pixelPosition) * gl_Position.w;`,
 );
 
 export const ICON_FRAGMENT_SHADER = `\
@@ -782,7 +789,7 @@ void gpuScene_applyMinimumScreenLength(
   }
   float minimumLength = max(24.0, width * 6.0);
   float extension = max(0.0, minimumLength - segmentLength);
-  vec2 extensionNdc = project_pixel_size_to_clipspace(
+  vec2 extensionNdc = gpuScene_pixelSizeToNdc(
     segment / segmentLength * extension);
 #ifdef ERDBLICK_SCREEN_LENGTH_START_ANCHOR
   endClip.xy += extensionNdc * endClip.w;
@@ -1064,23 +1071,23 @@ void main(void) {
 
   float offsetScale = gpuScene_offsetScale(instancePathStyle.w);
   if ((flags & PATH_VARIABLE_OFFSET) != 0u) {
-    clip0.xy += project_pixel_size_to_clipspace(gpuScene_localVectorToScreen(
+    clip0.xy += gpuScene_pixelSizeToNdc(gpuScene_localVectorToScreen(
       common0, clip0, instanceOffsetVectors01.xy * offsetScale)) * clip0.w;
-    clip1.xy += project_pixel_size_to_clipspace(gpuScene_localVectorToScreen(
+    clip1.xy += gpuScene_pixelSizeToNdc(gpuScene_localVectorToScreen(
       common1, clip1, instanceOffsetVectors01.zw * offsetScale)) * clip1.w;
-    clip2.xy += project_pixel_size_to_clipspace(gpuScene_localVectorToScreen(
+    clip2.xy += gpuScene_pixelSizeToNdc(gpuScene_localVectorToScreen(
       common2, clip2, instanceOffsetVectors23.xy * offsetScale)) * clip2.w;
-    clip3.xy += project_pixel_size_to_clipspace(gpuScene_localVectorToScreen(
+    clip3.xy += gpuScene_pixelSizeToNdc(gpuScene_localVectorToScreen(
       common3, clip3, instanceOffsetVectors23.zw * offsetScale)) * clip3.w;
   } else {
     vec2 offset0 = pathScreenNormal(clip0, clip1) * instanceScalarOffsets.x;
     vec2 offset1 = pathScreenNormal(clip0, clip2) * instanceScalarOffsets.y;
     vec2 offset2 = pathScreenNormal(clip1, clip3) * instanceScalarOffsets.z;
     vec2 offset3 = pathScreenNormal(clip2, clip3) * instanceScalarOffsets.w;
-    clip0.xy += project_pixel_size_to_clipspace(offset0) * clip0.w;
-    clip1.xy += project_pixel_size_to_clipspace(offset1) * clip1.w;
-    clip2.xy += project_pixel_size_to_clipspace(offset2) * clip2.w;
-    clip3.xy += project_pixel_size_to_clipspace(offset3) * clip3.w;
+    clip0.xy += gpuScene_pixelSizeToNdc(offset0) * clip0.w;
+    clip1.xy += gpuScene_pixelSizeToNdc(offset1) * clip1.w;
+    clip2.xy += gpuScene_pixelSizeToNdc(offset2) * clip2.w;
+    clip3.xy += gpuScene_pixelSizeToNdc(offset3) * clip3.w;
   }
 
   if ((flags & PATH_TRIM_START) != 0u) {
@@ -1091,7 +1098,7 @@ void main(void) {
       ? segment / segmentPixels
       : vec2(0.0);
     vec2 trim = direction * min(instanceTrim.x, max(0.0, segmentPixels - 0.5));
-    vec2 trimNdc = project_pixel_size_to_clipspace(trim);
+    vec2 trimNdc = gpuScene_pixelSizeToNdc(trim);
     clip0.xy += trimNdc * clip0.w;
     clip1.xy += trimNdc * clip1.w;
   }
@@ -1103,7 +1110,7 @@ void main(void) {
       ? segment / segmentPixels
       : vec2(0.0);
     vec2 trim = direction * min(instanceTrim.y, max(0.0, segmentPixels - 0.5));
-    vec2 trimNdc = project_pixel_size_to_clipspace(trim);
+    vec2 trimNdc = gpuScene_pixelSizeToNdc(trim);
     clip2.xy -= trimNdc * clip2.w;
     clip3.xy -= trimNdc * clip3.w;
   }
@@ -1119,7 +1126,7 @@ void main(void) {
   pathClipLine(previous, current);
   pathClipLine(next, current);
   pathClipLine(current, mix(next, previous, float(isEnd)));
-  vec2 halfWidth = project_pixel_size_to_clipspace(
+  vec2 halfWidth = gpuScene_pixelSizeToNdc(
     vec2(max(0.0, instancePathStyle.x) * 0.5));
   vec3 offset = pathJoinOffset(
     previous.xyz / previous.w,
@@ -1469,7 +1476,7 @@ void main(void) {
   vec4 currentClip = mix(startClip, endClip, float(isEnd));
   geometry.position = mix(startCommon, endCommon, float(isEnd));
   gl_Position = currentClip;
-  gl_Position.xy += project_pixel_size_to_clipspace(offsetPixels) *
+  gl_Position.xy += gpuScene_pixelSizeToNdc(offsetPixels) *
     gl_Position.w;
   gpuScene_applyDepthBias(
     gl_Position,
@@ -1717,9 +1724,9 @@ void main(void) {
       ? vec2(direction.y, -direction.x) / directionLength * instanceArrowStyle.x
       : vec2(0.0);
   }
-  previousClip.xy += project_pixel_size_to_clipspace(offsetPixels) *
+  previousClip.xy += gpuScene_pixelSizeToNdc(offsetPixels) *
     previousClip.w;
-  tipClip.xy += project_pixel_size_to_clipspace(offsetPixels) * tipClip.w;
+  tipClip.xy += gpuScene_pixelSizeToNdc(offsetPixels) * tipClip.w;
   vec2 tangent = gpuScene_clipToPixels(tipClip) -
     gpuScene_clipToPixels(previousClip);
   float tangentLength = length(tangent);
@@ -1732,7 +1739,7 @@ void main(void) {
     normal * positions.x * arrowSize + tangent * positions.y * arrowSize;
   geometry.position = tipCommon;
   gl_Position = tipClip;
-  gl_Position.xy += project_pixel_size_to_clipspace(triangleOffset) *
+  gl_Position.xy += gpuScene_pixelSizeToNdc(triangleOffset) *
     gl_Position.w;
   gpuScene_applyDepthBias(
     gl_Position,

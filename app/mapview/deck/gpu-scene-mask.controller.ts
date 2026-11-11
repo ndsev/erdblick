@@ -2,16 +2,16 @@ import {COORDINATE_SYSTEM} from "@deck.gl/core";
 import {Texture, type Device} from "@luma.gl/core";
 
 import type {DeckInteractionEffect, DeckRgba} from
-    "./deck-interaction-effect";
-import type {DeckInteractionOutlineService} from
-    "./deck-interaction-outline.service";
+    "./deck-interaction-effect.util";
+import type {DeckInteractionOutline} from
+    "./deck-interaction-outline.visualization";
 import {
     ErdblickVectorMaskLayer,
     NO_POLYGON_OFFSET,
     type ErdblickVectorMaskConfiguration
 } from "./erdblick-vector.layer";
 import {GpuSceneMaskMode} from "./erdblick-vector.shaders";
-import type {GpuScene} from "./gpu-scene";
+import type {GpuScene} from "./gpu-scene.visualization";
 import type {TileSubsetInteractionOverlay} from
     "./tile-subset-interaction.model";
 
@@ -66,7 +66,12 @@ class SparseMaskTargetTable {
         this.targetTexture = this.createTexture(this.height);
     }
 
-    /** Update sparse identities and return the current sampled texture. */
+    /**
+     * Update sparse identities and return the current sampled texture, borrowed
+     * from this owner. requiredRecords must cover every target index; capacity
+     * grows geometrically and never shrinks. Growth publishes only after upload
+     * succeeds; an in-place upload can fail after earlier spans have changed.
+     */
     update(next: ReadonlyMap<number, DeckRgba>, requiredRecords: number): Texture {
         const nextHeight = this.requiredHeight(requiredRecords);
         if (nextHeight !== this.height) {
@@ -106,7 +111,7 @@ class SparseMaskTargetTable {
         return this.targetTexture;
     }
 
-    /** Release the sampled target texture. */
+    /** Release both the active texture and any replacements still awaiting frame retirement. */
     destroy(): void {
         this.targetTexture.destroy();
         this.retiredTextures.forEach(texture => texture.destroy());
@@ -190,8 +195,9 @@ class SparseMaskTargetTable {
  * Per-view interaction/glow owner over the persistent GpuScene buffers.
  *
  * Visualizations contribute only semantic target sets and stripe anchors.
- * The controller coalesces them into a bounded number of sparse target
- * textures and mask passes; it never creates geometry-sized JavaScript data.
+ * The controller shares one target texture/pass per interaction ID or glow
+ * color/radius combination. There is no fixed group-count or texture-size cap;
+ * target textures follow the scene picking high-water mark without copying vertices.
  */
 export class GpuSceneMaskController {
     private readonly owners = new Map<string, MaskOwner>();
@@ -205,11 +211,17 @@ export class GpuSceneMaskController {
     constructor(
         private readonly device: Device,
         private readonly scene: GpuScene,
-        private readonly outlineService: DeckInteractionOutlineService,
+        private readonly outlineService: DeckInteractionOutline,
         private readonly flattenZ: boolean
     ) {}
 
-    /** Replace one stable scene owner's exact local targets and schedule reconciliation. */
+    /**
+     * Replace one stable scene owner's exact local targets and schedule reconciliation.
+     * Collections/anchor are copied, but overlay objects and their nested effects/
+     * targets are borrowed; keep them unchanged until replaced. Owners sharing an
+     * overlay ID must agree on its effect/order/anchor because the first owner
+     * supplies the group settings.
+     */
     setOverlays(
         ownerId: string,
         contributionIdentities: ReadonlySet<string>,
@@ -371,7 +383,10 @@ export class GpuSceneMaskController {
         }
     }
 
-    /** Install, mutate, or remove the bounded hidden layer set. */
+    /**
+     * Install, mutate, or remove hidden mask layers, reconciling groups independently.
+     * Allocation/upload failures do not roll back earlier groups.
+     */
     private reconcile(): void {
         this.reconcileHandle = null;
         this.reconcileDelayMs = null;

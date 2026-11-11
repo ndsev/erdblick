@@ -14,12 +14,13 @@ import {CollisionFilterExtension} from "@deck.gl/extensions";
 import {TextLayer} from "@deck.gl/layers";
 
 import {DeckZIndexExtension} from "./deck-z-index.extension";
+import {ScreenSpaceSizeExtension} from "./screen-space-size.extension";
 import {
     GpuLabelFlag,
     GpuLabelSizeUnit,
     GpuLabelWordBreak
-} from "./gpu-render-packet";
-import type {GpuScene, GpuSceneLabel} from "./gpu-scene";
+} from "./gpu-render-packet.model";
+import type {GpuScene, GpuSceneLabel} from "./gpu-scene.visualization";
 
 const NO_DEPTH_PARAMETERS = {
     depthCompare: "always",
@@ -137,6 +138,9 @@ export class GpuTextLayerHost extends CompositeLayer<LayerProps & {
                 wordBreak: bucket.wordBreak,
                 maxWidth: bucket.maxWidth,
                 extensions: [
+                    ...(bucket.billboard && bucket.sizeUnits === "pixels"
+                        ? [new ScreenSpaceSizeExtension()]
+                        : []),
                     ...(bucket.depthTest
                         ? [new DeckZIndexExtension()]
                         : []),

@@ -8,7 +8,7 @@ import {
     SimpleChanges
 } from "@angular/core";
 import {OverlayOptions} from "primeng/api";
-import {FeatureSearchMapLayerRef, FeatureSearchScope} from "../shared/feature-search-state";
+import {FeatureSearchMapLayerRef, FeatureSearchScope} from "./search-definition.model";
 import type {SearchValueSummariesState, SearchValueSummary} from "./search.model";
 import {
     autoInitializeSearchStyleColorDraft,
@@ -29,7 +29,8 @@ import {
     SearchStyleFieldOption,
     SearchStyleFieldValueKind,
     SearchStyleGradientStopDraft,
-    sortedGradientStopDrafts
+    sortedGradientStopDrafts,
+    specialStopsForType
 } from "./search-style-color.util";
 
 @Component({
@@ -115,6 +116,23 @@ import {
 
             @if (colorWarning) {
                 <div class="search-style-color-warning">{{ colorWarning }}</div>
+            }
+            @if (viewDraft.mode !== 'solid' && viewDraft.specialStops?.length) {
+                <div class="search-style-color-stop-list">
+                    <span>Special values</span>
+                    @for (stop of viewDraft.specialStops; track stop.id) {
+                        <div class="search-style-color-stop-row">
+                            <p-colorpicker [ngModel]="stop.color" appendTo="body"
+                                           [overlayOptions]="colorPickerOverlayOptions"
+                                           [attr.aria-label]="specialColorLabel(stop)"
+                                           (ngModelChange)="setSpecialStopColor(stop, $event)"></p-colorpicker>
+                            <span>{{ specialColorLabel(stop) }}</span>
+                            <p-button icon="pi pi-times" severity="danger" [outlined]="true"
+                                      pTooltip="Use fallback for this special value"
+                                      (click)="deleteSpecialStop(stop)"></p-button>
+                        </div>
+                    }
+                </div>
             }
 
             @if (viewDraft.mode === 'gradient') {
@@ -283,6 +301,11 @@ export class SearchStyleColorComponent implements OnChanges {
         this.customFieldCompletionOwnerId = `search-style-color-field-${componentId}`;
     }
 
+    /**
+     * Refresh the local editable copy on parent changes. Complete an explicitly
+     * requested data refresh when its summary arrives; metadata updates alone do
+     * not regenerate the user's saved stops.
+     */
     ngOnChanges(changes: SimpleChanges): void {
         if (!this.draft) {
             return;
@@ -322,13 +345,42 @@ export class SearchStyleColorComponent implements OnChanges {
     }
 
     protected get gradientTags() {
-        return gradientValueTags(this.viewDraft);
+        const numeric = this.selectedFieldOption()?.schemaType?.numeric;
+        return gradientValueTags(this.viewDraft).map(tag => ({...tag,
+            label: numeric?.unit
+                ? `${Number((Number(tag.label) * numeric.scale + numeric.offset).toPrecision(8))} ${numeric.unit}`
+                : tag.label
+        }));
+    }
+
+    /** Explain exceptional raw codes using the current field's metadata. */
+    protected specialColorLabel(stop: SearchStyleGradientStopDraft): string {
+        const names = this.selectedFieldOption()?.schemaType?.namedValues
+            .filter(named => named.role === "special" && named.value === stop.value).map(named => named.name) ?? [];
+        return `${stop.value}${names.length ? ` (${names.join(", ")})` : ""}`;
+    }
+
+    /** Editing a special color preserves its raw code and the ordinary stops. */
+    protected setSpecialStopColor(stop: SearchStyleGradientStopDraft, color: string): void {
+        this.viewDraft = {...this.viewDraft, specialStops: this.viewDraft.specialStops?.map(candidate =>
+            candidate.id === stop.id ? {...candidate, color: normalizeHexColor(color)} : candidate)};
+        this.emitChange();
+    }
+
+    /** Removing an override deliberately exposes the scale's fallback for that code. */
+    protected deleteSpecialStop(stop: SearchStyleGradientStopDraft): void {
+        this.viewDraft = {...this.viewDraft, specialStops: this.viewDraft.specialStops?.filter(candidate => candidate.id !== stop.id)};
+        this.emitChange();
     }
 
     protected get canSortGradientStops(): boolean {
         return gradientStopsNeedSorting(this.viewDraft);
     }
 
+    /**
+     * Switch modes and regenerate defaults from the selected schema field, choosing
+     * a numeric field for gradients or keeping the previous mode when none exists.
+     */
     protected setMode(mode: SearchStyleColorMode): void {
         this.clearDataWarning();
         let nextField = this.viewDraft.field;
@@ -347,6 +399,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    /** Select a schema field and rebuild defaults only when its type supports the mode. */
     protected setField(field: string): void {
         this.clearDataWarning();
         if (this.viewDraft.mode === "gradient" && !this.fieldSupportsGradient(field)) {
@@ -359,6 +412,10 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    /**
+     * Switch between free expressions and schema choices. Returning to the field
+     * picker resolves a compatible current field before regenerating its stops.
+     */
     protected setFieldMode(mode: "field" | "custom"): void {
         this.clearDataWarning();
         if (mode === "custom") {
@@ -401,10 +458,15 @@ export class SearchStyleColorComponent implements OnChanges {
         this.setFieldMode(this.viewDraft.customField ? "field" : "custom");
     }
 
+    /**
+     * Retain edited stops while changing the expression, but discard saved type
+     * guards and special-value overrides when they refer to the previous expression.
+     */
     protected setCustomField(field: string): void {
         this.clearDataWarning();
         this.viewDraft = {
             ...this.viewDraft,
+            ...(field !== this.viewDraft.field ? {specialStops: undefined} : {}),
             field: field ?? "",
             customField: this.viewDraft.customField || this.fieldOptions.length > 0,
             categoryValueKind: this.fieldOptions.length > 0
@@ -416,6 +478,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    /** Keep the fallback synchronized with the selected solid color for later mode changes. */
     protected setSolidColor(color: string): void {
         const solidColor = normalizeHexColor(color);
         this.viewDraft = {
@@ -436,6 +499,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    /** Append an incomplete numeric row with its own stable editor ID. */
     protected addGradientStop(): void {
         this.clearDataWarning();
         this.viewDraft = {
@@ -463,6 +527,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    /** Keep blank or non-finite input as null so the editor can show an incomplete row. */
     protected setGradientStopValue(stop: SearchStyleGradientStopDraft, value: number | string | null): void {
         this.clearDataWarning();
         const numberValue = value === null || value === "" ? Number.NaN : Number(value);
@@ -484,6 +549,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    /** Apply an explicit user-requested sort while preserving stop IDs and colors. */
     protected sortGradientStops(): void {
         if (!this.canSortGradientStops) {
             return;
@@ -496,6 +562,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    /** Append a pending category row; its empty text is not yet an authored key. */
     protected addCategoryStop(): void {
         this.clearDataWarning();
         this.viewDraft = {
@@ -524,6 +591,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.emitChange();
     }
 
+    /** Keep category text editable and mark whitespace-only input as pending. */
     protected setCategoryStopValue(stop: SearchStyleCategoryStopDraft, value: string): void {
         this.clearDataWarning();
         const valueText = value ?? "";
@@ -576,7 +644,8 @@ export class SearchStyleColorComponent implements OnChanges {
         return Math.max(
             0,
             ...draft.gradientStops.map(stop => stop.id),
-            ...draft.categoryStops.map(stop => stop.id)
+            ...draft.categoryStops.map(stop => stop.id),
+            ...(draft.specialStops ?? []).map(stop => stop.id)
         );
     }
 
@@ -632,6 +701,10 @@ export class SearchStyleColorComponent implements OnChanges {
         return isNumericStyleValueKind(option?.valueKind);
     }
 
+    /**
+     * Generate schema defaults using this editor's ID sequence and surface the
+     * reason when automatic initialization cannot produce a usable scale.
+     */
     private autoInitializedDraft(draft: SearchStyleColorDraft): SearchStyleColorDraft {
         const result = autoInitializeSearchStyleColorDraft(
             draft,
@@ -647,6 +720,23 @@ export class SearchStyleColorComponent implements OnChanges {
         this.dataColorWarning = "";
     }
 
+    /**
+     * Result summaries expose a type only when every value has that exact ID.
+     * Several maps can instead share equivalent types verified by the field
+     * picker. Use that metadata to initialize missing exception colors, without
+     * binding the scale to the current source. Updating ordinary stops preserves
+     * edited or deleted special colors.
+     */
+    private observedColorBinding(summary: SearchValueSummary) {
+        const field = this.selectedFieldOption();
+        const type = summary.schemaType ?? field?.schemaType;
+        return {
+            type,
+            specialStops: this.viewDraft.specialStops
+                ?? (type ? specialStopsForType(type, () => this.nextStopId++) : undefined)
+        };
+    }
+
     /** Uses observed numeric min/max to rebuild gradient stops. */
     private updateGradientStopsFromData(summary: SearchValueSummary): void {
         if (!summary.numeric || summary.numeric.count <= 0) {
@@ -655,10 +745,11 @@ export class SearchStyleColorComponent implements OnChanges {
             return;
         }
 
+        const binding = this.observedColorBinding(summary);
         const gradientStops = gradientStopsForObservedNumericRange({
             min: summary.numeric.min,
             max: summary.numeric.max
-        }, () => this.nextStopId++);
+        }, () => this.nextStopId++, binding.type?.numeric);
         if (gradientStops.length === 0) {
             this.dataColorWarning = "Observed numeric values do not provide a usable range.";
             this.updateColorWarning();
@@ -668,7 +759,8 @@ export class SearchStyleColorComponent implements OnChanges {
         this.viewDraft = {
             ...this.viewDraft,
             gradientStops,
-            categoryStops: []
+            categoryStops: [],
+            specialStops: binding.specialStops
         };
         this.dataColorWarning = "";
         this.emitChange();
@@ -677,9 +769,17 @@ export class SearchStyleColorComponent implements OnChanges {
 
     /** Rebuilds category stops from observed numeric, boolean, or string values. */
     private updateCategoryStopsFromData(summary: SearchValueSummary): void {
+        if (summary.kinds.bitmask > 0) {
+            this.dataColorWarning = "Choose a named flag from the field picker to color its presence. Raw mask combinations are not categories.";
+            this.updateColorWarning();
+            return;
+        }
+        const binding = this.observedColorBinding(summary);
+        const specialValues = new Set(binding.type?.namedValues
+            .filter(named => named.role === "special").map(named => String(named.value)) ?? []);
         const values = summary.histogram
             .map(bucket => bucket.value)
-            .filter(value => value.trim().length > 0);
+            .filter(value => value.trim().length > 0 && !specialValues.has(value));
         if (values.length === 0) {
             this.dataColorWarning = "Observed data for this expression has no category histogram.";
             this.updateColorWarning();
@@ -688,9 +788,18 @@ export class SearchStyleColorComponent implements OnChanges {
 
         const valueKind = this.observedCategoryValueKind(summary)
             ?? this.selectedFieldOption()?.valueKind;
+        if (summary.kinds.integer > 0 && values.some(value =>
+            /^-?\d+$/.test(value) && !Number.isSafeInteger(Number(value)))) {
+            this.dataColorWarning = "Some observed integers exceed the editor's exact numeric range. Their raw values remain available in Diagnostics.";
+            this.updateColorWarning();
+            return;
+        }
+        // Refreshing observed categories changes ordinary stops only. Preserve
+        // edited or deleted special colors across equivalent source versions.
         this.viewDraft = {
             ...this.viewDraft,
             categoryValueKind: valueKind,
+            specialStops: binding.specialStops,
             gradientStops: [],
             categoryStops: categoryStopsForObservedValues(
                 values,
@@ -725,7 +834,10 @@ export class SearchStyleColorComponent implements OnChanges {
         return undefined;
     }
 
-    /** Explains why observed data is not available yet and kicks off lazy aggregation. */
+    /**
+     * Explains why observed data is not available yet. The requesting action starts
+     * lazy aggregation; this method only reports its current state.
+     */
     private dataSummaryMissingMessage(): string {
         if (this.dataSummaryStatus === "loading") {
             return "Summarizing observed values...";
@@ -733,12 +845,19 @@ export class SearchStyleColorComponent implements OnChanges {
         if (this.dataSummaryStatus === "error") {
             return "Observed value summary failed. See Diagnostics.";
         }
-        if (this.dataSummaryStatus === "empty" || this.dataSummaryStatus === "ready") {
+        if (this.dataSummaryStatus === "ready") {
+            return "No single observed value type is available. Check Diagnostics for missing values or mixed types.";
+        }
+        if (this.dataSummaryStatus === "empty") {
             return "No observed values are available for this expression.";
         }
         return "Summarizing observed values; click again when ready.";
     }
 
+    /**
+     * Prioritize data failures, then mode compatibility.
+     * If no stops exist, ask the initializer for an explanation without applying it.
+     */
     private updateColorWarning(): void {
         if (this.dataColorWarning) {
             this.colorWarning = this.dataColorWarning;

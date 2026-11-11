@@ -1,0 +1,364 @@
+.omnibar-wrapper {
+  position: fixed;
+  top: 0.35em;
+  left: 2.75em;
+  min-width: 15em;
+  max-width: calc(100vw - 5em);
+  max-height: calc(100vh - 5em);
+  z-index: 130000;
+
+  &.shifted {
+    left: 0.5em !important;
+  }
+
+  // The closed palette must occupy only its input's width. Otherwise the
+  // remembered panel width creates an invisible hit area over the main menu.
+  &:not(.is-open) .resizable-container {
+    display: none;
+  }
+
+  .resizable-container {
+    position: relative;
+    width: 34rem;
+    min-width: 15em;
+    min-height: 0;
+    overflow: auto;
+    max-width: calc(100vw - 5em);
+    max-height: calc(100vh - 10.5em);
+  }
+
+  //.resizable-container.multiline {
+  //  max-height: calc(100vh - 10.8em) !important;
+  //}
+
+  .omnibar-input {
+    width: 100%;
+    position: relative;
+    line-height: 0;
+
+    textarea {
+      width: 100% !important;
+      transition: all 0.3s;
+      resize: none;
+      animation-duration: 0.1s !important;
+      transition-duration: 0.1s !important;
+      padding: 0.625em;
+      font-size: 1em;
+      margin-top: 0;
+      margin-bottom: 0;
+      box-shadow: none !important;
+      border-radius: 0.5em 0.5em 0 0;
+    }
+
+    textarea.single-line {
+      min-height: 1.5em;
+      width: 15.5em !important;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      overflow: hidden;
+      padding: 0.25em;
+      border-radius: 0.5em;
+    }
+
+  }
+
+  .p-dialog-mask {
+    position: relative !important;
+    height: inherit !important;
+    width: inherit !important;
+    min-width: 22em !important;
+    left: 0 !important;
+    top: 0 !important;
+  }
+
+  .p-dialog {
+    width: 100%;
+    margin: 0;
+    overflow: auto;
+    max-height: calc(100vh - 10.5em);
+    border-radius: 0 0 0.5em 0.5em;
+  }
+
+  .p-dialog-content {
+    padding: 0;
+  }
+
+  .p-dialog-header {
+    display: none;
+  }
+
+  .omnibar-menu-panel {
+    container: omnibar / inline-size;
+  }
+
+  // Keep details below the action name for active choices, history and invalid
+  // drafts. Reserve the remove-button column so all text lines stay aligned.
+  .omnibar-option-wrapper {
+    display: grid;
+    grid-template-columns: 1.65em minmax(0, 1fr) 1.6em;
+    grid-template-areas:
+      "icon name end"
+      "icon details end";
+    align-items: center;
+    gap: 0.15em 0.35em;
+    min-width: 0;
+    padding: 0.2em 0.25em;
+    border-radius: 0.25em;
+    font-size: 0.9em;
+    cursor: pointer;
+
+    &.history-entry {
+      background: color-mix(in srgb, var(--p-purple-500) 10%, var(--p-content-background));
+    }
+
+    &:hover,
+    &:focus-visible {
+      background: var(--p-highlight-background);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--p-primary-color);
+      outline-offset: -2px;
+    }
+  }
+
+  .omnibar-option-name {
+    grid-area: name;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: bold;
+  }
+
+  .omnibar-bubbles {
+    grid-area: details;
+    display: flex;
+    font-size: 0.9em;
+    gap: 0.25em;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .omnibar-bubble {
+    display: inline-flex;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 0.55em;
+    line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+
+    .omnibar-bubble-name,
+    .omnibar-bubble-value {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 0.05em 0.4em;
+    }
+
+    .omnibar-bubble-name {
+      flex: 0 2 auto;
+      max-width: 8em;
+      color: var(--p-text-muted-color);
+      background: var(--p-content-hover-background);
+    }
+
+    .omnibar-bubble-value {
+      flex: 0 1 auto;
+      background: var(--p-content-background);
+    }
+
+    .omnibar-bubble-name + .omnibar-bubble-value {
+      border-left: 1px solid var(--p-content-border-color);
+    }
+
+    &.bubble-missing .omnibar-bubble-value {
+      color: var(--p-text-muted-color);
+    }
+
+    &.bubble-error {
+      border-color: var(--p-red-400);
+      color: var(--p-red-500);
+    }
+  }
+
+  .omnibar-description {
+    display: block;
+    padding: 0.05em 0.4em;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--p-text-muted-color);
+  }
+
+  // At narrow panel widths, values carry more useful information than repeated
+  // argument labels. The complete name/value pair remains in each tooltip.
+  @container omnibar (max-width: 26rem) {
+    .omnibar-bubble-name {
+      display: none;
+    }
+
+    .omnibar-bubble-name + .omnibar-bubble-value {
+      border-left: none;
+    }
+  }
+
+  .action-icon {
+    grid-area: icon;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.65em;
+    height: 1.65em;
+    border-radius: 50%;
+    color: white;
+
+    i,
+    .material-symbols-outlined {
+      font-size: 1em;
+      line-height: 1;
+    }
+  }
+
+  .item-disabled .action-icon {
+    background-color: darkgrey !important;
+  }
+
+  .omnibar-row-end {
+    grid-area: end;
+    display: flex;
+    justify-content: center;
+  }
+
+  .omnibar-remove-button {
+    width: 1.6em;
+    height: 1.6em;
+    padding: 0;
+    border: none;
+    border-radius: 0.25em;
+    background: transparent;
+    color: var(--p-text-muted-color);
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible {
+      background: var(--p-red-500);
+      color: white;
+    }
+  }
+
+  .blue {
+    background-color: var(--p-primary-500);
+  }
+
+  .red {
+    background-color: indianred !important;
+  }
+
+  .orange {
+    background-color: darkorange !important;
+  }
+
+  .green {
+    background-color: limegreen !important;
+  }
+
+  .grey {
+    background-color: darkgrey !important;
+  }
+
+  .violet {
+    background-color: blueviolet !important;
+  }
+}
+
+.completion-popup {
+  line-height: normal;
+
+  color: var(--p-content-color);
+  background: var(--p-contextmenu-background);
+  border: 1px solid var(--p-focus-ring-color);
+  border-radius: var(--p-contextmenu-border-radius);
+  padding: var(--p-contextmenu-list-padding);
+
+  position: fixed;
+  margin-top: -0.5em;
+
+  min-width: 150px;
+  min-height: 1em;
+
+  .completion-popup-close {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: 999px;
+    color: var(--p-content-color);
+    cursor: pointer;
+    display: flex;
+    height: 1.35em;
+    justify-content: center;
+    margin-left: auto;
+    opacity: 0.7;
+    padding: 0;
+    width: 1.35em;
+
+    &:hover {
+      background: var(--p-surface-700);
+      opacity: 1;
+    }
+  }
+
+  div {
+    width: 100%;
+
+    padding: 2px;
+    border-radius: 4px;
+
+    background: var(--p-content-background);
+    color: var(--p-content-color);
+
+    cursor: pointer;
+  }
+
+  div.selected {
+    background: var(--p-primary-color);
+    span {
+      color: var(--p-primary-contrast-color) !important;
+    }
+  }
+
+  .row {
+    background: none;
+
+    width: 100%;
+
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .type {
+    font-style: italic;
+    color: var(--p-surface-500);
+    padding-left: 0.5em;
+  }
+
+  .hint {
+    font-size: small;
+    color: var(--p-surface-500);
+  }
+}
+
+.completion-popup-hidden {
+  display: none;
+}
+
+omnibar-panel {
+  .item-disabled {
+    color: darkgrey;
+    pointer-events: none;
+  }
+}

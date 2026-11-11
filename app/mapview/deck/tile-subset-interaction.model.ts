@@ -1,5 +1,10 @@
-import type {TileFeatureId} from "../../shared/appstate.service";
-import type {DeckInteractionEffect} from "./deck-interaction-effect";
+/**
+ * Semantic interaction targets and effect values for a rendered subset.
+ * Visualizations publish these values to the per-view mask controller without
+ * owning its textures or rendering passes.
+ */
+import type { TileFeatureId } from "../../inspection/inspection.model";
+import type { DeckInteractionEffect } from "./deck-interaction-effect.util";
 
 /** Style-order boundary separating ordinary presentation from transient interaction rules. */
 export const INTERACTION_STYLE_ORDER_BASE = 2_000;

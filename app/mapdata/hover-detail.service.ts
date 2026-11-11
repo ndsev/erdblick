@@ -1,31 +1,31 @@
-import {Injectable, OnDestroy} from "@angular/core";
-import {debounceTime, skip, Subject, Subscription} from "rxjs";
-import type {FeatureLayerStyle} from "../../build/libs/core/erdblick-core";
-import {coreLib, uint8ArrayToWasm} from "../integrations/wasm";
+import { Injectable, OnDestroy } from "@angular/core";
 import {
-    AppStateService,
+    debounceTime,
+    skip,
+    Subject,
+    Subscription
+} from "rxjs";
+import type { FeatureLayerStyle } from "../../build/libs/core/erdblick-core";
+import {
     defaultHoverLabelFieldKey,
     type HoverLabelFieldConfig,
     type TileFeatureId
-} from "../shared/appstate.service";
-import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
-import type {ErdblickStyle} from "../styledata/style.service";
-import type {SearchResultTileEntry} from "./map-runtime.model";
-import {MapInfoService} from "./map-info.service";
-import {MapTileStreamService} from "./map-tile-stream.service";
-import type {MapgetLayer} from "./mapget-layer.model";
-import {
-    StyledMapgetLayer,
-    type StyleFilterPlan,
-    type StyledMapgetLayerEvent
-} from "./styled-mapget-layer.model";
-import {MAX_STYLE_LOD} from "../shared/lod-policy";
-import {
-    partitionKey,
-    type PartitionId
-} from "./partition.model";
+} from "../inspection/inspection.model";
+import { InspectionState } from "../inspection/inspection.state";
+import { coreLib, uint8ArrayToWasm } from "../integrations/wasm.adapter";
+import { MAX_STYLE_LOD } from "../mapstyle/style-lod.model";
+import { stripFeatureInspectionTarget } from "../inspection/feature-identity.model";
+import { AppStateService } from "../appstate/appstate.service";
+import type { ErdblickStyle } from "../mapstyle/mapstyle.model";
+import { MapDataService } from "./mapdata.service";
+import type { SearchResultTileEntry } from "../search/search.model";
+import { MapTileStreamService } from "./map-tile-stream.service";
+import type { MapgetLayer } from "./mapget-layer.model";
+import { partitionKey, type PartitionId } from "./partition.model";
+import { StyledMapgetLayer } from "./styled-mapget-layer.presentation";
+import { type StyledMapgetLayerEvent, type StyleFilterPlan } from "./styled-mapget-layer.model";
 
-export type HoverDetailField = {key: string; value: string; colorKey: string};
+export type HoverDetailField = { key: string; value: string; colorKey: string };
 export type HoverFeatureDetails = {
     featureId: string;
     showFeatureId: boolean;
@@ -36,10 +36,10 @@ const FEATURE_ID_EXPRESSION = "id";
 const DECODED_TILE_CACHE_LIMIT = 16;
 
 /**
- * Keeps scalar hover fields resident for visible feature tiles without adding
+ * Keeps projected hover values resident for visible feature tiles without adding
  * geometry or issuing requests in response to pointer movement.
  */
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class HoverDetailService implements OnDestroy {
     readonly valuesChanged = new Subject<string | null>();
 
@@ -55,7 +55,7 @@ export class HoverDetailService implements OnDestroy {
     }>();
     private readonly decodedTiles = new Map<string, {
         valueVersion: number;
-        valuesByFeatureId: Map<string, Map<string, unknown>>;
+        valuesByFeatureId: Map<string, Map<string, readonly unknown[]>>;
     }>();
     private syntheticStyle: ErdblickStyle | null = null;
     private enabled: boolean;
@@ -64,19 +64,20 @@ export class HoverDetailService implements OnDestroy {
     /** Connects persisted field configuration to the proactive filter owners. */
     constructor(
         private readonly state: AppStateService,
-        private readonly mapInfo: MapInfoService,
-        private readonly tileStream: MapTileStreamService
+        private readonly mapInfo: MapDataService,
+        private readonly tileStream: MapTileStreamService,
+        public readonly inspectionState: InspectionState
     ) {
-        this.enabled = this.state.hoverLabelsEnabled;
-        this.activeFields = this.normalizeFields(this.state.hoverLabelFields);
-        this.subscriptions.add(this.state.hoverLabelsEnabledState.pipe(
+        this.enabled = this.inspectionState.hoverLabelsEnabled;
+        this.activeFields = this.normalizeFields(this.inspectionState.hoverLabelFields);
+        this.subscriptions.add(this.inspectionState.hoverLabelsEnabledState.pipe(
             skip(1)
         ).subscribe(enabled => {
             this.enabled = enabled;
             this.rebuildLayers();
             this.valuesChanged.next(null);
         }));
-        this.subscriptions.add(this.state.hoverLabelFieldsState.pipe(
+        this.subscriptions.add(this.inspectionState.hoverLabelFieldsState.pipe(
             skip(1),
             debounceTime(200)
         ).subscribe(fields => {
@@ -86,7 +87,11 @@ export class HoverDetailService implements OnDestroy {
         }));
     }
 
-    /** Reconciles visible coverage for one view while retaining scalar-only subset values. */
+    /**
+     * Reconciles visible coverage for one view while retaining geometry-free projected values.
+     * Partition arrays are retained and compared by identity; callers must replace
+     * them when coverage changes.
+     */
     reconcileView(
         viewIndex: number,
         coverage: ReadonlyArray<{
@@ -101,7 +106,7 @@ export class HoverDetailService implements OnDestroy {
                 entry.mapgetLayer === coverage[index].mapgetLayer &&
                 entry.partitions === coverage[index].partitions &&
                 entry.priorityPartitions ===
-                    coverage[index].priorityPartitions)) {
+                coverage[index].priorityPartitions)) {
             return;
         }
         this.desiredCoverageByView.set(viewIndex, coverage.map(entry => ({
@@ -165,12 +170,16 @@ export class HoverDetailService implements OnDestroy {
                 if (expression === FEATURE_ID_EXPRESSION) {
                     return [];
                 }
-                const rawValue = values?.get(expression);
-                const value = this.displayValue(rawValue);
-                return value === null ? [] : [{
+                // A wildcard such as **.speedLimitKmh can match several values.
+                // Keep result order and format each match separately: a single
+                // array-valued result must remain distinct from several scalars.
+                const matches = (values?.get(expression) ?? [])
+                    .map(value => this.displayValue(value))
+                    .filter((value): value is string => value !== null);
+                return matches.length === 0 ? [] : [{
                     key: field.displayKey?.trim() ||
                         defaultHoverLabelFieldKey(expression),
-                    value,
+                    value: matches.join(", "),
                     colorKey: expression
                 }];
             });
@@ -178,7 +187,7 @@ export class HoverDetailService implements OnDestroy {
                 field.expression === FEATURE_ID_EXPRESSION
             );
             if (showFeatureId || displayedFields.length) {
-                result.push({featureId: baseFeatureId, showFeatureId, fields: displayedFields});
+                result.push({ featureId: baseFeatureId, showFeatureId, fields: displayedFields });
             }
         }
         return result;
@@ -248,7 +257,7 @@ export class HoverDetailService implements OnDestroy {
         viewIndex: number,
         mapgetLayer: MapgetLayer,
         expressions: readonly string[]
-    ): {layer: StyledMapgetLayer; subscription: Subscription} {
+    ): { layer: StyledMapgetLayer; subscription: Subscription } {
         const plan: StyleFilterPlan = {
             valid: true,
             channels: [{
@@ -318,7 +327,7 @@ export class HoverDetailService implements OnDestroy {
         layerId: string,
         partition: PartitionId,
         featureId: string
-    ): Map<string, unknown> | undefined {
+    ): Map<string, readonly unknown[]> | undefined {
         const owned = this.layers.get(this.layerIdentityKey(
             viewIndex,
             mapId,
@@ -339,7 +348,7 @@ export class HoverDetailService implements OnDestroy {
             if (!valuesByFeatureId) {
                 return undefined;
             }
-            cached = {valueVersion: state.valueVersion, valuesByFeatureId};
+            cached = { valueVersion: state.valueVersion, valuesByFeatureId };
             this.decodedTiles.delete(cacheKey);
             this.decodedTiles.set(cacheKey, cached);
             while (this.decodedTiles.size > DECODED_TILE_CACHE_LIMIT) {
@@ -353,11 +362,15 @@ export class HoverDetailService implements OnDestroy {
         return cached.valuesByFeatureId.get(featureId);
     }
 
-    /** Converts one immutable TileSubsetLayer into feature-id keyed scalar values. */
+    /**
+     * Retain each expression's complete result sequence for the hovered feature.
+     * Empty sequences have no matches; one array result remains nested rather
+     * than being confused with several matches from a wildcard expression.
+     */
     private decodeTile(
         blob: Uint8Array,
         expressions: readonly string[]
-    ): Map<string, Map<string, unknown>> | null {
+    ): Map<string, Map<string, readonly unknown[]>> | null {
         const subset = uint8ArrayToWasm(
             data => this.mapInfo.tileLayerParser.readTileSubsetLayer(data),
             blob
@@ -373,7 +386,7 @@ export class HoverDetailService implements OnDestroy {
             const fieldIndices = expressions.map(expression =>
                 schema.featureFields.indexOf(expression));
             const entryCount = Math.max(0, Math.floor(Number(schema.entryCount)));
-            const valuesByFeatureId = new Map<string, Map<string, unknown>>();
+            const valuesByFeatureId = new Map<string, Map<string, readonly unknown[]>>();
             for (let offset = 0; offset < entryCount; offset += 1024) {
                 const entries = subset.entryRange(
                     0,
@@ -383,11 +396,12 @@ export class HoverDetailService implements OnDestroy {
                 ) as SearchResultTileEntry[];
                 for (const entry of entries) {
                     const values = Array.isArray(entry.values) ? entry.values : [];
-                    const byExpression = new Map<string, unknown>();
+                    const byExpression = new Map<string, readonly unknown[]>();
                     expressions.forEach((expression, index) => {
                         const fieldIndex = fieldIndices[index];
-                        if (fieldIndex >= 0 && fieldIndex < values.length) {
-                            byExpression.set(expression, values[fieldIndex]);
+                        const results = values[fieldIndex];
+                        if (Array.isArray(results)) {
+                            byExpression.set(expression, results);
                         }
                     });
                     valuesByFeatureId.set(entry.featureId, byExpression);
@@ -427,7 +441,7 @@ export class HoverDetailService implements OnDestroy {
         const source = JSON.stringify({
             name: "Internal/Hover Details",
             version: 2,
-            rules: [{scope: "feature", geometry: ["point"], color: "#000000"}]
+            rules: [{ scope: "feature", geometry: ["point"], color: "#000000" }]
         });
         const featureLayerStyle = uint8ArrayToWasm(
             data => new coreLib.FeatureLayerStyle(data),
@@ -453,13 +467,16 @@ export class HoverDetailService implements OnDestroy {
             shortId: "hover-details",
             visible: false,
             url: "",
-            sourceRef: {styleName: "Internal/Hover Details", sourceKind: "editor"}
+            sourceRef: { styleName: "Internal/Hover Details", sourceKind: "editor" }
         };
         this.syntheticStyle = syntheticStyle;
         return syntheticStyle;
     }
 
-    /** Formats projected scalar values without turning absent values into misleading text. */
+    /**
+     * Formats projected values without turning absent values into misleading text.
+     * Stringifies scalars and falls back to JSON for structured results.
+     */
     private displayValue(value: unknown): string | null {
         if (value === null || value === undefined) {
             return null;
@@ -494,7 +511,7 @@ export class HoverDetailService implements OnDestroy {
             .join("/");
     }
 
-    /** Builds the small LRU key for one concrete subset generation. */
+    /** Keys one owner/partition cache slot; valueVersion separately rejects stale decoded contents. */
     private decodedTileKey(layer: StyledMapgetLayer, key: string): string {
         return `${layer.ownerId}/${key}`;
     }

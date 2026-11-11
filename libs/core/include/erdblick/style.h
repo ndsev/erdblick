@@ -41,6 +41,7 @@ struct FeatureStyleOption
 {
     /** Construct an empty option placeholder. */
     FeatureStyleOption() = default;
+
     /** Parse one option declaration from YAML. */
     explicit FeatureStyleOption(YAML::Node const& yaml);
 
@@ -102,6 +103,7 @@ struct FeatureStylePresetValue
 {
     /** Construct an empty preset-value placeholder. */
     FeatureStylePresetValue() = default;
+
     /** Parse one validated preset-value declaration from YAML. */
     explicit FeatureStylePresetValue(YAML::Node const& yaml);
 
@@ -109,11 +111,12 @@ struct FeatureStylePresetValue
     bool value_ = false;
 };
 
-/** A named option combination owned by, and affine with, one feature-layer style. */
+/** A named combination of local Boolean options declared by one feature-layer style. */
 struct FeatureStylePreset
 {
     /** Construct an empty preset placeholder. */
     FeatureStylePreset() = default;
+
     /** Parse one validated preset declaration from YAML. */
     explicit FeatureStylePreset(YAML::Node const& yaml);
 
@@ -131,48 +134,71 @@ struct FeatureStylePreset
 class FeatureLayerStyle
 {
 public:
-    /** Parse a style sheet from YAML stored in a byte buffer. */
+    /**
+     * Parse a style sheet from YAML stored in a byte buffer, retaining usable
+     * rules when individual rules are rejected. Inspect validationReport() for
+     * skipped rules even when isValid() is true.
+     */
     explicit FeatureLayerStyle(SharedUint8Array const& yamlArray);
-    /** Report whether parsing succeeded and yielded a usable style. */
+
+    /** Report whether at least one usable rule survived document and rule validation. */
     [[nodiscard]] bool isValid() const;
+
     /** Return the structured validation report from the last parse. */
     [[nodiscard]] NativeJsValue validationReport() const;
+
     /** Return the rules in source order. */
     [[nodiscard]] const std::vector<FeatureStyleRule>& rules() const;
+
     /** Return the declared style options. */
     [[nodiscard]] const std::vector<FeatureStyleOption>& options() const;
+
     /** Return the declared style-level presets. */
     [[nodiscard]] const std::vector<FeatureStylePreset>& presets() const;
+
     /** Return the human-readable style name. */
     [[nodiscard]] std::string const& name() const;
+
     /** Return the declared stylesheet category; omitted category defaults to Base. */
     [[nodiscard]] StyleCategory category() const;
+
     /** Check whether the optional layer-affinity regex matches a layer name. */
     [[nodiscard]] bool hasLayerAffinity(std::string const& layerName) const;
+
     /** Report whether the style should start enabled in the UI. */
     [[nodiscard]] bool defaultEnabled() const;
+
     /** Return the bitmask of highlight modes for which this style has explicit rules. */
     [[nodiscard]] uint32_t supportedHighlightModesMask() const;
+
     /** Check whether the style declares rules for the given highlight mode. */
     [[nodiscard]] bool supportsHighlightMode(FeatureStyleRule::HighlightMode mode) const;
+
     /** Check whether the style declares a local/fetched overlay effect for the mode. */
     [[nodiscard]] bool supportsInteractionEffect(FeatureStyleRule::HighlightMode mode) const;
+
     /** Return the effect recipe as a plain JS object, or undefined when absent. */
     [[nodiscard]] NativeJsValue interactionEffect(
         FeatureStyleRule::HighlightMode mode,
         NativeJsValue const& options) const;
+
     /** Map one canonical visible-tile count onto the style's integer LOD ladder. */
     [[nodiscard]] uint8_t lodForVisibleTileCount(
         uint32_t visibleTileCount,
         uint32_t defaultLod3TileThreshold) const;
+
     /** Interpolate the density ladder for smooth GPU presentation transitions. */
     [[nodiscard]] double presentationLodForVisibleTileCount(
         uint32_t visibleTileCount,
         uint32_t defaultLod3TileThreshold) const;
+
     /** Check whether any rule for the given highlight mode targets relations. */
     [[nodiscard]] bool hasRelationRules(FeatureStyleRule::HighlightMode mode) const;
+
     /**
-     * Return the candidate rule indices for a feature type in the requested render pass.
+     * Return candidate rule indices for a feature type in the requested render
+     * pass (highlight mode and LOD). These index the runtime rule vector;
+     * per-feature filters still need evaluation after this coarse lookup.
      *
      * The returned vector is borrowed from an internal cache and remains valid for the
      * lifetime of the style object.

@@ -1,15 +1,31 @@
-import {Injectable, NgZone, OnDestroy} from "@angular/core";
-import {auditTime, BehaviorSubject, combineLatest, Subject, Subscription} from "rxjs";
-import {MapInfoService} from "./map-info.service";
+import type {InfoMessageRef} from "../diagnostics/info-message.model";
+import type {ConnectionDiagnostics} from "../diagnostics/diagnostics.model";
+import { Injectable, NgZone, OnDestroy } from "@angular/core";
+import { BehaviorSubject, Subject, Subscription } from "rxjs";
+import { z } from "zod";
+import { rejectAction } from "../action/action.model";
+import { featureIdentitySchema } from "../inspection/feature-identity.model";
+import { TileFeatureId } from "../inspection/inspection.model";
+import { coreLib, uint8ArrayToWasmOrThrow } from "../integrations/wasm.adapter";
 import {
-    MapTileRequestStatus,
-    MapTileStreamClientInteractive,
-    MapTileStreamClientTiles,
-    type MapTileStreamFilterStatusPayload,
-    type MapTileStreamSourceCatalogChangePayload,
-    type MapTileStreamStatusPayload,
-    type MapTileStreamTransportCompressionStats
-} from "./tilestream";
+    ConnectionRetryAttempt,
+    connectionRetryDeadline,
+    ConnectionRetryPolicy,
+    recordConnectionFailure
+} from "./connection-retry-policy.model";
+import { InfoMessageService } from "../diagnostics/info.service";
+import {
+    formatFeatureInspectionTarget,
+    namedFeatureReferenceJson,
+    parseFeatureInspectionTarget,
+    stripFeatureInspectionTarget,
+    type FeaturePickTarget,
+    type NamedFeatureReference
+} from "../inspection/feature-identity.model";
+
+import { AppStateService } from "../appstate/appstate.service";
+import { MapDataState } from "./mapdata.state";
+import { FeatureWrapper, InspectionFeatureTile } from "./feature-inspection.adapter";
 import {
     FilterSubscriptionCallbacks,
     FilterSubscriptionCoverage,
@@ -19,27 +35,8 @@ import {
     TileAttachmentValue,
     TileSubsetDelivery
 } from "./filter-subscription.model";
-import {
-    FeatureWrapper,
-    InspectionFeatureTile
-} from "./feature-inspection.model";
-import {
-    coreLib,
-    uint8ArrayToWasm,
-    uint8ArrayToWasmOrThrow
-} from "../integrations/wasm";
-import {
-    AppStateService,
-    MAX_NUM_TILES_TO_LOAD,
-    TileFeatureId
-} from "../shared/appstate.service";
-import {InfoMessageService} from "../shared/info.service";
-import {stripFeatureInspectionTarget} from "../shared/tile-feature-id";
-import {TileExpiryScheduler} from "./tile-expiry-scheduler";
-import {
-    ConnectionRetryAttempt, ConnectionRetryPolicy, connectionRetryDeadline,
-    recordConnectionFailure
-} from "../shared/connection-retry-policy";
+import { MapDataService } from "./mapdata.service";
+import type { MapgetLayer } from "./mapget-layer.model";
 import {
     parseMapPartitionKey,
     parsePartition,
@@ -49,7 +46,15 @@ import {
     type ObjectPartitionId,
     type PartitionId
 } from "./partition.model";
-import type {MapgetLayer} from "./mapget-layer.model";
+import { TileExpiryScheduler } from "./tile-expiry-scheduler.util";
+import { MapTileStreamClientInteractive, MapTileStreamClientTiles } from "./map-tile-stream.client";
+import {
+    MapTileRequestStatus,
+    type MapTileStreamFilterStatusPayload,
+    type MapTileStreamSourceCatalogChangePayload,
+    type MapTileStreamStatusPayload,
+    type MapTileStreamTransportCompressionStats
+} from "./map-tile-stream.protocol";
 
 export interface RetainedTileExpiryOwner {
     expireTiles(tokens: ReadonlyArray<{
@@ -93,6 +98,9 @@ interface ObjectDiscoveryCacheEntry {
 
 const MAX_OBJECT_DISCOVERY_CACHE_TILES = 4096;
 
+/** Bound the distinct partitions in a one-shot inspection request, independently of viewport settings. */
+const MAX_ONE_SHOT_PARTITIONS = 512;
+
 /**
  * Owns interactive filter transport and attachment refs.
  *
@@ -100,9 +108,15 @@ const MAX_OBJECT_DISCOVERY_CACHE_TILES = 4096;
  * Complete feature data is fetched only through feature-restricted, one-shot
  * `/tiles` requests for inspection and is never inserted into a viewport cache.
  */
-@Injectable({providedIn: "root"})
+@Injectable({ providedIn: "root" })
 export class MapTileStreamService implements OnDestroy {
+    private connectionNotice?: InfoMessageRef;
+    private protocolNotice?: InfoMessageRef;
+    /** Only successfully located foreign references enter this bounded generation-qualified cache. */
+    private readonly locatedFeatureReferences = new Map<string, TileFeatureId[]>();
     readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
+    readonly actionClientId$ = new BehaviorSubject<string | null>(null);
+    readonly actionControlReceived = new Subject<{ payload: unknown; receivedAt: number }>();
     readonly filterStatusReceived =
         new Subject<MapTileStreamFilterStatusPayload>();
 
@@ -134,15 +148,30 @@ export class MapTileStreamService implements OnDestroy {
             }
         );
     private connectionRetry?: ConnectionRetryAttempt;
+    private catalogRetry?: ConnectionRetryAttempt;
+    private catalogRetryTerminal = false;
+    private catalogFailureRevision: number | null = null;
+    private catalogRefreshController?: AbortController;
+    private catalogEpoch = 0;
+    private destroyed = false;
     private connectionTerminalError = "";
     private activeInspectionLoads = 0;
     private retryPolicy: ConnectionRetryPolicy;
     private readonly stateSubscriptions = new Subscription();
-    private readonly connectionRetryOwner: RetainedTileExpiryOwner = {expireTiles: () => {
-        if (this.connectionRetry) this.connectionRetry.at = 0;
-        this.forceNextUpdate = true;
-        this.scheduleUpdate();
-    }};
+    private readonly connectionRetryOwner: RetainedTileExpiryOwner = {
+        expireTiles: () => {
+            if (this.connectionRetry) this.connectionRetry.at = 0;
+            this.forceNextUpdate = true;
+            this.scheduleUpdate();
+        }
+    };
+    /** Catalog HTTP recovery shares timer infrastructure, never the socket's failure state. */
+    private readonly catalogRetryOwner: RetainedTileExpiryOwner = {
+        expireTiles: () => {
+            if (this.catalogRetry) this.catalogRetry.at = 0;
+            this.requestSourceCatalogRefresh();
+        }
+    };
     private readonly connectionRetryScheduler = new TileExpiryScheduler<RetainedTileExpiryOwner, string>(
         (owner, tokens) => {
             if (!this.backendProtocolMismatchActive) owner.expireTiles(tokens);
@@ -174,26 +203,30 @@ export class MapTileStreamService implements OnDestroy {
 
     constructor(
         private readonly stateService: AppStateService,
-        private readonly mapInfo: MapInfoService,
+        private readonly mapInfo: MapDataService,
         private readonly messageService: InfoMessageService,
-        private readonly ngZone: NgZone
+        private readonly ngZone: NgZone,
+        public readonly state: MapDataState
     ) {
-        this.retryPolicy = this.stateService.connectionRetryPolicy;
-        this.stateSubscriptions.add(combineLatest([
-            this.stateService.connectionRetryEnabledState,
-            this.stateService.connectionRetryInitialDelayMsState,
-            this.stateService.connectionRetryBackoffMultiplierState,
-            this.stateService.connectionRetryMaxDelayMsState
-        ]).pipe(auditTime(0)).subscribe(() => this.applyRetryPolicy()));
-        this.stateService.tilePullCompressionEnabledState.subscribe(enabled =>
+        this.retryPolicy = this.state.connectionRetryPolicy;
+        this.stateSubscriptions.add(this.state.connectionRetryPolicyChanges.subscribe(() => this.applyRetryPolicy()));
+        this.stateSubscriptions.add(this.state.tilePullCompressionEnabledState.subscribe(enabled =>
             this.tileStream?.setPullCompressionEnabled(enabled)
-        );
-        this.mapInfo.dataSourceInfoChanged.subscribe(() => {
+        ));
+        this.stateSubscriptions.add(this.mapInfo.dataSourceInfoChanged.subscribe(() => {
             this.ngZone.runOutsideAngular(() => {
                 this.tileStream?.resetAfterDataSourceInfoChange();
                 this.scheduleUpdate();
             });
-        });
+        }));
+        this.stateSubscriptions.add(this.mapInfo.sourceCatalogLoaded.subscribe(revision => {
+            const target = this.sourceCatalogRefreshTargetRevision;
+            if (target === null || (revision !== null && revision >= target)) {
+                this.sourceCatalogRefreshTargetRevision = null;
+                this.clearCatalogRetry();
+                this.scheduleUpdate();
+            }
+        }));
     }
 
     async initialize(): Promise<void> {
@@ -201,8 +234,10 @@ export class MapTileStreamService implements OnDestroy {
             "/interactive",
             this.mapInfo.tileLayerParser
         );
+        this.tileStream.onClientId = clientId => this.actionClientId$.next(clientId);
+        this.tileStream.onActionControl = (payload, receivedAt) => this.actionControlReceived.next({ payload, receivedAt });
         this.tileStream.setPullCompressionEnabled(
-            this.stateService.tilePullCompressionEnabled
+            this.state.tilePullCompressionEnabled
         );
         this.tileStream.setFrameProcessingPaused(this.tilePipelinePaused);
         this.tileStream.onSubsets = payload =>
@@ -224,8 +259,10 @@ export class MapTileStreamService implements OnDestroy {
             });
         this.tileStream.onOpen = () => this.ngZone.run(() => {
             this.backendProtocolMismatchActive = false;
-            this.messageService.clearBackendConnectionError();
-            this.messageService.clearBackendProtocolError();
+            this.connectionNotice?.dismiss();
+            this.protocolNotice?.dismiss();
+            this.connectionNotice = undefined;
+            this.protocolNotice = undefined;
             // A websocket reconnect creates a blank server-side session, so
             // resend the authoritative complete pending-work snapshot.
             this.scheduleUpdate();
@@ -236,6 +273,11 @@ export class MapTileStreamService implements OnDestroy {
             const expected =
                 `${mismatch.expected.major}.${mismatch.expected.minor}.x`;
             this.backendProtocolMismatchActive = true;
+            ++this.catalogEpoch;
+            this.catalogRefreshController?.abort();
+            this.sourceCatalogRefreshTargetRevision = null;
+            this.sourceCatalogReloadAfterCurrent = false;
+            this.clearCatalogRetry();
             this.connectionRetryScheduler.dispose();
             this.connectionRetry = undefined;
             this.showBackendProtocolError(
@@ -281,7 +323,8 @@ export class MapTileStreamService implements OnDestroy {
             window.addEventListener("pagehide", this.onPageHide);
             window.addEventListener("pageshow", this.onPageShow);
         });
-        await this.mapInfo.reloadDataSources();
+        this.requestSourceCatalogRefresh();
+        await this.sourceCatalogReloadPromise;
         this.scheduleUpdate();
     }
 
@@ -299,6 +342,8 @@ export class MapTileStreamService implements OnDestroy {
     private readonly onPageHide = (): void => {
         this.cancelPageResume();
         this.pageHidden = true;
+        this.catalogRefreshController?.abort();
+        this.connectionRetryScheduler.cancelOwner(this.catalogRetryOwner);
         this.clearUpdateTimers();
         this.tileStream?.setFrameProcessingPaused(true);
         this.tileStream?.close(1000, "page hidden");
@@ -307,7 +352,7 @@ export class MapTileStreamService implements OnDestroy {
     /** A back/forward-cache restore needs a new session and the complete current pending snapshot. */
     private readonly onPageShow = (): void => {
         this.cancelPageResume();
-        if (!this.pageHidden) {
+        if (!this.pageHidden || this.destroyed) {
             return;
         }
         this.pageHidden = false;
@@ -315,6 +360,7 @@ export class MapTileStreamService implements OnDestroy {
         this.tileStream?.setFrameProcessingPaused(this.tilePipelinePaused);
         this.forceNextUpdate = true;
         if (!this.backendProtocolMismatchActive) {
+            this.requestSourceCatalogRefresh(null, true);
             this.scheduleUpdate();
         }
     };
@@ -329,6 +375,11 @@ export class MapTileStreamService implements OnDestroy {
 
     /** Removes page listeners and releases the owned transport when the Angular root is destroyed. */
     ngOnDestroy(): void {
+        this.destroyed = true;
+        this.sourceCatalogRefreshTargetRevision = null;
+        this.sourceCatalogReloadAfterCurrent = false;
+        this.connectionNotice?.dismiss();
+        this.protocolNotice?.dismiss();
         this.stateSubscriptions.unsubscribe();
         window.removeEventListener("beforeunload", this.onBeforeUnload);
         window.removeEventListener("pagehide", this.onPageHide);
@@ -338,6 +389,11 @@ export class MapTileStreamService implements OnDestroy {
         this.tileStream = null;
         this.tileExpiryScheduler.dispose();
         this.connectionRetryScheduler.dispose();
+    }
+
+    /** Sends an action reply on its original live connection without opening another transport. */
+    sendActionControl(clientId: string, payload: object): boolean {
+        return this.tileStream?.sendActionControl(clientId, payload) ?? false;
     }
 
     createFilterSubscription(
@@ -385,7 +441,7 @@ export class MapTileStreamService implements OnDestroy {
         }
         const uniqueTiles = [...new Set(discoveryTileIds.map(Number))];
         if (!uniqueTiles.length) {
-            return {associations: [], expiresAtMs: null};
+            return { associations: [], expiresAtMs: null };
         }
         let cache = this.objectDiscoveryCache.get(layer);
         if (!cache) {
@@ -404,11 +460,11 @@ export class MapTileStreamService implements OnDestroy {
             const batch = this.fetchObjectDiscoveryBatch(layer, tileIds);
             tileIds.forEach((tileId, index) => {
                 const pending = batch.then(values => values[index]);
-                const entry: ObjectDiscoveryCacheEntry = {pending};
+                const entry: ObjectDiscoveryCacheEntry = { pending };
                 cache!.set(tileId, entry);
                 pending.then(value => {
                     if (cache!.get(tileId) === entry) {
-                        cache!.set(tileId, {value});
+                        cache!.set(tileId, { value });
                     }
                 }).catch(() => {
                     if (cache!.get(tileId) === entry) {
@@ -447,12 +503,12 @@ export class MapTileStreamService implements OnDestroy {
                 seen.add(key);
                 associations.push({
                     partition: object.partition,
-                    ...(object.bounds ? {bounds: object.bounds} : {}),
+                    ...(object.bounds ? { bounds: object.bounds } : {}),
                     discoveryTileId: uniqueTiles[tileIndex]
                 });
             }
         });
-        return {associations, expiresAtMs};
+        return { associations, expiresAtMs };
     }
 
     /** Bound long-running pan sessions without evicting current or in-flight discovery. */
@@ -480,12 +536,12 @@ export class MapTileStreamService implements OnDestroy {
     ): Promise<ObjectDiscoveryTileValue[]> {
         const response = await fetch("/objects/discover", {
             method: "POST",
-            headers: {"Content-Type": "application/json"},
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 requests: [{
                     mapId: layer.mapId,
                     layerId: layer.layerId,
-                    ...(layer.sourceId ? {sourceId: layer.sourceId} : {}),
+                    ...(layer.sourceId ? { sourceId: layer.sourceId } : {}),
                     tileIds
                 }]
             })
@@ -496,7 +552,7 @@ export class MapTileStreamService implements OnDestroy {
                 `${response.status} ${response.statusText}.`
             );
         }
-        const body = await response.json() as {responses?: unknown[]};
+        const body = await response.json() as { responses?: unknown[] };
         if (!Array.isArray(body.responses) ||
             body.responses.length !== tileIds.length) {
             throw new Error(
@@ -571,7 +627,7 @@ export class MapTileStreamService implements OnDestroy {
             );
         }
         return value.map(raw => {
-            const item = raw as {id?: unknown; bounds?: unknown};
+            const item = raw as { id?: unknown; bounds?: unknown };
             const partition = parsePartition({
                 kind: "object",
                 id: item.id
@@ -580,7 +636,7 @@ export class MapTileStreamService implements OnDestroy {
                 throw new Error("Object discovery returned a tile partition.");
             }
             if (item.bounds === undefined) {
-                return {partition};
+                return { partition };
             }
             if (!Array.isArray(item.bounds) || item.bounds.length !== 4 ||
                 item.bounds.some(coordinate =>
@@ -857,13 +913,13 @@ export class MapTileStreamService implements OnDestroy {
             const groupKey = `${mapId}\n${layerId}`;
             let group = groups.get(groupKey);
             if (!group) {
-                group = {mapId, layerId, partitions: new Map()};
+                group = { mapId, layerId, partitions: new Map() };
                 groups.set(groupKey, group);
             }
             const key = partitionKey(partition);
             let entry = group.partitions.get(key);
             if (!entry) {
-                entry = {partition, ids: []};
+                entry = { partition, ids: [] };
                 group.partitions.set(key, entry);
             }
             const baseId = stripFeatureInspectionTarget(feature.featureId);
@@ -873,12 +929,15 @@ export class MapTileStreamService implements OnDestroy {
         }
         const distinctPartitionCount = [...groups.values()]
             .reduce((count, group) => count + group.partitions.size, 0);
-        if (distinctPartitionCount > MAX_NUM_TILES_TO_LOAD) {
+        if (distinctPartitionCount > MAX_ONE_SHOT_PARTITIONS) {
             throw new Error(
                 `Inspection feature request exceeds ` +
-                `${MAX_NUM_TILES_TO_LOAD} partitions.`
+                `${MAX_ONE_SHOT_PARTITIONS} partitions.`
             );
         }
+
+        await this.mapInfo.waitForMapLayersReady([...groups.values()], signal);
+        signal?.throwIfAborted();
 
         const transport = new MapTileStreamClientTiles(
             "/tiles",
@@ -911,11 +970,23 @@ export class MapTileStreamService implements OnDestroy {
         }));
         let timeout: ReturnType<typeof setTimeout> | undefined;
         let abort: (() => void) | undefined;
+        let catalogSubscription: Subscription | undefined;
         try {
             const cancelled = new Promise<never>((_, reject) => {
-                abort = () => reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
-                signal?.addEventListener("abort", abort, {once: true});
+                const cancel = (reason: unknown) => {
+                    // Stop decoding before a catalog edit releases this map's
+                    // dictionaries; promise cleanup alone would run too late.
+                    transport.destroy();
+                    reject(reason);
+                };
+                abort = () => cancel(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+                signal?.addEventListener("abort", abort, { once: true });
                 if (signal?.aborted) abort();
+                catalogSubscription = this.mapInfo.dataSourceInfoChanged.subscribe(mapIds => {
+                    if ([...groups.values()].some(group => mapIds.includes(group.mapId))) {
+                        cancel(new DOMException("Inspection datasource changed.", "AbortError"));
+                    }
+                });
             });
             const timeoutPromise = new Promise<never>((_, reject) => {
                 timeout = setTimeout(
@@ -933,10 +1004,11 @@ export class MapTileStreamService implements OnDestroy {
             if (tiles.size < distinctPartitionCount) {
                 console.warn(
                     "Inspection feature request returned fewer partitions than requested.",
-                    {requested: distinctPartitionCount, received: tiles.size}
+                    { requested: distinctPartitionCount, received: tiles.size }
                 );
             }
         } finally {
+            catalogSubscription?.unsubscribe();
             if (abort) signal?.removeEventListener("abort", abort);
             if (timeout) {
                 clearTimeout(timeout);
@@ -986,8 +1058,8 @@ export class MapTileStreamService implements OnDestroy {
             const response = await fetch("/locate", {
                 signal,
                 method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({requests: validRequests})
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ requests: validRequests })
             });
             if (!response.ok) {
                 throw new Error(
@@ -1009,7 +1081,7 @@ export class MapTileStreamService implements OnDestroy {
                 const candidates = [...(payload.responses?.[validIndex++] ?? [])]
                     .filter(candidate =>
                         typeof (candidate.partitionKey ?? candidate.tileId) ===
-                            "string" &&
+                        "string" &&
                         this.parseMapPartitionKeySafe(
                             candidate.partitionKey ?? candidate.tileId!
                         ) !== null
@@ -1037,6 +1109,101 @@ export class MapTileStreamService implements OnDestroy {
             console.warn("Canonical feature locate failed.", error);
             return requested.map(() => null);
         }
+    }
+
+    /** Resolves a canonical feature string using the backend schema, preserving ambiguous matches for callers. */
+    async locateFeature(mapId: string, featureId: string, layerId?: string, signal?: AbortSignal): Promise<TileFeatureId[]> {
+        const canonicalId = stripFeatureInspectionTarget(featureId);
+        return this.locateFeatureRequest(JSON.stringify({ requests: [{
+            mapId, ...(layerId ? {layerId} : {}), featureId: canonicalId
+        }] }), canonicalId, signal);
+    }
+
+    /** Resolve named foreign parts only against the target map, without importing its schema into the source. */
+    async locateFeatureReference(reference: NamedFeatureReference, signal?: AbortSignal): Promise<TileFeatureId[]> {
+        signal?.throwIfAborted();
+        const referenceJson = namedFeatureReferenceJson(reference);
+        const key = this.mapInfo.schemaScopeSignature([reference.mapId]) + "\n" + referenceJson;
+        const cached = this.locatedFeatureReferences.get(key);
+        if (cached) return cached;
+        const located = await this.locateFeatureRequest(`{"requests":[${referenceJson}]}`, undefined, signal);
+        if (key !== this.mapInfo.schemaScopeSignature([reference.mapId]) + "\n" + referenceJson)
+            throw new Error("Target datasource changed while locating the reference. Please retry.");
+        if (located.length) {
+            this.locatedFeatureReferences.set(key, located);
+            if (this.locatedFeatureReferences.size > 256)
+                this.locatedFeatureReferences.delete(this.locatedFeatureReferences.keys().next().value!);
+        }
+        return located;
+    }
+
+    /** Convert render picks to persistent canonical identities before inspection or hover publication. */
+    async resolveFeaturePicks(picks: FeaturePickTarget[], signal?: AbortSignal): Promise<TileFeatureId[]> {
+        const sourceMaps = [...new Set(picks.flatMap(pick => {
+            const source = this.parseMapPartitionKeySafe(pick.mapTileKey);
+            return source ? [source[0]] : [];
+        }))];
+        const sourceGeneration = this.mapInfo.schemaScopeSignature(sourceMaps);
+        const groups = await Promise.all(picks.map(async pick => {
+            if (!pick.featureReference) return [pick];
+            const located = await this.locateFeatureReference(pick.featureReference, signal);
+            if (!located.length)
+                throw new Error(`Referenced ${pick.featureReference.typeId} is unavailable in ${pick.featureReference.mapId}.`);
+            return located.map(target => this.applyPickedFeatureSelectors(target, pick));
+        }));
+        signal?.throwIfAborted();
+        if (sourceGeneration !== this.mapInfo.schemaScopeSignature(sourceMaps)) {
+            throw new Error("Picked datasource changed while locating the reference. Please retry.");
+        }
+        const unique = new Map(groups.flat().map(target => [`${target.mapTileKey}\n${target.featureId}`, target]));
+        return [...unique.values()];
+    }
+
+    /** Synchronous navigation/mask checks may use resolved references, never guess unresolved IDs. */
+    cachedFeaturePicks(picks: FeaturePickTarget[]): TileFeatureId[] {
+        return picks.flatMap(pick => {
+            if (!pick.featureReference) return [pick];
+            const key = this.mapInfo.schemaScopeSignature([pick.featureReference.mapId]) + "\n"
+                + namedFeatureReferenceJson(pick.featureReference);
+            return (this.locatedFeatureReferences.get(key) ?? [])
+                .map(target => this.applyPickedFeatureSelectors(target, pick));
+        });
+    }
+
+    /** Row ordinals remain separate from the named reference until its base ID is canonical. */
+    private applyPickedFeatureSelectors(target: TileFeatureId, pick: FeaturePickTarget): TileFeatureId {
+        if (!pick.featureReference) return target;
+        const baseFeatureId = target.featureId;
+        const featureId = pick.attributeIndex !== undefined
+            ? formatFeatureInspectionTarget({scope: "attribute", baseFeatureId,
+                attributeIndex: pick.attributeIndex, validityIndex: pick.validityIndex})
+            : pick.relationIndex !== undefined
+                ? formatFeatureInspectionTarget({scope: "relation", baseFeatureId,
+                    relationIndex: pick.relationIndex, validityIndex: pick.validityIndex})
+                : baseFeatureId;
+        return {...target, featureId};
+    }
+
+    /** Shared bounded locate response path; a foreign request has no canonical fallback string. */
+    private async locateFeatureRequest(body: string, fallbackId?: string, signal?: AbortSignal): Promise<TileFeatureId[]> {
+        signal?.throwIfAborted();
+        const response = await fetch("/locate", {
+            method: "POST", headers: { "Content-Type": "application/json" }, signal,
+            body
+        });
+        if (!response.ok) throw new Error(`Feature locate failed: HTTP ${response.status}`);
+        const content = await response.text();
+        signal?.throwIfAborted();
+        if (content.length > 256 * 1024) throw new Error("Feature locate response exceeds the bound");
+        const payload: { responses?: Array<Array<{ partitionKey?: string; tileId?: string; canonicalFeatureId?: string }>> } = JSON.parse(content);
+        const candidates = payload.responses?.[0] ?? [];
+        if (candidates.length > 100) throw new Error("Feature locate is ambiguous; provide a layer or partition");
+        return candidates.flatMap(candidate => {
+            const mapTileKey = candidate.partitionKey ?? candidate.tileId;
+            const featureId = candidate.canonicalFeatureId ?? fallbackId;
+            return mapTileKey && typeof featureId === "string" && featureId && this.parseMapPartitionKeySafe(mapTileKey)
+                ? [{ mapTileKey, featureId }] : [];
+        });
     }
 
     private featureIdentityKey(feature: TileFeatureId): string {
@@ -1124,17 +1291,22 @@ export class MapTileStreamService implements OnDestroy {
 
     /** Recomputes waiting deadlines when preferences change, retaining attempts and live work. */
     private applyRetryPolicy(): void {
-        this.retryPolicy = this.stateService.connectionRetryPolicy;
+        this.retryPolicy = this.state.connectionRetryPolicy;
         if (this.connectionRetry && this.connectionRetry.at > 0) {
             this.connectionRetry.at = connectionRetryDeadline(this.retryPolicy, this.connectionRetry);
             this.connectionRetryScheduler.schedule(this.connectionRetryOwner, "connection", 0, this.connectionRetry.at);
+        }
+        if (this.catalogRetry && this.catalogRetry.at > 0 && !this.catalogRetryTerminal) {
+            this.catalogRetry.at = connectionRetryDeadline(this.retryPolicy, this.catalogRetry);
+            if (!this.pageHidden && !this.destroyed)
+                this.connectionRetryScheduler.schedule(this.catalogRetryOwner, "catalog", 0, this.catalogRetry.at);
         }
     }
 
     /** Coalesces error/close callbacks for one failed connection attempt. */
     private scheduleConnectionRetry(message: string): void {
         if (this.pageHidden || this.backendProtocolMismatchActive || this.connectionTerminalError) return;
-        this.backendRequestProgress = {done: 0, total: 0, allDone: true};
+        this.backendRequestProgress = { done: 0, total: 0, allDone: true };
         this.connectionRetry = recordConnectionFailure(this.connectionRetry, message);
         this.connectionRetry.at = connectionRetryDeadline(this.retryPolicy, this.connectionRetry);
         this.connectionRetryScheduler.schedule(this.connectionRetryOwner, "connection", 0, this.connectionRetry.at);
@@ -1148,7 +1320,7 @@ export class MapTileStreamService implements OnDestroy {
     }
 
     /** Current owner state drives the circle; historical logs and pending counts do not. */
-    getConnectionDiagnostics(): {retrying: boolean; failed: boolean; loading: boolean; message: string} {
+    getConnectionDiagnostics(): ConnectionDiagnostics {
         const catalog = this.mapInfo.getSourceRecoveryState();
         const browserRetrying = this.retryPolicy.enabled && !!this.connectionRetry;
         const activeFilters = [...this.filterSubscriptionsById.values()].some(ref =>
@@ -1160,12 +1332,19 @@ export class MapTileStreamService implements OnDestroy {
                 retry.at > 0 ? `Retry in ${Math.max(0, Math.ceil((retry.at - Date.now()) / 1000))} s.` : "Retrying.";
             return `${source}: ${retry.message} ${action}`;
         };
-        const messages = [catalog.message, this.connectionTerminalError,
-            this.connectionRetry && describe(this.connectionRetry, "Backend")].filter(Boolean);
+        const backendFailed = !!this.connectionRetry || !!this.connectionTerminalError || this.backendProtocolMismatchActive;
+        const catalogFailed = !!catalog.catalogError || !!this.catalogRetry;
+        const backendRetrying = !this.pageHidden && !this.tilePipelinePaused && browserRetrying;
+        const catalogRetrying = !!this.catalogRetry && !this.catalogRetryTerminal && this.retryPolicy.enabled &&
+            !this.pageHidden && !this.destroyed && !this.backendProtocolMismatchActive;
+        const messages = [catalog.message, catalog.catalogError, this.connectionTerminalError,
+        this.catalogRetry && (this.catalogRetryTerminal ? `${this.catalogRetry.message} Automatic retry stopped.` : describe(this.catalogRetry, "Datasource metadata")),
+        this.connectionRetry && describe(this.connectionRetry, "Backend")].filter(Boolean);
         return {
-            retrying: catalog.retrying || (!this.pageHidden && !this.tilePipelinePaused && browserRetrying),
-            failed: catalog.failed || !!this.connectionRetry ||
-                !!this.connectionTerminalError || this.backendProtocolMismatchActive,
+            retrying: catalog.retrying || backendRetrying || catalogRetrying,
+            failed: catalog.failed || catalogFailed || backendFailed,
+            backendFailed, backendRetrying, catalogFailed,
+            sourceCount: catalog.sourceCount, failedSourceCount: catalog.failedSourceCount,
             loading,
             message: [...new Set(messages)].join("\n")
         };
@@ -1194,7 +1373,7 @@ export class MapTileStreamService implements OnDestroy {
     }
 
     getBackendRequestProgress(): BackendRequestProgress {
-        return {...this.backendRequestProgress};
+        return { ...this.backendRequestProgress };
     }
 
     currentViewportRenderSeconds(): number {
@@ -1222,7 +1401,7 @@ export class MapTileStreamService implements OnDestroy {
             tileExpiry: {
                 scheduledTiles: this.tileExpiryScheduler.size,
                 pendingFilterTiles: [...this.filterSubscriptionsById.values()]
-                .reduce((count, ref) => count + ref.pendingPartitionCount, 0)
+                    .reduce((count, ref) => count + ref.pendingPartitionCount, 0)
             },
             activeFilters: [...this.filterSubscriptionsById.values()].map(ref => ({
                 filterId: ref.filterId,
@@ -1280,7 +1459,7 @@ export class MapTileStreamService implements OnDestroy {
         const dueAt = Math.min(
             now + this.acknowledgementQuietMs,
             this.acknowledgementBurstStartedAt +
-                this.acknowledgementMaxLatencyMs
+            this.acknowledgementMaxLatencyMs
         );
         if (this.acknowledgementTimer) {
             clearTimeout(this.acknowledgementTimer);
@@ -1381,12 +1560,14 @@ export class MapTileStreamService implements OnDestroy {
             metadata = uint8ArrayToWasmOrThrow(
                 data => this.mapInfo.tileLayerParser
                     .readTileSubsetLayerMetadata(data),
-                subsetBlob
+                // Metadata is a protocol prefix. Never copy point geometry into the
+                // permanent main-thread WASM heap just to route a delivery.
+                subsetBlob.subarray(0, 256 * 1024)
             ) as unknown as typeof metadata;
         } catch (error) {
             throw new Error(
-                "Failed to read TileSubsetLayer metadata.",
-                {cause: error}
+                "Failed to read TileSubsetLayer metadata (256 KiB browser metadata limit).",
+                { cause: error }
             );
         }
         const filterId = String(metadata.filterId);
@@ -1413,7 +1594,7 @@ export class MapTileStreamService implements OnDestroy {
             }
             const scalarFields =
                 metadata.layer.scalarFields &&
-                typeof metadata.layer.scalarFields === "object"
+                    typeof metadata.layer.scalarFields === "object"
                     ? metadata.layer.scalarFields as Record<string, unknown>
                     : {};
             const rawEntryCount = Number(
@@ -1484,7 +1665,7 @@ export class MapTileStreamService implements OnDestroy {
                 `Failed to install filter '${filterId}' generation ${generation}: ` +
                 (error instanceof Error ? error.message : String(error));
             subscription.reportError(message);
-            throw new Error(message, {cause: error});
+            throw new Error(message, { cause: error });
         }
     }
 
@@ -1627,84 +1808,162 @@ export class MapTileStreamService implements OnDestroy {
             reason === "config-error";
     }
 
-    /** Coalesces refreshes while keeping revision targets scoped to one backend connection. */
+    /** Coalesces refresh demand without allowing revision notifications to defeat backoff. */
     private requestSourceCatalogRefresh(
         targetRevision: number | null = null,
-        resetRevisionEpoch: boolean = false
+        resetRevisionEpoch = false
     ): void {
-        if (targetRevision !== null && Number.isFinite(targetRevision)) {
-            const normalized = Math.max(0, Math.floor(targetRevision));
-            this.sourceCatalogRefreshTargetRevision =
-                resetRevisionEpoch ||
-                this.sourceCatalogRefreshTargetRevision === null
-                    ? normalized
-                    : Math.max(
-                        this.sourceCatalogRefreshTargetRevision,
-                        normalized
-                    );
-        } else if (resetRevisionEpoch) {
+        if (this.destroyed || this.backendProtocolMismatchActive) return;
+        if (resetRevisionEpoch) {
+            ++this.catalogEpoch;
+            this.catalogRefreshController?.abort();
             this.sourceCatalogRefreshTargetRevision = null;
+            this.clearCatalogRetry();
         }
+        if (targetRevision !== null && Number.isFinite(targetRevision)) {
+            this.sourceCatalogRefreshTargetRevision = Math.max(
+                this.sourceCatalogRefreshTargetRevision ?? 0, Math.max(0, Math.floor(targetRevision)));
+            // A new revision may repair a terminal catalog failure. Repeated frames cannot.
+            if (this.catalogRetryTerminal && targetRevision > (this.catalogFailureRevision ?? -1))
+                this.clearCatalogRetry();
+        }
+        if (this.pageHidden) return;
         if (this.sourceCatalogReloadPromise) {
-            // The running fetch may belong to the previous backend process. A
-            // second fetch is required even if its response happens to look current.
             this.sourceCatalogReloadAfterCurrent ||= resetRevisionEpoch;
             return;
         }
-        this.sourceCatalogReloadPromise = this.reloadSourceCatalogUntilCaughtUp()
-            .then(() => this.scheduleUpdate())
-            .catch(error =>
-                console.error("Failed to refresh datasource catalog.", error)
-            )
+        if (this.catalogRetry && (this.catalogRetryTerminal || !this.retryPolicy.enabled || this.catalogRetry.at > Date.now()))
+            return;
+        const epoch = this.catalogEpoch;
+        const requestedRevision = this.sourceCatalogRefreshTargetRevision;
+        const controller = new AbortController();
+        this.catalogRefreshController = controller;
+        this.sourceCatalogReloadPromise = this.reloadSourceCatalogUntilCaughtUp(epoch, controller.signal)
+            .catch(error => {
+                if (!controller.signal.aborted && !this.destroyed && epoch === this.catalogEpoch) {
+                    console.error("Failed to refresh datasource catalog.", error);
+                    this.scheduleCatalogRetry("Failed to refresh datasource metadata.", false, requestedRevision);
+                }
+            })
             .finally(() => {
                 this.sourceCatalogReloadPromise = null;
+                if (this.catalogRefreshController === controller) this.catalogRefreshController = undefined;
+                if (this.destroyed || this.pageHidden || this.backendProtocolMismatchActive) return;
+                this.scheduleUpdate();
                 if (this.sourceCatalogReloadAfterCurrent) {
                     this.sourceCatalogReloadAfterCurrent = false;
-                    this.sourceCatalogRefreshTargetRevision = null;
                     this.requestSourceCatalogRefresh();
-                    return;
-                }
-                const pendingRevision = this.sourceCatalogRefreshTargetRevision;
-                if (pendingRevision !== null) {
-                    const currentRevision = this.mapInfo.sourceCatalogRevision;
-                    if (currentRevision === null ||
-                        currentRevision < pendingRevision) {
-                        this.requestSourceCatalogRefresh(pendingRevision);
-                    } else {
-                        this.sourceCatalogRefreshTargetRevision = null;
-                    }
+                } else if (!this.catalogRetry && this.sourceCatalogRefreshTargetRevision !== null) {
+                    this.requestSourceCatalogRefresh();
                 }
             });
     }
 
-    private async reloadSourceCatalogUntilCaughtUp(): Promise<void> {
+    /** At most two catch-up passes; each read may retry one superseded snapshot. */
+    private async reloadSourceCatalogUntilCaughtUp(epoch: number, signal: AbortSignal): Promise<void> {
         for (let attempt = 0; attempt < 2; ++attempt) {
-            const requested = this.sourceCatalogRefreshTargetRevision;
-            this.sourceCatalogRefreshTargetRevision = null;
-            await this.mapInfo.reloadDataSources();
-            const streamRevision = this.tileStream?.getSourcesRevision() ?? null;
-            const target = Math.max(requested ?? -1, streamRevision ?? -1);
-            if (target < 0 ||
-                (this.mapInfo.sourceCatalogRevision ?? -1) >= target) {
+            const requestedRevision = this.sourceCatalogRefreshTargetRevision;
+            const result = await this.mapInfo.refreshSourceCatalog(signal);
+            if (signal.aborted || this.destroyed || epoch !== this.catalogEpoch) return;
+            if (result.status === "cancelled") return;
+            if (result.status === "failed") {
+                this.scheduleCatalogRetry(result.message, result.retryable, requestedRevision);
+                return;
+            }
+            if (result.status === "stale") {
+                this.scheduleCatalogRetry("Datasource metadata changed during refresh.", true, requestedRevision);
+                return;
+            }
+            const target = Math.max(this.sourceCatalogRefreshTargetRevision ?? -1,
+                this.tileStream?.getSourcesRevision() ?? -1);
+            if (target < 0 || (this.mapInfo.sourceCatalogRevision ?? -1) >= target) {
+                this.sourceCatalogRefreshTargetRevision = null;
+                this.clearCatalogRetry();
                 return;
             }
             this.sourceCatalogRefreshTargetRevision = target;
         }
+        this.scheduleCatalogRetry("Datasource metadata has not reached the requested revision.", true);
+    }
+
+    /** One HTTP retry owner preserves attempts across healthy socket frames and source events. */
+    private scheduleCatalogRetry(message: string, retryable: boolean,
+                                 requestedRevision: number | null = this.sourceCatalogRefreshTargetRevision): void {
+        // An older terminal response must not consume a repair notification
+        // that arrived while it was in flight. Repeated demand still stops.
+        if (!retryable && (this.sourceCatalogRefreshTargetRevision ?? -1) > (requestedRevision ?? -1)) {
+            this.clearCatalogRetry();
+            return;
+        }
+        this.catalogRetry = recordConnectionFailure(this.catalogRetry, message);
+        this.catalogRetryTerminal = !retryable;
+        this.catalogFailureRevision = requestedRevision;
+        this.catalogRetry.at = retryable ? connectionRetryDeadline(this.retryPolicy, this.catalogRetry) : Infinity;
+        if (!this.pageHidden && !this.destroyed)
+            this.connectionRetryScheduler.schedule(this.catalogRetryOwner, "catalog", 0, this.catalogRetry.at);
+    }
+
+    private clearCatalogRetry(): void {
+        this.catalogRetry = undefined;
+        this.catalogRetryTerminal = false;
+        this.catalogFailureRevision = null;
+        this.connectionRetryScheduler.cancelOwner(this.catalogRetryOwner);
     }
 
     private showInfo(message: string): void {
         this.ngZone.run(() => this.messageService.showInfo(message));
     }
 
+    /** Keeps stream failures separate from metadata failures and updates their current explanation. */
     private showBackendConnectionError(message: string): void {
-        this.ngZone.run(() =>
-            this.messageService.showBackendConnectionError(message)
-        );
+        this.ngZone.run(() => {
+            this.connectionNotice?.update({detail: message});
+            this.connectionNotice = this.messageService.showError(message, {
+                scope: 'backend-stream', dedupeKey: 'connection', summary: 'Backend Error', life: 'sticky'
+            });
+        });
     }
 
+    /** Presents protocol failure without allowing ordinary connection recovery to clear another owner. */
     private showBackendProtocolError(message: string): void {
-        this.ngZone.run(() =>
-            this.messageService.showBackendProtocolError(message)
-        );
+        this.ngZone.run(() => {
+            this.protocolNotice?.update({detail: message});
+            this.protocolNotice = this.messageService.showError(message, {
+                scope: 'backend-protocol', dedupeKey: 'protocol', summary: 'Backend Protocol Mismatch', life: 'sticky'
+            });
+        });
     }
+
+    /** Resolves only explicitly requested identities; never guesses between ambiguous backend matches. */
+    async resolveFeatureIdentities(features: Array<z.infer<typeof featureIdentitySchema>>, signal?: AbortSignal): Promise<TileFeatureId[]> {
+        const result: TileFeatureId[] = [];
+        for (const feature of features) {
+            signal?.throwIfAborted();
+            let featureId = feature.featureId;
+            if (feature.attributeIndex !== undefined || feature.relationIndex !== undefined || feature.validityIndex !== undefined) {
+                if (feature.attributeIndex !== undefined && feature.relationIndex !== undefined) rejectAction("attributeIndex and relationIndex are mutually exclusive", "invalid_arguments");
+                if (feature.attributeIndex === undefined && feature.relationIndex === undefined) rejectAction("validityIndex requires attributeIndex or relationIndex", "invalid_arguments");
+                const target = parseFeatureInspectionTarget(featureId);
+                if (target.scope !== "feature") rejectAction("Use either a suffixed featureId or numeric inspection selectors, not both", "invalid_arguments");
+                featureId = formatFeatureInspectionTarget(feature.attributeIndex !== undefined
+                    ? { scope: "attribute", baseFeatureId: target.baseFeatureId, attributeIndex: feature.attributeIndex, validityIndex: feature.validityIndex }
+                    : { scope: "relation", baseFeatureId: target.baseFeatureId, relationIndex: feature.relationIndex!, validityIndex: feature.validityIndex });
+            }
+            if ("mapTileKey" in feature) {
+                if (!this.parseMapPartitionKeySafe(feature.mapTileKey) || !feature.mapTileKey.startsWith("Features:")) rejectAction("Invalid feature partition key", "invalid_arguments");
+                result.push({ mapTileKey: feature.mapTileKey, featureId });
+            } else {
+                const matches = await this.locateFeature(feature.mapId, featureId, feature.layerId, signal);
+                signal?.throwIfAborted();
+                if (matches.length !== 1) rejectAction(matches.length ? "Feature identity is ambiguous; supply its partition" :
+                    "Feature was not found. For a relation target, use viewer_list_layers to find a layer whose " +
+                    "featureTypes includes the target type. " +
+                    "Do not bypass this failure by copying the source feature's mapTileKey into a new inspection.");
+                const target = parseFeatureInspectionTarget(featureId);
+                result.push({ ...matches[0], featureId: formatFeatureInspectionTarget({ ...target, baseFeatureId: matches[0].featureId }) });
+            }
+        }
+        return result.filter((feature, index) => result.findIndex(other => other.mapTileKey === feature.mapTileKey && other.featureId === feature.featureId) === index);
+    }
+
 }

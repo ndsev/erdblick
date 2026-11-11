@@ -1,0 +1,81 @@
+.mcp-trigger {
+    display: inline-flex;
+    margin: .375rem .5rem;
+    --p-button-sm-padding-y: .125rem;
+}
+
+.action-details {
+    display: flex;
+    flex-direction: column;
+    gap: .6rem;
+    width: min(24rem,calc(100vw - 3rem));
+    max-height: calc(100dvh - 6rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.action-details p {
+    margin: 0;
+}
+
+.mcp-connection {
+    display: flex;
+    flex-direction: column;
+    gap: .4rem;
+}
+
+.mcp-connection-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    flex-wrap: wrap;
+}
+
+.mcp-connection-label {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+}
+
+.mcp-connection small {
+    overflow-wrap: anywhere;
+}
+
+.action-details p-iftalabel input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.action-stop-controls {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+}
+
+.action-help {
+    font-size: 1.25rem;
+    color: var(--p-text-muted-color);
+    cursor: help;
+}
+
+.action-details > ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 6rem;
+    overflow: auto;
+    flex-shrink: 0;
+}
+
+.action-details > ul li {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    font-size: .85rem;
+    padding: .25rem 0;
+}
+
+.action-details > ul li span:first-child {
+    overflow-wrap: anywhere;
+}

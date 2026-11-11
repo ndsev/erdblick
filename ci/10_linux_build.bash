@@ -2,6 +2,7 @@
 
 set -e
 
+# Recreate the build tree for the requested preset (release by default), then build WASM and UI.
 ci_dir="$(realpath ${BASH_SOURCE[0]} | xargs -I{} dirname {})"
 source "$ci_dir/emsdk/emsdk_env.sh"
 cd "$ci_dir/.."

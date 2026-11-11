@@ -20,6 +20,10 @@ places or features, and the **2D/3D controls (3)** to change the projection.
 6. **Diagnostics indicator** – summarizes tile progress, backend connectivity, and error presence.
 7. **Coordinate readout** – shows cursor coordinates and tile IDs and lets you place a shared marker.
 
+The vertical attribution text at the map edge combines notices from loaded map
+data and the background imagery visible in all views. Hover it for the full text
+or click it to open **Copyright and Legal Information**, grouped by source.
+
 The workspace can keep the Search area, a modal tool, and several inspections
 visible at the same time:
 
@@ -28,6 +32,11 @@ Individual workspace surfaces can be resized without leaving the desktop
 viewport:
 
 
+<!-- mcp:
+title: "Map camera navigation and projection"
+keywords: ["navigate", "zoom", "pan", "rotate", "flat", "2D", "3D", "first person"]
+hint: "Use viewer_navigate to fit known features, native mapTileKeys or WGS84 bounds. For direct camera/projection changes discover view.camera and view.projection; camera angles are radians and destination.alt is a scale-height, not physical elevation. Use a discovered viewId and observe synchronization. Direct camera assignment is unavailable in first-person mode."
+-->
 ## Navigating the Map
 
 You can move around the map using a mix of mouse gestures, keyboard shortcuts, and on-screen controls:
@@ -63,6 +72,24 @@ The main bar provides these top-level entries:
 
 On narrower screens, the main bar collapses into a more compact mobile layout. In that mode, the **Maps** action also appears in the menu bar itself.
 
+### MCP Agent Controls
+
+When enabled by the deployment, the **MCP** button opens agent connection and
+activity controls. Give the tab a recognizable label so a remote agent can choose
+the intended viewer. The popover shows tool availability and recent action
+outcomes; a ready connection does not mean an agent is currently working.
+
+Choose **Configure**, then the platform and agent, to display setup instructions
+and copyable connection fields. App clients also ask you to choose **Remote MCP**
+or **WebMCP**. Copying a command does not execute it. Follow the displayed steps
+in your client and keep the viewer tab open; WebMCP requires a supported browser
+document, while remote MCP must be reachable from the agent's environment.
+
+**Stop current action** cancels pending agent work. It does not undo completed
+edits or stop searches you started yourself. If controls are unavailable, read
+the status detail; ordinary map use remains available. Developer integration
+details are in [Optional MCP browser actions](erdblick-dev-guide.md#optional-mcp-browser-actions).
+
 ### Cache Reset
 
 When enabled for your authenticated session, **Tools -> Cache Reset** lists the
@@ -78,6 +105,11 @@ does not clear caches inside a datasource or refresh other browser sessions.
 
 ![Authorized cache-reset dialog with map ownership](screenshots/26-cache-reset-authorized.png)
 
+<!-- mcp:
+title: "Map layers tile levels and grid"
+keywords: ["map", "layer", "visibility", "AUTO", "tile borders", "grid", "background"]
+hint: "Read view.layers to identify what is visible, then use singular view.layer to assign a complete {visible, level, autoLevel} value. Catalogs may include hidden layers. view.grid controls the independent NDS/XYZ tile grid; view.background selects a discovered background. Search help for \"Style options and presets\" for per-layer presentation."
+-->
 ## Maps, Layers, and Base Content
 
 Use the **Maps & Layers** panel to:
@@ -110,11 +142,32 @@ colour, and opacity independently for each view:
 
 ![Expanded tile-grid configurator](screenshots/04-tile-grid-configurator.png)
 
+## Notifications
+
+Notifications appear above the workspace. Repeating the same message keeps one
+notification visible, increments its occurrence badge and restarts its timer.
+After dismissal, a later occurrence starts again at **1**. Counts above 99 display
+as **99+**; hover the badge to read the exact count.
+
+Success, information, warning and error messages normally remain for **3, 5, 8
+and 10 seconds**. Hovering a notification or focusing one of its controls pauses
+the timer, as does switching to another browser tab. Persistent backend and
+configuration warnings stay until dismissed or their owning condition resolves.
+Distinct queued messages appear with a short delay between them.
+
+Use the **×** button to dismiss a notification. Some warnings offer an action,
+such as opening Rendering preferences after a GPU capacity failure. Successful
+actions close their own notification; a failed action leaves its explanation
+available. Manual clipboard copying and detailed search errors still open dialogs.
+
+![A repeated validation message with its occurrence badge and dismissal control](screenshots/info-messages.png)
+
 ## Loading and Status Indicators
 
 Erdblick exposes loading state both on the map and in the main bar:
 
 - The **diagnostics indicator** shows whether tiles are still loading, whether the backend is connected, and whether errors have occurred.
+- Its status dot is green when healthy, yellow for unavailable datasource/catalog data with a connected backend, and red for a backend connection or protocol failure. The loading spinner always stays blue. Individual datasource rows keep their own failure state.
 - Tile-state overlays are only visible when tile borders are enabled.
 
 Tile overlays use these states:
@@ -124,6 +177,11 @@ Tile overlays use these states:
 
 Click the diagnostics indicator to open its progress popover. From there you can jump into the full statistics, log, and export tools. For the detailed workflow, see the [Diagnostics and Status Guide](erdblick-diagnostics.md).
 
+<!-- mcp:
+title: "Coordinate marker"
+keywords: ["coordinates", "marker", "longitude", "latitude", "pin", "WGS84"]
+hint: "Use app.marker for the marker position and visibility. A marker does not move the camera; use viewer_navigate or view.camera when navigation is also requested."
+-->
 ## Coordinate Panel and Marker
 
 - The coordinate panel shows the current cursor position plus derived tile IDs. Click any value to copy it.
@@ -167,20 +225,30 @@ For the feature workflow, continue with the [Feature Inspection Guide](erdblick-
 - persistent Search panels for results, visualization, and diagnostics
 - search history and inline validation
 
-The dedicated [Search and Jump](../../../docs/mv-search.md) guide covers targets, persistent feature-search panels, result visualization, diagnostics, and the query language.
+The [Search Guide](erdblick-search.md) covers targets, persistent Search panels,
+result visualization, diagnostics and query assistance.
 
+<!-- mcp:
+title: "Viewer preferences and resets"
+keywords: ["preferences", "rendering", "tile budget", "dark mode", "reset", "navigation", "inspection"]
+hint: "Discover app.preferences channels for supported rendering, navigation, inspection and hover settings. Assign complete values while preserving unrelated fields. Some UI preferences, including dark mode, have no semantic state channel; use a fresh viewer_take_snapshot and supported UI controls. Reset actions discard saved state; diagnose the specific problem before using them."
+-->
 ## Preferences and Resets
 
 Open **Edit -> Preferences** to access the main viewer preferences:
 
 - **Max Tiles to Load** limits how much data the current view may page in
 - **Max Inspections** controls how many locked inspection panels can stay open
-- **Location Matches** controls how many place-name search results the palette requests and displays; the default is 10 and the supported range is 1 to 50
+- **Location Matches** controls how many place-name search results the palette requests and displays; the default is 10 and the supported range is 1 to 50. Its input, slider, and Apply control are disabled while location search is off.
+- **Enable location search** under **Inspect & Search** is on by default. Turning it off cancels location-provider queries, hides location entries (including history suggestions), and disables the boundary and match controls while retaining their values.
+- **Use location boundaries** starts disabled until the fixed terms are accepted. Turning it off removes area highlights and makes location selection navigate to the supplied centrepoint. Enabling it again opens the terms dialog with both location toggles and a single **Apply** button. Applying with boundaries selected accepts the terms. Disclaimer and attribution links sit beside both location toggles; see [Place-Name Location Search](erdblick-search.md#place-name-location-search).
 - **Show coordinates** controls whether the coordinate readout is present and, when configured by the deployment, requests acceptance of its legal terms; it does not hide the marker controls
 - **Hover Labels** controls which feature fields appear above the coordinate readout; each value can use a short display key, which defaults to the final segment of its field expression, and its joined key/value pill follows the inspection value-bubble color, outline, and striping preferences
 - **Tile pull compression** toggles compressed tile downloads
 - **WebGL antialiasing** controls multisample rendering when the browser/device supports it
 - **Semantic layer compositing** is a default-on diagnostic switch. Disabling it recreates the renderer without semantic ordering passes and hides semantic decorations, such as cinematic lane markings, and their picking. It is saved locally, not in shared URLs; other rendering effects remain enabled.
+- **Point clouds** under **Rendering** controls downsampling and the maximum points per object. See [Point-cloud presets and preferences](erdblick-stylesystem.md#ndslive-point-clouds) for the count, Apply workflow, and persistence.
+- **Connection** controls automatic reconnection and its delays; see [Connection Retry](#connection-retry). It does not control datasource startup or tile freshness.
 - **Contact shading** uses final scene depth to darken nearby lower surfaces and can be disabled on slower GPUs
 - **LOD 3 Tile Threshold** controls the default visible-tile-count boundary between stylesheet LOD 2 and LOD 3; styles can override the full LOD ladder
 - **Dark Mode** switches between on, off, and automatic
@@ -194,20 +262,57 @@ search behavior, and rendering controls remain easy to scan:
 
 **Feature zoom clearance** controls the distance left around a feature when zooming to it.
 
-![Inspect and Search preferences](screenshots/preferences-inspection.png)
+Under **Inspect & Search**, **Drill Pick Radius** widens the pixel area used to
+find nearby pick candidates. Under **Rendering**, **Max Tiles to Load** bounds
+the workload when exploring dense maps; it does not change the per-object
+point-cloud sampling quota.
 
-**Drill pick radius** widens the pixel area used to find nearby pick candidates.
+If a GPU material buffer fills up, one **GPU material buffer exhausted** warning stays
+visible until dismissed; further warnings do not stack while it is open. Its
+**Adjust downsampling to reduce GPU load** link dismisses the warning and opens
+**Preferences → Rendering**. Enable point-cloud downsampling, lower **Maximum points
+per cloud object**, and press **Apply** to reload with fewer points. **Max Tiles to Load**
+can also reduce the total rendering load. The warning does not change settings automatically.
 
-![Rendering preferences](screenshots/preferences-rendering.png)
+### Connection Retry
 
-**Max Tiles to Load** bounds the workload when exploring dense maps.
+Open **Edit -> Preferences -> Connection** when this browser repeatedly loses
+its connection to mapget. The settings are:
 
+| Control | Meaning | Default |
+| --- | --- | --- |
+| **Automatic retry** | Reconnect automatically after a connection failure. | On |
+| **Initial delay (seconds)** | Wait before the first retry. | 5 |
+| **Backoff multiplier** | Multiply the delay after each failed attempt. | 2 |
+| **Maximum delay / cooldown (seconds)** | Cap the delay; retries continue at this interval during a prolonged outage. | 60 |
+
+Press **Apply** to commit the complete policy. Delays must be positive, the
+maximum must be at least the initial delay, and the multiplier must be at least
+one. A validation message explains invalid combinations. Settings persist in
+this browser and exported state snapshots, but not shared URLs.
+
+Turning retry off cancels scheduled reconnection; it does not turn off tile
+expiry or repair an unavailable datasource. Source startup retries are a server
+setting, and retained tiles refresh according to their own lifetimes. Inspect
+the diagnostics popover for the failing connection or source before changing
+these controls.
+
+<!-- mcp:
+title: "Hover label fields"
+keywords: ["hover", "HUD", "label", "field", "display key", "speed limit"]
+hint: "Configure app.preferences.hover using schema-grounded field expressions and optional displayKey values. This changes the hover HUD, not permanent map labels. Search help for \"Style labels\" for text drawn on map geometry."
+-->
 ### Hover Labels
 
 The **Hover Labels** tab builds the compact HUD shown while pointing at a map
 feature. Select known fields or enter a custom Simfil expression, and give each
 value an optional short display key. The feature data is already available to
 the renderer, so hovering does not trigger an extra data request.
+
+An expression can show several matches. For example, `**.speedLimitKmh` displays
+`80, 90` when it finds those two limits on a feature. Matches retain their
+expression order; null and undefined values are omitted. An array-valued match
+keeps its brackets, so one array `[80,90]` remains distinguishable from two limits.
 
 ![Configuring hover-label fields and display keys](screenshots/preferences-hover-labels.png)
 

@@ -1,3 +1,8 @@
+/**
+ * Tile and object partition identities used in filter demand and deliveries.
+ * Parsing and equality operate on the protocol values themselves; canonical
+ * runtime map-tile keys continue to come from the native implementation.
+ */
 /** Lossless browser representation of mapget's tagged PartitionId. */
 export type TilePartitionId = {readonly kind: "tile"; readonly id: number};
 export type ObjectPartitionId = {

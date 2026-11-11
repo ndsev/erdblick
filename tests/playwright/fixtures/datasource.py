@@ -1,0 +1,185 @@
+#!python
+
+import mapget
+from mapget import Point as Pt
+import sys
+
+
+def add_base_example_feature(tile: mapget.TileFeatureLayer, featureId = 0) -> None:
+    """
+    Add the original example feature used by existing docs and tests.
+
+    This keeps attributes like `isBridge` (false) and the nested `addresses`
+    with `name = "Main St."` so inspection-panel tests can continue to
+    assert on those values.
+    """
+    feature: mapget.Feature = tile.new_feature("Way", [("wayId", featureId)])
+
+    # Assign geometry (low-level)
+    geom: mapget.Geometry = feature.geom().new_geometry(mapget.GeomType.LINE)
+    geom.append(41.0, 11.0)
+    geom.append(Pt(x=42.0, y=12.0, z=506))
+
+    # Point grouping consumes a one-tile halo, so each point must belong to
+    # its source partition. Keep IDs/attributes available in the inspection
+    # anchor tile, but do not duplicate these absolute points into every tile.
+    tile_id = tile.tile_id()
+    point = Pt(42.5, 11.6)
+    if mapget.TileId.from_wgs84(point.x, point.y, tile_id.level()) == tile_id:
+        feature.add_point(point)
+    points = [point for point in [Pt(42.5, 11.6), Pt(42.5, 11.8)]
+              if mapget.TileId.from_wgs84(point.x, point.y, tile_id.level()) == tile_id]
+    if points:
+        feature.add_points(points)
+
+    # Assign the remaining geometry (high-level).
+    feature.add_line([Pt(42.5, 11.6), Pt(42.5, 11.7)])
+    feature.add_mesh([Pt(42.5, 11.6), Pt(42.5, 11.7), Pt(42.2, 11.7)])
+    feature.add_poly([Pt(42.5, 11.6), Pt(42.5, 11.7), Pt(42.2, 11.7), Pt(42.2, 11.3)])
+
+    # Add an attribute
+    fixed_attrs: mapget.Object = feature.attributes()
+    fixed_attrs.add_field("isBridge", False)
+
+    # Add an attribute which has a compound value (low-level)
+    attr_obj = tile.new_object()
+    attr_obj.add_field("name", "Main St.")
+    attr_obj.add_field("houseNumber", 5)
+    attr_arr = tile.new_array()
+    attr_arr.append(attr_obj)
+    attr_arr.append(attr_obj)
+    fixed_attrs.add_field("addresses", attr_arr)
+
+    # Add an attribute which has a compound value (high-level)
+    # Note: Map values may also be feature IDs to create references.
+    fixed_attrs.add_field(
+        "pois",
+        [
+            {"name": "Bakery", "rating": 10},
+            {"name": "Gas Station", "rating": 8},
+            {"reference": tile.new_feature_id("Way", [("wayId", 7)])},
+        ],
+    )
+
+    # Add an attribute layer
+    attr_layer: mapget.Object = feature.attribute_layers().new_layer("rules")
+    attr: mapget.Attribute = attr_layer.new_attribute("SPEED_LIMIT_METRIC")
+    # TODO: Add Python bindings for validities.
+    # attr.set_direction(mapget.Direction.POSITIVE)
+    attr.add_field("speedLimitKmh", 50)
+
+    # Two deliberately colliding meanings exercise confirmed search preparation:
+    # an attribute named SPEED_LIMIT and a warning-sign enum with that name.
+    speed = attr_layer.new_attribute("SPEED_LIMIT")
+    speed.add_field("attributeValue", {"speed": 50 + featureId})
+    warning = attr_layer.new_attribute("WARNING_SIGN")
+    warning.add_field("attributeValue", {"warningSign":
+        "SPEED_LIMIT" if featureId == 0 else "ANIMALS" if featureId == 1 else "OTHER"})
+
+    # Add a child feature ID
+    # TODO: Add Python bindings for relations.
+    # feature.children().append(tile.new_feature_id("Way", [("wayId", 10)]))
+
+def handle_tile_request(tile: mapget.TileFeatureLayer) -> None:
+    # Read out requested tile-id / map-id / layer-id
+    print(
+        f"Got request for tile={tile.tile_id().value:02X}, "
+        f"map={tile.map_id()}, layer={tile.layer_id()}."
+    )
+
+    # Keep the original example feature for backwards compatibility.
+    for i in range(0, 5):
+        add_base_example_feature(tile, i)
+
+# Instantiate a data source with a minimal mandatory set
+# of meta-information.
+ds = mapget.DataSourceServer(
+    {
+        "layers": {
+            "WayLayer": {
+                # Declare a nested field independently of materialized tiles so
+                # browser tests can exercise schema-backed worker completion.
+                # Other example attributes remain open, dynamically typed data.
+                "featureModelSchema": {
+                    "oneOf": [{"$ref": "#/$defs/Way"}],
+                    "$defs": {
+                        "AttributeLayers": {
+                            "type": "object",
+                            "x-mapget": {"metaType": "AttributeLayerMap", "featureType": "Way"},
+                            "properties": {"rules": {"$ref": "#/$defs/Rules"}},
+                        },
+                        "Rules": {
+                            "type": "object", "x-mapget": {"metaType": "AttributeContainer"},
+                            "properties": {
+                                "SPEED_LIMIT": {"$ref": "#/$defs/SpeedLimit"},
+                                "WARNING_SIGN": {"$ref": "#/$defs/WarningSign"},
+                            },
+                        },
+                        "SpeedLimit": {
+                            "type": "object",
+                            "x-mapget": {"metaType": "Attribute", "attributeTypeCode": "SPEED_LIMIT"},
+                            "properties": {"attributeValue": {
+                                "type": "object", "properties": {"speed": {"type": "integer", "minimum": 0, "maximum": 255}},
+                            }},
+                        },
+                        "WarningSign": {
+                            "type": "object",
+                            "x-mapget": {"metaType": "Attribute", "attributeTypeCode": "WARNING_SIGN"},
+                            "properties": {"attributeValue": {
+                                "type": "object", "properties": {"warningSign": {
+                                    "type": "string", "enum": ["SPEED_LIMIT", "ANIMALS", "OTHER"],
+                                }},
+                            }},
+                        },
+                        "Way": {
+                            "type": "object",
+                            "x-mapget": {"metaType": "Feature", "featureType": "Way"},
+                            "properties": {
+                                "typeId": {"const": "Way"},
+                                "properties": {
+                                    "type": "object",
+                                    "x-mapget": {"metaType": "FeatureProperties", "featureType": "Way"},
+                                    "properties": {
+                                        "isBridge": {"type": "boolean"},
+                                        "layer": {"$ref": "#/$defs/AttributeLayers"},
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                "featureTypes": [
+                    {
+                        "name": "Way",
+                        "uniqueIdCompositions": [
+                            [
+                                {
+                                    "partId": "wayId",
+                                    "datatype": "I64",
+                                }
+                            ]
+                        ],
+                    }
+                ]
+            }
+        },
+        "mapId": "TestMap",
+    }
+)
+
+# Set the callback which is invoked when a tile is requested.
+ds.on_tile_feature_request(handle_tile_request)
+
+# Parse port as optional first argument
+port = 0  # Pick random free port
+if len(sys.argv) > 1:
+    port = int(sys.argv[1])
+
+# Run the data source - you may also set port=0 to select a
+# port automatically.
+ds.go(port=port)
+
+# Wait until Ctrl-C is hit. Navigate e.g. to
+#  http://localhost:54544/tile?layer=WayLayer&tileId=2&responseType=json
+# to test the running data source.
+ds.wait_for_signal()

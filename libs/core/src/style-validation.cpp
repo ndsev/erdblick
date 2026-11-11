@@ -1,3 +1,4 @@
+#include "erdblick/style-authoring.h"
 #include "style-validation.h"
 
 #include "color.h"
@@ -51,6 +52,11 @@ bool markIsValid(YAML::Mark const& mark)
     return mark.pos >= 0 && mark.line >= 0 && mark.column >= 0;
 }
 
+/**
+ * Read an optional scalar without changing out when absent or invalid. Parsing
+ * failures append a located rule-skipped issue; required properties are enforced
+ * by their owning validator.
+ */
 template <typename T>
 bool readScalar(
     YAML::Node const& parent,
@@ -230,7 +236,8 @@ bool validateRegexValue(
             "error",
             "schema",
             std::move(impact),
-            "Invalid regular expression in " + property + ": " + e.what(),
+            "Invalid regular expression in " + property + ": " + e.what() +
+                ". Use regex syntax such as .*SPEED.*, not shell wildcards such as *SPEED*.",
             locationForNode(parent[property]));
         issue.ruleIndex = ruleIndex;
         issue.rulePath = rulePath;
@@ -473,6 +480,11 @@ bool validateLodRange(
         node);
 }
 
+/**
+ * Locate literal scalar text from its YAML mark. This deliberately remains a
+ * best-effort UI location: decoded escapes and folded scalars may not occur in
+ * the original source.
+ */
 std::optional<size_t> findScalarOffset(YAML::Node const& node, std::string const& source)
 {
     if (!node.IsScalar()) {
@@ -514,6 +526,11 @@ StyleSourceLocation locationFromOffset(std::string const& source, size_t offset,
     return loc;
 }
 
+/**
+ * Compile an optional expression in a fresh mapget environment without rewriting
+ * it. Report a scalar-relative location when possible, otherwise the YAML node;
+ * this checks syntax and compilation, not evaluation against a feature.
+ */
 bool validateExpression(
     YAML::Node const& parent,
     std::string const& property,
@@ -560,7 +577,7 @@ bool validateGeometry(YAML::Node const& ruleYaml, std::string const& rulePath, S
     if (!node.IsDefined()) {
         return true;
     }
-    static const std::set<std::string> allowed = {"point", "mesh", "line", "polygon", "aabb", "gltf"};
+    static const auto allowed = styleAuthoringEnumValues("rule", "geometry");
     auto validateOne = [&](YAML::Node const& valueNode) {
         if (!valueNode.IsScalar()) {
             auto& issue = report.addIssue("error", "schema", "rule-skipped", "geometry entries must be scalar.", locationForNode(valueNode));
@@ -597,6 +614,11 @@ bool validateGeometry(YAML::Node const& ruleYaml, std::string const& rulePath, S
     return validateOne(node);
 }
 
+/**
+ * Validate scale structure, stop ordering or typed categorical uniqueness, and
+ * exceptional-value overrides. Literal colors follow Color's accepted input
+ * formats; expression validity is checked separately from runtime value types.
+ */
 bool validateColorScale(
     YAML::Node const& ruleYaml,
     std::string const& rulePath,
@@ -626,7 +648,7 @@ bool validateColorScale(
     if (!validateEnumValue(
             scale,
             "mode",
-            {"linear", "categorical"},
+            styleAuthoringEnumValues("color-scale", "mode"),
             rulePath,
             report,
             ruleIndex) ||
@@ -713,6 +735,28 @@ bool validateColorScale(
             }
         }
     }
+    if (auto specials = scale["specials"]; specials.IsDefined()) {
+        if (!specials.IsSequence())
+            return fail(
+                "color-scale.specials requires a list of numeric color overrides.",
+                specials);
+        std::set<double> values;
+        for (auto const& stop : specials) {
+            if (!stop.IsSequence() || stop.size() != 2 || !stop[0].IsScalar() ||
+                !stop[1].IsScalar() || !Color(stop[1].Scalar()).isValid())
+                return fail(
+                    "Every special color must be a [numeric raw value, literal color] pair.",
+                    stop);
+            try {
+                auto raw = stop[0].as<double>();
+                if (!std::isfinite(raw) || !values.insert(raw).second)
+                    return fail("Special colors require unique finite raw values.", stop);
+            }
+            catch (YAML::Exception const&) {
+                return fail("Special color keys must be numeric raw values.", stop);
+            }
+        }
+    }
     if (scale["fallback"].IsDefined() &&
         (!scale["fallback"].IsScalar() ||
          !Color(scale["fallback"].Scalar()).isValid()))
@@ -751,7 +795,7 @@ bool validateWidthScale(
     if (!validateEnumValue(
             scale,
             "mode",
-            {"linear", "categorical"},
+            styleAuthoringEnumValues("color-scale", "mode"),
             rulePath,
             report,
             ruleIndex) ||
@@ -1309,7 +1353,7 @@ bool validateStyleOptionYaml(
         issue.property = "id";
         return false;
     }
-    if (!validateEnumValue(optionYaml, "type", {"bool", "color", "string"}, optionPath, report, std::nullopt)) {
+    if (!validateEnumValue(optionYaml, "type", styleAuthoringEnumValues("option", "type"), optionPath, report, std::nullopt)) {
         report.issues.back().severity = "warning";
         report.issues.back().impact = "option-skipped";
         report.valid = std::ranges::none_of(report.issues, [](auto const& issue) { return issue.severity == "error"; });
@@ -1493,6 +1537,8 @@ bool validateStyleRuleYamlImpl(
         return false;
     }
 
+    // Continue across independent properties so one edit exposes all actionable
+    // issues. Nested failures still invalidate their containing top-level rule.
     bool ok = true;
     auto markInvalid = [&ok](bool value) { ok = value && ok; };
     auto rejectRemoved = [&](std::string const& property, std::string message) {
@@ -1513,70 +1559,20 @@ bool validateStyleRuleYamlImpl(
     };
 
     markInvalid(validateGeometry(ruleYaml, rulePath, report, sourceRuleIndex));
-    markInvalid(validateEnumValue(ruleYaml, "scope", {"feature", "relation", "attribute"}, rulePath, report, sourceRuleIndex));
-    markInvalid(validateEnumValues(ruleYaml, "mode", {"none", "hover", "selection"}, rulePath, report, sourceRuleIndex));
-    markInvalid(validateEnumValue(ruleYaml, "fidelity", {"any", "high", "low"}, rulePath, report, sourceRuleIndex));
     markInvalid(validateLodRange(ruleYaml, rulePath, report, sourceRuleIndex));
-    markInvalid(validateEnumValue(ruleYaml, "arrow", {"none", "forward", "backward", "double"}, rulePath, report, sourceRuleIndex));
-    markInvalid(validateEnumValue(
-        ruleYaml,
-        "z-index-role",
-        {"support", "overlay"},
-        rulePath,
-        report,
-        sourceRuleIndex));
-    markInvalid(validateEnumValue(
-        ruleYaml,
-        "relation-line-geometry",
-        {"centers", "connection-stubs"},
-        rulePath,
-        report,
-        sourceRuleIndex));
-    markInvalid(validateEnumValue(ruleYaml, "attribute-validity-geom", {"any", "required", "none"}, rulePath, report, sourceRuleIndex));
-    markInvalid(validateEnumValue(ruleYaml, "offset-type", {"miter"}, rulePath, report, sourceRuleIndex));
-    markInvalid(validateEnumValue(
-        ruleYaml,
-        "lateral-offset-unit",
-        {"meter", "meters", "m", "pixel", "pixels", "px"},
-        rulePath,
-        report,
-        sourceRuleIndex));
-    markInvalid(validateEnumValue(
-        ruleYaml,
-        "dash-unit",
-        {"meter", "meters", "m", "pixel", "pixels", "px"},
-        rulePath,
-        report,
-        sourceRuleIndex));
-    markInvalid(validateEnumValue(
-        ruleYaml,
-        "label-size-units",
-        {"meters", "common", "pixels"},
-        rulePath,
-        report,
-        sourceRuleIndex));
-    markInvalid(validateEnumValue(
-        ruleYaml,
-        "label-text-anchor",
-        {"start", "middle", "end"},
-        rulePath,
-        report,
-        sourceRuleIndex));
-    markInvalid(validateEnumValue(
-        ruleYaml,
-        "label-alignment-baseline",
-        {"top", "center", "bottom"},
-        rulePath,
-        report,
-        sourceRuleIndex));
-    markInvalid(validateEnumValue(
-        ruleYaml,
-        "label-word-break",
-        {"break-word", "break-all"},
-        rulePath,
-        report,
-        sourceRuleIndex));
+    for (auto const& [property, field] : styleAuthoringSchema().at("records").at("rule").items()) {
+        auto const kind = field.at("kind").get<std::string>();
+        if (property == "geometry" || (kind != "enum" && kind != "enum-list")) {
+            continue;
+        }
+        auto const allowed = styleAuthoringEnumValues("rule", property);
+        markInvalid(kind == "enum-list"
+            ? validateEnumValues(ruleYaml, property, allowed, rulePath, report, sourceRuleIndex)
+            : validateEnumValue(ruleYaml, property, allowed, rulePath, report, sourceRuleIndex));
+    }
 
+    // Reject removed authoring forms explicitly, before validating the current
+    // property set, so users see the migration they need to make.
     rejectRemoved(
         "aspect",
         "aspect was renamed to scope in style schema version 2.");
@@ -1656,6 +1652,9 @@ bool validateStyleRuleYamlImpl(
         ok = false;
     }
 
+    markInvalid(readScalar<bool>(ruleYaml, "point-cloud", rulePath, report, sourceRuleIndex));
+    markInvalid(validateNumericRange(ruleYaml, "point-cloud-max-points", 0., double(std::numeric_limits<uint32_t>::max()), rulePath, report, sourceRuleIndex));
+    markInvalid(readScalar<uint32_t>(ruleYaml, "point-cloud-max-points", rulePath, report, sourceRuleIndex));
     if (ruleYaml["geometry-name"].IsDefined()) {
         std::string geometryName;
         if (!readScalar(
@@ -1929,6 +1928,8 @@ bool validateStyleRuleYamlImpl(
         report,
         sourceRuleIndex));
 
+    // Literal validation above cannot establish expression syntax or relationships
+    // between independently valid properties. Check those before nested styles.
     markInvalid(validateExpression(ruleYaml, "filter", true, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "attribute-filter", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "color-expression", false, rulePath, source, report, sourceRuleIndex));
@@ -1977,6 +1978,8 @@ bool validateStyleRuleYamlImpl(
         ok = false;
     }
 
+    // Branches inherit the current evaluation context. Relation endpoint styles
+    // have their own feature context, unlike a top-level relation-scope rule.
     if (ruleYaml["first-of"].IsDefined() && ruleYaml["all-of"].IsDefined()) {
         auto& issue = report.addIssue(
             "error",

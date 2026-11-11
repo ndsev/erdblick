@@ -66,6 +66,10 @@ double lineLength(std::vector<mapget::Point> const& points)
     return result;
 }
 
+/**
+ * Trim a metric planar polyline from its end, interpolating the remaining endpoint.
+ * If the requested distance consumes the line, retain only its first point.
+ */
 std::vector<mapget::Point> trimLineEnd(
     std::vector<mapget::Point> const& points,
     double trimMeters)
@@ -94,6 +98,10 @@ std::vector<mapget::Point> trimLineEnd(
     return {points.front()};
 }
 
+/**
+ * Trim a metric planar polyline from its start while preserving later vertices.
+ * If the requested distance consumes the line, retain only its last point.
+ */
 std::vector<mapget::Point> trimLineStart(
     std::vector<mapget::Point> const& points,
     double trimMeters)
@@ -125,6 +133,10 @@ std::vector<mapget::Point> trimLineStart(
     return {points.back()};
 }
 
+/**
+ * Find the first non-degenerate XY segment from the requested end and return
+ * its unit direction for constructing a smooth connection.
+ */
 std::optional<std::array<double, 2>> terminalDirection(
     std::vector<mapget::Point> const& points,
     bool atEnd)
@@ -155,6 +167,7 @@ std::optional<std::array<double, 2>> terminalDirection(
     return std::nullopt;
 }
 
+/** Evaluate a cubic Bezier connection in the current geometry coordinate space. */
 mapget::Point cubicPoint(
     mapget::Point const& p0,
     mapget::Point const& p1,
@@ -174,6 +187,11 @@ mapget::Point cubicPoint(
     };
 }
 
+/**
+ * Find the smallest pixel-to-world scale at which lateral offset changes would
+ * consume too much forward motion along a sampled transition. Zero means no
+ * finite contraction threshold was found.
+ */
 double transitionOffsetScaleThreshold(
     std::span<mapget::Point const> points,
     std::span<glm::fvec2 const> offsetVectorsPx)
@@ -210,6 +228,10 @@ bool hasLocalOffset(glm::dvec3 const& offset)
     return offset.x != 0.0 || offset.y != 0.0 || offset.z != 0.0;
 }
 
+/**
+ * Decode source rule indices from a planner channel ID suffix such as :2,5.
+ * Malformed or partially parsed indices reject the whole list.
+ */
 std::vector<uint32_t> channelRuleIndices(std::string_view channelId)
 {
     auto const separator = channelId.rfind(':');
@@ -318,6 +340,10 @@ double mercatorWorldX(double longitudeDeg)
         (2.0 * kPi);
 }
 
+/**
+ * Project latitude into Deck's 512-unit Mercator world, clamping near the poles
+ * to avoid the projection singularity.
+ */
 double mercatorWorldY(double latitudeDeg)
 {
     auto const latitudeRad = glm::clamp(
@@ -329,6 +355,10 @@ double mercatorWorldY(double latitudeDeg)
     return (kMercatorTileSize * (kPi + mercatorTerm)) / (2.0 * kPi);
 }
 
+/**
+ * Compute local Mercator scaling for offset geometry. False means the caller
+ * must use its fallback projection because the scale is not finite or usable.
+ */
 bool distanceScalesAt(
     double latitudeDeg,
     double& latitudeCosine,
@@ -549,6 +579,18 @@ void TileSubsetLayerRenderer::setLineSimplificationTolerance(
         : 0.0;
 }
 
+void TileSubsetLayerRenderer::setPointCloudPolicy(
+    bool enabled, uint32_t maxPoints, double spacingMeters, std::string const& /*cacheKey*/)
+{
+    // The caller supplies the user's quota. A default detail setting is not
+    // an allocation limit and must not reject a valid requested point count.
+    if (!std::isfinite(spacingMeters) || spacingMeters < 0.)
+        throw std::invalid_argument("Invalid point-cloud rendering policy");
+    pointCloudEnabled_ = enabled;
+    pointCloudMaxPoints_ = maxPoints;
+    pointCloudDeliveredCount_ = pointCloudRenderedCount_ = 0;
+}
+
 void TileSubsetLayerRenderer::configureGpuPacket(
     uint32_t sceneGeneration,
     uint32_t packetSequence,
@@ -749,6 +791,9 @@ void TileSubsetLayerRenderer::run()
             .latitude = coordinateOriginWgs_.y,
             .altitude = coordinateOriginWgs_.z,
         });
+
+    // Size picking storage before emission; all scope-specific rows share one
+    // contribution-local pick index space.
     size_t terminalEntryCount = 0;
     subset_->forEachChannel(
         [&](mapget::model_ptr<mapget::TileSubsetChannel> const& channel) {
@@ -758,6 +803,26 @@ void TileSubsetLayerRenderer::run()
             terminalEntryCount += channel->entryCount();
             return true;
         });
+    hasPointCloudRules_ = false;
+    std::function<size_t(FeatureStyleRule const&)> countCloudPasses = [&](auto const& rule) -> size_t {
+        if (rule.subRules().empty()) return rule.pointCloud() ? 1 : 0;
+        size_t count = 0;
+        for (auto const& child : rule.subRules()) {
+            auto const childPasses = countCloudPasses(child);
+            // First-of emits only one branch; all-of emits every matching branch.
+            if (rule.branchMode() == FeatureStyleRule::BranchMode::FirstOf)
+                count = std::max(count, childPasses);
+            else count += childPasses;
+        }
+        return count;
+    };
+    subset_->forEachChannel([&](auto const& channel) {
+        for (auto const* rule : rulesForChannel(channel->channelId())) {
+            auto const passes = countCloudPasses(*rule);
+            hasPointCloudRules_ |= passes != 0;
+        }
+        return true;
+    });
     pickRefs_.reserve(terminalEntryCount);
     pickIndices_.reserve(terminalEntryCount);
     gpuPacketBuilder_.beginContribution(
@@ -823,6 +888,9 @@ void TileSubsetLayerRenderer::run()
                 return true;
             });
     gpuPacketBuilder_.endContribution();
+
+    // Geometry emission discovers pick identities and issues. Append those
+    // tables after the contribution's physical streams have been finalized.
     for (uint32_t index = 0U; index < pickRefs_.size(); ++index) {
         auto const& pick = pickRefs_[index];
         gpuPacketBuilder_.appendPick({
@@ -903,11 +971,26 @@ BoundEvalFun TileSubsetLayerRenderer::makeEvalFun(
                 state.lastValue = simfil::Value::undef();
                 return state.lastValue;
             }
-            auto node = state.values->at(index);
             state.lastIndex = index;
-            state.lastValue = node
-                ? simfil::Value::field(*node)
-                : simfil::Value::undef();
+            state.lastValue = simfil::Value::undef();
+            auto results = state.values->at(index);
+            if (!results || results->type() != simfil::ValueType::Array) {
+                state.renderer->recordRuntimeIssue(
+                    "projection", expression,
+                    "Projected expression results must be an array.", 0);
+            }
+            else if (results->size() > 1) {
+                state.renderer->recordRuntimeIssue(
+                    "projection", expression,
+                    "Style expression returned multiple values; expected at most one. Use an explicit reduction.", 0);
+            }
+            else if (results->size() == 1) {
+                if (auto node = results->at(0)) {
+                    // An array-valued result is still one value. Never unwrap it
+                    // again or silently choose the first of several results.
+                    state.lastValue = simfil::Value::field(*node);
+                }
+            }
             return state.lastValue;
         };
     result.reportIssueRef_ = [](
@@ -1076,6 +1159,8 @@ void TileSubsetLayerRenderer::renderFeature(
             entryOrdinal);
         ++index;
     }
+    if (hasPointCloudRules_ && selectablePick)
+        bridgePickResults_[*selectablePick].setFeatureId(featureId);
 }
 
 void TileSubsetLayerRenderer::renderFeatureRule(
@@ -1125,7 +1210,7 @@ void TileSubsetLayerRenderer::renderFeatureRule(
         if (!featureId) {
             return;
         }
-        bridgePickResults_[pick].featureId = featureId->toString();
+        bridgePickResults_[pick].setFeatureId(featureId);
     }
 }
 
@@ -1265,7 +1350,7 @@ void TileSubsetLayerRenderer::renderAttribute(
         entryEvalState);
     auto const attributeName = entry->attributeName();
     auto const attributeLayer = entry->attributeLayer();
-    auto const featureIdString = featureId->toString();
+    auto const featureIdString = featureReferenceKey(featureId);
     FeatureStyleRule::MatchContext context{
         .featureType = featureId->typeId(),
         .attributeName = attributeName
@@ -1289,7 +1374,7 @@ void TileSubsetLayerRenderer::renderAttribute(
                 entryOrdinal,
                 0,
                 rule.selectable(),
-                [&] { return pickResult(entry, featureIdString); });
+                [&] { return pickResult(entry, featureId); });
             auto const slotKey =
                 std::to_string(channelOrdinal) + ":" +
                 featureIdString + ":" +
@@ -1512,7 +1597,7 @@ void TileSubsetLayerRenderer::renderRelation(
                 std::optional<std::string> endpointFeatureIdString;
                 auto getEndpointFeatureIdString = [&]() -> std::string const& {
                     if (!endpointFeatureIdString) {
-                        endpointFeatureIdString = endpointFeatureId->toString();
+                        endpointFeatureIdString = featureReferenceKey(endpointFeatureId);
                     }
                     return *endpointFeatureIdString;
                 };
@@ -1593,6 +1678,28 @@ bool TileSubsetLayerRenderer::renderGeometryCollection(
     std::optional<mapget::Point> labelPosition;
     if (!collection && !resolvedGeometries) {
         return rendered;
+    }
+    if (rule.pointCloud() && collection) {
+        auto const color = resolvedStyle ? std::optional<glm::fvec4>{resolvedStyle->color} : rule.color(evalFun);
+        if (!color) return false;
+        auto const sourceCount = mapget::PointCloudGeometrySample::count(collection, rule.geometryName());
+        mapget::PointCloudIndexSelection selection(sourceCount,
+            pointCloudEnabled_ ? pointCloudMaxPoints_ : std::numeric_limits<uint32_t>::max());
+        pointCloudDeliveredCount_ += sourceCount;
+        pointCloudRenderedCount_ += selection.size();
+        auto const zIndex = resolvedStyle ? resolvedStyle->zIndex : resolvedZIndex(rule, evalFun);
+        auto const icon = rule.hasIconUrl() ? rule.iconUrl(evalFun) : std::string{};
+        mapget::PointCloudGeometrySample::forEach(collection, selection, [&](auto const& record) {
+            auto const point = projectWgsPoint(offsetAabbOrigin(record.point, rule, offset));
+            if (!labelPosition) labelPosition = point;
+            if (rule.hasIconUrl()) appendIcon(point, icon, rule, evalFun, *color, zIndex, pick);
+            else appendPoint(point, rule, evalFun, *color, zIndex, pick);
+        }, rule.geometryName());
+        if (labelPosition && rule.hasLabel()) {
+            auto const text = rule.labelText(evalFun);
+            if (!text.empty()) appendLabel(*labelPosition, text, rule, evalFun, zIndex, pick);
+        }
+        return selection.size() != 0;
     }
     auto renderOne =
         [&](mapget::model_ptr<mapget::Geometry> const& geometry,
@@ -2006,13 +2113,13 @@ bool TileSubsetLayerRenderer::renderTransitionLine(
     // end of the same road and receives the deliberately compact hairpin
     // construction below.
     auto const uTurn =
-        fromId->toString() == toId->toString() && *fromEnd == *toEnd;
+        featureReferenceKey(fromId) == featureReferenceKey(toId) && *fromEnd == *toEnd;
     constexpr double kTurnSideThreshold = 0.05;
 
     auto legKey = [&](mapget::model_ptr<mapget::FeatureId> const& id,
                       mapget::ValidityData::TransitionEnd end,
                       int canonicalSide) {
-        return stackPrefix + ":" + id->toString() + ":" +
+        return stackPrefix + ":" + featureReferenceKey(id) + ":" +
             (end == mapget::ValidityData::End ? "end" : "start") + ":" +
             (canonicalSide > 0 ? "right" : "left");
     };
@@ -2410,7 +2517,7 @@ bool TileSubsetLayerRenderer::renderTransitionLine(
         // group's bound without imposing its former, overly aggressive 0.9 m
         // trim-radius estimate.
         auto const scaleGroupKey =
-            stackPrefix + ":" + entry->featureId()->toString() + ":turn";
+            stackPrefix + ":" + featureReferenceKey(entry->featureId()) + ":turn";
         scaleGroup = &transitionOffsetScaleGroups_[scaleGroupKey];
         auto const pathScaleThreshold = uTurn
             ? 0.0
@@ -2994,17 +3101,38 @@ void TileSubsetLayerRenderer::recordPickNavigationAltitude(
 TileSubsetLayerRenderer::PickResult
 TileSubsetLayerRenderer::pickResult(
     mapget::model_ptr<mapget::AttributeValidityEntry> const& entry,
-    std::string const& featureId)
+    mapget::model_ptr<mapget::FeatureId> const& featureId)
 {
     PickResult result;
     if (!entry) {
         return result;
     }
-    result.featureId = featureId;
+    result.setFeatureId(featureId);
     result.attributeIndex = entry->attributeIndex();
     result.hasValidity = entry->hasValidity();
     result.validityIndex = entry->validityIndex();
     return result;
+}
+
+void TileSubsetLayerRenderer::PickResult::setFeatureId(
+    mapget::model_ptr<mapget::FeatureId> const& id)
+{
+    featureId.clear();
+    featureReference.reset();
+    if (!id)
+        return;
+    if (id->externalMapId())
+        featureReference = JsValue::fromFeatureId(*id);
+    else
+        featureId = id->toString();
+}
+
+std::string TileSubsetLayerRenderer::featureReferenceKey(
+    mapget::model_ptr<mapget::FeatureId> const& id)
+{
+    // A JSON rendering is sufficient for an internal equality/stack key. It
+    // must not escape as the canonical ID of an unresolved foreign feature.
+    return id->externalMapId() ? "foreign:" + id->toJson().dump() : "local:" + id->toString();
 }
 
 TileSubsetLayerRenderer::PickResult
@@ -3017,7 +3145,7 @@ TileSubsetLayerRenderer::pickResult(
         return result;
     }
     if (representativeFeatureId) {
-        result.featureId = representativeFeatureId->toString();
+        result.setFeatureId(representativeFeatureId);
     }
     auto members = entry->memberFeatureIds();
     // A singleton group is semantically identical to its representative.
@@ -3033,8 +3161,10 @@ TileSubsetLayerRenderer::pickResult(
             ? entry->model().resolve<mapget::FeatureId>(*node)
             : mapget::model_ptr<mapget::FeatureId>{};
         if (member) {
-            result.memberFeatureIds.push_back(
-                member->toString());
+            if (member->externalMapId())
+                result.memberFeatureReferences.push_back(JsValue::fromFeatureId(*member));
+            else
+                result.memberFeatureIds.push_back(member->toString());
         }
     }
     return result;
@@ -3055,10 +3185,13 @@ TileSubsetLayerRenderer::pickResult(
         ? targetFeatureId
         : sourceFeatureId;
     if (endpointFeatureId) {
-        result.featureId = endpointFeatureId->toString();
+        result.setFeatureId(endpointFeatureId);
     }
     if (sourceFeatureId) {
-        result.relationSourceFeatureId = sourceFeatureId->toString();
+        if (sourceFeatureId->externalMapId())
+            result.relationSourceReference = JsValue::fromFeatureId(*sourceFeatureId);
+        else
+            result.relationSourceFeatureId = sourceFeatureId->toString();
     }
     result.relationId = entry->relationId();
     if (!result.relationSourceFeatureId.empty()) {
@@ -3846,11 +3979,17 @@ JsValue TileSubsetLayerRenderer::coordinateOriginToJs() const
     return JsValue::Float64Array(origin);
 }
 
-JsValue TileSubsetLayerRenderer::pickResultsToJs() const
+JsValue TileSubsetLayerRenderer::pickResultsToJs(bool includeReferences) const
 {
     auto results = JsValue::List();
     for (uint32_t index = 0U; index < pickRefs_.size(); ++index) {
         auto item = JsValue::Dict();
+        if (includeReferences) {
+            auto const& reference = pickRefs_[index];
+            item.set("channelOrdinal", JsValue(reference.channelOrdinal));
+            item.set("entryOrdinal", JsValue(reference.entryOrdinal));
+            item.set("endpointRole", JsValue(reference.endpointRole));
+        }
         auto const found = bridgePickResults_.find(index);
         if (found == bridgePickResults_.end()) {
             results.push(item);
@@ -3860,6 +3999,8 @@ JsValue TileSubsetLayerRenderer::pickResultsToJs() const
         if (!pick.featureId.empty()) {
             item.set("featureId", JsValue(pick.featureId));
         }
+        if (pick.featureReference)
+            item.set("featureReference", *pick.featureReference);
         if (pick.attributeIndex) {
             item.set(
                 "attributeIndex",
@@ -3881,6 +4022,8 @@ JsValue TileSubsetLayerRenderer::pickResultsToJs() const
                 "relationSourceFeatureId",
                 JsValue(pick.relationSourceFeatureId));
         }
+        if (pick.relationSourceReference)
+            item.set("relationSourceReference", *pick.relationSourceReference);
         if (pick.relationIndex) {
             item.set(
                 "relationIndex",
@@ -3892,6 +4035,12 @@ JsValue TileSubsetLayerRenderer::pickResultsToJs() const
                 members.push(JsValue(member));
             }
             item.set("memberFeatureIds", members);
+        }
+        if (!pick.memberFeatureReferences.empty()) {
+            auto members = JsValue::List();
+            for (auto const& member : pick.memberFeatureReferences)
+                members.push(member);
+            item.set("memberFeatureReferences", members);
         }
         results.push(item);
     }
@@ -3916,6 +4065,11 @@ NativeJsValue TileSubsetLayerRenderer::renderBridgeResult() const
         {"coordinateOrigin", coordinateOriginToJs()},
         {"pickResults", hasGltfBridge ? pickResultsToJs() : JsValue::List()},
     });
+    if (hasPointCloudRules_) {
+        // Identities were captured in the single entry traversal. Do not repeatedly
+        // scan entries by ordinal, or deserialize the full cloud on the main thread.
+        result.set("pointCloudPicks", pickResultsToJs(true));
+    }
     if (subset_ && subset_->glbAttachmentName())
     {
         result.set(
@@ -3925,15 +4079,17 @@ NativeJsValue TileSubsetLayerRenderer::renderBridgeResult() const
     return *result;
 }
 
-NativeJsValue TileSubsetLayerRenderer::renderPackets() const
+NativeJsValue TileSubsetLayerRenderer::renderPackets()
 {
     auto result = JsValue::List();
-    for (auto const& packet : renderPacketFragmentsBytes()) {
+    // Copy each bounded packet into JS before releasing its native record blocks.
+    // Holding all encoded packets here used to duplicate the entire cloud in WASM.
+    gpuPacketBuilder_.consumeFragments([&](std::vector<std::byte>&& packet) {
         result.push(JsValue::Uint8Array(std::span<uint8_t const>{
             reinterpret_cast<uint8_t const*>(packet.data()),
             packet.size(),
         }));
-    }
+    });
     return *result;
 }
 

@@ -27,6 +27,11 @@
             "tsConfig": "tsconfig.app.json",
             "assets": [
               {
+                "glob": "web-mcp-actions.json",
+                "input": "app/action/generated",
+                "output": "/"
+              },
+              {
                 "glob": "**/*",
                 "input": "config/styles",
                 "output": "/static-config/styles"
@@ -80,7 +85,8 @@
             "scripts": [],
             "webWorkerTsConfig": "tsconfig.worker.json",
             "allowedCommonJsDependencies": [
-              "earcut"
+              "earcut",
+              "dom-to-image-more"
             ]
           },
           "configurations": {
@@ -99,6 +105,11 @@
               ],
               "outputHashing": "all",
               "assets": [
+                {
+                  "glob": "web-mcp-actions.json",
+                  "input": "app/action/generated",
+                  "output": "/"
+                },
                 {
                   "glob": "**/*",
                   "input": "config/styles",
@@ -215,6 +226,11 @@
               "outputHashing": "all",
               "assets": [
                 {
+                  "glob": "web-mcp-actions.json",
+                  "input": "app/action/generated",
+                  "output": "/"
+                },
+                {
                   "glob": "**/*",
                   "input": "config/styles",
                   "output": "/static-config/styles"
@@ -307,6 +323,11 @@
               ],
               "outputHashing": "all",
               "assets": [
+                {
+                  "glob": "web-mcp-actions.json",
+                  "input": "app/action/generated",
+                  "output": "/"
+                },
                 {
                   "glob": "**/*",
                   "input": "config/styles",
@@ -407,7 +428,7 @@
             "tsConfig": "tsconfig.spec.json",
             "buildTarget": "erdblick:build:test",
             "setupFiles": [
-              "test/vitest.setup.ts"
+              "tests/support/vitest.setup.ts"
             ],
             "coverage": true,
             "coverageReporters": [
@@ -417,11 +438,11 @@
               "json-summary"
             ],
             "coverageExclude": [],
-            "exclude": [
-              "app/app.component.spec.ts"
-            ],
             "reporters": [
               "verbose"
+            ],
+            "include": [
+              "../tests/app/**/*.spec.ts"
             ]
           }
         }

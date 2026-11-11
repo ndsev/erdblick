@@ -1,0 +1,2 @@
+# Location navigation tests supply deterministic /location responses and require no feature datasource.
+sources: []

@@ -14,6 +14,11 @@ This example colors NDS.Island-6 lane centerlines by their speed-limit
 attribute: teal for 100 km/h and amber for 120 km/h. The Advanced tab exposes
 the YAML rules; **Export** saves the sheet for reuse in another session.
 
+<!-- mcp:
+title: "Style lifecycle and local editing"
+keywords: ["styles", "import", "create", "edit", "reset", "browser local"]
+hint: "Discover exact style IDs with viewer_list_styles, then read YAML with viewer_get_style. Validate candidate YAML with viewer_validate_style before viewer_edit_style. Edits are browser-local; they do not update deployment files. Search help for \"Style document shape\" and \"Style options and presets\" when authoring."
+-->
 ## Managing Styles in the UI
 
 Most day-to-day style work happens directly inside the Styles dialog, where
@@ -49,6 +54,11 @@ first row to edit the owning sheet directly:
 
 The **brush** opens the sheet that owns this group of lane options.
 
+<!-- mcp:
+title: "Bundled style presets for Live Classic and generic maps"
+keywords: ["cinematic", "topology", "travel direction", "BMD", "point cloud", "preset"]
+hint: "Discover available options and presets for the actual map/layer with viewer_list_style_options and viewer_list_presets. Names in this guide describe bundled configurations, not a guarantee that every deployment has loaded them. Apply qualified IDs through view.layerPreset or view.mapPreset; absence of a stock option does not establish absence of map attributes."
+-->
 ## Pre-defined Styles
 
 MapViewer ships styles for NDS.Live, NDS.Classic, and generic geometry.
@@ -108,8 +118,35 @@ Enable **Point clouds**, then choose a layer preset:
 
 **Colour by object** and **Subtle overlay** can also be combined in the
 layer's style options. All presets retain depth occlusion and object picking.
-Overlay changes appearance, not the point count or memory requirements.
+Picking identifies the containing object, not an individual point.
 
+To reduce rendering load:
+
+1. Open **Edit -> Preferences -> Rendering -> Point clouds**.
+2. Leave **Enable point-cloud downsampling** on and lower **Maximum points per
+   cloud object**. The range is 100,000 to 14,000,000; the default is 14,000,000.
+   The slider steps by 100,000; the numeric field accepts an exact count.
+3. Press **Apply**. Editing the controls alone does not reload geometry.
+
+Objects within the count remain complete; larger objects retain evenly spaced
+original points. This is count-based sampling, not a spatial density guarantee.
+Zooming out or opening another view does not lower the per-object count. Turning
+downsampling off requests full geometry, subject to available memory. Inspection
+and GeoJSON export remain exact in either mode.
+
+A downsampled tile shows a warning without preventing rendering. An unsampled
+replacement clears its current warning; the log keeps previous entries. The
+preferences are browser-local and included in exported state snapshots, not
+shared URLs. The count is not a total memory budget: several smaller objects
+can still exhaust a GPU buffer. Lower **Max Tiles to Load** or hide unused
+layers as well when needed.
+
+For custom styles, see [Point-cloud rules](#point-cloud-rules).
+
+<!-- mcp:
+keywords: [style, YAML, search visualization]
+hint: "Search result rules and ordinary YAML styles have different persistence and scope. Read the existing style with viewer_get_style before changing it. viewer_edit_style installs browser-local YAML; viewer_set_search changes one search session. Search help for \"Style document shape\" for a complete authoring example."
+-->
 ## YAML Styles and Search Result Styles
 
 YAML style sheets are persistent project-wide rules loaded from the bundle,
@@ -118,19 +155,31 @@ YAML. A root `category` may be `base` or `search`; omission means `base`.
 Category is metadata independent of whether a style is built in, additional,
 modified, imported, or visible.
 
-Feature Search saves reusable search-result rules as ordinary imported YAML
-with `category: search`, a checked-by-default **Enable this style upon save** choice, and optional exact
-layer-ID affinity. Empty affinity applies to any layer. The source is added directly to
-the Styles tree, marked with a **Search** tag, persisted through the normal
-imported-style mechanism, and exported through the normal style action. Its
-canonical source contains flat rules, plus one `showSearchStyle` Boolean option
-that defaults on and gates every generated rule. This produces a real per-layer
-**Show &lt;stylesheet name&gt;** control in Maps & Layers. The option gate is plumbing: it
-is kept out of Quick rule controls and removed when a saved style is copied
-back into detached Feature Search rules. The source contains no query, search
-scope, map ID, or separate JSON-library identity. Its optional `layer` metadata
-affects ordinary rendering but is not copied into a detached Feature Search
-rule template.
+Feature Search saves its matching entities and visual rules as ordinary imported YAML
+with `category: search`, a checked-by-default **Enable this style upon save** choice,
+and optional exact layer-ID affinity. The save dialog captures the resolved feature
+or attribute scope, normalized query, selected feature types, and current visual rules.
+Each generated rule includes that membership predicate. Attribute rules use
+`attribute-filter`, so native rendering uses each matched validity's geometry;
+attributes without a validity use their feature geometry. No geometry clipping is
+reimplemented in the browser.
+
+The source is added to the Styles tree with a **Search** tag, persisted through the
+normal imported-style mechanism, and exported through the normal style action. A
+`showSearchStyle` Boolean option defaults on and gates every rule, producing a
+per-layer **Show &lt;stylesheet name&gt;** control in Maps & Layers. The generated gate
+is removed when copying compatible rules back into a detached Feature Search;
+captured predicates remain and intersect with the new search. Explicitly different
+scopes are incompatible. Older generic templates still work without reconstructing
+missing scope or query information.
+
+Empty affinity imposes no root layer restriction; exact layer IDs match across
+maps. Separately, generated rule predicates retain the selected map/layer identities
+from the prepared search. Clearing affinity does not remove these source guards.
+Reusing the stylesheet on another dataset requires reviewing those predicates and
+its field/type assumptions. Layer affinity is not copied into a detached search,
+but captured predicates still intersect with that search. Tiles, result views and
+density settings are not saved in the stylesheet.
 
 The root `default` and the generated Boolean option are deliberately distinct.
 Root `default` determines whether the whole stylesheet is enabled when first
@@ -138,16 +187,46 @@ saved or loaded; `options[].default` seeds the per-layer control once that
 stylesheet is active.
 
 The Style Editor has **Quick** and **Advanced** tabs for every loaded base or
-search style. Its header switch controls the loaded style's current visible
-state directly and intentionally does not rewrite the YAML `default`. Quick
-opens all rules initially and exposes the root name, exact layer-affinity IDs, and the rule properties
-supported by the current controls, updating the authoritative Advanced YAML on
-every change. No selected affinity means Any. A noncanonical regular expression
-is presented as Custom and is preserved until the user explicitly replaces it
-with exact IDs or clears it. Unsupported properties and rules remain in the
-YAML; rule-local help icons explain what Quick preserves or leaves Advanced-only.
-Applying either view updates the same stylesheet source.
+search style. Its header switch controls current visibility without changing YAML
+`default`. Both tabs edit the same source; Apply updates the stylesheet.
 
+Quick exposes the name and exact layer affinity at the top. No selected layer means
+Any, and a custom regular expression can be edited directly or replaced with exact
+IDs. Common controls include exact native geometry choices, feature and attribute
+filters, literal/expression/scaled colors, width or point diameter, opacity, and
+label text. Expand the named groups for matching, LOD, attributes, offsets, lines,
+points, surfaces, drawing order, labels, relations, and branch trees. Rule lists can
+be added to, duplicated, reordered, and removed. Switching `first-of`/`all-of`
+retains the child rules. Relation endpoints use the same nested rule controls.
+
+Document groups expose options of all three native types (Boolean, color, string),
+local presets, LOD thresholds, and hover/selection effects. Maps & Layers also provides
+runtime controls for all non-internal option types. Color text accepts native named
+colors and RGB hex forms. Click the color swatch to open the picker; choosing a
+color writes RGB hex, while opening or dismissing it preserves the authored value.
+Scale rows retain numeric, string, and Boolean category keys and optional fallbacks.
+Numeric entry uses native
+validation rather than search-editor slider limits.
+
+Each rule has a collapsible header with reorder, duplicate, and remove controls.
+**Add properties** reveals unconfigured common fields. **Add** sets an optional
+field; the reset-arrow button removes its value, retaining
+inheritance or native defaults. Hover or focus a field's information button for
+its explanation. Opening the form does not materialize defaults. Inherited scales/expressions retain their native
+precedence over child literals. Compatibility fields are explicitly labeled when
+they have no rendering effect. Edits patch individual YAML nodes, preserving
+unrelated content and comments. Editing an alias makes a local copy without changing
+other uses. Unknown fields remain preserved. Native validation messages identify
+invalid fields in the form; invalid YAML syntax temporarily disables form editing
+until corrected in Advanced.
+
+![Quick Style Editor with attribute scope and matching controls](screenshots/style-component-editor-controls.png)
+
+<!-- mcp:
+title: "Style document shape"
+keywords: ["YAML", "version 2", "custom style", "rules", "layer affinity"]
+hint: "Use this complete stylesheet shape when creating a browser-local style. Obtain actual feature types and field paths from mapget schema/extraction before writing filters. Search help for \"Style matching fields\", \"Style typed color scales\", and \"Style labels\" for rule details."
+-->
 ## Document shape
 
 At the top level, a style sheet contains rendering `rules`, optional `options`,
@@ -188,6 +267,11 @@ attribute filters, and the stylesheet LOD fields described below.
 Options become typed SIMFIL bindings. They can participate in filters and
 presentation expressions without rewriting the stylesheet.
 
+<!-- mcp:
+title: "Style options and presets"
+keywords: ["option", "preset", "layer preset", "map preset", "Boolean", "visibility"]
+hint: "Discover IDs with viewer_list_style_options or viewer_list_presets scoped to the target map/layer/style. Apply existing choices with view.styleOption, view.layerPreset or view.mapPreset. Read state first, use the selected viewId and check app.viewSync; preset application can affect synchronized views."
+-->
 ## Options and layer presets
 
 Options declared in the sheet become controls in **Maps & Layers**. Values
@@ -219,11 +303,12 @@ map, with at least one matching component required. If a present layer lacks
 the referenced preset, that composition cannot be applied to the map.
 Selecting a map preset leaves unrelated layers and options alone.
 
-## One top-level rule, one channel
+## Rule channels
 
-Each applicable top-level rule becomes exactly one ordered `/filter` channel.
-Channels are not combined for compression. The channel transports only the
-geometry and projected scalar expressions needed to evaluate that rule tree.
+The planner emits ordered `/filter` channels for applicable top-level rules.
+Compatible rules can share a channel, whose `style-rules` indices retain their
+independent presentation behavior. Channels carry the geometry and projected scalar
+expressions needed to evaluate their rule trees.
 
 The planner separates:
 
@@ -235,6 +320,10 @@ The planner separates:
 Mapget schema-compiles all four lists in their real contexts. Styles do not use
 search-query normalization.
 
+<!-- mcp:
+keywords: [feature scope, attribute scope, relation scope]
+hint: "Choose the rule scope from the requested entity: whole feature, attribute/validity, or relation. Verify real dataset field paths before authoring. Search help for \"Attribute rules\" or \"Relation rules\" for the corresponding expression context."
+-->
 ## Scopes
 
 `scope` belongs to the top-level rule:
@@ -250,6 +339,11 @@ A top-level relation rule may not contain `first-of` or `all-of`; its
 `relation-source-style` and `relation-target-style` are feature-style trees and
 may use branches.
 
+<!-- mcp:
+title: "Style matching fields"
+keywords: ["filter", "type", "geometry name", "semantic geometry", "fidelity", "lod-range"]
+hint: "Feature type and geometry names must come from the selected dataset. Use mapget schema and a bounded feature extraction to establish them. A matching rule also needs compatible layer affinity, enabled stylesheet and visible layer."
+-->
 ## Matching fields
 
 Common admission fields:
@@ -281,6 +375,10 @@ ordinary feature predicate. `fidelity` and `lod-range` are alternative
 authoring forms and cannot occur on the same rule. Both gates belong only to a
 top-level rule.
 
+<!-- mcp:
+title: "Style rule branches"
+keywords: ["first-of", "all-of", "conditional", "fallback", "nested rules"]
+-->
 ## Branches
 
 `first-of` selects the first matching child for rendering:
@@ -355,6 +453,10 @@ Exactly one of these may be present:
 color: orange
 ```
 
+<!-- mcp:
+keywords: [style, color, expression, simfil]
+hint: "For a palette based on map values, search help for \"Style typed color scales\". color-expression is for dynamic color strings, while numeric gradients and typed categories use color-scale."
+-->
 #### Expression color
 
 ```yaml
@@ -364,6 +466,11 @@ color-expression: "selected and '#ff0000' or '#808080'"
 Use this for genuinely dynamic color strings, such as the internal selection
 color binding.
 
+<!-- mcp:
+title: "Style typed color scales"
+keywords: ["colour", "color", "gradient", "categorical", "palette", "missing value", "speed limit"]
+hint: "For attribute-driven colors, establish the real expression and value types with mapget schema and bounded extraction. Stops are ordered [value, color] pairs; validate the resulting complete YAML with viewer_validate_style. Search help for \"Attribute rules\" when the color should apply to attribute validity geometry."
+-->
 #### Typed color scale
 
 ```yaml
@@ -397,6 +504,51 @@ Linear keys must be finite, numeric, and strictly increasing. Colors are
 interpolated between adjacent stops. `fallback` handles null, unsupported
 types, and values which cannot be mapped.
 
+Numeric scales can give exceptional raw values their own colors without binding
+the style to a schema hash or type ID:
+
+```yaml
+color-scale:
+  mode: linear
+  expression: "properties.speed"
+  stops:
+    - [1, blue]
+    - [253, red]
+  specials:
+    - [0, gray]
+    - [254, purple]
+    - [255, cyan]
+  fallback: white
+```
+
+This example illustrates an ordinary range of 1–253. Check the field path, units,
+and exceptional raw values in the selected data. Explicit special colors are
+checked before interpolation or categorical lookup, including for computed
+numbers. They require unique finite numeric keys and work across schema versions.
+
+When `specials` is present, the renderer also consults the value's current type
+metadata: unlisted named exceptions and values outside its ordinary ranges use
+the fallback. Keep `specials: []` after deleting all overrides to retain this
+behavior. A plain computed number has no metadata to classify further exceptions.
+Manual scales without `specials` retain their ordinary raw-value behavior.
+
+Automatic styles compare numeric meaning while preparing palettes, including
+units, ranges, encoding and named exceptions. Equivalent sources share the two
+geometry rules; different meanings remain separate. The resulting scales do not
+store schema hashes or type IDs. Color scales contain no source identity
+restrictions; the expression and raw-value stops determine where they apply.
+
+Generated symbolic category scales combine labels across schema versions of the
+same field. Adding an enum entry or changing its wire ordinal does not change
+the color assigned to an existing logical label. The combined scale retains the
+union of category stops without binding their source identities. This applies to
+new automatic styles; edited palettes are not merged or recolored.
+
+Stops use raw source numbers. The search editor can label scaled units and choose
+round steps in those units without changing the stored encoding. For flags, prefer
+a boolean categorical scale over a named `hasFlag(...)` expression or explicit
+rule priority; enumerating all mask combinations loses useful meaning.
+
 Use one scale instead of a palette-only `first-of` chain. Structural
 `first-of`/`all-of` trees remain appropriate for geometry, dash composition,
 or other compound presentation changes.
@@ -406,6 +558,10 @@ or other compound presentation changes.
 `opacity` sets the geometry alpha from `0` (transparent) to `1` (opaque).
 Use `label-opacity` separately for labels.
 
+<!-- mcp:
+title: "Style width scales"
+keywords: ["line width", "thickness", "scale", "width-expression"]
+-->
 ### Width scales
 
 `width` sets line thickness or point diameter in pixels.
@@ -430,6 +586,10 @@ width-scale:
 When color and width depend on the same expression, use identical expression
 text. The style planner then projects one value for both scales.
 
+<!-- mcp:
+title: "Style polygon height"
+keywords: ["building", "extrusion", "height", "3D"]
+-->
 ### Polygon height
 
 `polygon-height` extrudes polygon and triangle-mesh surface geometry vertically
@@ -458,7 +618,24 @@ geometry: [polygon, mesh]
 surface-shading: true
 ```
 
+<!-- mcp:
+title: "Style labels"
+keywords: ["put labels on features", "feature labels", "labels", "label", "text", "caption", "feature name", "feature ID", "speed limit", "value", "font"]
+hint: "Expressions run in the rule scope; verify the exact field path and units before showing values. Search help for \"Scopes\" and \"Attribute rules\" if a label should describe an attribute rather than its owning feature."
+-->
 ### Labels
+
+To put labels on features, edit their stylesheet and set `label-text` for fixed
+text or `label-text-expression` for a name, ID or other field. These labels are
+drawn on map geometry, not just in the hover readout. Choose the rule's feature
+or attribute scope and confirm the field exists in that dataset before applying.
+
+For feature-scope label expressions, use `_.id` when you want only the feature's
+canonical ID; unqualified recursive field lookup can also find nested `id` values.
+In attribute scope, use `$feature.id` for the owning feature's ID. A null or
+undefined label result uses the literal `label-text` fallback when supplied,
+otherwise no label is emitted. Numeric zero and boolean false remain valid labels.
+Use `select(values, 0)` to choose one matching name; `any(values)` returns a boolean.
 
 Use `label-text` for fixed text or `label-text-expression` for text derived
 from each entry. The remaining `label-*` fields control its appearance.
@@ -567,6 +744,10 @@ Arrowheads and picking follow the displaced line.
 Use vertical offsets for actual height differences. For overlapping geometry
 that should remain at the same height, use drawing order instead.
 
+<!-- mcp:
+title: "Style drawing order"
+keywords: ["z index", "overlap", "occlusion", "above", "below", "semantic compositing"]
+-->
 ### Drawing order
 
 `z-index` separates coplanar vector geometry without moving it in world
@@ -656,6 +837,11 @@ dash-gap: 4
 dash-unit: pixels
 ```
 
+<!-- mcp:
+title: "Style arrows"
+keywords: ["direction", "digitization", "forward", "backward", "double arrow"]
+hint: "A line arrow follows geometry direction unless the style expression changes it. Do not infer permitted travel direction from digitization alone; use actual direction attributes or the relevant bundled preset."
+-->
 ### Arrows
 
 `arrow` accepts `none`, `forward`, `backward`, or `double`, relative
@@ -676,6 +862,10 @@ without creating a separate rule for each threshold. See
 [Level of detail](#level-of-detail) for its relationship to rule activation
 and geometry detail.
 
+<!-- mcp:
+title: "Style interaction effects"
+keywords: ["hover", "selection", "highlight", "glow", "interaction"]
+-->
 ## Interaction effects
 
 Routine feature hover and selection use a constrained, style-owned material
@@ -754,6 +944,47 @@ nodes initially retain their separate flat-tint/opacity path.
 This constrained material contract intentionally does not synthesize missing
 geometry or emulate arbitrary style rules.
 
+<!-- mcp:
+title: "Style point-cloud rules"
+keywords: ["point cloud", "point-cloud", "downsampling", "sampling", "point geometry"]
+-->
+## Point-cloud rules
+
+Use `point-cloud: true` on a top-level, feature-scope rule that selects only
+point geometry. It opts each object's matching point geometries into the
+viewer sampling preference; it does not combine objects into spatial groups.
+For example, adapt the layer and feature type to the actual dataset:
+
+```yaml
+name: "Custom point clouds"
+version: 2
+layer: "PointCloudObject"
+rules:
+  - scope: feature
+    type: PointCloudObject
+    geometry: point
+    point-cloud: true
+    color: "#70D6C7"
+    width: 2
+    billboard: true
+    depth-test: true
+    selectable: true
+```
+
+Keep the sampling policy on the top-level rule. Nested branches inherit it and
+must not override it; grouping and relation rules cannot opt in. Ordinary point
+and POI rules without this flag are unchanged. Selection retains original
+coordinates and duplicates, and picking identifies the owning object.
+
+Set the count through **Preferences -> Rendering -> Point clouds**, not through
+a separate YAML quota. See [NDS.Live point clouds](#ndslive-point-clouds) for
+the user workflow and the [developer reference](erdblick-dev-guide.md#point-cloud-sampling-and-lifetime)
+for the native quota compatibility contract and rendering lifetime.
+
+<!-- mcp:
+title: "Style point grouping"
+keywords: ["cluster", "mergeCount", "point grouping", "aggregation"]
+-->
 ## Point grouping and `$mergeCount`
 
 Feature-scope point rules can request server grouping:
@@ -789,6 +1020,10 @@ Initial restrictions:
 
 A mismatch rejects the plan rather than returning a wrong merge count.
 
+<!-- mcp:
+keywords: [attribute styling, validity, rules]
+hint: "The names SPEED_LIMIT, speedProfile, valueKph and centerline in this example illustrate the contract; they are not universal NDS field paths. Discover actual attribute/layer names and payload fields using mapget schema and bounded extraction. Use attribute validity geometry when showing where an attribute applies."
+-->
 ## Attribute rules
 
 ```yaml
@@ -811,7 +1046,7 @@ Attribute fields:
 
 | Field | Meaning |
 |---|---|
-| `attribute-type` | Attribute-name/type pattern. |
+| `attribute-type` | Attribute-name/type regular expression, e.g. `.*SPEED.*` (not the shell glob `*SPEED*`). |
 | `attribute-layer-type` | Attribute-layer pattern. |
 | `attribute-filter` | Entry-context SIMFIL predicate. |
 | `attribute-validity-geom` | `any`, `required`, or `none`. |
@@ -836,6 +1071,10 @@ pick identity and terminal arrow. Returning to the same connected end of the
 same road uses the compact left-side U-turn hairpin described above;
 opposite-heading cross-road legs retain the ordinary fillet.
 
+<!-- mcp:
+keywords: [relation styling, target, links]
+hint: "Discover real stored relation names and endpoint types through mapget schema/extraction before adapting this example. Recursive visualization is bounded and does not imply an unbounded graph traversal. Search help for \"Style interaction effects\" when relations should appear only during inspection."
+-->
 ## Relation rules
 
 ```yaml
@@ -859,11 +1098,11 @@ opposite-heading cross-road legs retain the ordinary fillet.
   relation-source-style:
     geometry: line
     opacity: 0
-    label-text-expression: "$source.laneGroupId"
+    label-text-expression: "laneGroupId"
   relation-target-style:
     geometry: line
     opacity: 0
-    label-text-expression: "$target.laneGroupId"
+    label-text-expression: "laneGroupId"
 ```
 
 Relation fields:
@@ -913,6 +1152,11 @@ Generic bidirectional display uses permanent south-west ownership. If that
 owner is outside current coverage, the pair is not rendered. Selection
 traversal is root-owned.
 
+<!-- mcp:
+title: "Style level of detail"
+keywords: ["LOD", "fidelity", "zoom", "visible tiles", "simplification"]
+hint: "Stylesheet LOD, datasource tile level and camera zoom are different controls. Inspect the rule gates and view.layer state before changing the camera or loaded tile level to address missing detail."
+-->
 ## Level of detail
 
 Each style uses an integer level of detail (LOD) from 0 through 7. LOD 0 is the
@@ -967,6 +1211,11 @@ switching opacity at one hard threshold.
 `lod-range: [0, 2]`, `[3, 7]`, and `[0, 7]`, respectively. There is no separate
 low/high-fidelity render pass.
 
+<!-- mcp:
+title: "Style validation and runtime failures"
+keywords: ["style error", "invalid YAML", "planner", "loadable", "warning", "diagnostics"]
+hint: "viewer_validate_style checks YAML without installing it. A loadable style still needs valid dataset expressions at runtime; after applying it, inspect viewer_get_diagnostics for style/render errors and verify the visible result. Search help for \"Nothing renders\" if no geometry appears."
+-->
 ## Validation and planner failures
 
 Style validation reports source rule index, property, message, and YAML

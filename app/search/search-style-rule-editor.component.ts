@@ -15,7 +15,7 @@ import {
     FeatureSearchMapLayerRef,
     FeatureSearchScope,
     normalizeFeatureSearchGeometry
-} from "../shared/feature-search-state";
+} from "./search-definition.model";
 import type {SearchValueSummariesState, SearchValueSummary} from "./search.model";
 import {
     isNumericStyleValueKind,
@@ -29,7 +29,7 @@ import {
     searchStyleRuleDisplayItems,
     SearchStyleRuleDraftCodec
 } from "./search-style-rule-editor.model";
-import type {QuickStyleWarning} from "./search-style-sheet.converter";
+import type {SearchStyleProjectionWarning} from "./search-style-sheet.converter";
 
 /** Search-independent editor UI for canonical high-fidelity search style rules. */
 @Component({
@@ -128,6 +128,9 @@ import type {QuickStyleWarning} from "./search-style-sheet.converter";
                             </div>
                         </p-accordion-header>
                         <p-accordion-content>
+                          <!-- Collapsing a rule retains its drafts above, but
+                               releases its field and category editor widgets. -->
+                          @if (accordionValue.includes(panelValue(rule))) {
                             <section class="feature-search-style-section">
                                 <div class="feature-search-style-section-rail">Filter</div>
                                 <div class="feature-search-style-section-body">
@@ -328,6 +331,7 @@ import type {QuickStyleWarning} from "./search-style-sheet.converter";
                                     </search-style-color>
                                 </div>
                             </section>
+                          }
                         </p-accordion-content>
                     </p-accordion-panel>
                   } @else {
@@ -368,10 +372,11 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
     @Input() canRefreshValueSummaries = true;
     @Input() expandRulesByDefault = false;
     @Input() expansionContext = "";
+
     /** Source indices let Quick retain the authoritative YAML rule ordering. */
     @Input() sourceRuleIndices: Record<number, number> = {};
     @Input() readOnlyRuleIndices: number[] = [];
-    @Input() notesBySourceIndex: Record<number, readonly QuickStyleWarning[]> = {};
+    @Input() notesBySourceIndex: Record<number, readonly SearchStyleProjectionWarning[]> = {};
     @Output() draftsChange = new EventEmitter<FeatureSearchStyleRuleDraft[]>();
     @Output() updateFromDataRequested = new EventEmitter<void>();
 
@@ -412,7 +417,7 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
     }
 
     /** Returns notes owned by one authoritative YAML rule. */
-    protected notesFor(sourceIndex: number): readonly QuickStyleWarning[] {
+    protected notesFor(sourceIndex: number): readonly SearchStyleProjectionWarning[] {
         return this.notesBySourceIndex[sourceIndex] ?? [];
     }
 
@@ -629,7 +634,7 @@ export class SearchStyleRuleEditorComponent implements OnChanges {
     /** Returns the geometry-specific size-control label. */
     protected sizeLabel(rule: FeatureSearchStyleRuleDraft): string {
         if (this.isPoint(rule)) {
-            return "Radius";
+            return "Diameter";
         }
         return this.isLabel(rule) ? "Size" : "Width";
     }

@@ -38,6 +38,7 @@ const char *__asan_default_options() {
 #include "visualization.h"
 #include "parser.h"
 #include "style.h"
+#include "style-authoring.h"
 #include "testdataprovider.h"
 #include "inspection.h"
 #include "geometry.h"
@@ -570,12 +571,20 @@ void setExceptionHandler(em::val handler) {
     });
 }
 
-/** Validate a SIMFIL query by compiling it against a fresh default environment. */
-void validateSimfil(const std::string &query) {
+/**
+ * Check an omnibar draft without schema rewriting or query execution.
+ * Simfil returns compilation errors as values. Invalid drafts are normal while
+ * typing, so return their message instead of throwing across the WASM boundary.
+ * An empty message means that the draft parses successfully.
+ */
+std::string simfilQueryError(const std::string& query)
+{
     auto env = mapget::makeEnvironment(simfil::Environment::WithNewStringCache);
-    simfil::compile(*env, query, simfil::CompileOptions{
-        .any = false,
-        .rewriteMode = simfil::RewriteMode::None});
+    auto result = simfil::compile(
+        *env,
+        query,
+        simfil::CompileOptions{.any = false, .rewriteMode = simfil::RewriteMode::None});
+    return result ? std::string{} : result.error().message;
 }
 
 uint16_t tileLayerStreamProtocolMajor()
@@ -594,6 +603,7 @@ uint16_t tileLayerStreamProtocolMinor()
 
 EMSCRIPTEN_BINDINGS(erdblick)
 {
+    em::function("styleAuthoringSchemaJson", &styleAuthoringSchemaJson);
     // Activate this to see a lot more output from the WASM lib.
     // mapget::log().set_level(spdlog::level::debug);
 
@@ -691,6 +701,11 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::enum_<mapget::TileSourceDataLayer::SourceDataAddressFormat>("SourceDataAddressFormat")
         .value("UNKNOWN", mapget::TileSourceDataLayer::SourceDataAddressFormat::Unknown)
         .value("BIT_RANGE", mapget::TileSourceDataLayer::SourceDataAddressFormat::BitRange);
+
+    em::class_<IncomingInspection>("IncomingInspection")
+        .constructor<std::string const&, std::string const&, std::string const&>()
+        .function("addSnapshot", &IncomingInspection::addSnapshot)
+        .function("inspectionModel", &IncomingInspection::inspectionModel);
 
     ////////// TileSourceDataLayer
     em::class_<TileSourceDataLayer>("TileSourceDataLayer")
@@ -807,6 +822,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function(
             "setLineSimplificationTolerance",
             &TileSubsetLayerRenderer::setLineSimplificationTolerance)
+        .function("setPointCloudPolicy", &TileSubsetLayerRenderer::setPointCloudPolicy)
+        .function("pointCloudDeliveredCount", &TileSubsetLayerRenderer::pointCloudDeliveredCount)
+        .function("pointCloudRenderedCount", &TileSubsetLayerRenderer::pointCloudRenderedCount)
         .function(
             "configureGpuPacket",
             &TileSubsetLayerRenderer::configureGpuPacket)
@@ -878,13 +896,18 @@ EMSCRIPTEN_BINDINGS(erdblick)
     ////////// TileLayerParser
     em::class_<TileLayerParser>("TileLayerParser")
         .constructor<>()
+        .function("installMapSchema", &TileLayerParser::installMapSchema)
+        .function("featureTypes", &TileLayerParser::featureTypes)
+        .function("setIncomingRelationHints", &TileLayerParser::setIncomingRelationHints)
         .function("setDataSourceInfo", &TileLayerParser::setDataSourceInfo)
+        .function("applyDataSourceChanges", &TileLayerParser::applyDataSourceChanges)
         .function("getDataSourceInfo", &TileLayerParser::getDataSourceInfo)
         .function("getFieldDictOffsets", &TileLayerParser::getFieldDictOffsets)
         .function("getFieldDict", &TileLayerParser::getFieldDict)
         .function("addFieldDict", &TileLayerParser::addFieldDict)
         .function("readFieldDictUpdate", &TileLayerParser::readFieldDictUpdate)
         .function("readTileFeatureLayer", &TileLayerParser::readTileFeatureLayer)
+        .function("hasIncomingRelations", &TileLayerParser::hasIncomingRelations)
         .function("readTileSourceDataLayer", &TileLayerParser::readTileSourceDataLayer)
         .function("readTileSubsetLayer", &TileLayerParser::readTileSubsetLayer)
         .function("readTileLayerMetadata", &TileLayerParser::readTileLayerMetadata)
@@ -894,12 +917,12 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("getAttributeScopeForQuery", &TileLayerParser::getAttributeScopeForQuery)
         .function("getMapLayersForQuery", &TileLayerParser::getMapLayersForQuery)
         .function("normalizeSearchQuery", &TileLayerParser::normalizeSearchQuery)
+        .function("prepareSearchQuery", &TileLayerParser::prepareSearchQuery)
         .function("searchStyleFieldsForQuery", &TileLayerParser::searchStyleFieldsForQuery)
         .function("planStyleFilter", &TileLayerParser::planStyleFilter)
         .function(
             "filterFeatureJumpTargets",
-            std::function<
-                NativeJsValue(TileLayerParser const&, std::string)>(
+            std::function<NativeJsValue(TileLayerParser const&, std::string)>(
                 [](TileLayerParser const& self, std::string input)
                 {
                     auto result = self.filterFeatureJumpTargets(input);
@@ -950,7 +973,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::function("setExceptionHandler", &setExceptionHandler);
 
     ////////// Validate SIMFIL query
-    em::function("validateSimfilQuery", &validateSimfil);
+    em::function("simfilQueryError", &simfilQueryError);
 
     ////////// Memory utilities
     em::function("getTotalMemory", &getTotalMemory);

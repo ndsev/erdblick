@@ -57,6 +57,8 @@ export class DeckZIndexExtension extends LayerExtension {
  * features do not all fight for the exact same depth value. Returning
  * `undefined` keeps layers whose styles do not use z-index entirely on Deck's
  * stock path.
+ * Non-finite orders join the zero-order group when any finite order is present.
+ * Missing or unselectable tie breakers use the element index as their tie key.
  */
 export function buildZIndexOffsets(
     zIndices: ArrayLike<number>,

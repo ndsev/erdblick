@@ -1,4 +1,13 @@
-import {AfterViewInit, Component, ElementRef, EventEmitter, Input, OnDestroy, Output, ViewChild} from "@angular/core";
+import {
+    AfterViewInit,
+    Component,
+    ElementRef,
+    EventEmitter,
+    Input,
+    OnDestroy,
+    Output,
+    ViewChild
+} from "@angular/core";
 import {NgClass} from "@angular/common";
 import {ProgressSpinnerModule} from "primeng/progressspinner";
 import {CompletionCandidate} from "./search.model";
@@ -8,6 +17,7 @@ import {CompletionCandidate} from "./search.model";
     template: `
         <div #popup
              class="completion-popup search-completion-popup"
+             data-testid="search-completion-popup"
              [class.completion-popup-hidden]="!(visible || pending)"
              (mousedown)="popupMouseDown.emit($event)"
              [style.top.px]="top"
@@ -21,6 +31,7 @@ import {CompletionCandidate} from "./search.model";
             </button>
             @for (item of items; track $index) {
                 <div [ngClass]="{'selected': $index === selectionIndex}"
+                     data-testid="search-completion-candidate"
                      (click)="candidateSelected.emit(item)">
                     <div class="row">
                         <span>{{ item.text }}</span><span class="type">({{ item.kind }})</span>
@@ -33,7 +44,7 @@ import {CompletionCandidate} from "./search.model";
                 </div>
             }
             @if (pending) {
-                <p-progress-spinner aria-label="Loading completion candidates"
+                <p-progress-spinner ariaLabel="Loading completion candidates"
                                     [style]="{ height: '1em', width: '1em' }" />
             }
         </div>

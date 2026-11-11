@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "outDir": ".angular/viewer-actions",
+    "rootDir": ".",
+    "sourceMap": false,
+    "types": ["node"]
+  },
+  "angularCompilerOptions": {
+    "compilationMode": "full"
+  },
+  "files": ["tools/export-viewer-actions.ts"],
+  "include": []
+}

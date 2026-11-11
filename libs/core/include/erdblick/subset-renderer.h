@@ -3,6 +3,7 @@
 #include "layer.h"
 #include "style.h"
 #include "gpu-render-records.h"
+#include "mapget/model/pointcloud-geometry.h"
 
 #include <cstdint>
 #include <functional>
@@ -29,13 +30,17 @@ namespace erdblick
 class TileSubsetLayerRenderer
 {
 public:
-    /** Bind one immutable style/LOD context; geometry arrives separately. */
+    /**
+     * Borrow one immutable style/LOD context; style must outlive this renderer.
+     * Geometry arrives separately through addTileSubsetContribution().
+     */
     TileSubsetLayerRenderer(
         int viewIndex,
         std::string const& mapTileKey,
         FeatureLayerStyle const& style,
         int highlightMode,
         int lod);
+
     /** Release native packet, bridge, and semantic metadata owned by this run. */
     ~TileSubsetLayerRenderer();
 
@@ -44,8 +49,15 @@ public:
         double longitude,
         double latitude,
         double altitude);
+
     /** Set the world-space error allowed when simplifying plain line paths. */
     void setLineSimplificationTolerance(double toleranceMeters);
+
+    /** Immutable input identity and admitted point-instance quota; spacing uses metres. */
+    void setPointCloudPolicy(bool enabled, uint32_t maxPoints, double spacingMeters, std::string const& cacheKey);
+    [[nodiscard]] double pointCloudDeliveredCount() const { return pointCloudDeliveredCount_; }
+    [[nodiscard]] double pointCloudRenderedCount() const { return pointCloudRenderedCount_; }
+
     /** Store scene-owned packet slots and sequencing before rendering starts. */
     void configureGpuPacket(
         uint32_t sceneGeneration,
@@ -54,6 +66,7 @@ public:
         uint32_t originSlot,
         uint32_t originKeyLow,
         uint32_t originKeyHigh);
+
     /** Install one immutable browser-atlas entry before packet rendering. */
     void addGpuIconResource(
         std::string const& uri,
@@ -64,7 +77,13 @@ public:
         float v1,
         float pixelWidth,
         float pixelHeight);
-    /** Install the single subset with its independently replaceable scene identity. */
+
+    /**
+     * Install the single subset with its independently replaceable scene identity.
+     * Retains the native model independently of its temporary wrapper and assigns
+     * its scene revision/activation identity. Rejects an empty model or a second
+     * contribution before resetForNextTile().
+     */
     void addTileSubsetContribution(
         TileSubsetLayer const& subset,
         uint32_t contributionKeyLow,
@@ -72,19 +91,34 @@ public:
         uint32_t contributionRevision,
         uint32_t contributionSlot,
         uint32_t contributionActivationToken);
-    /** Evaluate and pack the configured subset exactly once. */
+
+    /**
+     * Evaluate and pack the configured subset once. Requires a contribution and
+     * rejects repeated calls; resetForNextTile() starts the next reusable run.
+     */
     void run();
-    /** Drop all tile-owned state while retaining hot-path storage for reuse. */
+
+    /**
+     * Release the previous subset and clear packet/picking output while retaining
+     * hot-path storage for reuse. The borrowed style/LOD and cached channel
+     * bindings survive; reuse requires the same projection plan. Reinstall
+     * coordinate, packet and icon metadata.
+     */
     void resetForNextTile();
+
     /** Return only the browser-owned GLTF bridge data beside the GPU packet. */
     [[nodiscard]] NativeJsValue renderBridgeResult() const;
+
     /** Build the validated packet bytes for native callers and tests. */
     [[nodiscard]] std::vector<std::byte> renderPacketBytes() const;
+
     /** Build all individually bounded packet fragments for native callers and tests. */
     [[nodiscard]] std::vector<std::vector<std::byte>>
     renderPacketFragmentsBytes() const;
-    /** Return the complete packet sequence as individually bounded JavaScript arrays. */
-    [[nodiscard]] NativeJsValue renderPackets() const;
+
+    /** Consume record blocks into individually bounded JavaScript packet arrays. */
+    [[nodiscard]] NativeJsValue renderPackets();
+
     /** Return the number of source geometry vertices inspected by this run. */
     [[nodiscard]] uint32_t vertexCount() const;
 
@@ -149,10 +183,12 @@ private:
     struct ProjectedGeometryCache {
         /** Make all entries available for reuse while retaining their point capacities. */
         void reset();
+
         /** Find an active projection by geometry address. */
         [[nodiscard]] ProjectedGeometryCacheEntry* find(
             simfil::ModelNodeAddress address,
             bool simplified);
+
         /** Activate one cache entry for a geometry, reusing its point allocation. */
         [[nodiscard]] ProjectedGeometryCacheEntry& append(
             simfil::ModelNodeAddress address,
@@ -213,14 +249,23 @@ private:
     /** Semantic pick payload resolved into inspection targets by TypeScript. */
     struct PickResult {
         std::string featureId;
+        std::optional<JsValue> featureReference;
         std::optional<uint32_t> attributeIndex;
         std::optional<bool> hasValidity;
         uint32_t validityIndex = 0;
         std::string relationId;
         std::string relationSourceFeatureId;
+        std::optional<JsValue> relationSourceReference;
         std::optional<uint32_t> relationIndex;
         std::vector<std::string> memberFeatureIds;
+        std::vector<JsValue> memberFeatureReferences;
+
+        /** Local IDs are canonical; foreign IDs retain their named parts for target-map locate. */
+        void setFeatureId(mapget::model_ptr<mapget::FeatureId> const& id);
     };
+
+    /** Structural key for render bookkeeping only, never a public or persisted feature ID. */
+    [[nodiscard]] static std::string featureReferenceKey(mapget::model_ptr<mapget::FeatureId> const& id);
 
     /** Paths sharing one adaptive contraction threshold across transition legs. */
     struct TransitionOffsetScaleGroup {
@@ -231,6 +276,7 @@ private:
     /** Resolve projected feature/entry columns for one server-planned channel. */
     [[nodiscard]] ChannelBinding const& bindingFor(
         mapget::model_ptr<mapget::TileSubsetChannel> const& channel);
+
     /** Resolve the authored style rules referenced by a planned channel id. */
     [[nodiscard]] std::vector<FeatureStyleRule const*> rulesForChannel(
         std::string const& channelId) const;
@@ -241,6 +287,7 @@ private:
         uint32_t entryOrdinal,
         ChannelBinding const& binding,
         mapget::model_ptr<mapget::FeatureEntry> const& entry);
+
     /** Emit one concrete feature rule after its branch predicates are resolved. */
     void renderFeatureRule(
         mapget::model_ptr<mapget::FeatureEntry> const& entry,
@@ -252,6 +299,7 @@ private:
         std::optional<uint32_t>& selectablePick,
         uint32_t channelOrdinal,
         uint32_t entryOrdinal);
+
     /** Fuse two compatible feature-line rules into one dual-stroke path record. */
     bool renderFeatureRulePair(
         mapget::model_ptr<mapget::GeometryCollection> const& geometry,
@@ -262,22 +310,26 @@ private:
         std::optional<uint32_t>& selectablePick,
         uint32_t channelOrdinal,
         uint32_t entryOrdinal);
+
     /** Test immutable rule properties once before attempting per-feature stroke fusion. */
     [[nodiscard]] static bool canFuseFeatureRulePair(
         FeatureStyleRule const& outerRule,
         FeatureStyleRule const& innerRule);
+
     /** Render one attribute-validity entry without loading its host feature. */
     void renderAttribute(
         uint32_t channelOrdinal,
         uint32_t entryOrdinal,
         ChannelBinding const& binding,
         mapget::model_ptr<mapget::AttributeValidityEntry> const& entry);
+
     /** Render one group entry and preserve its member-feature pick semantics. */
     void renderGroup(
         uint32_t channelOrdinal,
         uint32_t entryOrdinal,
         ChannelBinding const& binding,
         mapget::model_ptr<mapget::GroupEntry> const& entry);
+
     /** Render one relation entry, including independently selectable endpoints. */
     void renderRelation(
         uint32_t channelOrdinal,
@@ -296,6 +348,7 @@ private:
         std::vector<ResolvedFeatureGeometry> const*
             resolvedGeometries = nullptr,
         ResolvedGeometryStyle const* resolvedStyle = nullptr);
+
     /** Dispatch one geometry by type and optionally emit its label. */
     bool renderGeometry(
         mapget::model_ptr<mapget::Geometry> const& geometry,
@@ -308,6 +361,7 @@ private:
         std::optional<mapget::GeomType> resolvedType = std::nullopt,
         std::optional<std::string_view> resolvedName = std::nullopt,
         ResolvedGeometryStyle const* resolvedStyle = nullptr);
+
     /** Render ordinary validity lines with deterministic per-segment stacking. */
     bool renderSegmentStackedLine(
         mapget::model_ptr<mapget::Geometry> const& geometry,
@@ -315,6 +369,7 @@ private:
         BoundEvalFun const& evalFun,
         uint32_t pickIndex,
         std::string const& stackPrefix);
+
     /** Render transition legs with adaptive offset contraction and continuity. */
     bool renderTransitionLine(
         mapget::model_ptr<mapget::AttributeValidityEntry> const& entry,
@@ -323,6 +378,7 @@ private:
         BoundEvalFun const& evalFun,
         uint32_t pickIndex,
         std::string const& stackPrefix);
+
     /** Connect relation source and target geometries without host-feature fetches. */
     void renderRelationLine(
         mapget::model_ptr<mapget::GeometryCollection> const& sourceGeometry,
@@ -338,6 +394,7 @@ private:
         ProjectedFields const& fields,
         mapget::model_ptr<mapget::Array> const& values,
         ProjectedEvalState& state);
+
     /** Skip duplicate server-owned gates for concrete channels while resolving branches locally. */
     bool forEachAdmittedRule(
         FeatureStyleRule const& rule,
@@ -345,6 +402,7 @@ private:
         BoundEvalFun const& entryEvalFun,
         std::function<void(FeatureStyleRule const&)> const& callback,
         BoundEvalFun const* featureEvalFun = nullptr) const;
+
     /** Allocate or reuse one pick index, constructing its payload only when needed. */
     [[nodiscard]] uint32_t pickIndex(
         uint32_t channelOrdinal,
@@ -352,29 +410,35 @@ private:
         uint32_t endpointRole,
         bool selectable,
         std::function<PickResult()> const& resultFactory);
+
     /** Allocate one tuple-addressed pick shared by this feature entry's rules. */
     [[nodiscard]] uint32_t featurePickIndex(
         uint32_t channelOrdinal,
         uint32_t entryOrdinal,
         bool selectable);
+
     /** Retain one representative physical height independently of render-depth bias. */
     void recordPickNavigationAltitude(
         uint32_t pickIndex,
         std::span<mapget::Point const> points);
+
     /** Build a semantic attribute/validity pick payload. */
     [[nodiscard]] static PickResult pickResult(
         mapget::model_ptr<mapget::AttributeValidityEntry> const& entry,
-        std::string const& featureId);
+        mapget::model_ptr<mapget::FeatureId> const& featureId);
+
     /** Build a semantic group pick payload with member feature ids. */
     [[nodiscard]] static PickResult pickResult(
         mapget::model_ptr<mapget::GroupEntry> const& entry,
         mapget::model_ptr<mapget::FeatureId> const& representativeFeatureId);
+
     /** Build one relation endpoint's semantic pick payload. */
     [[nodiscard]] static PickResult pickResult(
         mapget::model_ptr<mapget::RelationEntry> const& entry,
         mapget::model_ptr<mapget::FeatureId> const& sourceFeatureId,
         mapget::model_ptr<mapget::FeatureId> const& targetFeatureId,
         uint32_t endpointRole);
+
     /** Deduplicate repeated expression failures while retaining occurrence counts. */
     void recordRuntimeIssue(
         std::string const& property,
@@ -385,11 +449,14 @@ private:
     /** Convert WGS84 doubles to local metre coordinates around the packet origin. */
     [[nodiscard]] mapget::Point projectWgsPoint(
         mapget::Point const& wgsPoint) const;
+
     /** Convert packet-local metre coordinates back to WGS84 doubles for labels/GLTF. */
     [[nodiscard]] mapget::Point unprojectLocalPoint(
         mapget::Point const& localPoint) const;
+
     /** Map a legacy local pick slot into the compact GPU packet pick table. */
     [[nodiscard]] uint32_t gpuPickIndex(uint32_t legacyPickIndex) const;
+
     /** Assemble common record metadata from evaluated style and semantic state. */
     [[nodiscard]] GpuRecordStyle gpuRecordStyle(
         FeatureStyleRule const& rule,
@@ -397,17 +464,21 @@ private:
         glm::fvec4 const& color,
         double zIndex,
         uint32_t legacyPickIndex) const;
+
     /** Hash one feature identity independently of tile clipping and entry order. */
     [[nodiscard]] uint64_t featureDepthIdentity(
         mapget::model_ptr<mapget::FeatureId> const& featureId) const;
+
     /** Fold stable tile, semantic, and rule identity into the packet's 32-bit tie key. */
     [[nodiscard]] uint32_t depthTieKey(
         uint64_t semanticIdentity,
         uint32_t ruleRenderIndex) const;
+
     /** Serialize the exact double-precision coordinate origin for the GLTF bridge. */
     [[nodiscard]] JsValue coordinateOriginToJs() const;
-    /** Serialize temporary GLTF-local semantic pick results for TypeScript. */
-    [[nodiscard]] JsValue pickResultsToJs() const;
+
+    /** Serialize entry identities, optionally including compact GPU references for clouds. */
+    [[nodiscard]] JsValue pickResultsToJs(bool includeReferences = false) const;
 
     /** Append one point instance after local-coordinate projection. */
     void appendPoint(
@@ -417,6 +488,7 @@ private:
         glm::fvec4 const& color,
         double zIndex,
         uint32_t pickIndex);
+
     /** Append one hollow screen-facing point glyph with an explicit pixel radius. */
     void appendPointRing(
         mapget::Point const& point,
@@ -426,6 +498,7 @@ private:
         glm::fvec4 const& color,
         double zIndex,
         uint32_t pickIndex);
+
     /** Append or request one style icon without falling back to point geometry. */
     void appendIcon(
         mapget::Point const& point,
@@ -435,6 +508,7 @@ private:
         glm::fvec4 const& color,
         double zIndex,
         uint32_t pickIndex);
+
     /** Triangulate and append one polygon/surface with explicit ring boundaries. */
     void appendSurface(
         std::vector<mapget::Point> const& points,
@@ -445,6 +519,7 @@ private:
         double zIndex,
         uint32_t pickIndex,
         double polygonHeight = 0.0);
+
     /** Preserve GLTF mesh geometry in the temporary browser bridge. */
     void appendMesh(
         std::vector<mapget::Point> const& points,
@@ -454,6 +529,7 @@ private:
         double zIndex,
         uint32_t pickIndex,
         double polygonHeight = 0.0);
+
     /** Expand one path into adjacency segments and optional shader arrowheads. */
     GpuPathRecordHandle appendPath(
         std::vector<mapget::Point> const& points,
@@ -470,15 +546,18 @@ private:
         bool simplificationApplied = false,
         std::optional<GpuPathOverlay> pathOverlay = std::nullopt,
         GpuScreenLengthAnchor screenLengthAnchor = GpuScreenLengthAnchor::None);
+
     /** Project WGS84 path points, discarding sub-pixel vertices first when allowed. */
     void projectPathPoints(
         std::span<mapget::Point const> points,
         bool simplify,
         std::vector<mapget::Point>& projected);
+
     /** Simplify a local or WGS84 path while retaining both endpoints. */
     [[nodiscard]] std::span<mapget::Point const> simplifyPath(
         std::span<mapget::Point const> points,
         bool wgs84Coordinates = false);
+
     /** Expand one axis-aligned box into persistent surface triangles. */
     void appendAabb(
         mapget::Point const& origin,
@@ -488,12 +567,14 @@ private:
         glm::fvec4 const& color,
         double zIndex,
         uint32_t pickIndex);
+
     /** Append one styled GLTF node reference to the temporary bridge. */
     void appendGltf(
         mapget::model_ptr<mapget::Geometry> const& geometry,
         FeatureStyleRule const& rule,
         BoundEvalFun const& evalFun,
         uint32_t pickIndex);
+
     /** Append one absolute-WGS84 label for the shared Deck TextLayer host. */
     void appendLabel(
         mapget::Point const& point,
@@ -569,6 +650,11 @@ private:
     uint32_t gpuOriginSlot_ = 0U;
     uint64_t gpuOriginKey_ = 0U;
     double lineSimplificationToleranceMeters_ = 0.0;
+    bool pointCloudEnabled_ = true;
+    bool hasPointCloudRules_ = false;
+    uint32_t pointCloudMaxPoints_ = mapget::DefaultPointCloudMaxPoints;
+    uint64_t pointCloudDeliveredCount_ = 0;
+    uint64_t pointCloudRenderedCount_ = 0;
     bool hasRun_ = false;
 };
 

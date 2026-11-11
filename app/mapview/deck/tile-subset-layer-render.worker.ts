@@ -1,14 +1,19 @@
+import {DEFAULT_POINT_CLOUD_MAX_POINTS} from "../point-cloud-policy.model";
 import {
     coreLib,
     initializeLibrary,
-    uint8ArrayToWasmOrThrow
-} from "../../integrations/wasm";
+    uint8ArrayToWasmOrThrow,
+    type ErdblickCore_
+} from "../../integrations/wasm.adapter";
 import type {
     FeatureLayerStyle,
-    TileLayerParser
+    TileLayerParser,
+    TileSubsetLayerRenderer
 } from "../../../build/libs/core/erdblick-core";
 import type {
     TileSubsetLayerRenderResult,
+    TileSubsetLayerRenderCatalogInstall,
+    TileSubsetLayerRenderCatalogInstalled,
     TileSubsetLayerRenderTask,
     TileSubsetLayerRenderWorkerInbound,
     TileSubsetLayerRenderWorkerReady
@@ -16,20 +21,25 @@ import type {
 import type {TileSubsetGpuIconCatalogEntry} from
     "./tile-subset-layer-render.worker.protocol";
 
+declare const self: DedicatedWorkerGlobalScope;
+
 const textEncoder = new TextEncoder();
 interface ParserCacheEntry {
+    mapId: string;
     parser: TileLayerParser;
     fieldDictSizes: Map<string, number>;
 }
 
 const parserCache = new Map<string, ParserCacheEntry>();
+const maxParserCacheEntries = 8;
 const styleCache = new Map<string, FeatureLayerStyle>();
-const rendererCache = new Map<string, any>();
+const rendererCache = new Map<string, TileSubsetLayerRenderer>();
 const maxRendererCacheEntries = 4;
 const iconCatalog = new Map<string, TileSubsetGpuIconCatalogEntry>();
 let iconCatalogVersion = -1;
+let cachedPointCloudInput: {key: string; subset: ReturnType<TileLayerParser["readTileSubsetLayer"]>} | null = null;
 
-/** Install a complete small catalog snapshot only when the main version advances. */
+/** Replace the icon catalog when supplied, then require its version to match the render task. */
 function installIconCatalog(task: TileSubsetLayerRenderTask): void {
     if (task.iconCatalogEntries) {
         iconCatalog.clear();
@@ -46,39 +56,56 @@ function installIconCatalog(task: TileSubsetLayerRenderTask): void {
     }
 }
 
-/** Reuse one parser per map/catalog revision and retire superseded catalogs. */
-function parserFor(task: TileSubsetLayerRenderTask): ParserCacheEntry {
-    const key = `${task.catalogRevision}:${task.mapId}`;
-    const cached = parserCache.get(key);
-    if (cached) {
-        return cached;
+/**
+ * Bind a new map/schema snapshot before retiring that map's previous parser.
+ * Repeated installs for the same revision add schemas to its existing parser;
+ * that path keeps earlier additions if a later artifact fails.
+ */
+function installCatalog(message: TileSubsetLayerRenderCatalogInstall): void {
+    const key = `${message.catalogRevision}:${message.mapId}`;
+    const existing = parserCache.get(key);
+    if (existing) {
+        for (const artifact of message.schemas) {
+            uint8ArrayToWasmOrThrow(bytes => existing.parser.installMapSchema(bytes, artifact.schemaId), artifact.bytes);
+        }
+        return;
     }
-    if (!task.dataSourceInfoBlob) {
-        throw new Error(
-            `Subset render worker has no catalog '${key}'.`
-        );
-    }
-    const parser = new coreLib.TileLayerParser() as TileLayerParser;
-    const configured = uint8ArrayToWasmOrThrow(
-        data => parser.setDataSourceInfo(data),
-        task.dataSourceInfoBlob
-    );
-    if (configured === null) {
+    const parser: TileLayerParser = new coreLib.TileLayerParser();
+    try {
+        for (const artifact of message.schemas) {
+            uint8ArrayToWasmOrThrow(
+                bytes => parser.installMapSchema(bytes, artifact.schemaId), artifact.bytes
+            );
+        }
+        uint8ArrayToWasmOrThrow(bytes => parser.setDataSourceInfo(bytes), message.dataSourceInfoBlob);
+    } catch (error) {
         parser.delete();
-        throw new Error("Failed to configure the subset render worker parser.");
+        throw error;
     }
+    // Keep the previous graph alive until the replacement is completely bound.
+    // MapSchema's native cache shares owners when several maps use one artifact.
     for (const [existingKey, existing] of parserCache) {
-        if (existingKey.endsWith(`:${task.mapId}`)) {
+        if (existing.mapId === message.mapId) {
             existing.parser.delete();
             parserCache.delete(existingKey);
         }
     }
-    const entry = {
-        parser,
-        fieldDictSizes: new Map<string, number>()
-    };
-    parserCache.set(key, entry);
-    return entry;
+    while (parserCache.size >= maxParserCacheEntries) {
+        const [oldestKey, oldest] = parserCache.entries().next().value!;
+        oldest.parser.delete();
+        parserCache.delete(oldestKey);
+    }
+    parserCache.set(key, {mapId: message.mapId, parser, fieldDictSizes: new Map<string, number>()});
+}
+
+/** Rendering only consumes catalogs whose installation has been acknowledged. */
+function parserFor(task: TileSubsetLayerRenderTask): ParserCacheEntry {
+    const key = `${task.catalogRevision}:${task.mapId}`;
+    const cached = parserCache.get(key);
+    if (!cached) throw new Error(`Subset render worker has no installed catalog '${key}'.`);
+    parserCache.delete(key);
+    parserCache.set(key, cached);
+    return cached;
 }
 
 /**
@@ -112,7 +139,11 @@ function installFieldDict(
     );
 }
 
-/** Resolve an immutable compiled stylesheet, requiring source on the first use. */
+/**
+ * Resolve a compiled stylesheet, requiring source on first use of its key.
+ * Keys must identify immutable source: later supplied text is ignored on a hit.
+ * Compiled styles remain cached for the worker's lifetime.
+ */
 function styleFor(key: string, source?: string): FeatureLayerStyle {
     const cached = styleCache.get(key);
     if (cached) {
@@ -134,12 +165,16 @@ function styleFor(key: string, source?: string): FeatureLayerStyle {
     return style;
 }
 
-/** Reuse native scratch and packet storage for one immutable style context. */
-function rendererFor(task: TileSubsetLayerRenderTask): any {
+/**
+ * Reuse native scratch and packet storage by style, highlight mode, LOD and
+ * point-cloud revision, evicting least-recently used renderers.
+ */
+function rendererFor(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderer {
     const key = JSON.stringify([
         task.styleKey,
         task.highlightModeValue,
-        task.lod
+        task.lod,
+        task.pointCloud?.cacheKey
     ]);
     const cached = rendererCache.get(key);
     if (cached) {
@@ -147,15 +182,16 @@ function rendererFor(task: TileSubsetLayerRenderTask): any {
         rendererCache.set(key, cached);
         return cached;
     }
-    if (rendererCache.size >= maxRendererCacheEntries) {
+    while (rendererCache.size >= (task.pointCloud ? 1 : maxRendererCacheEntries)) {
         const oldest = rendererCache.entries().next().value as
-            [string, any] | undefined;
+            [string, TileSubsetLayerRenderer] | undefined;
         if (oldest) {
             oldest[1].delete();
             rendererCache.delete(oldest[0]);
         }
     }
-    const renderer = new coreLib.TileSubsetLayerRenderer(
+    const module: ErdblickCore_ = coreLib;
+    const renderer = new module.TileSubsetLayerRenderer(
         task.viewIndex,
         task.renderKey,
         styleFor(task.styleKey, task.styleSource),
@@ -166,11 +202,16 @@ function rendererFor(task: TileSubsetLayerRenderTask): any {
     return renderer;
 }
 
-/** Deserialize and render exactly one tile contribution into bounded packet fragments. */
+/**
+ * Deserialize and render one tile contribution, returning packets/bridge data or
+ * a task error. Point-cloud input remains native-owned for reuse by matching
+ * revisions; other subset handles are released after rendering, and renderer
+ * scratch is reset.
+ */
 function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
     const startedAt = performance.now();
     let subset: ReturnType<TileLayerParser["readTileSubsetLayer"]> | null = null;
-    let renderer: any = null;
+    let renderer: TileSubsetLayerRenderer | null = null;
     let result: TileSubsetLayerRenderResult | null = null;
     try {
         const parserEntry = parserFor(task);
@@ -178,12 +219,17 @@ function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
         installIconCatalog(task);
         const parser = parserEntry.parser;
         const deserializeStartedAt = performance.now();
-        subset = uint8ArrayToWasmOrThrow(
-            data => parser.readTileSubsetLayer(data),
-            task.subsetBlob
-        );
-        if (!subset) {
-            throw new Error("Failed to deserialize TileSubsetLayer.");
+        if (task.reusePointCloudInput) {
+            if (!task.pointCloud || cachedPointCloudInput?.key !== task.pointCloud.cacheKey)
+                throw new Error("Point-cloud input cache does not match the requested revision.");
+            subset = cachedPointCloudInput.subset;
+        } else {
+            cachedPointCloudInput?.subset.delete();
+            cachedPointCloudInput = null;
+            subset = uint8ArrayToWasmOrThrow(
+                data => parser.readTileSubsetLayer(data), task.subsetBlob);
+            if (!subset) throw new Error("Failed to deserialize TileSubsetLayer.");
+            if (task.pointCloud) cachedPointCloudInput = {key: task.pointCloud.cacheKey, subset};
         }
         const deserializeMs = performance.now() - deserializeStartedAt;
 
@@ -199,6 +245,8 @@ function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
         renderer.setLineSimplificationTolerance(
             task.lineSimplificationToleranceMeters
         );
+        renderer.setPointCloudPolicy(task.pointCloud?.enabled ?? true, task.pointCloud?.maxPoints ?? DEFAULT_POINT_CLOUD_MAX_POINTS,
+            task.pointCloud?.spacingMeters ?? 0, task.pointCloud?.cacheKey ?? task.taskId);
         renderer.configureGpuPacket(
             task.sceneGeneration,
             task.packetSequence,
@@ -230,6 +278,8 @@ function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
         const runStartedAt = performance.now();
         renderer.run();
         const runMs = performance.now() - runStartedAt;
+
+        // Materialize the packet and bridge buffers before resetting native renderer scratch.
         const packetStartedAt = performance.now();
         const packets = Array.from(
             renderer.renderPackets() as ArrayLike<Uint8Array>
@@ -247,6 +297,9 @@ function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
             packets,
             bridge,
             vertexCount: Number(renderer.vertexCount()),
+            pointCloudDeliveredCount: Number(renderer.pointCloudDeliveredCount()),
+            pointCloudRenderedCount: Number(renderer.pointCloudRenderedCount()),
+            wasmMemoryBytes: Number(coreLib.getTotalMemory()),
             timings: {
                 deserializeMs,
                 runMs,
@@ -270,8 +323,9 @@ function render(task: TileSubsetLayerRenderTask): TileSubsetLayerRenderResult {
         };
         return result;
     } finally {
-        renderer?.resetForNextTile?.();
-        subset?.delete();
+        renderer?.resetForNextTile();
+        if (subset !== cachedPointCloudInput?.subset) subset?.delete();
+        if (result) result.wasmMemoryBytes = Number(coreLib.getTotalMemory());
         if (result?.timings) {
             result.timings.totalMs = performance.now() - startedAt;
         }
@@ -288,8 +342,36 @@ self.onmessage = async (event: MessageEvent<TileSubsetLayerRenderWorkerInbound>)
         self.postMessage(ready);
         return;
     }
-    await initializeLibrary();
-    const result = render(event.data);
+    if (event.data.type === "TileSubsetLayerRenderCatalogInstall") {
+        const installed: TileSubsetLayerRenderCatalogInstalled = {
+            type: "TileSubsetLayerRenderCatalogInstalled", requestId: event.data.requestId, catalogKeys: []
+        };
+        try {
+            await initializeLibrary();
+            installCatalog(event.data);
+        } catch (error) {
+            installed.error = error instanceof Error ? error.message : String(error);
+        }
+        installed.catalogKeys = [...parserCache.keys()];
+        self.postMessage(installed);
+        return;
+    }
+    let result: TileSubsetLayerRenderResult;
+    try {
+        await initializeLibrary();
+        result = render(event.data);
+    } catch (error) {
+        // Initialization failures must return the task's admission credit too.
+        result = {
+            type: "TileSubsetLayerRenderResult",
+            taskId: event.data.taskId,
+            visualizationId: event.data.visualizationId,
+            renderSignature: event.data.renderSignature,
+            error: error instanceof Error ? error.message : String(error)
+        };
+    }
+
+    // Transfer each backing buffer once; the worker relinquishes ownership to the main thread.
     const transferables = result.packets && result.bridge
         ? [
             ...result.packets.map(packet => packet.buffer),

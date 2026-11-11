@@ -11,13 +11,18 @@ import {
 } from "@deck.gl/core";
 import type {Device, Texture} from "@luma.gl/core";
 import {createScenegraphsFromGLTF} from "@luma.gl/gltf";
-import {Geometry, GroupNode, Model, ModelNode} from "@luma.gl/engine";
+import {
+    Geometry,
+    GroupNode,
+    Model,
+    ModelNode
+} from "@luma.gl/engine";
 import {type ShaderModule, pbrMaterial} from "@luma.gl/shadertools";
 import {Matrix4} from "@math.gl/core";
 import type {
     DeckTileGltfAsset,
     DeckTileGltfProcessed
-} from "./deck-tile-gltf-asset";
+} from "./deck-tile-gltf-asset.adapter";
 
 const GLTF_NODE_UNIFORM_BLOCK = `\
 uniform gltfNodeUniforms {
@@ -277,6 +282,7 @@ export interface DeckGltfNodeDatum {
     nodeIndex: number;
     featureAddress: number;
     color: [number, number, number, number];
+
     /** Texture-to-tint interpolation used only by flat interaction passes. */
     tintMix?: number;
     depthTest: boolean;
@@ -432,6 +438,7 @@ type LayerScenegraphState = {
     textureCacheDevice: Device | null;
 };
 
+/** Create a detached scenegraph state with no acquired models, textures or device. */
 function createEmptyLayerScenegraphState(): LayerScenegraphState {
     return {
         assetCacheKey: null,

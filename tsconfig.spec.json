@@ -3,14 +3,15 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "./out-tsc/spec",
+    "resolveJsonModule": true,
     "types": [
       "vitest/globals"
     ]
   },
   "include": [
     "app/zone-flags.ts",
-    "app/**/*.spec.ts",
+    "tests/app/**/*.spec.ts",
     "app/**/*.d.ts",
-    "test/**/*.ts"
+    "tests/support/**/*.ts"
   ]
 }

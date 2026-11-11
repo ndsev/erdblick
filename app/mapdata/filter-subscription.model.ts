@@ -1,4 +1,9 @@
-import type {MapTileStreamFilterStatusPayload} from "./tilestream";
+/**
+ * Filter demand, delivery values and retained attachment references.
+ * These contracts describe a presentation subscription independently of its
+ * network client; the transport service supplies delivery and release callbacks.
+ */
+import type { MapTileStreamFilterStatusPayload } from "./map-tile-stream.protocol";
 import {
     partitionJson,
     partitionKey,
@@ -12,6 +17,8 @@ export type FilterBindingValue = null | boolean | number | string;
 /** One generic mapget evaluation channel produced by Erdblick's style planner. */
 export interface FilterChannelDefinition {
     channelId: string;
+    /** Exact schema used to prepare this search predicate. */
+    schemaId?: string;
     scope: "feature" | "attribute" | "relation" | "auto";
     rewrite: boolean;
     featureTypes: string[];
@@ -19,6 +26,7 @@ export interface FilterChannelDefinition {
     entryFields: string[];
     geometryTypes: number;
     geometryName?: string;
+    pointCloudMaxPoints?: number;
     featureFilter?: string;
     entryFilter?: string;
     group?: {

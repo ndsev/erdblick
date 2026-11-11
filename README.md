@@ -8,6 +8,7 @@
 
 - [Erdblick User Guide](docs/erdblick-user-guide.md) – setup, UI basics, search, inspection, split view, troubleshooting, and more.
 - [Erdblick Development Guide](docs/erdblick-dev-guide.md) – architecture overview, build instructions, tile/rendering pipelines, and debugging tips.
+- [Test Layout and Commands](tests/README.md) – Angular, native and browser suites, fixtures and MapViewer integration.
 
 Those documents now host the detailed instructions that previously lived in this README. Use them as a sitemap when contributing.
 
@@ -18,14 +19,21 @@ Those documents now host the detailed instructions that previously lived in this
 | Full | Default build that includes maps/layers panel, style editor, search, inspector, and diagnostics. |
 | Visualization-only | Lightweight bundle for kiosks or embeds. Only the canvas renders; configuration is provided via URL parameters or `/static-config/config.json`. |
 
-Select a mode when running `./build-ui.bash <output-folder> [visualization-only]`. Integrations such as the MapViewer container use the `ERDBLICK_VARIANT` environment variable to pick the variant they embed. The [Setup Guide](docs/erdblick-setup.md) documents both workflows.
+`./ci/20_linux_rebuild.bash` builds both modes: serve `static/browser/` for the
+full UI or `static-visualization-only/browser/` for visualization only.
+Integrations such as the MapViewer container use the `ERDBLICK_VARIANT`
+environment variable to pick the variant they embed. The
+[Setup Guide](docs/erdblick-setup.md) documents both workflows.
 
 ## Quick Start
 
+Prepare the [source-build prerequisites](docs/erdblick-setup.md#running-from-source)
+and a backend compatible with the checked-out mapget APIs, then run from the
+erdblick root:
+
 ```bash
-pip install mapget
-./build-ui.bash ~/tmp/erdblick-dist
-mapget serve -w ~/tmp/erdblick-dist
+./ci/20_linux_rebuild.bash
+mapget serve -w static/browser
 ```
 
 Open the printed localhost URL, then configure your mapget backend (via its YAML config or management API) so `/sources` advertises the maps you need. Products such as MapViewer already ship with a prebuilt erdblick bundle under `/app/erdblick`, so those users can skip the build step entirely.
@@ -35,21 +43,24 @@ Open the printed localhost URL, then configure your mapget backend (via its YAML
 Browser-based integration tests are implemented with Playwright and assume that the Emscripten build
 has completed successfully (so the WASM core and `static/browser` bundle are available).
 
-To run them locally:
+For the Python datasource fixture, prepare a repository-local `venv/` with a
+mapget package compatible with the checkout's tile protocol. The integration
+wrapper uses that environment. For a matching native backend instead, see the
+[developer guide](docs/erdblick-dev-guide.md#browser-integration).
+
+To run the Python fixture locally:
 
 ```bash
-./ci/10_linux_build.bash             # build core + UI
-npm install                          # install dev dependencies (incl. Playwright)
+./ci/20_linux_rebuild.bash            # incrementally build core + both UI variants
 npx playwright install --with-deps   # install Playwright browsers (once)
-pip install mapget                   # install the latest mapget package
-./ci/run-integration-with-venv-mapget.sh  # runs tests in playwright/tests using mapget serve
+./ci/run-integration-with-venv-mapget.sh  # runs tests in tests/playwright/tests using mapget serve
 ```
 
-The Playwright harness will start `mapget --config test/mapget-integration.yaml serve --allow-post-config --port 9000 --cache-type none --webapp /:static/browser` automatically; 
-ensure a `mapget` binary is available on your PATH (or set `MAPGET_BIN` to override the executable path). 
-The default integration setup uses the Python example datasource from the vendored `mapget` repo
-(`build/_deps/mapget-src/examples/python/datasource.py`) via a `DataSourceProcess` entry in
-`test/mapget-integration.yaml`. If this Python datasource cannot be started (for example, the
+The Playwright harness will start `mapget --config tests/playwright/fixtures/mapget-integration.yaml serve --allow-post-config --port 9000 --cache-type none --webapp /:static/browser` automatically;
+ensure a `mapget` binary is available on your PATH (or set `MAPGET_BIN` to override the executable path).
+The default integration setup uses `tests/playwright/fixtures/datasource.py`
+via a `DataSourceProcess` entry in
+`tests/playwright/fixtures/mapget-integration.yaml`. If this Python datasource cannot be started (for example, the
 `mapget` Python package is missing), `/sources` may be empty and datasource-dependent tests will be
 reported as skipped while generic backend and debug-tile tests still run.
 
@@ -58,7 +69,8 @@ Coverage output is written to `coverage/playwright/`. For human inspection, open
 - `coverage/playwright/index.html` for the emitted-script V8 summary plus per-script tables.
 - `coverage/playwright/source/index.html` for the source-mapped Istanbul HTML report.
 
-The source-mapped report requires a frontend build with hidden source maps:
+After the wrapper build, collecting the source-mapped coverage report requires
+an additional frontend build with hidden source maps:
 
 ```bash
 npm run build:integration-coverage

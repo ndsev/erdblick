@@ -55,22 +55,38 @@ export interface BackendState {
     lastStatusAt?: number;
 }
 
+/** Current failure causes stay separate from loading and the historical error badge. */
+export interface ConnectionDiagnostics {
+    retrying: boolean;
+    failed: boolean;
+    loading: boolean;
+    message: string;
+    backendFailed: boolean;
+    backendRetrying: boolean;
+    catalogFailed: boolean;
+    sourceCount: number;
+    failedSourceCount: number;
+}
+
 /** Point-in-time diagnostics snapshot combining tile, progress, and backend state. */
 export interface DiagnosticsSnapshot {
     at: number;
     tiles: TileStateCounts;
     progress: TilePipelineProgress;
     backend: BackendState;
+
     /** Real in-flight work, excluding pending partitions and recovery waits. */
     loading?: boolean;
+
     /** Current failures and recovery, independent of historical error logs. */
-    recovery?: {retrying: boolean; failed: boolean; message: string};
+    recovery?: ConnectionDiagnostics;
 }
 
 /** Aggregated performance statistic derived from one raw backend stat path. */
 export interface PerfStat {
     key: string;
     path: string[];
+
     /** View-wide live value which is independent of the tile/layer filter. */
     scope?: 'view';
     unit?: string;

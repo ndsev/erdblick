@@ -8,6 +8,7 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/gpu-render-records.h
   include/erdblick/style.h
   include/erdblick/style-validation.h
+  include/erdblick/style-authoring.h
   include/erdblick/style-filter-plan.h
   include/erdblick/rule.h
   include/erdblick/buffer.h
@@ -28,6 +29,7 @@ set(ERDBLICK_SOURCE_FILES
   src/gpu-render-records.cpp
   src/style.cpp
   src/style-validation.cpp
+  src/style-authoring.cpp
   src/style-filter-plan.cpp
   src/rule.cpp
   src/color.cpp
