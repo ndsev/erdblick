@@ -288,6 +288,11 @@ feature. Select known fields or enter a custom Simfil expression, and give each
 value an optional short display key. The feature data is already available to
 the renderer, so hovering does not trigger an extra data request.
 
+An expression can show several matches. For example, `**.speedLimitKmh` displays
+`80, 90` when it finds those two limits on a feature. Matches retain their
+expression order; null and undefined values are omitted. An array-valued match
+keeps its brackets, so one array `[80,90]` remains distinguishable from two limits.
+
 ![Configuring hover-label fields and display keys](screenshots/preferences-hover-labels.png)
 
 Enable **Hover Labels** and choose projected fields. This Island example shows a lane identifier and its speed limit.

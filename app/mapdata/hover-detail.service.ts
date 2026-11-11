@@ -36,7 +36,7 @@ const FEATURE_ID_EXPRESSION = "id";
 const DECODED_TILE_CACHE_LIMIT = 16;
 
 /**
- * Keeps scalar hover fields resident for visible feature tiles without adding
+ * Keeps projected hover values resident for visible feature tiles without adding
  * geometry or issuing requests in response to pointer movement.
  */
 @Injectable({ providedIn: "root" })
@@ -55,7 +55,7 @@ export class HoverDetailService implements OnDestroy {
     }>();
     private readonly decodedTiles = new Map<string, {
         valueVersion: number;
-        valuesByFeatureId: Map<string, Map<string, unknown>>;
+        valuesByFeatureId: Map<string, Map<string, readonly unknown[]>>;
     }>();
     private syntheticStyle: ErdblickStyle | null = null;
     private enabled: boolean;
@@ -170,12 +170,16 @@ export class HoverDetailService implements OnDestroy {
                 if (expression === FEATURE_ID_EXPRESSION) {
                     return [];
                 }
-                const rawValue = values?.get(expression);
-                const value = this.displayValue(rawValue);
-                return value === null ? [] : [{
+                // A wildcard such as **.speedLimitKmh can match several values.
+                // Keep result order and format each match separately: a single
+                // array-valued result must remain distinct from several scalars.
+                const matches = (values?.get(expression) ?? [])
+                    .map(value => this.displayValue(value))
+                    .filter((value): value is string => value !== null);
+                return matches.length === 0 ? [] : [{
                     key: field.displayKey?.trim() ||
                         defaultHoverLabelFieldKey(expression),
-                    value,
+                    value: matches.join(", "),
                     colorKey: expression
                 }];
             });
@@ -323,7 +327,7 @@ export class HoverDetailService implements OnDestroy {
         layerId: string,
         partition: PartitionId,
         featureId: string
-    ): Map<string, unknown> | undefined {
+    ): Map<string, readonly unknown[]> | undefined {
         const owned = this.layers.get(this.layerIdentityKey(
             viewIndex,
             mapId,
@@ -358,11 +362,15 @@ export class HoverDetailService implements OnDestroy {
         return cached.valuesByFeatureId.get(featureId);
     }
 
-    /** Converts singleton expression results into feature-id keyed hover values. */
+    /**
+     * Retain each expression's complete result sequence for the hovered feature.
+     * Empty sequences have no matches; one array result remains nested rather
+     * than being confused with several matches from a wildcard expression.
+     */
     private decodeTile(
         blob: Uint8Array,
         expressions: readonly string[]
-    ): Map<string, Map<string, unknown>> | null {
+    ): Map<string, Map<string, readonly unknown[]>> | null {
         const subset = uint8ArrayToWasm(
             data => this.mapInfo.tileLayerParser.readTileSubsetLayer(data),
             blob
@@ -378,7 +386,7 @@ export class HoverDetailService implements OnDestroy {
             const fieldIndices = expressions.map(expression =>
                 schema.featureFields.indexOf(expression));
             const entryCount = Math.max(0, Math.floor(Number(schema.entryCount)));
-            const valuesByFeatureId = new Map<string, Map<string, unknown>>();
+            const valuesByFeatureId = new Map<string, Map<string, readonly unknown[]>>();
             for (let offset = 0; offset < entryCount; offset += 1024) {
                 const entries = subset.entryRange(
                     0,
@@ -388,12 +396,12 @@ export class HoverDetailService implements OnDestroy {
                 ) as SearchResultTileEntry[];
                 for (const entry of entries) {
                     const values = Array.isArray(entry.values) ? entry.values : [];
-                    const byExpression = new Map<string, unknown>();
+                    const byExpression = new Map<string, readonly unknown[]>();
                     expressions.forEach((expression, index) => {
                         const fieldIndex = fieldIndices[index];
                         const results = values[fieldIndex];
-                        if (Array.isArray(results) && results.length === 1) {
-                            byExpression.set(expression, results[0]);
+                        if (Array.isArray(results)) {
+                            byExpression.set(expression, results);
                         }
                     });
                     valuesByFeatureId.set(entry.featureId, byExpression);

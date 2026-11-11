@@ -286,8 +286,11 @@ WASM boundary as JavaScript `undefined`; `valueErrors` distinguishes failed
 expressions from successful empty results. Search summaries count actual results,
 not sequence wrappers. Scalar style properties accept exactly one result, use
 their default for zero results and report a runtime issue/default for multiple
-results. They never silently pick the first. Hover/result labels likewise only
-unwrap singleton sequences.
+results. They never silently pick the first. Result labels likewise only unwrap
+singleton sequences. Hover labels display all non-null, defined matches in
+expression order, separated by commas. Each match is formatted independently:
+two scalar results `[1, 2]` display as `1, 2`, while one array-valued result
+`[[1, 2]]` displays as `[1,2]`.
 
 ## Ownership model
 

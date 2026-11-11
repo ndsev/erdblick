@@ -169,11 +169,19 @@ describe("HoverDetailService", () => {
         service.ngOnDestroy();
     });
 
-    it("reads projected values from the resident subset instead of loading on hover", () => {
+    it.each([
+        { results: [], display: null },
+        { results: [null, undefined], display: null },
+        { results: [80], display: "80" },
+        { results: [80, 90, 80], display: "80, 90, 80" },
+        { results: [80, null, undefined, 90], display: "80, 90" },
+        { results: [[80, 90]], display: "[80,90]" },
+        { results: [false, 0, "unlimited"], display: "false, 0, unlimited" }
+    ])("shows the resident expression matches without loading on hover: $results", ({ results, display }) => {
         const { service, tileStream, filterRefs, mapInfo, mapgetLayer } =
             createHarness([
                 { expression: "id", customExpression: false },
-                { expression: "typeId", customExpression: false }
+                { expression: "**.speedLimitKmh", customExpression: true }
             ]);
         const tileId = 545379780;
         const partition = tilePartition(tileId);
@@ -185,14 +193,14 @@ describe("HoverDetailService", () => {
         }]);
         mapInfo.tileLayerParser.readTileSubsetLayer.mockReturnValue({
             channelSchema: vi.fn(() => ({
-                featureFields: ["typeId"],
+                featureFields: ["**.speedLimitKmh"],
                 entryCount: 1
             })),
             entryRange: vi.fn(() => [{
                 mapTileKey,
                 featureId: "Road.42",
                 resultIndex: 0,
-                values: [["Road"]]
+                values: [results]
             }]),
             delete: vi.fn()
         });
@@ -227,31 +235,12 @@ describe("HoverDetailService", () => {
         }])).toEqual([{
             featureId: "Road.42",
             showFeatureId: true,
-            fields: [
-                { key: "typeId", value: "Road", colorKey: "typeId" }
-            ]
+            fields: display === null ? [] : [{
+                key: "speedLimitKmh", value: display, colorKey: "**.speedLimitKmh"
+            }]
         }]);
         expect(tileStream.parseMapPartitionKeySafe).toHaveBeenCalledOnce();
-        service.ngOnDestroy();
-    });
-
-    it.each([
-        { results: [], present: false, expected: undefined },
-        { results: [null], present: true, expected: null },
-        { results: [undefined], present: true, expected: undefined },
-        { results: [80], present: true, expected: 80 },
-        { results: [80, 90], present: false, expected: undefined },
-        { results: [[80, 90]], present: true, expected: [80, 90] }
-    ])("preserves exactly one hover result without flattening arrays: $results", ({ results, present, expected }) => {
-        const { service, mapInfo } = createHarness([{ expression: "speedLimit", customExpression: false }]);
-        mapInfo.tileLayerParser.readTileSubsetLayer.mockReturnValue({
-            channelSchema: () => ({ featureFields: ["speedLimit"], entryCount: 1 }),
-            entryRange: () => [{ featureId: "Road.42", values: [results] }],
-            delete: vi.fn()
-        });
-        const values = service["decodeTile"](new Uint8Array([1]), ["speedLimit"])!.get("Road.42")!;
-        expect(values.has("speedLimit")).toBe(present);
-        expect(values.get("speedLimit")).toEqual(expected);
+        expect(tileStream.createFilterSubscription).toHaveBeenCalledOnce();
         service.ngOnDestroy();
     });
 
