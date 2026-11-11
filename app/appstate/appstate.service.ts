@@ -15,7 +15,7 @@ import {
     take
 } from "rxjs";
 import { filter } from "rxjs/operators";
-import { MessageService } from "primeng/api";
+import { InfoMessageService } from "../diagnostics/info.service";
 import {
     AppState,
     AppStateOptions,
@@ -345,7 +345,7 @@ export class AppStateService implements OnDestroy {
      * a queued edit cannot overwrite the history entry the user just selected.
      */
     constructor(private readonly router: Router,
-        private readonly messages: MessageService) {
+        private readonly messages: InfoMessageService) {
         this.retireMapPresetDefinitionStorage();
         // Perform initial hydration after the initial NavigationEnd event arrives.
         this.router.events.pipe(filter(event => event instanceof NavigationEnd), take(1)).subscribe(() => {
@@ -910,14 +910,10 @@ export class AppStateService implements OnDestroy {
 
     /** Reports a rejected persisted field while its owner restores other valid saved values. */
     reportHydrationError(source: string, error: unknown): void {
-        // Persistence only publishes a toast. Depending on the modal-dialog
-        // service here would make every state container import dialog and map controllers.
-        this.messages.add({
-            key: "tc",
-            severity: "error",
-            summary: "Error",
-            detail: `Could not restore ${source}: ${error instanceof Error ? error.message : String(error)}`
-        });
+        this.messages.showError(
+            `Could not restore ${source}: ${error instanceof Error ? error.message : String(error)}`,
+            {scope: 'state-hydration'}
+        );
     }
 
     /** Keeps one malformed persisted state entry from aborting startup hydration. */

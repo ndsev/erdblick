@@ -9,7 +9,7 @@ import {
 import { Subject } from "rxjs";
 import { Router } from "@angular/router";
 import { AppStateService } from "../../../app/appstate/appstate.service";
-import { MessageService } from "primeng/api";
+import { InfoMessageService } from "../../../app/diagnostics/info.service";
 import { PreferencesComponent } from "../../../app/preferences/preferences.component";
 import { PREFERENCES_DIALOG_LAYOUT_ID } from "../../../app/layout/layout.model";
 
@@ -19,7 +19,7 @@ function createPreferences() {
         events: new Subject(), navigate: vi.fn(),
         routerState: { snapshot: { root: { queryParams: {} } } }
     } as unknown as Router;
-    const persistence = new AppStateService(router, {} as MessageService);
+    const persistence = new AppStateService(router, {} as InfoMessageService);
     return { persistence, preferences: stateOwners(persistence).views };
 }
 

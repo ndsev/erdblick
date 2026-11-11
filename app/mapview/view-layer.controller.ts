@@ -1,3 +1,4 @@
+import {GPU_BUFFER_EXHAUSTED_NOTICE} from "./gpu-buffer-notice.model";
 import { NgZone } from "@angular/core";
 import { Subject, Subscription } from "rxjs";
 import type { InfoMessageService } from "../diagnostics/info.service";
@@ -2037,7 +2038,7 @@ export class ViewLayerController {
                 if (error instanceof GpuMaterialBufferExhaustedError) {
                     // Allocation rollback and failed-signature tracking have already
                     // run. Only presentation enters Angular; rendering stays outside it.
-                    this.ngZone.run(() => this.infoMessages.showGpuBufferExhausted());
+                    this.ngZone.run(() => this.infoMessages.show(GPU_BUFFER_EXHAUSTED_NOTICE));
                 } else {
                     console.error("TileSubsetLayer visualization failed.", error);
                 }

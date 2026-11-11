@@ -10,7 +10,6 @@ import { provideHttpClient } from "@angular/common/http";
 import { provideZonelessChangeDetection } from "@angular/core";
 import { createApplication } from "@angular/platform-browser";
 import { provideRouter } from "@angular/router";
-import { MessageService } from "primeng/api";
 import type { z } from "zod";
 import { beforeAll } from "vitest";
 import type { AppActionRegistry } from "../../app/action/action-registry.service";
@@ -34,7 +33,7 @@ let catalog: ReturnType<AppActionRegistry["catalog"]>;
 beforeAll(async () => {
     const application = await createApplication({ providers: [
         provideZonelessChangeDetection(), provideHttpClient(), provideRouter([]),
-        { provide: APP_BASE_HREF, useValue: "/" }, MessageService
+        { provide: APP_BASE_HREF, useValue: "/" }
     ] });
     try {
         const registry = registerApplication(application.injector);

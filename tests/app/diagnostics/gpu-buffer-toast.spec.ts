@@ -3,8 +3,8 @@ import {Component, NO_ERRORS_SCHEMA} from '@angular/core';
 import {TestBed} from '@angular/core/testing';
 import {HttpClient} from '@angular/common/http';
 import {By} from '@angular/platform-browser';
-import {MessageService} from 'primeng/api';
-import {ToastModule} from 'primeng/toast';
+import {InfoMessageComponent} from '../../../app/diagnostics/info-message.component';
+import {GPU_BUFFER_EXHAUSTED_NOTICE} from '../../../app/mapview/gpu-buffer-notice.model';
 import {EMPTY} from 'rxjs';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {AppComponent} from '../../../app/app.component';
@@ -34,10 +34,9 @@ describe('GPU warning toast', () => {
     it('keeps one warning, dismisses it on navigation, and allows a later warning', async () => {
         TestBed.configureTestingModule({
             declarations: [AppComponent],
-            imports: [ToastModule, PreferencesStub],
+            imports: [InfoMessageComponent, PreferencesStub],
             schemas: [NO_ERRORS_SCHEMA],
             providers: [
-                MessageService,
                 ...[AppActionRegistry, AppStateService, DiagnosticsFacadeService, DiagnosticsState,
                     DialogStackService, MapDataService, MapTileStreamService, MapStyleService,
                     TileSubsetLayerRenderService].map(provide => ({provide, useValue: {}})),
@@ -46,7 +45,7 @@ describe('GPU warning toast', () => {
                 {provide: LayoutService, useValue: {isDialogOpen: () => false}},
                 {provide: AppConfigService, useValue: {
                     getExtensionModuleId: () => undefined,
-                    snapshot: {serverConfig: {styleEditingEnabled: false, mapPresets: {write: false}}}
+                    snapshot: {serverConfig: {styleEditingEnabled: true, mapPresets: {write: true}}}
                 }}
             ]
         });
@@ -56,26 +55,44 @@ describe('GPU warning toast', () => {
         const root: HTMLElement = fixture.nativeElement;
         const preferences: PreferencesStub = fixture.debugElement.query(By.directive(PreferencesStub)).componentInstance;
 
-        info.showBackendConnectionError('Keep this notice');
-        for (let index = 0; index < 10; ++index) info.showGpuBufferExhausted();
+        info.showError('Keep this notice', {scope: 'other', life: 'sticky'});
+        for (let index = 0; index < 10; ++index) info.show(GPU_BUFFER_EXHAUSTED_NOTICE);
         fixture.detectChanges();
         await fixture.whenStable();
-        expect(root.querySelectorAll('[data-testid="gpu-buffer-warning"]')).toHaveLength(1);
+        await vi.waitFor(() => {
+            fixture.detectChanges();
+            expect(root.querySelectorAll('[data-message-scope="gpu-buffer-exhausted"]')).toHaveLength(1);
+        });
 
-        root.querySelector<HTMLButtonElement>('.gpu-buffer-action')!.click();
+        expect(root.querySelector('[data-message-scope="gpu-buffer-exhausted"]')?.getAttribute('data-count')).toBe('10');
+        root.querySelector<HTMLButtonElement>('[data-message-scope="gpu-buffer-exhausted"] button')!.click();
         fixture.detectChanges();
         await vi.waitFor(() => {
             fixture.detectChanges();
-            expect(root.querySelector('[data-testid="gpu-buffer-warning"]')).toBeNull();
+            expect(root.querySelector('[data-message-scope="gpu-buffer-exhausted"]')).toBeNull();
         });
         expect(preferences.openRendering).toHaveBeenCalledOnce();
         expect(root.textContent).toContain('Keep this notice');
+        await vi.waitFor(() => {
+            fixture.detectChanges();
+            expect(root.querySelector('[data-message-scope="source-style-editing"]')).not.toBeNull();
+            expect(root.querySelector('[data-message-scope="map-preset-editing"]')).not.toBeNull();
+        });
+        root.querySelector<HTMLButtonElement>('[data-message-scope="source-style-editing"] button')!.click();
+        await vi.waitFor(() => {
+            fixture.detectChanges();
+            expect(root.querySelector('[data-message-scope="source-style-editing"]')).toBeNull();
+        });
+        expect(root.querySelector('[data-message-scope="map-preset-editing"]')?.getAttribute('data-count')).toBe('1');
 
-        info.showGpuBufferExhausted();
-        info.showGpuBufferExhausted();
+        info.show(GPU_BUFFER_EXHAUSTED_NOTICE);
+        info.show(GPU_BUFFER_EXHAUSTED_NOTICE);
         fixture.detectChanges();
-        await fixture.whenStable();
-        expect(root.querySelectorAll('[data-testid="gpu-buffer-warning"]')).toHaveLength(1);
+        await vi.waitFor(() => {
+            fixture.detectChanges();
+            expect(root.querySelectorAll('[data-message-scope="gpu-buffer-exhausted"]')).toHaveLength(1);
+        });
+        expect(root.querySelector('[data-message-scope="gpu-buffer-exhausted"]')?.getAttribute('data-count')).toBe('2');
         expect(root.textContent).toContain('Keep this notice');
     });
 });

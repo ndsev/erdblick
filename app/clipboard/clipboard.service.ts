@@ -1,4 +1,5 @@
 import {Injectable} from "@angular/core";
+import {AppAlertService} from "../alert/app-alert.service";
 import {InfoMessageService} from "../diagnostics/info.service";
 
 
@@ -6,7 +7,7 @@ import {InfoMessageService} from "../diagnostics/info.service";
 /** Clipboard helper that falls back to a manual copy dialog outside secure contexts. */
 export class ClipboardService {
 
-    constructor(private messageService: InfoMessageService) {}
+    constructor(private messageService: InfoMessageService, private alerts: AppAlertService) {}
 
     /**
      * Copies text to the system clipboard. The asynchronous write falls back to a
@@ -18,7 +19,7 @@ export class ClipboardService {
             const hint = "The clipboard is not available due to missing secure context (HTTPS). Copy the content manually:";
 
             if (!globalThis.isSecureContext || !(navigator as any)?.clipboard?.writeText) {
-                this.messageService.showAlertDialogDefault("Clipboard Content", text, true, hint);
+                this.alerts.showAlertDialogDefault("Clipboard Content", text, true, hint);
                 return;
             }
 
@@ -28,7 +29,7 @@ export class ClipboardService {
                 },
                 () => {
                     // Fall back to manual copy dialog on failure
-                    this.messageService.showAlertDialogDefault("Clipboard Content", text, true, hint);
+                    this.alerts.showAlertDialogDefault("Clipboard Content", text, true, hint);
                 }
             );
         } catch (error) {

@@ -13,16 +13,14 @@ diagnostics-indicator {
       color: var(--p-badge-danger-background);
     }
 
-    .pi-circle-fill.retrying {
-      animation: diagnostics-connection-retry 2s step-end infinite;
+    .pi-circle-fill.degraded {
+      color: var(--p-badge-warn-background);
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .pi-circle-fill.retrying {
-        animation: none;
-        color: var(--p-badge-danger-background);
-        border-radius: 50%;
-        outline: 2px solid var(--p-badge-success-background);
+      .p-progressspinner-spin,
+      .p-progressspinner-circle {
+        animation: none !important;
       }
     }
 
@@ -82,6 +80,12 @@ diagnostics-indicator {
       font-weight: 600;
     }
 
+    .diagnostics-help {
+      font-size: 1.25rem;
+      color: var(--p-text-muted-color);
+      cursor: help;
+    }
+
     .diagnostics-popover-actions {
       display: flex;
       flex-direction: row;
@@ -101,9 +105,13 @@ diagnostics-indicator {
   }
 }
 
-@keyframes diagnostics-connection-retry {
-  0%, 100% { color: var(--p-badge-success-background); }
-  50% { color: var(--p-badge-danger-background); }
+.p-tooltip.diagnostics-source-tooltip {
+  max-width: min(36rem, calc(100vw - 2rem));
+
+  .p-tooltip-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
 }
 
 .diagnostics-label {

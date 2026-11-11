@@ -1,5 +1,6 @@
+import type {InfoMessageRef} from "../diagnostics/info-message.model";
 import { type ConnectionRetryPolicy, connectionRetryPolicySchema } from "./connection-retry-policy.model";
-import { HttpClient } from "@angular/common/http";
+import { HttpClient, HttpErrorResponse } from "@angular/common/http";
 import { Injectable } from "@angular/core";
 import {
     BehaviorSubject,
@@ -48,6 +49,7 @@ import {
     isDataSourceCatalogEntryReady,
     MapInfoItem,
     MapSchemaArtifact,
+    SourceCatalogRefreshResult,
     sortDataSourceCatalogEntries
 } from "./source-catalog.model";
 import { MapgetLayer } from "./mapget-layer.model";
@@ -83,6 +85,10 @@ const styleOptionSelectorSchema = z
  */
 @Injectable({ providedIn: "root" })
 export class MapDataService implements AppActionContributor {
+    private metadataConnectionNotice?: InfoMessageRef;
+    private sourceConfigError = "";
+    /** Last catalog fetch failure; protocol/parse failures require new state or an explicit refresh. */
+    catalogRefreshFailure?: {message: string; retryable: boolean};
     public readonly legalInformationPerMap = new Map<string, Set<string>>();
     public readonly legalInformationUpdated = new Subject<boolean>();
     public readonly layerStateChanged = new Subject<string>();
@@ -93,6 +99,8 @@ export class MapDataService implements AppActionContributor {
      * Unlisted maps keep their dictionaries, layers and retained presentations.
      */
     public readonly dataSourceInfoChanged = new Subject<readonly string[]>();
+    /** A valid HTTP snapshot was applied; consumers can reconcile their refresh state. */
+    public readonly sourceCatalogLoaded = new Subject<number | null>();
     public readonly maps$: BehaviorSubject<MapLayerTree>;
 
     /** Shared parser instance whose datasource metadata is populated from `/sources`. */
@@ -435,25 +443,38 @@ export class MapDataService implements AppActionContributor {
      * Awaiting this method never waits for all schemas: one slow or broken source
      * must not block the application, MCP, or another map becoming usable.
      */
-    async reloadDataSources(): Promise<boolean> {
+    async reloadDataSources(signal?: AbortSignal): Promise<boolean> {
+        const result = await this.refreshSourceCatalog(signal);
+        return result.status === "applied" || result.status === "superseded";
+    }
+
+    /** Request-local outcomes let recovery owners distinguish failure from supersession. */
+    refreshSourceCatalog(signal?: AbortSignal): Promise<SourceCatalogRefreshResult> {
+        return this.loadSourceCatalog(signal, true);
+    }
+
+    private async loadSourceCatalog(signal: AbortSignal | undefined, retrySuperseded: boolean): Promise<SourceCatalogRefreshResult> {
+        if (signal?.aborted) return {status: "cancelled"};
         const serial = ++this.catalogLoadSerial;
         const changeSerial = this.catalogChangeSerial;
         try {
             const response = await firstValueFrom(this.httpClient.get<Array<MapInfoItem>>("/sources?blocking=false", {
                 cache: "no-store",
                 observe: "response"
-            }));
-            if (serial !== this.catalogLoadSerial) return true;
+            }).pipe(takeUntil(signal ? fromEvent(signal, "abort") : EMPTY)));
+            if (signal?.aborted) return {status: "cancelled"};
+            if (serial !== this.catalogLoadSerial) return {status: "superseded"};
             const revision = this.parseSourceCatalogRevision(response.headers.get("X-Mapget-Sources-Revision"));
             if (changeSerial !== this.catalogChangeSerial &&
                 (revision === null || this.sourceCatalogRevisionValue === null || revision < this.sourceCatalogRevisionValue)) {
                 // A newer stream notification arrived while HTTP was in flight.
-                // Preserve it and fetch a fresh snapshot, including for direct UI reloads.
-                void this.reloadDataSources();
-                return true;
+                // Direct UI reloads may try once more, under the same cancellation
+                // owner. A continuously moving catalog must yield to backoff.
+                return retrySuperseded ? this.loadSourceCatalog(signal, false) : {status: "stale"};
             }
             const nextMetadata = new Map<string, MapInfoItem>();
-            const result = Array.isArray(response.body) ? response.body : [];
+            if (!Array.isArray(response.body)) throw new Error("Invalid datasource catalog: expected an array.");
+            const result = response.body;
             this.sourceCatalogEntries = this.normalizeSourceCatalogEntries(result).map(source => {
                 if (dataSourceCatalogStatus(source) !== "ready") return source;
                 const metadata = this.sourceMetadata(source);
@@ -465,12 +486,15 @@ export class MapDataService implements AppActionContributor {
             });
             this.catalogMetadata = nextMetadata;
             this.sourceCatalogRevisionValue = revision;
-            if (response.headers.get("X-Mapget-Sources-Config-Status") === "error") {
-                console.warn("Datasource config status:", response.headers.get("X-Mapget-Sources-Config-Message")
-                    || "Datasource configuration contains errors.");
-            }
+            const configError = response.headers.get("X-Mapget-Sources-Config-Status") === "error"
+                ? response.headers.get("X-Mapget-Sources-Config-Message") || "Datasource configuration contains errors."
+                : "";
+            if (configError && configError !== this.sourceConfigError) console.warn("Datasource config status:", configError);
+            this.sourceConfigError = configError;
+            this.catalogRefreshFailure = undefined;
             this.reconcileReadySources(result);
-            this.messageService.clearBackendConnectionError();
+            this.metadataConnectionNotice?.dismiss();
+            this.metadataConnectionNotice = undefined;
             for (const [signature, source] of nextMetadata) {
                 if (source.schemaId && !this.readySourceMetadata.has(signature) && !this.sourceHydrations.has(signature)) {
                     const hydration = this.hydrateSourceSchema(signature, source);
@@ -480,12 +504,21 @@ export class MapDataService implements AppActionContributor {
                     });
                 }
             }
-            return true;
+            this.sourceCatalogLoaded.next(revision);
+            return {status: "applied"};
         } catch (err) {
-            if (serial !== this.catalogLoadSerial) return false;
+            if (signal?.aborted) return {status: "cancelled"};
+            if (serial !== this.catalogLoadSerial) return {status: "superseded"};
+            this.catalogRefreshFailure = {
+                message: "Could not load datasource metadata from the map backend.",
+                retryable: err instanceof HttpErrorResponse && [0, 408, 429, 500, 502, 503, 504].includes(err.status)
+            };
             console.error("Failed to load data source info.", err);
-            this.messageService.showBackendConnectionError("Could not connect to the map backend to load datasource metadata.");
-            return false;
+            this.metadataConnectionNotice = this.messageService.showError(
+                "Could not connect to the map backend to load datasource metadata.",
+                {scope: 'backend-metadata', summary: 'Backend Error', life: 'sticky'}
+            );
+            return {status: "failed", ...this.catalogRefreshFailure};
         }
     }
 
@@ -691,11 +724,16 @@ export class MapDataService implements AppActionContributor {
     }
 
     /** Reports constructor recovery independently of whether mapget's transport is connected. */
-    getSourceRecoveryState(): { retrying: boolean; failed: boolean; message: string } {
-        const failures = this.sourceCatalogEntries.filter(entry => dataSourceCatalogStatus(entry) === "failed");
+    getSourceRecoveryState(): {
+        retrying: boolean; failed: boolean; sourceCount: number; failedSourceCount: number;
+        catalogError: string; message: string;
+    } {
+        const failures = this.sourceCatalogEntries.filter(entry => dataSourceReadinessStatus(entry) === "failed");
         return {
             retrying: failures.some(entry => entry.retrying === true), failed: failures.length > 0,
-            message: failures.map(entry => `${entry.mapId}: ${entry.statusMessage || "Datasource unavailable."}`).join("\n")
+            sourceCount: this.sourceCatalogEntries.length, failedSourceCount: failures.length,
+            catalogError: [this.sourceConfigError, this.catalogRefreshFailure?.message].filter(Boolean).join("\n"),
+            message: failures.map(entry => `${entry.mapId}: ${this.dataSourceStatusText(entry)}`).join("\n")
         };
     }
 

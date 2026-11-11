@@ -438,14 +438,14 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                         </section>
                         <p-divider></p-divider>
                         <div class="slider-container">
-                            <label [for]="tilesToLoadInput">Max Tiles to Load
+                            <label for="max-tiles-to-load">Max Tiles to Load
                                 <i class="pi pi-info-circle"
                                    pTooltip="Caps how many visible map tiles may be requested and rendered at once. Lower values reduce load; higher values allow more tiles before throttling."
                                    tooltipPosition="top"></i>
                             </label>
                             <div class="slider-controls">
                                 <div style="display: inline-block">
-                                    <input class="tiles-input w-full"
+                                    <input class="tiles-input w-full" id="max-tiles-to-load" data-testid="max-tiles-to-load"
                                            type="text"
                                            pInputText
                                            [(ngModel)]="tilesToLoadInput"
@@ -458,6 +458,7 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
                                               [max]="DEFAULT_VISIBLE_TILE_LIMIT"></p-slider>
                                 </div>
                                 <p-button (click)="applyTileLimits()"
+                                          data-testid="apply-tile-limit" ariaLabel="Apply tile limit"
                                           label=""
                                           icon="pi pi-check"
                                           [disabled]="!tilesToLoadChanged"></p-button>

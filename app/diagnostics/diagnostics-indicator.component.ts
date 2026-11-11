@@ -19,14 +19,15 @@ import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
     template: `
         <div class="diagnostics-indicator">
             <button class="diagnostics-indicator-button" type="button" (click)="togglePopover($event)"
+                    data-testid="diagnostics-status" [attr.data-severity]="statusSeverity"
                     [pTooltip]="statusTooltip" [attr.aria-label]="statusTooltip" tooltipPosition="left">
                 @if (showSpinner) {
                     <p-progress-spinner strokeWidth="8" fill="transparent" animationDuration=".5s"
                                         [style]="{ width: '1.75em', height: '1.75em' }"
-                                        [class]="paused ? 'diagnostics-spinner-paused' : ''" />
+                                        [class.diagnostics-spinner-paused]="paused" />
                 } @else {
-                    <i class="pi pi-circle-fill" [class.disconnected]="!snapshot.backend.connected || snapshot.recovery?.failed"
-                       [class.retrying]="snapshot.recovery?.retrying"></i>
+                    <i class="pi pi-circle-fill" [class.disconnected]="statusSeverity === 'danger'"
+                       [class.degraded]="statusSeverity === 'warn'"></i>
                 }
             </button>
             @if (hasError) {
@@ -48,12 +49,23 @@ import {MapTileStreamService} from '../mapdata/map-tile-stream.service';
                             <span class="diagnostics-label">Backend</span>
                             <span>{{ snapshot.backend.connected ? 'connected' : 'disconnected' }}</span>
                         </div>
-                        @if (snapshot.recovery?.failed || snapshot.recovery?.retrying) {
-                            <div class="diagnostics-popover-row">
-                                <span class="diagnostics-label">Connection recovery</span>
-                                <span>{{ snapshot.recovery?.retrying ? 'Retrying' : 'No automatic retry active' }}</span>
-                            </div>
-                            <div class="diagnostics-popover-row">{{ snapshot.recovery?.message }}</div>
+                        @if (snapshot.recovery; as recovery) {
+                            @if (recovery.failedSourceCount > 0) {
+                                <div class="diagnostics-popover-row" data-testid="diagnostics-unavailable-sources">
+                                    <p-badge [value]="recovery.failedSourceCount" severity="warn" />
+                                    <span>Datasource{{ recovery.failedSourceCount === 1 ? '' : 's' }} unavailable</span>
+                                    <span class="material-symbols-outlined diagnostics-help" tabindex="0" role="img"
+                                          [attr.aria-label]="recovery.message" data-testid="diagnostics-unavailable-sources-help"
+                                          [pTooltip]="recovery.message" tooltipPosition="top" tooltipEvent="both"
+                                          tooltipStyleClass="diagnostics-source-tooltip">help</span>
+                                </div>
+                            } @else if (recovery.failed || recovery.retrying) {
+                                <div class="diagnostics-popover-row">
+                                    <span class="diagnostics-label">Recovery</span>
+                                    <span>{{ recovery.retrying ? 'Retrying' : 'No automatic retry active' }}</span>
+                                </div>
+                                <div class="diagnostics-popover-row">{{ recovery.message }}</div>
+                            }
                         }
                         <diagnostics-progress [progress]="snapshot.progress"></diagnostics-progress>
                         <div class="diagnostics-popover-actions">
@@ -158,14 +170,26 @@ export class DiagnosticsIndicatorComponent implements AfterViewInit, OnDestroy {
 
     /** Describes current recovery without conflating it with the persistent error-log badge. */
     protected get statusTooltip(): string {
-        const status = this.snapshot.recovery?.retrying ? "Retrying connection…" :
-            this.snapshot.recovery?.failed || !this.snapshot.backend.connected ? "Connection unavailable." :
-            this.showSpinner ? "Loading map data…" : "Connected.";
+        const recovery = this.snapshot.recovery;
+        const count = recovery?.failedSourceCount ?? 0;
+        const status = this.statusSeverity === 'danger'
+            ? recovery?.backendRetrying ? "Reconnecting to the backend…" : "Backend connection unavailable."
+            : count > 0 ? count === recovery?.sourceCount
+                ? "Backend connected. No datasource available."
+                : `Backend connected. ${count} datasource${count === 1 ? '' : 's'} unavailable.`
+            : recovery?.catalogFailed ? "Backend connected. Datasource metadata needs attention."
+            : this.showSpinner ? "Loading map data…" : "Connected.";
         return `${status} ${this.snapshot.recovery?.message || "Open progress statistics."}`;
+    }
+
+    /** Backend failure takes precedence over degradation within a reachable backend. */
+    protected get statusSeverity(): 'success' | 'warn' | 'danger' {
+        if (!this.snapshot.backend.connected || this.snapshot.recovery?.backendFailed) return 'danger';
+        return this.snapshot.recovery?.failed ? 'warn' : 'success';
     }
 
     /** Pending counters alone cannot prove loading: they can remain incomplete throughout an outage. */
     private shouldShowSpinner(snapshot: DiagnosticsSnapshot): boolean {
-        return snapshot.backend.connected && snapshot.loading === true;
+        return snapshot.backend.connected && !snapshot.recovery?.backendFailed && snapshot.loading === true;
     }
 }

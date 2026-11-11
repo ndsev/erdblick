@@ -1265,6 +1265,86 @@ it does not mean the source tile is empty. Halo and foreign relation
 dependencies are ignored. With no active regular subset observation,
 occupancy is `unknown`, not empty.
 
+### Notifications and modal alerts
+
+`InfoMessageService` owns notification instances, duplicate counts, queue admission
+and expiry. It has no PrimeNG or dialog/controller dependency, so persistence and
+background services can report failures safely before the UI mounts.
+`InfoMessageComponent` is the sole toast adapter. Its headless `p-toast` items
+render reactive content, occurrence badges and UI-owned actions. PrimeNG carriers
+are sticky; only the application service owns expiry and requests per-item closure.
+Do not add competing timers, duplicate filters, or channel-wide clears.
+
+The convenience methods `showSuccess`, `showInfo`, `showWarning` and `showError`
+return an `InfoMessageRef` and accept `InfoMessageOptions`. Their default lifetimes
+are **3, 5, 8 and 10 seconds** respectively. `show(InfoMessageInput)` accepts the
+same options with explicit `severity` and `detail`.
+
+```ts
+const notice = messages.showError('Connection interrupted.', {
+    scope: 'my-connection', dedupeKey: 'connection', life: 'sticky'
+});
+// A condition update changes text without counting another occurrence.
+notice.update({detail: 'Reconnecting to the server.'});
+// Recovery dismisses this exact instance, including if it is still queued.
+notice.dismiss();
+```
+
+An identical report increments the existing instance's count and restarts its
+full configured lifetime. Default identity includes scope, severity, summary,
+detail and action ID/label. An explicit scoped `dedupeKey` asserts semantic
+identity even when detail changes; update the reference explicitly to change
+displayed content. The original position, lifetime and action remain in effect
+on repeats. `duplicates: 'allow'` opts out of coalescing and
+`restartOnRepeat: false` retains the original deadline. `life` accepts positive
+milliseconds or `'sticky'`, never zero. `update` returns false for a retired
+reference or an identity collision; it does not merge existing instances.
+
+Dismissal ends duplicate identity immediately. A new occurrence starts at one
+even while the old exit animation completes, and stale callbacks cannot close
+its replacement. The badge shows `99+` above 99; its accessible label and title
+retain the exact occurrence count. The count measures reports, not failed tiles
+or retry attempts. Producers decide which events warrant a report.
+
+`INFO_MESSAGE_CONFIG` defaults to a 200 ms admission gap per stack and 50 pending
+transient instances. First delivery is immediate; an exit animation finishes
+before its replacement's gap starts. Repeats bypass admission. Sticky conditions
+do not block the queue and are protected from overflow; excess transient reports
+produce one counted overflow warning. Pending entries receive their full lifetime
+when mounted. Setting `gapMs: 0` explicitly disables pacing.
+
+Pointer hover, keyboard focus, pending actions and hidden documents pause expiry;
+resume retains the remaining time. A repeat while paused restores the full
+lifetime without removing the pause. Hidden documents do not drain queued items.
+Canvas-only presentation drops transient notices while retaining sticky conditions.
+The visualization-only build disables notifications instead of retaining a backlog.
+Host teardown retires its instances and cancels its schedules.
+
+Action descriptors contain IDs and labels, never component closures. The root
+passes an `InfoMessageActions` handler map into the component. Missing handlers
+are disabled; pending actions cannot be activated twice. Success dismisses only
+the originating instance, while rejection leaves it available with inline feedback.
+Toast appearance does not move focus. New messages use polite announcements
+(assertive for errors); badge increments do not repeat the full announcement.
+
+Metadata HTTP failures, stream connection failures and protocol failures each own
+their own reference. A successful catalog request cannot clear a stream warning.
+Stream recovery remains governed by the existing transport callbacks. The GPU
+capacity notice is a rendering-owned descriptor whose action opens Rendering
+preferences; it does not change allocation or sampling policy. Startup editing
+notices have distinct scopes and remain independently dismissible.
+
+`AppAlertService` owns dynamic alerts and confirmations. Clipboard fallback and
+multiline search errors remain modals. The root releases its registered container
+on teardown; outstanding confirmations resolve `false` when their owner disappears.
+Notifications are not automatically copied into Diagnostics or persisted to storage.
+
+Lifecycle and adapter tests live under `tests/app/diagnostics/`, modal tests under
+`tests/app/alert/`, and independent recovery coverage in
+`tests/app/mapdata/mapdata-catalog.spec.ts`. Browser coverage uses real Preferences
+validation errors in `tests/playwright/tests/info-messages.spec.ts`; the matching
+snapshot scenario owns the documentation image.
+
 ## Styles and level of detail
 
 Stylesheets must use `version: 2`. Backend stages and the removed scalar
@@ -1361,13 +1441,15 @@ Per-message deduplication lets a later worker warning appear even after other
 warnings for the same value were logged. Exact replacements clear the derived
 warning; historical log entries remain.
 
-Failed tile values expire through the same `TileExpiryScheduler` as successful finite-lifetime values. Mapget caps error tiles with `mapget.serve.error-tile-ttl` (default five seconds). Mapget also caps successful empty source layers with `mapget.serve.empty-tile-ttl` (default five seconds), including missing LiveSource tiles/objects. Empty search/inspection matches inherit their source lifetime; they do not receive a separate empty-result cap. Filter errors retain their per-output diagnostics and earliest dependency expiry; unrelated new coverage is sent immediately. There is no subscription-level suppression, retry deadline map, or tile-specific backoff. Release and coverage pruning cancel expiry ownership. Retained inspection renewals preserve older content on error and schedule the returned value's absolute expiry. Initial inspection failures are surfaced immediately, not hidden in a transport retry loop.
+Failed tile values expire through the same `TileExpiryScheduler` as successful finite-lifetime values. Mapget caps error tiles with `mapget.serve.error-tile-ttl` (default five seconds). Mapget also caps successful empty source layers with `mapget.serve.empty-tile-ttl` (default one hour), including missing LiveSource tiles/objects. Empty search/inspection matches inherit their source lifetime; they do not receive a separate empty-result cap. Filter errors retain their per-output diagnostics and earliest dependency expiry; unrelated new coverage is sent immediately. There is no subscription-level suppression, retry deadline map, or tile-specific backoff. Release and coverage pruning cancel expiry ownership. Retained inspection renewals preserve older content on error and schedule the returned value's absolute expiry. Initial inspection failures are surfaced immediately, not hidden in a transport retry loop.
 
 Preferences → Connection edits the flat AppState keys `connectionRetryEnabled`, `connectionRetryInitialDelayMs`, `connectionRetryBackoffMultiplier` and `connectionRetryMaxDelayMs`. Defaults are enabled, 5000 ms, 2 and 60000 ms. They use normal browser persistence and snapshot/config ownership, with no URL parameters. Set deployment defaults in `config.json.state` or `mapviewer.yaml`'s `erdblick.state`; YAML overrides static defaults per key, while user-owned browser preferences remain authoritative. The UI displays seconds and validates the complete policy before Apply. Delays must be positive integer milliseconds within `2147483647`, the maximum must be at least the initial delay, and the multiplier must be finite and at least one. Malformed imported combinations fall back to default timing with a diagnostic.
 
-`connection-retry-policy.model.ts` owns browser transport backoff only. Preference changes recompute the connection deadline from its failure time; disabling retries removes the reconnect timer without disabling tile freshness. Compatible connection frames reset reconnect backoff. Server constructor policy and HTTP eligibility belong to `sources[].retry`, independently of this browser.
+`connection-retry-policy.model.ts` owns browser reconnection and catalog-HTTP backoff. Each has its own attempt state and shares the indexed deadline scheduler. Preference changes recompute eligible deadlines from failure time; disabling retries removes their timers without disabling tile freshness. Compatible connection frames reset only reconnect backoff. Server constructor policy and HTTP eligibility belong to `sources[].retry`, independently of this browser.
 
-The diagnostics snapshot separates current recovery from socket connectivity and historical logs. Catalog `retrying` flags and the browser connection owner drive the mainbar circle's green/red animation; stopped failures use static red and healthy idle state uses green. The tooltip/popover identifies causes and retry waits. Reduced motion uses a static retry presentation. The existing spinner requires both a connected backend and active loading or pipeline work; unfinished counters during retry waits do not show it. Pausing progress does not freeze connection status. No health polling or additional retry timer is used for presentation.
+Catalog refresh coalesces target revisions, makes at most two immediate catch-up passes (each allowing one superseded-read retry), and backs off failures or persistently stale responses. HTTP transport failures and 408/429/500/502/503/504 are eligible; malformed responses and other HTTP failures stop until explicit refresh, a newer revision, or a new connection epoch. `MapDataService.refreshSourceCatalog` returns request-local applied, superseded, stale, cancelled or failed outcomes and allows at most one awaited superseded-read retry with the same AbortSignal. An obsolete failure cannot recreate retry state after a newer successful read; exhausting stale reads cannot borrow a prior terminal classification. Applied HTTP snapshots notify `sourceCatalogLoaded`; only a snapshot satisfying outstanding demand clears recovery, including after independent manual reads. A newer queued repair revision survives an older terminal response. Page hide, teardown and protocol mismatch cancel owned work; reconnect resets process-local revision targets. No per-datasource browser polling is added.
+
+`ConnectionDiagnostics` separates backend failure/retry state, catalog health, and effective failed/total source counts (including browser schema-installation failure). With a reachable backend, datasource/catalog failures produce a steady yellow status dot, including when every source fails. Backend connection/protocol failure takes red precedence; a healthy dot is green. The popover shows an unavailable-datasource count with unchanged failure/retry messages in a help tooltip; backend/catalog recovery details remain visible when no datasource has failed. The loading spinner always stays blue, independently of warning or error severity; waiting retries alone do not create loading. Reduced motion disables spinner animation without changing its color. Pausing progress still refreshes health, and historical error badges remain independent. Presentation adds no polling or retry owner.
 
 <!-- mcp:
 keywords: [WebMCP, browser, document, authentication, tools]

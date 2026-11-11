@@ -4,7 +4,8 @@ import {
     AfterViewInit,
     Component,
     OnDestroy,
-    ViewContainerRef
+    ViewContainerRef,
+    ViewChild
 } from '@angular/core';
 import { Title } from "@angular/platform-browser";
 import { AppActionRegistry } from "./action/action-registry.service";
@@ -28,6 +29,10 @@ import {
     TileSubsetLayerRenderService
 } from "./mapview/deck/tile-subset-layer-render.service";
 import { InfoMessageService } from "./diagnostics/info.service";
+import { AppAlertService } from "./alert/app-alert.service";
+import { InfoMessageActions, InfoMessageRef } from "./diagnostics/info-message.model";
+import { GPU_BUFFER_RENDERING_ACTION } from "./mapview/gpu-buffer-notice.model";
+import type { PreferencesComponent } from "./preferences/preferences.component";
 import { KeyboardService } from "./keyboard/keyboard.service";
 import { AppStateService } from "./appstate/appstate.service";
 import { MapStyleService } from "./mapstyle/mapstyle.service";
@@ -66,44 +71,13 @@ declare let window: DebugWindow;
             <coordinates-legal-terms-dialog></coordinates-legal-terms-dialog>
             <location-terms-dialog></location-terms-dialog>
             <survey></survey>
-            <p-toast position="top-center" key="tc" [baseZIndex]="9500"></p-toast>
-            <p-toast position="top-right" key="gpu-buffer-exhausted" [baseZIndex]="9500"
-                     [preventOpenDuplicates]="true">
-                <ng-template #message let-message>
-                    <i class="pi pi-exclamation-triangle p-toast-message-icon" aria-hidden="true"></i>
-                    <div class="p-toast-message-text" data-testid="gpu-buffer-warning">
-                        <div class="p-toast-summary">{{ message.summary }}</div>
-                        <div class="p-toast-detail">{{ message.detail }}</div>
-                        <button type="button" class="gpu-buffer-action"
-                                (click)="infoMessageService.clearGpuBufferExhausted(); preferences.openRendering()">
-                            Adjust downsampling to reduce GPU load
-                        </button>
-                    </div>
-                </ng-template>
-            </p-toast>
-            <p-toast position="top-center" key="backend-connection" [baseZIndex]="9600"></p-toast>
-            <p-toast position="top-center" key="backend-protocol" [baseZIndex]="9700"></p-toast>
-            <p-toast position="top-center" key="configuration-editing" [baseZIndex]="9800"></p-toast>
+            <info-message [actions]="notificationActions" />
         }
         <legal-dialog></legal-dialog>
         <about-dialog></about-dialog>
         <router-outlet></router-outlet>
     `,
-    standalone: false,
-    styles: [`
-        .gpu-buffer-action {
-            display: block;
-            margin-top: .5rem;
-            padding: 0;
-            border: 0;
-            background: none;
-            color: inherit;
-            font: inherit;
-            text-align: left;
-            text-decoration: underline;
-            cursor: pointer;
-        }
-    `]
+    standalone: false
 })
 /**
  * Root application component.
@@ -118,6 +92,17 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     protected readonly diagnosticsLogDialogLayoutId = DIAGNOSTICS_LOG_DIALOG_LAYOUT_ID;
     protected readonly diagnosticsExportDialogLayoutId = DIAGNOSTICS_EXPORT_DIALOG_LAYOUT_ID;
     protected readonly featureSearchExportDialogLayoutId = FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID;
+
+    @ViewChild('preferences') private preferences?: Pick<PreferencesComponent, 'openRendering'>;
+    protected readonly notificationActions: InfoMessageActions = {
+        [GPU_BUFFER_RENDERING_ACTION]: () => {
+            if (!this.preferences) throw new Error('Rendering preferences are unavailable.');
+            this.preferences.openRendering();
+        }
+    };
+    private readonly configurationNotices: InfoMessageRef[] = [];
+    private readonly releaseAlertContainer: () => void;
+    private destroyed = false;
 
     title: string = "erdblick";
     private readonly presentationEmbed =
@@ -140,6 +125,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         private keyboardService: KeyboardService,
         private viewContainerRef: ViewContainerRef,
         protected readonly infoMessageService: InfoMessageService,
+        private readonly alerts: AppAlertService,
         private dialogStack: DialogStackService,
         private configService: AppConfigService,
         private readonly diagnosticsState: DiagnosticsState,
@@ -148,7 +134,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
         public readonly layout: LayoutService,
         private readonly actions: AppActionRegistry) {
         // Register a default container for alert dialogs
-        this.infoMessageService.registerDefaultContainer(this.viewContainerRef);
+        this.releaseAlertContainer = this.alerts.registerDefaultContainer(this.viewContainerRef);
         this.titleService.setTitle(this.capitalizeTitle(this.title));
         this.bindDialogFocusStacking();
         this.bindDialogDragSelectionGuard();
@@ -171,19 +157,30 @@ export class AppComponent implements AfterViewInit, OnDestroy {
             return;
         }
         queueMicrotask(() => {
+            if (this.destroyed) return;
             const serverConfig = this.configService.snapshot.serverConfig;
-            if (serverConfig.styleEditingEnabled || serverConfig.mapPresets.write) {
-                this.infoMessageService.showConfigurationEditingNotices(
-                    serverConfig.styleEditingEnabled
-                        ? serverConfig.styleEditingDirectory ?? ""
-                        : null,
-                    serverConfig.mapPresets.write);
+            if (serverConfig.styleEditingEnabled) {
+                const directory = serverConfig.styleEditingDirectory;
+                this.configurationNotices.push(this.infoMessageService.showWarning(directory
+                    ? `Saving a style will overwrite YAML files below ${directory}.`
+                    : "Saving a style will overwrite mapviewer source files.", {
+                    summary: 'Source Style Editing Enabled', scope: 'source-style-editing', life: 'sticky'
+                }));
+            }
+            if (serverConfig.mapPresets.write) {
+                this.configurationNotices.push(this.infoMessageService.showWarning(
+                    'Changes to map presets are saved to the server configuration.', {
+                        summary: 'Server Map Preset Editing Enabled', scope: 'map-preset-editing', life: 'sticky'
+                    }));
             }
         });
     }
 
     /** Removes global dialog listeners installed during startup. */
     ngOnDestroy() {
+        this.destroyed = true;
+        this.releaseAlertContainer();
+        for (const notice of this.configurationNotices) notice.dismiss();
         this.detachDialogFocusListener?.();
         this.detachDialogDragStartListener?.();
         this.detachDialogDragEndListener?.();

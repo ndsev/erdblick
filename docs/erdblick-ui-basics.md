@@ -142,11 +142,32 @@ colour, and opacity independently for each view:
 
 ![Expanded tile-grid configurator](screenshots/04-tile-grid-configurator.png)
 
+## Notifications
+
+Notifications appear above the workspace. Repeating the same message keeps one
+notification visible, increments its occurrence badge and restarts its timer.
+After dismissal, a later occurrence starts again at **1**. Counts above 99 display
+as **99+**; hover the badge to read the exact count.
+
+Success, information, warning and error messages normally remain for **3, 5, 8
+and 10 seconds**. Hovering a notification or focusing one of its controls pauses
+the timer, as does switching to another browser tab. Persistent backend and
+configuration warnings stay until dismissed or their owning condition resolves.
+Distinct queued messages appear with a short delay between them.
+
+Use the **×** button to dismiss a notification. Some warnings offer an action,
+such as opening Rendering preferences after a GPU capacity failure. Successful
+actions close their own notification; a failed action leaves its explanation
+available. Manual clipboard copying and detailed search errors still open dialogs.
+
+![A repeated validation message with its occurrence badge and dismissal control](screenshots/info-messages.png)
+
 ## Loading and Status Indicators
 
 Erdblick exposes loading state both on the map and in the main bar:
 
 - The **diagnostics indicator** shows whether tiles are still loading, whether the backend is connected, and whether errors have occurred.
+- Its status dot is green when healthy, yellow for unavailable datasource/catalog data with a connected backend, and red for a backend connection or protocol failure. The loading spinner always stays blue. Individual datasource rows keep their own failure state.
 - Tile-state overlays are only visible when tile borders are enabled.
 
 Tile overlays use these states:

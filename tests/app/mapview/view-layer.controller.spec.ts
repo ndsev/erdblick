@@ -558,19 +558,19 @@ describe("ViewLayerController", () => {
     ])("reports a rejected render according to its failure type: %s", async error => {
         const controller = Object.create(ViewLayerController.prototype);
         controller.sceneHandle = {scene: {}};
-        controller.infoMessages = {showGpuBufferExhausted: vi.fn()};
+        controller.infoMessages = {show: vi.fn()};
         controller.ngZone = {run: vi.fn(callback => callback())};
         const logError = vi.spyOn(console, "error").mockImplementation(() => {});
         try {
             controller.startVisualizationRender({render: vi.fn().mockRejectedValue(error)});
             await vi.waitFor(() => {
                 if (error instanceof GpuMaterialBufferExhaustedError) {
-                    expect(controller.infoMessages.showGpuBufferExhausted).toHaveBeenCalledOnce();
+                    expect(controller.infoMessages.show).toHaveBeenCalledOnce();
                     expect(controller.ngZone.run).toHaveBeenCalledOnce();
                     expect(logError).not.toHaveBeenCalled();
                 } else {
                     expect(logError).toHaveBeenCalledExactlyOnceWith("TileSubsetLayer visualization failed.", error);
-                    expect(controller.infoMessages.showGpuBufferExhausted).not.toHaveBeenCalled();
+                    expect(controller.infoMessages.show).not.toHaveBeenCalled();
                 }
             });
         } finally {

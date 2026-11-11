@@ -6,6 +6,11 @@
 
 export type DataSourceCatalogStatus = "initializing" | "ready" | "failed";
 
+/** A request-local outcome keeps supersession separate from retryable failure. */
+export type SourceCatalogRefreshResult =
+    | {status: "applied" | "superseded" | "stale" | "cancelled"}
+    | {status: "failed"; message: string; retryable: boolean};
+
 /**
  * Browser-local schema installation, independent of the server's startup status.
  * A server-ready source remains visible while loading, but cannot yet supply

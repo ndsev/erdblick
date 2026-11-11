@@ -9,11 +9,11 @@ import { Subject } from 'rxjs';
 import { Router } from '@angular/router';
 import { z } from 'zod';
 import { AppStateService } from "../../../app/appstate/appstate.service";
-import { MessageService } from "primeng/api";
+import { InfoMessageService } from "../../../app/diagnostics/info.service";
 
 /** Provides registration and publication without starting browser navigation. */
 function setup() {
-    const registry = new AppStateService({ events: new Subject() } as unknown as Router, {} as MessageService);
+    const registry = new AppStateService({ events: new Subject() } as unknown as Router, {} as InfoMessageService);
     const left = registry.registerState({ name: 'left', defaultValue: 0, schema: z.number() });
     const right = registry.registerState({ name: 'right', defaultValue: 0, schema: z.number() });
     return { registry, left, right };

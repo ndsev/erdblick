@@ -73,10 +73,29 @@ describe("DiagnosticsIndicatorComponent", () => {
         expect(component.snapshot.tiles.loaded).toBe(1);
         const recovering = snapshot(0, 2);
         recovering.loading = false;
-        recovering.recovery = {retrying: true, failed: true, message: "SLS outage"};
+        recovering.recovery = {
+            retrying: true, failed: true, loading: false, message: "SLS outage",
+            backendFailed: false, backendRetrying: false, catalogFailed: false,
+            sourceCount: 2, failedSourceCount: 1
+        };
         snapshot$.next(recovering);
         expect(component.showSpinner).toBe(false);
-        expect(component.statusTooltip).toContain("Retrying");
+        expect(component.statusSeverity).toBe("warn");
+        expect(component.statusTooltip).toContain("1 datasource unavailable");
+        expect(component.statusTooltip).toContain("SLS outage");
+        recovering.loading = true;
+        snapshot$.next({...recovering});
+        expect(component.showSpinner).toBe(true);
+        expect(component.statusSeverity).toBe("warn");
+        recovering.recovery.failedSourceCount = 2;
+        snapshot$.next({...recovering});
+        expect(component.statusTooltip).toContain("No datasource available");
+        recovering.recovery.backendFailed = true;
+        recovering.recovery.backendRetrying = true;
+        snapshot$.next({...recovering});
+        expect(component.statusSeverity).toBe("danger");
+        expect(component.showSpinner).toBe(false);
+        expect(component.statusTooltip).toContain("Reconnecting to the backend");
         recovering.loading = true;
         recovering.backend.connected = false;
         snapshot$.next({...recovering});
@@ -86,6 +105,7 @@ describe("DiagnosticsIndicatorComponent", () => {
         snapshot$.next(snapshot(2, 2));
 
         expect(component.snapshot.tiles.loaded).toBe(2);
+        expect(component.statusSeverity).toBe("success");
         expect(component.showSpinner).toBe(false);
         expect(detectChanges).toHaveBeenCalledTimes(1);
         expect(markForCheck).not.toHaveBeenCalled();

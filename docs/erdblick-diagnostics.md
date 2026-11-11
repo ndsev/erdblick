@@ -18,8 +18,11 @@ The top-right side of the main bar contains the diagnostics indicator:
 
 - While connected and actively fetching or rendering, it shows a spinner.
 - Pausing the tile pipeline changes its progress presentation, not connection status.
-- A green/red animation identifies active recovery, including connection retry waits or retrying datasources. Reduced-motion mode uses a static presentation.
-- Healthy idle state is green; a stopped failure is red. The tooltip and popover identify the cause and any retry wait. Pending counters alone do not keep the spinner running during a retry wait.
+- Once the current workload is complete, the spinner turns into a status dot.
+- A green dot means the backend is connected with no current datasource/catalog failure.
+- A yellow dot means the backend is connected but a datasource or its browser schema is unavailable, or catalog metadata needs attention. This also applies when every configured datasource has failed; the tooltip says **No datasource available**.
+- A red dot means the backend connection is unavailable or its stream protocol is incompatible.
+- The loading spinner always stays blue, regardless of warning or error status. Waiting for a retry alone does not show a spinner; colors stay steady, including with reduced motion.
 - If erdblick has seen tile errors or log entries with error level, an extra error badge appears next to the indicator.
 
 Click the indicator to open the progress popover. It shows:
@@ -27,8 +30,17 @@ Click the indicator to open the progress popover. It shows:
 - loaded vs. expected tile counts
 - tile error count
 - backend connection state
+- an unavailable-datasource count badge and **Datasource unavailable** or **Datasources unavailable** label; hover over or focus the help icon to read the original failure/retry messages unchanged
+- backend or catalog recovery details when no datasource is unavailable, independently of historical errors
 - backend and rendering progress counters
 - shortcuts to **Open Statistics**, **Open Log**, and **Export**
+
+Individual failed datasource rows remain red in Maps & Layers. Unsupported
+datasources receive no automatic retry. Eligible SmartLayer initialization
+failures use server backoff (5, 10, 20, 40, then 60 seconds by default), while
+browser **Preferences → Connection** controls backend reconnection and transient
+catalog HTTP recovery. Fixing or removing a failed source restores the main
+indicator once no current failure remains; the historical error badge may remain.
 
 <!-- mcp:
 title: "Tile loading error overlays"

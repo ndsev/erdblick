@@ -1,3 +1,5 @@
+import type {InfoMessageRef} from "../diagnostics/info-message.model";
+import type {ConnectionDiagnostics} from "../diagnostics/diagnostics.model";
 import { Injectable, NgZone, OnDestroy } from "@angular/core";
 import { BehaviorSubject, Subject, Subscription } from "rxjs";
 import { z } from "zod";
@@ -108,6 +110,8 @@ const MAX_ONE_SHOT_PARTITIONS = 512;
  */
 @Injectable({ providedIn: "root" })
 export class MapTileStreamService implements OnDestroy {
+    private connectionNotice?: InfoMessageRef;
+    private protocolNotice?: InfoMessageRef;
     /** Only successfully located foreign references enter this bounded generation-qualified cache. */
     private readonly locatedFeatureReferences = new Map<string, TileFeatureId[]>();
     readonly tilePipelinePaused$ = new BehaviorSubject<boolean>(false);
@@ -144,6 +148,12 @@ export class MapTileStreamService implements OnDestroy {
             }
         );
     private connectionRetry?: ConnectionRetryAttempt;
+    private catalogRetry?: ConnectionRetryAttempt;
+    private catalogRetryTerminal = false;
+    private catalogFailureRevision: number | null = null;
+    private catalogRefreshController?: AbortController;
+    private catalogEpoch = 0;
+    private destroyed = false;
     private connectionTerminalError = "";
     private activeInspectionLoads = 0;
     private retryPolicy: ConnectionRetryPolicy;
@@ -153,6 +163,13 @@ export class MapTileStreamService implements OnDestroy {
             if (this.connectionRetry) this.connectionRetry.at = 0;
             this.forceNextUpdate = true;
             this.scheduleUpdate();
+        }
+    };
+    /** Catalog HTTP recovery shares timer infrastructure, never the socket's failure state. */
+    private readonly catalogRetryOwner: RetainedTileExpiryOwner = {
+        expireTiles: () => {
+            if (this.catalogRetry) this.catalogRetry.at = 0;
+            this.requestSourceCatalogRefresh();
         }
     };
     private readonly connectionRetryScheduler = new TileExpiryScheduler<RetainedTileExpiryOwner, string>(
@@ -193,15 +210,23 @@ export class MapTileStreamService implements OnDestroy {
     ) {
         this.retryPolicy = this.state.connectionRetryPolicy;
         this.stateSubscriptions.add(this.state.connectionRetryPolicyChanges.subscribe(() => this.applyRetryPolicy()));
-        this.state.tilePullCompressionEnabledState.subscribe(enabled =>
+        this.stateSubscriptions.add(this.state.tilePullCompressionEnabledState.subscribe(enabled =>
             this.tileStream?.setPullCompressionEnabled(enabled)
-        );
-        this.mapInfo.dataSourceInfoChanged.subscribe(() => {
+        ));
+        this.stateSubscriptions.add(this.mapInfo.dataSourceInfoChanged.subscribe(() => {
             this.ngZone.runOutsideAngular(() => {
                 this.tileStream?.resetAfterDataSourceInfoChange();
                 this.scheduleUpdate();
             });
-        });
+        }));
+        this.stateSubscriptions.add(this.mapInfo.sourceCatalogLoaded.subscribe(revision => {
+            const target = this.sourceCatalogRefreshTargetRevision;
+            if (target === null || (revision !== null && revision >= target)) {
+                this.sourceCatalogRefreshTargetRevision = null;
+                this.clearCatalogRetry();
+                this.scheduleUpdate();
+            }
+        }));
     }
 
     async initialize(): Promise<void> {
@@ -234,8 +259,10 @@ export class MapTileStreamService implements OnDestroy {
             });
         this.tileStream.onOpen = () => this.ngZone.run(() => {
             this.backendProtocolMismatchActive = false;
-            this.messageService.clearBackendConnectionError();
-            this.messageService.clearBackendProtocolError();
+            this.connectionNotice?.dismiss();
+            this.protocolNotice?.dismiss();
+            this.connectionNotice = undefined;
+            this.protocolNotice = undefined;
             // A websocket reconnect creates a blank server-side session, so
             // resend the authoritative complete pending-work snapshot.
             this.scheduleUpdate();
@@ -246,6 +273,11 @@ export class MapTileStreamService implements OnDestroy {
             const expected =
                 `${mismatch.expected.major}.${mismatch.expected.minor}.x`;
             this.backendProtocolMismatchActive = true;
+            ++this.catalogEpoch;
+            this.catalogRefreshController?.abort();
+            this.sourceCatalogRefreshTargetRevision = null;
+            this.sourceCatalogReloadAfterCurrent = false;
+            this.clearCatalogRetry();
             this.connectionRetryScheduler.dispose();
             this.connectionRetry = undefined;
             this.showBackendProtocolError(
@@ -291,7 +323,8 @@ export class MapTileStreamService implements OnDestroy {
             window.addEventListener("pagehide", this.onPageHide);
             window.addEventListener("pageshow", this.onPageShow);
         });
-        await this.mapInfo.reloadDataSources();
+        this.requestSourceCatalogRefresh();
+        await this.sourceCatalogReloadPromise;
         this.scheduleUpdate();
     }
 
@@ -309,6 +342,8 @@ export class MapTileStreamService implements OnDestroy {
     private readonly onPageHide = (): void => {
         this.cancelPageResume();
         this.pageHidden = true;
+        this.catalogRefreshController?.abort();
+        this.connectionRetryScheduler.cancelOwner(this.catalogRetryOwner);
         this.clearUpdateTimers();
         this.tileStream?.setFrameProcessingPaused(true);
         this.tileStream?.close(1000, "page hidden");
@@ -317,7 +352,7 @@ export class MapTileStreamService implements OnDestroy {
     /** A back/forward-cache restore needs a new session and the complete current pending snapshot. */
     private readonly onPageShow = (): void => {
         this.cancelPageResume();
-        if (!this.pageHidden) {
+        if (!this.pageHidden || this.destroyed) {
             return;
         }
         this.pageHidden = false;
@@ -325,6 +360,7 @@ export class MapTileStreamService implements OnDestroy {
         this.tileStream?.setFrameProcessingPaused(this.tilePipelinePaused);
         this.forceNextUpdate = true;
         if (!this.backendProtocolMismatchActive) {
+            this.requestSourceCatalogRefresh(null, true);
             this.scheduleUpdate();
         }
     };
@@ -339,6 +375,11 @@ export class MapTileStreamService implements OnDestroy {
 
     /** Removes page listeners and releases the owned transport when the Angular root is destroyed. */
     ngOnDestroy(): void {
+        this.destroyed = true;
+        this.sourceCatalogRefreshTargetRevision = null;
+        this.sourceCatalogReloadAfterCurrent = false;
+        this.connectionNotice?.dismiss();
+        this.protocolNotice?.dismiss();
         this.stateSubscriptions.unsubscribe();
         window.removeEventListener("beforeunload", this.onBeforeUnload);
         window.removeEventListener("pagehide", this.onPageHide);
@@ -1255,6 +1296,11 @@ export class MapTileStreamService implements OnDestroy {
             this.connectionRetry.at = connectionRetryDeadline(this.retryPolicy, this.connectionRetry);
             this.connectionRetryScheduler.schedule(this.connectionRetryOwner, "connection", 0, this.connectionRetry.at);
         }
+        if (this.catalogRetry && this.catalogRetry.at > 0 && !this.catalogRetryTerminal) {
+            this.catalogRetry.at = connectionRetryDeadline(this.retryPolicy, this.catalogRetry);
+            if (!this.pageHidden && !this.destroyed)
+                this.connectionRetryScheduler.schedule(this.catalogRetryOwner, "catalog", 0, this.catalogRetry.at);
+        }
     }
 
     /** Coalesces error/close callbacks for one failed connection attempt. */
@@ -1274,7 +1320,7 @@ export class MapTileStreamService implements OnDestroy {
     }
 
     /** Current owner state drives the circle; historical logs and pending counts do not. */
-    getConnectionDiagnostics(): { retrying: boolean; failed: boolean; loading: boolean; message: string } {
+    getConnectionDiagnostics(): ConnectionDiagnostics {
         const catalog = this.mapInfo.getSourceRecoveryState();
         const browserRetrying = this.retryPolicy.enabled && !!this.connectionRetry;
         const activeFilters = [...this.filterSubscriptionsById.values()].some(ref =>
@@ -1286,12 +1332,19 @@ export class MapTileStreamService implements OnDestroy {
                 retry.at > 0 ? `Retry in ${Math.max(0, Math.ceil((retry.at - Date.now()) / 1000))} s.` : "Retrying.";
             return `${source}: ${retry.message} ${action}`;
         };
-        const messages = [catalog.message, this.connectionTerminalError,
+        const backendFailed = !!this.connectionRetry || !!this.connectionTerminalError || this.backendProtocolMismatchActive;
+        const catalogFailed = !!catalog.catalogError || !!this.catalogRetry;
+        const backendRetrying = !this.pageHidden && !this.tilePipelinePaused && browserRetrying;
+        const catalogRetrying = !!this.catalogRetry && !this.catalogRetryTerminal && this.retryPolicy.enabled &&
+            !this.pageHidden && !this.destroyed && !this.backendProtocolMismatchActive;
+        const messages = [catalog.message, catalog.catalogError, this.connectionTerminalError,
+        this.catalogRetry && (this.catalogRetryTerminal ? `${this.catalogRetry.message} Automatic retry stopped.` : describe(this.catalogRetry, "Datasource metadata")),
         this.connectionRetry && describe(this.connectionRetry, "Backend")].filter(Boolean);
         return {
-            retrying: catalog.retrying || (!this.pageHidden && !this.tilePipelinePaused && browserRetrying),
-            failed: catalog.failed || !!this.connectionRetry ||
-                !!this.connectionTerminalError || this.backendProtocolMismatchActive,
+            retrying: catalog.retrying || backendRetrying || catalogRetrying,
+            failed: catalog.failed || catalogFailed || backendFailed,
+            backendFailed, backendRetrying, catalogFailed,
+            sourceCount: catalog.sourceCount, failedSourceCount: catalog.failedSourceCount,
             loading,
             message: [...new Set(messages)].join("\n")
         };
@@ -1755,85 +1808,130 @@ export class MapTileStreamService implements OnDestroy {
             reason === "config-error";
     }
 
-    /** Coalesces refreshes while keeping revision targets scoped to one backend connection. */
+    /** Coalesces refresh demand without allowing revision notifications to defeat backoff. */
     private requestSourceCatalogRefresh(
         targetRevision: number | null = null,
-        resetRevisionEpoch: boolean = false
+        resetRevisionEpoch = false
     ): void {
-        if (targetRevision !== null && Number.isFinite(targetRevision)) {
-            const normalized = Math.max(0, Math.floor(targetRevision));
-            this.sourceCatalogRefreshTargetRevision =
-                resetRevisionEpoch ||
-                    this.sourceCatalogRefreshTargetRevision === null
-                    ? normalized
-                    : Math.max(
-                        this.sourceCatalogRefreshTargetRevision,
-                        normalized
-                    );
-        } else if (resetRevisionEpoch) {
+        if (this.destroyed || this.backendProtocolMismatchActive) return;
+        if (resetRevisionEpoch) {
+            ++this.catalogEpoch;
+            this.catalogRefreshController?.abort();
             this.sourceCatalogRefreshTargetRevision = null;
+            this.clearCatalogRetry();
         }
+        if (targetRevision !== null && Number.isFinite(targetRevision)) {
+            this.sourceCatalogRefreshTargetRevision = Math.max(
+                this.sourceCatalogRefreshTargetRevision ?? 0, Math.max(0, Math.floor(targetRevision)));
+            // A new revision may repair a terminal catalog failure. Repeated frames cannot.
+            if (this.catalogRetryTerminal && targetRevision > (this.catalogFailureRevision ?? -1))
+                this.clearCatalogRetry();
+        }
+        if (this.pageHidden) return;
         if (this.sourceCatalogReloadPromise) {
-            // The running fetch may belong to the previous backend process. A
-            // second fetch is required even if its response happens to look current.
             this.sourceCatalogReloadAfterCurrent ||= resetRevisionEpoch;
             return;
         }
-        this.sourceCatalogReloadPromise = this.reloadSourceCatalogUntilCaughtUp()
-            .then(() => this.scheduleUpdate())
-            .catch(error =>
-                console.error("Failed to refresh datasource catalog.", error)
-            )
+        if (this.catalogRetry && (this.catalogRetryTerminal || !this.retryPolicy.enabled || this.catalogRetry.at > Date.now()))
+            return;
+        const epoch = this.catalogEpoch;
+        const requestedRevision = this.sourceCatalogRefreshTargetRevision;
+        const controller = new AbortController();
+        this.catalogRefreshController = controller;
+        this.sourceCatalogReloadPromise = this.reloadSourceCatalogUntilCaughtUp(epoch, controller.signal)
+            .catch(error => {
+                if (!controller.signal.aborted && !this.destroyed && epoch === this.catalogEpoch) {
+                    console.error("Failed to refresh datasource catalog.", error);
+                    this.scheduleCatalogRetry("Failed to refresh datasource metadata.", false, requestedRevision);
+                }
+            })
             .finally(() => {
                 this.sourceCatalogReloadPromise = null;
+                if (this.catalogRefreshController === controller) this.catalogRefreshController = undefined;
+                if (this.destroyed || this.pageHidden || this.backendProtocolMismatchActive) return;
+                this.scheduleUpdate();
                 if (this.sourceCatalogReloadAfterCurrent) {
                     this.sourceCatalogReloadAfterCurrent = false;
-                    this.sourceCatalogRefreshTargetRevision = null;
                     this.requestSourceCatalogRefresh();
-                    return;
-                }
-                const pendingRevision = this.sourceCatalogRefreshTargetRevision;
-                if (pendingRevision !== null) {
-                    const currentRevision = this.mapInfo.sourceCatalogRevision;
-                    if (currentRevision === null ||
-                        currentRevision < pendingRevision) {
-                        this.requestSourceCatalogRefresh(pendingRevision);
-                    } else {
-                        this.sourceCatalogRefreshTargetRevision = null;
-                    }
+                } else if (!this.catalogRetry && this.sourceCatalogRefreshTargetRevision !== null) {
+                    this.requestSourceCatalogRefresh();
                 }
             });
     }
 
-    private async reloadSourceCatalogUntilCaughtUp(): Promise<void> {
+    /** At most two catch-up passes; each read may retry one superseded snapshot. */
+    private async reloadSourceCatalogUntilCaughtUp(epoch: number, signal: AbortSignal): Promise<void> {
         for (let attempt = 0; attempt < 2; ++attempt) {
-            const requested = this.sourceCatalogRefreshTargetRevision;
-            this.sourceCatalogRefreshTargetRevision = null;
-            await this.mapInfo.reloadDataSources();
-            const streamRevision = this.tileStream?.getSourcesRevision() ?? null;
-            const target = Math.max(requested ?? -1, streamRevision ?? -1);
-            if (target < 0 ||
-                (this.mapInfo.sourceCatalogRevision ?? -1) >= target) {
+            const requestedRevision = this.sourceCatalogRefreshTargetRevision;
+            const result = await this.mapInfo.refreshSourceCatalog(signal);
+            if (signal.aborted || this.destroyed || epoch !== this.catalogEpoch) return;
+            if (result.status === "cancelled") return;
+            if (result.status === "failed") {
+                this.scheduleCatalogRetry(result.message, result.retryable, requestedRevision);
+                return;
+            }
+            if (result.status === "stale") {
+                this.scheduleCatalogRetry("Datasource metadata changed during refresh.", true, requestedRevision);
+                return;
+            }
+            const target = Math.max(this.sourceCatalogRefreshTargetRevision ?? -1,
+                this.tileStream?.getSourcesRevision() ?? -1);
+            if (target < 0 || (this.mapInfo.sourceCatalogRevision ?? -1) >= target) {
+                this.sourceCatalogRefreshTargetRevision = null;
+                this.clearCatalogRetry();
                 return;
             }
             this.sourceCatalogRefreshTargetRevision = target;
         }
+        this.scheduleCatalogRetry("Datasource metadata has not reached the requested revision.", true);
+    }
+
+    /** One HTTP retry owner preserves attempts across healthy socket frames and source events. */
+    private scheduleCatalogRetry(message: string, retryable: boolean,
+                                 requestedRevision: number | null = this.sourceCatalogRefreshTargetRevision): void {
+        // An older terminal response must not consume a repair notification
+        // that arrived while it was in flight. Repeated demand still stops.
+        if (!retryable && (this.sourceCatalogRefreshTargetRevision ?? -1) > (requestedRevision ?? -1)) {
+            this.clearCatalogRetry();
+            return;
+        }
+        this.catalogRetry = recordConnectionFailure(this.catalogRetry, message);
+        this.catalogRetryTerminal = !retryable;
+        this.catalogFailureRevision = requestedRevision;
+        this.catalogRetry.at = retryable ? connectionRetryDeadline(this.retryPolicy, this.catalogRetry) : Infinity;
+        if (!this.pageHidden && !this.destroyed)
+            this.connectionRetryScheduler.schedule(this.catalogRetryOwner, "catalog", 0, this.catalogRetry.at);
+    }
+
+    private clearCatalogRetry(): void {
+        this.catalogRetry = undefined;
+        this.catalogRetryTerminal = false;
+        this.catalogFailureRevision = null;
+        this.connectionRetryScheduler.cancelOwner(this.catalogRetryOwner);
     }
 
     private showInfo(message: string): void {
         this.ngZone.run(() => this.messageService.showInfo(message));
     }
 
+    /** Keeps stream failures separate from metadata failures and updates their current explanation. */
     private showBackendConnectionError(message: string): void {
-        this.ngZone.run(() =>
-            this.messageService.showBackendConnectionError(message)
-        );
+        this.ngZone.run(() => {
+            this.connectionNotice?.update({detail: message});
+            this.connectionNotice = this.messageService.showError(message, {
+                scope: 'backend-stream', dedupeKey: 'connection', summary: 'Backend Error', life: 'sticky'
+            });
+        });
     }
 
+    /** Presents protocol failure without allowing ordinary connection recovery to clear another owner. */
     private showBackendProtocolError(message: string): void {
-        this.ngZone.run(() =>
-            this.messageService.showBackendProtocolError(message)
-        );
+        this.ngZone.run(() => {
+            this.protocolNotice?.update({detail: message});
+            this.protocolNotice = this.messageService.showError(message, {
+                scope: 'backend-protocol', dedupeKey: 'protocol', summary: 'Backend Protocol Mismatch', life: 'sticky'
+            });
+        });
     }
 
     /** Resolves only explicitly requested identities; never guesses between ambiguous backend matches. */

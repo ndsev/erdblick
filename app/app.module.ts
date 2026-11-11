@@ -1,3 +1,4 @@
+import {environment} from "./environments/environment";
 import { provideHttpClient, withFetch } from "@angular/common/http";
 import { inject, Injector, NgModule, provideAppInitializer } from "@angular/core";
 import { FormsModule, ReactiveFormsModule } from "@angular/forms";
@@ -8,7 +9,7 @@ import { definePreset } from '@primeng/themes';
 import Aura from "@primeng/themes/aura";
 import { AccordionModule } from "primeng/accordion";
 import { AnimateOnScroll } from "primeng/animateonscroll";
-import { ConfirmationService, MessageService } from "primeng/api";
+import { ConfirmationService } from "primeng/api";
 import { AutoCompleteModule } from 'primeng/autocomplete';
 import { BadgeModule } from "primeng/badge";
 import { BreadcrumbModule } from "primeng/breadcrumb";
@@ -53,7 +54,8 @@ import { TableModule } from "primeng/table";
 import { TabsModule } from "primeng/tabs";
 import { Tag } from "primeng/tag";
 import { Textarea } from "primeng/textarea";
-import { ToastModule } from "primeng/toast";
+import { InfoMessageComponent } from "./diagnostics/info-message.component";
+import { DEFAULT_INFO_MESSAGE_CONFIG, INFO_MESSAGE_CONFIG } from "./diagnostics/info-message.model";
 import { ToggleButton } from "primeng/togglebutton";
 import { ToggleSwitch } from "primeng/toggleswitch";
 import { TooltipModule } from "primeng/tooltip";
@@ -316,7 +318,7 @@ export const initializeServices = () => {
         TabsModule,
         PanelMenuModule,
         TreeTableModule,
-        ToastModule,
+        InfoMessageComponent,
         InputNumberModule,
         FieldsetModule,
         SliderModule,
@@ -364,7 +366,7 @@ export const initializeServices = () => {
         MapDataService,
         MapTileStreamService,
         InspectionSelectionService,
-        MessageService,
+        {provide: INFO_MESSAGE_CONFIG, useValue: {...DEFAULT_INFO_MESSAGE_CONFIG, enabled: !environment.visualizationOnly}},
         ConfirmationService,
         InfoMessageService,
         JumpTargetService,

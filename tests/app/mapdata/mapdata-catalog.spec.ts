@@ -1,7 +1,9 @@
 import { testPersistence, stateOwners } from "../../support/state-owners";
 import "@angular/compiler";
-import { HttpClient, HttpHeaders, HttpResponse } from "@angular/common/http";
-import { BehaviorSubject, of, Subject } from "rxjs";
+import { HttpClient, HttpErrorResponse, HttpHeaders, HttpResponse } from "@angular/common/http";
+import { NgZone } from "@angular/core";
+import { TestBed } from "@angular/core/testing";
+import { BehaviorSubject, of, Subject, throwError } from "rxjs";
 import {
     describe,
     expect,
@@ -13,7 +15,9 @@ import type { MapInfoItem } from "../../../app/mapdata/source-catalog.model";
 import type { AppStateService } from "../../../app/appstate/appstate.service";
 import type { MapStyleService } from "../../../app/mapstyle/mapstyle.service";
 import type { MapPresetService } from "../../../app/mapstyle/map-preset.service";
-import type { InfoMessageService } from "../../../app/diagnostics/info.service";
+import { InfoMessageService } from "../../../app/diagnostics/info.service";
+import { MapTileStreamService } from "../../../app/mapdata/map-tile-stream.service";
+import { MapTileStreamClientInteractive } from "../../../app/mapdata/map-tile-stream.client";
 
 /** Minimal valid catalog entry; each refresh below crosses a real JSON boundary. */
 function source(mapId: string, configIndex: number, status = "ready"): MapInfoItem {
@@ -31,7 +35,7 @@ function source(mapId: string, configIndex: number, status = "ready"): MapInfoIt
 }
 
 /** Exercises the real tree and native parser with only persistence/UI dependencies stubbed. */
-function fixture() {
+function fixture(messages: InfoMessageService = {showError: vi.fn()} as unknown as InfoMessageService) {
     const get = vi.fn();
     const state = testPersistence();
     const owners = stateOwners(state);
@@ -39,7 +43,7 @@ function fixture() {
     const service = new MapDataService(
         { get } as unknown as HttpClient, state, owners.styleService,
         { presets: [], presets$: new BehaviorSubject([]), presetsForLayer: () => [] } as unknown as MapPresetService,
-        { clearBackendConnectionError: vi.fn(), showBackendConnectionError: vi.fn() } as unknown as InfoMessageService,
+        messages,
         owners.layerState, owners.viewSettings, owners.inspectionState
     );
     const resets = vi.fn();
@@ -62,6 +66,110 @@ function fixture() {
 }
 
 describe("MapDataService incremental catalog startup", () => {
+    it("retains configuration health separately from source readiness and clears it on recovery", async () => {
+        const {service, get, reload, dispose} = fixture();
+        const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            get.mockReturnValueOnce(of(new HttpResponse({body: [], headers: new HttpHeaders({
+                'X-Mapget-Sources-Config-Status': 'error',
+                'X-Mapget-Sources-Config-Message': 'Configuration rejected'
+            })})));
+            expect(await service.reloadDataSources()).toBe(true);
+            expect(service.getSourceRecoveryState()).toMatchObject({
+                failedSourceCount: 0, catalogError: 'Configuration rejected'
+            });
+            await reload([]);
+            expect(service.getSourceRecoveryState().catalogError).toBe('');
+        } finally {warning.mockRestore(); dispose();}
+    });
+
+    it("classifies transient catalog HTTP failures without retrying invalid response bodies", async () => {
+        const {service, get, reload, dispose} = fixture();
+        const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+            for (const [status, retryable] of [[0, true], [503, true], [401, false], [200, false]] as const) {
+                get.mockReturnValueOnce(throwError(() => new HttpErrorResponse({status})));
+                expect(await service.reloadDataSources()).toBe(false);
+                expect(service.catalogRefreshFailure?.retryable).toBe(retryable);
+            }
+            get.mockReturnValueOnce(of(new HttpResponse({body: {unexpected: true}})));
+            expect(await service.reloadDataSources()).toBe(false);
+            expect(service.catalogRefreshFailure?.retryable).toBe(false);
+            await reload([]);
+            expect(service.catalogRefreshFailure).toBeUndefined();
+        } finally {error.mockRestore(); dispose();}
+    });
+
+    it("cancels catalog HTTP reads without publishing an error or a late response", async () => {
+        const notice = vi.fn();
+        const {service, get, dispose} = fixture({showError: notice} as unknown as InfoMessageService);
+        const response = new Subject<HttpResponse<MapInfoItem[]>>();
+        const controller = new AbortController();
+        get.mockReturnValueOnce(response);
+        try {
+            const pending = service.reloadDataSources(controller.signal);
+            controller.abort();
+            expect(await pending).toBe(false);
+            expect(response.observed).toBe(false);
+            response.next(new HttpResponse({body: [source('Late', 0)]}));
+            expect(service.maps.maps.size).toBe(0);
+            expect(notice).not.toHaveBeenCalled();
+            expect(service.catalogRefreshFailure).toBeUndefined();
+        } finally {dispose();}
+    });
+
+    it("keeps HTTP, stream and protocol notices independently owned across recovery and user dismissal", async () => {
+        vi.useFakeTimers();
+        TestBed.configureTestingModule({});
+        const messages = TestBed.inject(InfoMessageService);
+        const reported = vi.spyOn(messages, 'showError');
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.spyOn(MapTileStreamClientInteractive.prototype, 'updateRequest').mockResolvedValue('sent');
+        const {service, state, owners, get, reload, dispose} = fixture(messages);
+        const stream = new MapTileStreamService(state, service, messages, TestBed.inject(NgZone), owners.layerState);
+        try {
+            await stream.initialize();
+            const client = stream['tileStream']!;
+            get.mockReturnValueOnce(throwError(() => new Error('HTTP unavailable')));
+            expect(await service.reloadDataSources()).toBe(false);
+            const http = reported.mock.results.at(-1)!.value;
+            client.onClose?.(new CloseEvent('close', {code: 1006, reason: 'Lost connection'}));
+            const disconnected = reported.mock.results.at(-1)!.value;
+            client.onError?.(new Event('error'));
+            expect(reported.mock.results.at(-1)!.value.id).toBe(disconnected.id);
+            expect(messages.entry(disconnected.id)?.state().count).toBe(2);
+            expect(messages.entry(disconnected.id)?.state().detail).toBe('Could not connect to the map backend.');
+            await reload([]);
+            expect(http.active).toBe(false);
+            expect(disconnected.active).toBe(true);
+
+            get.mockReturnValueOnce(throwError(() => new Error('HTTP unavailable again')));
+            await service.reloadDataSources();
+            const nextHttp = reported.mock.results.at(-1)!.value;
+            client.onProtocolMismatch?.({actual: {major: 0, minor: 0, patch: 0}, expected: {major: 1, minor: 0}});
+            const protocol = reported.mock.results.at(-1)!.value;
+            expect(protocol.active).toBe(true);
+            client.onOpen?.();
+            expect(disconnected.active).toBe(false);
+            expect(protocol.active).toBe(false);
+            expect(nextHttp.active).toBe(true);
+            nextHttp.dismiss();
+            get.mockReturnValueOnce(throwError(() => new Error('New failure event')));
+            await service.reloadDataSources();
+            const fresh = reported.mock.results.at(-1)!.value;
+            expect(fresh.id).not.toBe(nextHttp.id);
+            expect(messages.entry(fresh.id)?.state().count).toBe(1);
+            await reload([]);
+            expect(fresh.active).toBe(false);
+        } finally {
+            stream.ngOnDestroy();
+            dispose();
+            TestBed.resetTestingModule();
+            vi.restoreAllMocks();
+            vi.useRealTimers();
+        }
+    });
+
     it("publishes independent schema readiness and keeps a failed source from pruning saved state", async () => {
         const {service, get, reload, dispose} = fixture();
         const slow = new Subject<ArrayBuffer>();
@@ -87,6 +195,10 @@ describe("MapDataService incremental catalog startup", () => {
             expect(service.canPruneStateForCurrentCatalog()).toBe(false);
             expect(service.maps.maps.get("Slow")?.info.status).toBe("ready");
             expect(service.maps.maps.get("Slow")?.info.schemaStatus).toBe("failed");
+            expect(service.getSourceRecoveryState()).toMatchObject({
+                failed: true, sourceCount: 2, failedSourceCount: 1, retrying: false
+            });
+            expect(service.getSourceRecoveryState().message).toContain("Schema download failed");
         } finally {vi.restoreAllMocks(); dispose();}
     });
 
@@ -173,6 +285,65 @@ describe("MapDataService incremental catalog startup", () => {
             subscription.unsubscribe();
         } finally {dispose();}
     });
+    it('cancels the awaited superseded read and never starts an unowned follow-up', async () => {
+        const {service, get, reload, dispose} = fixture();
+        const first = new Subject<HttpResponse<MapInfoItem[]>>();
+        const second = new Subject<HttpResponse<MapInfoItem[]>>();
+        const controller = new AbortController();
+        try {
+            await reload([source('Map', 0, 'initializing')]);
+            get.mockReturnValueOnce(first).mockReturnValueOnce(second);
+            const refresh = service.reloadDataSources(controller.signal);
+            service.applySourceCatalogChange({configIndex: 0, status: 'initializing', progress: 0.5}, 3);
+            first.next(new HttpResponse({body: [], headers: new HttpHeaders({'X-Mapget-Sources-Revision': '2'})}));
+            await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(3));
+            controller.abort();
+            expect(await refresh).toBe(false);
+            expect(second.observed).toBe(false);
+            expect(service.sourceCatalogRevision).toBe(3);
+            expect(get).toHaveBeenCalledTimes(3);
+        } finally {dispose();}
+    });
+
+    it('does not revive recovery when an older owned request fails after a manual read succeeds', async () => {
+        const {service, state, owners, get, dispose} = fixture();
+        const older = new Subject<HttpResponse<MapInfoItem[]>>();
+        const stream = new MapTileStreamService(state, service, {} as InfoMessageService,
+            {run: (fn: () => void) => fn(), runOutsideAngular: (fn: () => void) => fn()} as NgZone, owners.layerState);
+        const internal = stream as any;
+        internal.scheduleUpdate = vi.fn();
+        try {
+            get.mockReturnValueOnce(older);
+            internal.requestSourceCatalogRefresh(8);
+            get.mockReturnValueOnce(of(new HttpResponse({body: [], headers: new HttpHeaders({'X-Mapget-Sources-Revision': '8'})})));
+            expect(await service.reloadDataSources()).toBe(true);
+            older.error(new HttpErrorResponse({status: 503}));
+            await internal.sourceCatalogReloadPromise;
+            expect(internal.catalogRetry).toBeUndefined();
+            expect(service.catalogRefreshFailure).toBeUndefined();
+            expect(get).toHaveBeenCalledTimes(2);
+        } finally {stream.ngOnDestroy(); dispose();}
+    });
+
+    it('reports a bounded stale snapshot independently of an earlier terminal failure', async () => {
+        const {service, get, reload, dispose} = fixture();
+        const first = new Subject<HttpResponse<MapInfoItem[]>>();
+        const second = new Subject<HttpResponse<MapInfoItem[]>>();
+        try {
+            await reload([source('Map', 0, 'initializing')]);
+            service.catalogRefreshFailure = {message: 'Old malformed response', retryable: false};
+            get.mockReturnValueOnce(first).mockReturnValueOnce(second);
+            const refresh = service.refreshSourceCatalog();
+            service.applySourceCatalogChange({configIndex: 0, status: 'initializing', progress: 0.5}, 3);
+            first.next(new HttpResponse({body: [], headers: new HttpHeaders({'X-Mapget-Sources-Revision': '2'})}));
+            await vi.waitFor(() => expect(get).toHaveBeenCalledTimes(3));
+            service.applySourceCatalogChange({configIndex: 0, status: 'initializing', progress: 0.6}, 4);
+            second.next(new HttpResponse({body: [], headers: new HttpHeaders({'X-Mapget-Sources-Revision': '3'})}));
+            expect(await refresh).toEqual({status: 'stale'});
+            expect(get).toHaveBeenCalledTimes(3);
+        } finally {dispose();}
+    });
+
     it('prunes layers, style visibility and inspection together only after a complete catalog', async () => {
         const { service, state, owners, reload, dispose } = fixture();
         try {

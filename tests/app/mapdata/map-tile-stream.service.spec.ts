@@ -9,6 +9,7 @@ import {
     vi
 } from "vitest";
 import { MapTileStreamService } from "../../../app/mapdata/map-tile-stream.service";
+import type {SourceCatalogRefreshResult} from "../../../app/mapdata/source-catalog.model";
 import { TileDeliveryError } from "../../../app/mapdata/tile-diagnostics.model";
 import { MapgetLayer } from "../../../app/mapdata/mapget-layer.model";
 import { objectPartition, tilePartition } from "../../../app/mapdata/partition.model";
@@ -40,6 +41,7 @@ function serviceHarness(mapInfo: object = {}): MapTileStreamService {
     return new MapTileStreamService(
         { ...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>() } as any,
         {
+            sourceCatalogLoaded: new Subject<number | null>(),
             dataSourceInfoChanged: new Subject<readonly string[]>(),
             waitForMapLayersReady: vi.fn().mockResolvedValue(undefined),
             ...mapInfo
@@ -247,10 +249,11 @@ describe("MapTileStreamService page lifecycle", () => {
                 tilePullCompressionEnabledState: new Subject<boolean>()
             } as any,
             {
+                sourceCatalogLoaded: new Subject<number | null>(),
                 dataSourceInfoChanged: new Subject<readonly string[]>(),
-                reloadDataSources: vi.fn().mockResolvedValue(true)
+                refreshSourceCatalog: vi.fn().mockResolvedValue({status: "applied"})
             } as any,
-            { showBackendConnectionError: connectionError } as any,
+            { showError: connectionError } as any,
             {
                 run: (callback: () => unknown) => callback(),
                 runOutsideAngular: (callback: () => unknown) => callback()
@@ -273,6 +276,22 @@ describe("MapTileStreamService page lifecycle", () => {
         service.ngOnDestroy();
         vi.restoreAllMocks();
         vi.useRealTimers();
+    });
+
+    it("aborts catalog recovery on a protocol mismatch", async () => {
+        const internal = service as any;
+        let requestedSignal: AbortSignal | undefined;
+        internal.mapInfo.refreshSourceCatalog = vi.fn((signal: AbortSignal) => new Promise<SourceCatalogRefreshResult>(resolve => {
+            requestedSignal = signal;
+            signal.addEventListener('abort', () => resolve({status: "cancelled"}), {once: true});
+        }));
+        internal.requestSourceCatalogRefresh(7);
+        client.onProtocolMismatch?.({actual: {major: 0, minor: 0, patch: 0}, expected: {major: 1, minor: 0}});
+        await vi.advanceTimersByTimeAsync(60000);
+        expect(requestedSignal?.aborted).toBe(true);
+        expect(internal.catalogRetry).toBeUndefined();
+        expect(internal.mapInfo.refreshSourceCatalog).toHaveBeenCalledTimes(1);
+        expect(internal.connectionRetryScheduler.size).toBe(0);
     });
 
     it("stops scheduled work and ignores late socket callbacks after pagehide", async () => {
@@ -369,7 +388,8 @@ describe("MapTileStreamService page lifecycle", () => {
         client.onClose?.(new CloseEvent('close', { code: 1006, reason: 'connection lost' }));
         await vi.advanceTimersByTimeAsync(100);
 
-        expect(connectionError).toHaveBeenCalledWith('The map backend connection was closed (connection lost).');
+        expect(connectionError).toHaveBeenCalledWith('The map backend connection was closed (connection lost).',
+            {scope: 'backend-stream', dedupeKey: 'connection', summary: 'Backend Error', life: 'sticky'});
         expect(client.updateRequest).not.toHaveBeenCalled();
         await vi.advanceTimersByTimeAsync(5000);
         expect(client.updateRequest).toHaveBeenCalledOnce();
@@ -379,15 +399,16 @@ describe("MapTileStreamService page lifecycle", () => {
 describe("MapTileStreamService source catalog refresh", () => {
     it("reloads again when a backend reconnect races an in-flight catalog fetch", async () => {
         let finishFirstReload!: () => void;
-        const firstReload = new Promise<boolean>(resolve => {
-            finishFirstReload = () => resolve(true);
+        const firstReload = new Promise<SourceCatalogRefreshResult>(resolve => {
+            finishFirstReload = () => resolve({status: "applied"});
         });
         const mapInfo = {
+            sourceCatalogLoaded: new Subject<number | null>(),
             dataSourceInfoChanged: new Subject<readonly string[]>(),
             sourceCatalogRevision: 49,
-            reloadDataSources: vi.fn()
+            refreshSourceCatalog: vi.fn()
                 .mockReturnValueOnce(firstReload)
-                .mockResolvedValue(true)
+                .mockResolvedValue({status: "applied"})
         };
         const service = new MapTileStreamService(
             { ...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>() } as any,
@@ -403,14 +424,14 @@ describe("MapTileStreamService source catalog refresh", () => {
         internals.scheduleUpdate = vi.fn();
 
         internals.requestSourceCatalogRefresh(49);
-        expect(mapInfo.reloadDataSources).toHaveBeenCalledTimes(1);
+        expect(mapInfo.refreshSourceCatalog).toHaveBeenCalledTimes(1);
 
         // The new backend may reuse or lower the process-local revision while
         // the request started against its predecessor is still unresolved.
         internals.handleSourcesRevisionChanged(1, true);
         finishFirstReload();
 
-        await vi.waitFor(() => expect(mapInfo.reloadDataSources).toHaveBeenCalledTimes(2));
+        await vi.waitFor(() => expect(mapInfo.refreshSourceCatalog).toHaveBeenCalledTimes(2));
     });
 });
 
@@ -442,7 +463,8 @@ describe("MapTileStreamService TTL expiry scheduling", () => {
         try {
             const service = new MapTileStreamService(
                 { ...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>() } as any,
-                { dataSourceInfoChanged: new Subject<readonly string[]>() } as any,
+                { sourceCatalogLoaded: new Subject<number | null>(),
+                dataSourceInfoChanged: new Subject<readonly string[]>() } as any,
                 {} as any,
                 {
                     run: (callback: () => unknown) => callback(),
@@ -769,5 +791,137 @@ describe("failed tile expiry", () => {
         await vi.advanceTimersByTimeAsync(6000);
         expect(load).toHaveBeenCalledOnce();
         expect(internal.activeInspectionLoads).toBe(0);
+    });
+});
+
+describe("catalog retry ownership", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("clears terminal recovery after an independent fresh catalog, but preserves stale-response backoff", async () => {
+        const loaded = new Subject<number | null>();
+        const mapInfo = {
+            sourceCatalogLoaded: loaded, sourceCatalogRevision: 4,
+            refreshSourceCatalog: vi.fn(async () => {loaded.next(4); return {status: "applied"};})
+        };
+        const service = serviceHarness(mapInfo);
+        const internal = service as any;
+        internal.scheduleUpdate = vi.fn();
+        try {
+            internal.requestSourceCatalogRefresh(8);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(internal.catalogRetry.attempt).toBe(0);
+            await vi.advanceTimersByTimeAsync(5001);
+            expect(mapInfo.refreshSourceCatalog).toHaveBeenCalledTimes(4);
+            expect(internal.catalogRetry.attempt).toBe(1);
+            internal.catalogRetryTerminal = true;
+            loaded.next(8);
+            expect(internal.catalogRetry).toBeUndefined();
+            expect(internal.sourceCatalogRefreshTargetRevision).toBeNull();
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {service.ngOnDestroy();}
+    });
+
+    it("does not lose a repair revision arriving during an older terminal failure", async () => {
+        let finish!: (result: SourceCatalogRefreshResult) => void;
+        const mapInfo = {
+            sourceCatalogRevision: 0,
+            refreshSourceCatalog: vi.fn().mockImplementationOnce(() => new Promise<SourceCatalogRefreshResult>(resolve => {finish = resolve;}))
+                .mockResolvedValue({status: "failed", message: "Invalid catalog", retryable: false})
+        };
+        const service = serviceHarness(mapInfo);
+        const internal = service as any;
+        internal.scheduleUpdate = vi.fn();
+        try {
+            internal.requestSourceCatalogRefresh(7);
+            internal.requestSourceCatalogRefresh(8);
+            finish({status: "failed", message: "Invalid catalog", retryable: false});
+            await vi.advanceTimersByTimeAsync(0);
+            expect(mapInfo.refreshSourceCatalog).toHaveBeenCalledTimes(2);
+            internal.requestSourceCatalogRefresh(8);
+            await vi.advanceTimersByTimeAsync(60000);
+            expect(mapInfo.refreshSourceCatalog).toHaveBeenCalledTimes(2);
+        } finally {service.ngOnDestroy();}
+    });
+
+    it("backs off failed HTTP reads despite newer revisions and a healthy socket", async () => {
+        const mapInfo = {sourceCatalogRevision: 0, refreshSourceCatalog: vi.fn().mockResolvedValue({status: "failed", message: "HTTP unavailable", retryable: true})};
+        const service = serviceHarness(mapInfo);
+        const internal = service as any;
+        internal.scheduleUpdate = vi.fn();
+        try {
+            internal.requestSourceCatalogRefresh(7);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(mapInfo.refreshSourceCatalog).toHaveBeenCalledTimes(1);
+            for (const revision of [7, 8, 9]) internal.requestSourceCatalogRefresh(revision);
+            internal.clearConnectionFailure();
+            await vi.advanceTimersByTimeAsync(4999);
+            expect(mapInfo.refreshSourceCatalog).toHaveBeenCalledTimes(1);
+            await vi.advanceTimersByTimeAsync(2);
+            expect(mapInfo.refreshSourceCatalog).toHaveBeenCalledTimes(2);
+            await vi.advanceTimersByTimeAsync(9998);
+            expect(mapInfo.refreshSourceCatalog).toHaveBeenCalledTimes(2);
+            internal.mapInfo.sourceCatalogRevision = 9;
+            mapInfo.refreshSourceCatalog.mockResolvedValue({status: "applied"});
+            await vi.advanceTimersByTimeAsync(3);
+            expect(mapInfo.refreshSourceCatalog).toHaveBeenCalledTimes(3);
+            expect(internal.catalogRetry).toBeUndefined();
+            expect(internal.sourceCatalogRefreshTargetRevision).toBeNull();
+        } finally {service.ngOnDestroy();}
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("bounds stale successful responses and cancels catalog work on destruction", async () => {
+        const mapInfo = {sourceCatalogRevision: 0, refreshSourceCatalog: vi.fn().mockResolvedValue({status: "applied"})};
+        const service = serviceHarness(mapInfo);
+        const internal = service as any;
+        internal.scheduleUpdate = vi.fn();
+        internal.requestSourceCatalogRefresh(7);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(mapInfo.refreshSourceCatalog).toHaveBeenCalledTimes(2);
+        await vi.advanceTimersByTimeAsync(4000);
+        expect(mapInfo.refreshSourceCatalog).toHaveBeenCalledTimes(2);
+        service.ngOnDestroy();
+        await vi.advanceTimersByTimeAsync(60000);
+        internal.requestSourceCatalogRefresh(8);
+        expect(mapInfo.refreshSourceCatalog).toHaveBeenCalledTimes(2);
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("stops automatic retries for malformed catalogs until a new revision arrives", async () => {
+        const mapInfo = {
+            sourceCatalogRevision: 0,
+            refreshSourceCatalog: vi.fn().mockResolvedValue({status: "failed", message: "Invalid catalog", retryable: false})
+        };
+        const service = serviceHarness(mapInfo);
+        const internal = service as any;
+        internal.scheduleUpdate = vi.fn();
+        try {
+            internal.requestSourceCatalogRefresh(7);
+            await vi.advanceTimersByTimeAsync(0);
+            internal.requestSourceCatalogRefresh(7);
+            await vi.advanceTimersByTimeAsync(60000);
+            expect(mapInfo.refreshSourceCatalog).toHaveBeenCalledTimes(1);
+            internal.requestSourceCatalogRefresh(8);
+            await vi.advanceTimersByTimeAsync(0);
+            expect(mapInfo.refreshSourceCatalog).toHaveBeenCalledTimes(2);
+        } finally {service.ngOnDestroy();}
+    });
+
+    it("aborts a pending catalog request without starting another one on teardown", async () => {
+        let requestedSignal: AbortSignal | undefined;
+        const refreshSourceCatalog = vi.fn((signal: AbortSignal) => new Promise<SourceCatalogRefreshResult>(resolve => {
+            requestedSignal = signal;
+            signal.addEventListener('abort', () => resolve({status: "cancelled"}), {once: true});
+        }));
+        const service = serviceHarness({sourceCatalogRevision: 0, refreshSourceCatalog});
+        const internal = service as any;
+        internal.scheduleUpdate = vi.fn();
+        internal.requestSourceCatalogRefresh(7);
+        service.ngOnDestroy();
+        await vi.advanceTimersByTimeAsync(60000);
+        expect(requestedSignal?.aborted).toBe(true);
+        expect(refreshSourceCatalog).toHaveBeenCalledTimes(1);
+        expect(vi.getTimerCount()).toBe(0);
     });
 });

@@ -10,7 +10,6 @@ import { provideHttpClient } from "@angular/common/http";
 import { EnvironmentInjector } from "@angular/core";
 import { TestBed } from "@angular/core/testing";
 import { provideRouter } from "@angular/router";
-import { MessageService } from "primeng/api";
 import {
     afterEach,
     describe,
@@ -34,7 +33,7 @@ import { MapDataService } from "../../app/mapdata/mapdata.service";
 import { MapViewService } from "../../app/mapview/mapview.service";
 import { SearchState } from "../../app/search/search.state";
 import { SearchService } from "../../app/search/search.service";
-import { InfoMessageService } from "../../app/diagnostics/info.service";
+import { AppAlertService } from "../../app/alert/app-alert.service";
 import { AppStateService } from "../../app/appstate/appstate.service";
 
 afterEach(() => {
@@ -46,9 +45,9 @@ describe("application registration boundaries", () => {
     it("allows adjacent consumers to observe state containers without constructing domain controllers", () => {
         const forbidden = () => { throw new Error("A state container constructed a controller"); };
         TestBed.configureTestingModule({ providers: [
-            provideRouter([]), MessageService,
+            provideRouter([]),
             ...[CoordinatesService, InspectionPanelService, LayoutService, MapDataService,
-                MapViewService, SearchService, InfoMessageService]
+                MapViewService, SearchService, AppAlertService]
                 .map(provide => ({ provide, useFactory: forbidden }))
         ] });
 
@@ -77,7 +76,7 @@ describe("application registration boundaries", () => {
     });
 
     it("loads configuration without constructing state or action owners", () => {
-        TestBed.configureTestingModule({ providers: [provideHttpClient(), provideRouter([]), MessageService] });
+        TestBed.configureTestingModule({ providers: [provideHttpClient(), provideRouter([])] });
         const config = TestBed.inject(AppConfigService);
         expect(config.snapshot.backgroundLayers[0].id).toBe("osm");
         expect(TestBed.inject(AppStateService).registeredStates.size).toBe(0);
@@ -86,7 +85,7 @@ describe("application registration boundaries", () => {
     it("collects the actual Angular registrations before any runtime initializer or network IO", () => {
         const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Unexpected catalog IO"));
         const searchStartup = vi.spyOn(SearchService.prototype, "initialize");
-        TestBed.configureTestingModule({ providers: [provideHttpClient(), provideRouter([]), MessageService] });
+        TestBed.configureTestingModule({ providers: [provideHttpClient(), provideRouter([])] });
         const registry = registerApplication(TestBed.inject(EnvironmentInjector));
         const catalog = registry.catalog();
         const persistence = TestBed.inject(AppStateService);

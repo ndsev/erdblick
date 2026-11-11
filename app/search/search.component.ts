@@ -15,7 +15,7 @@ import {
 } from "@angular/core";
 import { Subscription } from "rxjs";
 import { AppConfirmPopupService } from "../alert/app-confirm-popup.service";
-import { InfoMessageService } from "../diagnostics/info.service";
+import { AppAlertService } from "../alert/app-alert.service";
 import { AppDialogComponent } from "../layout/app-dialog.component";
 import { AppPanelComponent } from "../layout/app-panel.component";
 import type { AppSurfaceHeaderAction } from "../layout/app-surface-header.component";
@@ -302,7 +302,7 @@ export class SearchComponent implements OnChanges, OnDestroy {
      * Subscribes to search progress and keeps the dialog state synchronized with the active search.
      */
     constructor(public searchService: SearchService,
-        private infoMessageService: InfoMessageService,
+        private alerts: AppAlertService,
         private dialogStack: DialogStackService,
         private confirmPopupService: AppConfirmPopupService,
         public readonly layout: LayoutService,
@@ -805,7 +805,7 @@ export class SearchComponent implements OnChanges, OnDestroy {
         const errorAlertSignature = `${session.runId}:${errorSignature}`;
         if (errorSignature && this.lastErrorAlertSignature !== errorAlertSignature) {
             this.lastErrorAlertSignature = errorAlertSignature;
-            this.infoMessageService.showAlertDialog(
+            this.alerts.showAlertDialog(
                 this.alertContainer,
                 'Feature Search Errors',
                 errorSignature);
@@ -826,7 +826,7 @@ export class SearchComponent implements OnChanges, OnDestroy {
             this.canStopSearch = false;
 
             if (session.results.errors.size) {
-                this.infoMessageService.showAlertDialog(
+                this.alerts.showAlertDialog(
                     this.alertContainer,
                     'Feature Search Errors',
                     Array.from(session.results.errors).join('\n'))
