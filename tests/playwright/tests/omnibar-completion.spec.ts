@@ -230,7 +230,7 @@ test('compact action parameters and keyboard navigation include history while sk
     const jump = page.getByTestId('omnibar-action').filter({hasText: 'Jump to Way'});
     await expect(jump).toBeVisible();
     await expect(jump.locator('[data-parameter-name="wayId"] .omnibar-bubble-value')).toHaveText('1');
-    expect((await jump.boundingBox())!.height).toBeLessThan(45);
+    expect((await jump.boundingBox())!.height).toBeLessThan(60);
     await input.fill('WARNING_SIGN');
     await expect(menu.locator('[data-action-id^="fj:"]')).toHaveCount(0);
     await expect(menu.locator('[data-action-id="features"]')).toBeVisible();
@@ -267,7 +267,7 @@ test('compact action parameters and keyboard navigation include history while sk
     await expect(history.locator('.omnibar-option-name')).not.toBeEmpty();
     await expect(history.locator('[data-parameter-name="lat"] .omnibar-bubble-value')).toHaveText('48');
     await expect(history.getByRole('button', {name: 'Remove from history'})).toBeVisible();
-    expect((await history.boundingBox())!.height).toBeLessThan(35);
+    expect((await history.boundingBox())!.height).toBeLessThan(60);
     await input.press('ArrowUp');
     await expect(history).toBeFocused();
     const bounds = (await history.boundingBox())!;
@@ -284,7 +284,7 @@ test('compact action parameters and keyboard navigation include history while sk
 });
 
 
-test('long drafts stay on one line inside a narrow panel and retain their full text in a tooltip', async ({page}) => {
+test('long drafts stay on one detail line below the action name and retain their full text in a tooltip', async ({page}) => {
     await page.setViewportSize({width: 1600, height: 900});
     await page.goto('/?v2=1&vid=0&n=1&f=0&lon=11&lat=48&alt=1000&bg=~0&l=');
     await waitForAppReady(page);
@@ -308,9 +308,12 @@ test('long drafts stay on one line inside a narrow panel and retain their full t
     const bubble = search.getByTestId('omnibar-bubble');
     await expect(bubble).toHaveAttribute('title', 'Filter: ' + query);
     await expect(bubble.locator('.omnibar-bubble-name')).toBeHidden();
-    expect((await search.boundingBox())!.height).toBeLessThan(35);
+    expect((await search.boundingBox())!.height).toBeLessThan(60);
     const bounds = (await menu.boundingBox())!;
+    const nameBounds = (await search.locator('.omnibar-option-name').boundingBox())!;
     const bubbleBounds = (await bubble.boundingBox())!;
+    expect(bubbleBounds.y).toBeGreaterThanOrEqual(nameBounds.y + nameBounds.height);
+    expect(bubbleBounds.x).toBeCloseTo(nameBounds.x, 0);
     expect(bubbleBounds.x + bubbleBounds.width).toBeLessThan(bounds.x + bounds.width - 15);
     expect(await menu.evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
     expect(await bubble.locator('.omnibar-bubble-value').evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);

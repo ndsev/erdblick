@@ -91,12 +91,16 @@
     container: omnibar / inline-size;
   }
 
-  // All choices occupy one row, including history and invalid drafts. Reserve
-  // the remove-button column everywhere so the bubble edges line up vertically.
+  // Keep details below the action name for active choices, history and invalid
+  // drafts. Reserve the remove-button column so all text lines stay aligned.
   .omnibar-option-wrapper {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1.65em minmax(0, 1fr) 1.6em;
+    grid-template-areas:
+      "icon name end"
+      "icon details end";
     align-items: center;
-    gap: 0.35em;
+    gap: 0.15em 0.35em;
     min-width: 0;
     padding: 0.2em 0.25em;
     border-radius: 0.25em;
@@ -119,9 +123,8 @@
   }
 
   .omnibar-option-name {
-    flex: 0 1 auto;
+    grid-area: name;
     min-width: 0;
-    max-width: 45%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -129,9 +132,9 @@
   }
 
   .omnibar-bubbles {
+    grid-area: details;
     display: flex;
-    flex: 1 1 0;
-    justify-content: flex-end;
+    font-size: 0.9em;
     gap: 0.25em;
     min-width: 0;
     overflow: hidden;
@@ -204,13 +207,13 @@
   }
 
   .action-icon {
-    flex: 0 0 1.65em;
+    grid-area: icon;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 1.65em;
     height: 1.65em;
-    border-radius: 0.3em;
+    border-radius: 50%;
     color: white;
 
     i,
@@ -225,8 +228,8 @@
   }
 
   .omnibar-row-end {
+    grid-area: end;
     display: flex;
-    flex: 0 0 1.6em;
     justify-content: center;
   }
 
