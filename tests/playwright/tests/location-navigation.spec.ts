@@ -333,7 +333,7 @@ test('falls back from failed geometry to extent, then preserves point marker nav
     await selectPlace(page, 'Area', 'wof:1', true);
     await expect.poll(async () => (await camera(page)).destination.lon).toBeCloseTo(11, 5);
     await page.clock.runFor(250);
-    await expect(page.getByText(/Showing its bounding extent/)).toBeVisible();
+    await expect(page.getByTestId('info-message').getByText(/Showing its bounding extent/)).toBeVisible();
     expect(await page.evaluate(() => window.ebDebug!.stateService.exportSnapshot()['marker'])).toBe(0);
     const extentSample = (await sampleMap(page, [[3, 8]]))[0];
     expect(Math.min(extentSample[1], extentSample[2]) - extentSample[0]).toBeGreaterThan(10);

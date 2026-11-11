@@ -17,14 +17,20 @@ async function prepare(page: Page) {
 }
 
 test('repeats retain the toast, restart expiry, and start at one after keyboard dismissal', async ({page}) => {
+    // Install before Angular captures timer functions, then stop wall-clock
+    // drift before creating the notice. On busy CI runners, browser actions
+    // otherwise consume the one-second margin before its ten-second expiry.
+    await page.clock.install({time: new Date('2026-01-01T10:00:00Z')});
     const {input, notice} = await prepare(page);
-    await page.clock.install();
+    await page.clock.pauseAt(new Date('2026-01-01T11:00:00Z'));
     await input.press('Enter');
+    await page.clock.runFor(500);
     await expect(notice).toHaveAttribute('data-count', '1');
     const original = await notice.getAttribute('data-message-id');
     await page.mouse.move(0, 0);
     await page.clock.fastForward(9000);
     await input.press('Enter');
+    await page.clock.runFor(500);
     await expect(notice).toHaveAttribute('data-count', '2');
     await expect(notice).toHaveAttribute('data-message-id', original!);
     await page.clock.fastForward(9000);
