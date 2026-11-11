@@ -886,12 +886,12 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "Rendered type-bound colors classify sentinels before ordinary stops",
+    "Rendered portable colors classify sentinels before ordinary stops",
     "[erdblick.schema][erdblick.subset-renderer]")
 {
     auto categorical = GENERATE(false, true);
-    auto guardSpelling = GENERATE("schemaTypes", "schemaType", "domain");
     erdblick::test::ScalarSchema fixture;
+    auto const originalSchemaId = std::string(fixture.owner->schemaId());
     auto selected = fixture.number(255, fixture.speed);
     std::array<uint8_t, 3> expected{0, 255, 255};
     bool removeOverride = false;
@@ -916,14 +916,23 @@ TEST_CASE(
         selected = fixture.number(254, fixture.speed);
         expected = {255, 0, 255};
     }
-    SECTION("same raw code from another type uses fallback")
+    SECTION("raw override works across types")
     {
         selected = fixture.number(255, fixture.classicSpeed);
-        expected = {255, 255, 255};
     }
-    SECTION("computed plain numbers acquire no sentinel semantics")
+    SECTION("raw override works for computed numbers")
     {
         selected = simfil::Value(int64_t{255});
+    }
+    SECTION("a new schema version needs no new color binding")
+    {
+        fixture = erdblick::test::ScalarSchema(".vNext");
+        REQUIRE(fixture.owner->schemaId() != originalSchemaId);
+        selected = fixture.number(255, fixture.speed);
+    }
+    SECTION("ordinary range checks use current type metadata")
+    {
+        selected = fixture.number(256, fixture.speed);
         expected = {255, 255, 255};
     }
     SECTION("deleted special override uses fallback instead of clamping")
@@ -970,26 +979,14 @@ rules:
     if (categorical) {
         scale["mode"] = "categorical";
         // Even an explicit ordinary stop cannot reclassify a named sentinel
-        // when its separate override is deleted from a type-bound scale.
+        // when its separate override is deleted from an exception-aware scale.
         scale["stops"].push_back(YAML::Load("[255, '#ff0000']"));
     }
-    // New scales accept a list of verified source identities. The matching
-    // identity is deliberately second, proving this is membership, not a
-    // first-source shortcut. Existing server/local YAML remains readable.
-    YAML::Node guard;
-    guard["schemaId"] = std::string(fixture.owner->schemaId());
-    guard[std::string_view(guardSpelling) == "domain" ? "domainId" : "typeId"] = fixture.speed;
-    if (std::string_view(guardSpelling) == "schemaTypes") {
-        auto unrelated = YAML::Clone(guard);
-        unrelated["schemaId"] = "another-equivalent-schema";
-        scale[guardSpelling].push_back(unrelated);
-        scale[guardSpelling].push_back(guard);
+    if (removeOverride) {
+        // Deleting every override still keeps exceptional values out of the
+        // ordinary palette, including an otherwise matching category stop.
+        scale["specials"] = YAML::Node(YAML::NodeType::Sequence);
     }
-    else {
-        scale[guardSpelling] = guard;
-    }
-    if (removeOverride)
-        scale.remove("specials");
     auto style = rendererStyle(YAML::Dump(yaml));
     REQUIRE(style.isValid());
     TileSubsetLayerRenderer renderer(0, "Features:ScalarSchema:Road:0", style, 0, 7);

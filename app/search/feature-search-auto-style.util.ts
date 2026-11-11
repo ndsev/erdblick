@@ -335,7 +335,7 @@ export function preparedSearchAutoStyleRules(
  *
  * These are freshly generated equality selectors, not arbitrary user Simfil.
  * Edited rules do not enter this helper. Equivalent source types share one
- * scale with several accepted identities. Symbolic category catalogs can grow
+ * portable scale. Symbolic category catalogs can grow
  * independently: union their labels, whose generated colors are deterministic.
  * Numeric units, ranges and special values still need to agree.
  */
@@ -366,9 +366,8 @@ export function combinePreparedSearchAutoStyles(
                 contextKey: JSON.stringify(selectors),
                 appearance: JSON.stringify({
                     ...rule,
-                    color: rule.color.mode !== "solid" && rule.valueMeaning
-                        ? {...rule.color, schemaTypes: undefined,
-                            ...(rule.symbolicCategories ? {stops: undefined} : {})} : rule.color,
+                    color: rule.color.mode === "categories" && rule.symbolicCategories
+                        ? {...rule.color, stops: undefined} : rule.color,
                     name: undefined,
                     filter: undefined,
                     applicability: undefined
@@ -387,11 +386,7 @@ export function combinePreparedSearchAutoStyles(
         }
         return [...matching.values()].map(appearance => {
             const first = appearance[0].rule;
-            let color = first.color.mode !== "solid" && first.valueMeaning
-                ? {...first.color, schemaTypes: [...new Map(appearance.flatMap(({rule}) =>
-                    rule.color.mode === "solid" ? [] : (rule.color.schemaTypes ?? []).map(type =>
-                        [`${type.schemaId}:${type.typeId}`, type] as const))).values()]}
-                : first.color;
+            let color = first.color;
             if (color.mode === "categories" && first.symbolicCategories) {
                 // These stops were generated together, never edited by a user.
                 // Equal labels have equal colors even when one schema adds or

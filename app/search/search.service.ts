@@ -4,7 +4,6 @@ import { Injectable } from "@angular/core";
 import { BehaviorSubject, Subject, take } from "rxjs";
 import { filter } from "rxjs/operators";
 import { z } from "zod";
-import {schemaTypeIdentitySchema} from "../mapdata/schema-type.model";
 
 import { AppActionContributor, AppActionRegistration } from "../action/action-contributor.model";
 import {
@@ -3502,10 +3501,8 @@ const searchStyleRuleSchema = z.strictObject({
             field: text,
             customField: z.boolean().optional(),
             stops: searchColorStopsSchema,
-            // Schema-generated numeric styles retain their exact meaning and
-            // exceptional values when read or edited through MCP, just as in
-            // the UI. Omitting these keys rejected ordinary speed gradients.
-            schemaTypes: z.array(schemaTypeIdentitySchema.extend({schemaId: identifierSchema}).strict()).min(1).max(100).optional(),
+            // Raw exceptional-value colors follow the same portable contract
+            // as the UI and YAML; no schema identity is stored in a scale.
             specials: searchColorStopsSchema.optional(),
             fallbackColor: colorSchema.optional()
         })

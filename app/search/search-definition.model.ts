@@ -1,5 +1,4 @@
 import { z } from "zod";
-import {colorScaleTypesSchema, type SchemaTypeIdentity} from "../mapdata/schema-type.model";
 
 export type FeatureSearchScope = "attribute" | "feature" | "auto";
 
@@ -31,9 +30,7 @@ export type FeatureSearchColorMode =
         customField?: boolean;
         stops: FeatureSearchColorStop[];
         fallbackColor?: string;
-        /** Generated scales accept these verified source types, including after reload. */
-        schemaTypes?: SchemaTypeIdentity[];
-        /** Exact raw overrides are evaluated before gradient interpolation. */
+        /** Raw overrides precede interpolation; an empty list sends named exceptions to fallback. */
         specials?: FeatureSearchColorStop[];
     };
 
@@ -372,11 +369,7 @@ function normalizeSearchColorMode(raw: Record<string, unknown>): FeatureSearchCo
             };
         }
         if (mode === "gradient" || mode === "categories") {
-            // Existing local searches stored the same exact guard as domain/domainId.
-            // Prefer the current spelling even when invalid, so a malformed guard
-            // cannot silently become an unguarded scale or select a second identity.
-            const schemaTypes = colorScaleTypesSchema.safeParse(color);
-            if (!schemaTypes.success || (color["specials"] !== undefined && !schemaTypes.data)) {
+            if (color["specials"] !== undefined && !Array.isArray(color["specials"])) {
                 return {mode: "solid", color: normalizeHexColor(color["fallbackColor"], DEFAULT_PIN_COLOR)};
             }
             return {
@@ -384,8 +377,7 @@ function normalizeSearchColorMode(raw: Record<string, unknown>): FeatureSearchCo
                 field: normalizeString(color["field"]) ?? "",
                 ...(normalizeBoolean(color["customField"], false) ? { customField: true } : {}),
                 stops: normalizeColorStops(color["stops"]),
-                ...(schemaTypes.data ? {schemaTypes: schemaTypes.data} : {}),
-                ...(schemaTypes.data && Array.isArray(color["specials"]) ? {specials: normalizeColorStops(color["specials"])} : {}),
+                ...(Array.isArray(color["specials"]) ? {specials: normalizeColorStops(color["specials"])} : {}),
                 ...(normalizeString(color["fallbackColor"])
                     ? { fallbackColor: normalizeHexColor(color["fallbackColor"], DEFAULT_PIN_COLOR) }
                     : {})

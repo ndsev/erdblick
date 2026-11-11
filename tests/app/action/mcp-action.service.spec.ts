@@ -1094,7 +1094,6 @@ describe("McpActionService", () => {
         const definition = createFeatureSearchStateEntry({id: "speed", query: "SPEED_LIMIT_METRIC",
             searchStyleRules: [{geometry: ["line"], filter: [], color: {
                 mode: "gradient", field: "attributeValue.speedLimitKmh",
-                schemaTypes: [{schemaId: "speed-schema", typeId: 198}],
                 stops: [{value: 1, color: "#0000ff"}, {value: 253, color: "#ff0000"}],
                 specials: [{value: 255, color: "#00ffff"}]
             }}]});
@@ -1113,6 +1112,14 @@ describe("McpActionService", () => {
         const {settings} = viewerActions.viewer_get_search.outputSchema.parse(
             service.execute("viewer_get_search", {searchId: definition.id}));
         expect(settings.searchStyleRules).toEqual(definition.searchStyleRules);
+        expect(settings.searchStyleRules[0].color).not.toHaveProperty("schemaTypes");
+        // The public action contract no longer accepts source-bound scales.
+        // Its strict schema must not advertise or silently store an old guard.
+        expect(() => service.execute("viewer_set_search", {searchId: definition.id, settings: {
+            searchStyleRules: [{...settings.searchStyleRules[0], color: {
+                ...settings.searchStyleRules[0].color, schemaTypes: [{schemaId: "old", typeId: 7}]
+            }}]
+        }})).toThrow(ViewerActionFailure);
         service.execute("viewer_set_search", {searchId: definition.id, settings});
         expect(stateOwners(state).searchService.state.featureSearches[0].searchStyleRules)
             .toEqual(definition.searchStyleRules);

@@ -117,10 +117,6 @@ import {
             @if (colorWarning) {
                 <div class="search-style-color-warning">{{ colorWarning }}</div>
             }
-            @if (schemaHasChanged) {
-                <p-button label="Use current schema" severity="secondary" [outlined]="true"
-                          (click)="setField(viewDraft.field)"></p-button>
-            }
             @if (viewDraft.mode !== 'solid' && viewDraft.specialStops?.length) {
                 <div class="search-style-color-stop-list">
                     <span>Special values</span>
@@ -351,30 +347,20 @@ export class SearchStyleColorComponent implements OnChanges {
     protected get gradientTags() {
         const numeric = this.selectedFieldOption()?.schemaType?.numeric;
         return gradientValueTags(this.viewDraft).map(tag => ({...tag,
-            label: numeric?.unit && !this.schemaHasChanged
+            label: numeric?.unit
                 ? `${Number((Number(tag.label) * numeric.scale + numeric.offset).toPrecision(8))} ${numeric.unit}`
                 : tag.label
         }));
     }
 
-    /** A saved generated scale must be explicitly replanned after a source changes meaning. */
-    protected get schemaHasChanged(): boolean {
-        const expected = this.viewDraft.schemaTypes;
-        const option = this.selectedFieldOption();
-        return !!expected && !!option && (option.incompatibleTypes === true ||
-            !(option.schemaTypes ?? (option.schemaType ? [option.schemaType] : [])).every(actual =>
-                expected.some(type => type.schemaId === actual.schemaId && type.typeId === actual.typeId)) ||
-            !option.schemaType);
-    }
-
-    /** Names explain raw codes only when the currently loaded type still matches the saved one. */
+    /** Explain exceptional raw codes using the current field's metadata. */
     protected specialColorLabel(stop: SearchStyleGradientStopDraft): string {
-        const names = this.schemaHasChanged ? [] : this.selectedFieldOption()?.schemaType?.namedValues
+        const names = this.selectedFieldOption()?.schemaType?.namedValues
             .filter(named => named.role === "special" && named.value === stop.value).map(named => named.name) ?? [];
         return `${stop.value}${names.length ? ` (${names.join(", ")})` : ""}`;
     }
 
-    /** Editing a special color preserves the raw code, exact schema type guard and ordinary stops. */
+    /** Editing a special color preserves its raw code and the ordinary stops. */
     protected setSpecialStopColor(stop: SearchStyleGradientStopDraft, color: string): void {
         this.viewDraft = {...this.viewDraft, specialStops: this.viewDraft.specialStops?.map(candidate =>
             candidate.id === stop.id ? {...candidate, color: normalizeHexColor(color)} : candidate)};
@@ -480,7 +466,7 @@ export class SearchStyleColorComponent implements OnChanges {
         this.clearDataWarning();
         this.viewDraft = {
             ...this.viewDraft,
-            ...(field !== this.viewDraft.field ? {schemaTypes: undefined, specialStops: undefined} : {}),
+            ...(field !== this.viewDraft.field ? {specialStops: undefined} : {}),
             field: field ?? "",
             customField: this.viewDraft.customField || this.fieldOptions.length > 0,
             categoryValueKind: this.fieldOptions.length > 0
@@ -737,21 +723,17 @@ export class SearchStyleColorComponent implements OnChanges {
     /**
      * Result summaries expose a type only when every value has that exact ID.
      * Several maps can instead share equivalent types verified by the field
-     * picker. Updating ordinary stops must retain that shared scale's guards
-     * and edited special colors, even when the summary has no single type.
+     * picker. Use that metadata to initialize missing exception colors, without
+     * binding the scale to the current source. Updating ordinary stops preserves
+     * edited or deleted special colors.
      */
     private observedColorBinding(summary: SearchValueSummary) {
         const field = this.selectedFieldOption();
         const type = summary.schemaType ?? field?.schemaType;
-        const unchanged = !type || this.viewDraft.schemaTypes?.some(accepted =>
-            accepted.schemaId === type.schemaId && accepted.typeId === type.typeId);
         return {
             type,
-            schemaTypes: unchanged ? this.viewDraft.schemaTypes
-                : (!summary.schemaType ? field?.schemaTypes : undefined)
-                    ?? (type ? [{schemaId: type.schemaId, typeId: type.typeId}] : undefined),
-            specialStops: unchanged && this.viewDraft.specialStops !== undefined
-                ? this.viewDraft.specialStops : type ? specialStopsForType(type, () => this.nextStopId++) : undefined
+            specialStops: this.viewDraft.specialStops
+                ?? (type ? specialStopsForType(type, () => this.nextStopId++) : undefined)
         };
     }
 
@@ -778,7 +760,6 @@ export class SearchStyleColorComponent implements OnChanges {
             ...this.viewDraft,
             gradientStops,
             categoryStops: [],
-            schemaTypes: binding.schemaTypes,
             specialStops: binding.specialStops
         };
         this.dataColorWarning = "";
@@ -814,11 +795,10 @@ export class SearchStyleColorComponent implements OnChanges {
             return;
         }
         // Refreshing observed categories changes ordinary stops only. Preserve
-        // edited or deleted special colors while their exact meaning matches.
+        // edited or deleted special colors across equivalent source versions.
         this.viewDraft = {
             ...this.viewDraft,
             categoryValueKind: valueKind,
-            schemaTypes: binding.schemaTypes,
             specialStops: binding.specialStops,
             gradientStops: [],
             categoryStops: categoryStopsForObservedValues(
@@ -875,14 +855,10 @@ export class SearchStyleColorComponent implements OnChanges {
     }
 
     /**
-     * Prioritize changed schema identity, then data failures and mode compatibility.
+     * Prioritize data failures, then mode compatibility.
      * If no stops exist, ask the initializer for an explanation without applying it.
      */
     private updateColorWarning(): void {
-        if (this.schemaHasChanged) {
-            this.colorWarning = "This saved scale belongs to an older or different value type. Its fallback remains active until you choose Use current schema.";
-            return;
-        }
         if (this.dataColorWarning) {
             this.colorWarning = this.dataColorWarning;
             return;

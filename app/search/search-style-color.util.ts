@@ -59,7 +59,6 @@ export interface SearchStyleColorDraft {
     categoryStops: SearchStyleCategoryStopDraft[];
 
     /** These are explicit saved rules; loading new metadata must not regenerate them. */
-    schemaTypes?: SchemaTypeIdentity[];
     specialStops?: SearchStyleGradientStopDraft[];
     fallbackColor: string;
 
@@ -115,8 +114,9 @@ export function searchStyleColorProperties(
             mode: color.mode === "gradient" ? "linear" : "categorical",
             expression,
             stops,
-            ...(color.schemaTypes ? {schemaTypes: color.schemaTypes} : {}),
-            ...(color.specials?.length ? {specials: normalizedCategoricalStyleStops(color.specials, fallback)} : {}),
+            // An empty override list still keeps named exceptions out of the
+            // ordinary scale after the user deletes their explicit colors.
+            ...(color.specials !== undefined ? {specials: normalizedCategoricalStyleStops(color.specials, fallback)} : {}),
             ...(color.fallbackColor === undefined ? {} : {fallback})
         }
     };
@@ -214,8 +214,8 @@ export function defaultSearchStyleColorDraft(field: string): SearchStyleColorDra
 }
 
 /**
- * Copy mutable stop/type records and normalize editor colors/numbers without
- * generating new stops or replacing a saved schema identity.
+ * Copy mutable stops and normalize editor colors/numbers without generating
+ * new stops or replacing the user's exceptional-value overrides.
  */
 export function cloneSearchStyleColorDraft(draft: SearchStyleColorDraft): SearchStyleColorDraft {
     return {
@@ -223,7 +223,6 @@ export function cloneSearchStyleColorDraft(draft: SearchStyleColorDraft): Search
         field: draft.field,
         customField: !!draft.customField,
         categoryValueKind: draft.categoryValueKind,
-        ...(draft.schemaTypes ? {schemaTypes: draft.schemaTypes.map(type => ({...type}))} : {}),
         ...(draft.specialStops ? {specialStops: draft.specialStops.map(stop => ({...stop}))} : {}),
         fallbackEnabled: draft.fallbackEnabled !== false,
         solidColor: normalizeHexColor(draft.solidColor),
@@ -555,12 +554,8 @@ export function autoInitializeSearchStyleColorDraft(
                     categoryValueKind: fieldOption.valueKind,
                     categoryStops: categoryStopsForEnumValues(enumValues, nextId),
                     gradientStops: [],
-                    // Several enum catalogs may contribute the same logical
-                    // labels. Keep their accepted types without tying colors
-                    // to a particular catalog's wire ordinals or entry count.
-                    schemaTypes: fieldOption.schemaTypes ?? (fieldOption.schemaType
-                        ? [{schemaId: fieldOption.schemaType.schemaId, typeId: fieldOption.schemaType.typeId}]
-                        : undefined),
+                    // Logical labels keep their colors when another map uses
+                    // a different schema version or different wire ordinals.
                     specialStops: undefined
                 }),
                 message: "",
@@ -600,9 +595,6 @@ export function autoInitializeSearchStyleColorDraft(
     return {
         draft: cloneSearchStyleColorDraft({
             ...draft, gradientStops, categoryStops: [],
-            schemaTypes: fieldOption.schemaTypes ?? (fieldOption.schemaType
-                ? [{schemaId: fieldOption.schemaType.schemaId, typeId: fieldOption.schemaType.typeId}]
-                : undefined),
             specialStops: fieldOption.schemaType ? specialStopsForType(fieldOption.schemaType, nextId) : undefined
         }),
         message: "",

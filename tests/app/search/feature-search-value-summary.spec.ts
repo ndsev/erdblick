@@ -30,10 +30,10 @@ void AppModule;
 describe("Search observed category values", () => {
     beforeAll(() => initializeLibrary());
 
-    it.each(["gradient", "categories"] as const)("keeps shared type guards and special colors when updating %s from mixed-map observations", mode => {
+    it.each(["gradient", "categories"] as const)("keeps special colors when updating %s from mixed-map observations", mode => {
         const component = new SearchStyleColorComponent();
         const types = [{schemaId: "A", typeId: 1}, {schemaId: "B", typeId: 2}];
-        component.draft = {...defaultSearchStyleColorDraft("speed"), mode, schemaTypes: types,
+        component.draft = {...defaultSearchStyleColorDraft("speed"), mode,
             specialStops: [{id: 1, value: 255, color: "#123456"}]};
         component.fieldOptions = [{label: "Speed", value: "speed", valueKind: "integer", schemaTypes: types,
             schemaType: {...types[0], typeName: "Speed", namedValues: [{name: "UNLIMITED", value: 255,
@@ -48,7 +48,8 @@ describe("Search observed category values", () => {
             otherCount: 0, distinctLimitReached: false
         };
         component["updateStopsFromData"]();
-        expect(changed).toHaveBeenCalledWith(expect.objectContaining({schemaTypes: types,
+        expect(changed.mock.calls[0][0]).not.toHaveProperty("schemaTypes");
+        expect(changed).toHaveBeenCalledWith(expect.objectContaining({
             specialStops: [{id: 1, value: 255, color: "#123456"}]}));
         if (mode === "categories") {
             expect(changed.mock.calls[0][0]!.categoryStops.map(stop => stop.valueText)).toEqual(["30", "50"]);

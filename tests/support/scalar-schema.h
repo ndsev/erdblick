@@ -1,6 +1,8 @@
 #pragma once
 
 #include <span>
+#include <string>
+#include <string_view>
 #include "mapget/model/mapschema.h"
 #include "simfil/value.h"
 
@@ -18,7 +20,8 @@ struct ScalarSchema
     simfil::TypeId speed{}, classicSpeed{}, width{}, flags{}, rawRoot{};
     mapget::DataSourceInfo source;
 
-    ScalarSchema()
+    /** A version suffix changes schema identity without changing numeric meaning. */
+    explicit ScalarSchema(std::string_view versionSuffix = {})
     {
         using Type = simfil::SchemaType;
         auto layer = owner->newLayer("Road", mapget::LayerType::Features);
@@ -31,7 +34,7 @@ struct ScalarSchema
         classicSpeed = classicSpeedType.id();
         width = widthType.id();
         flags = flagsType.id();
-        speedType.setTypeName("Live.Speed");
+        speedType.setTypeName("Live.Speed" + std::string(versionSuffix));
         classicSpeedType.setTypeName("Classic.Speed");
         widthType.setTypeName("Metric.Width");
         flagsType.setTypeName("Access.Flags");

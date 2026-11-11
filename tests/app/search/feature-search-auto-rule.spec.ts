@@ -96,7 +96,7 @@ describe("Feature Search automatic rule geometry", () => {
             if (rule.color.mode !== "categories") throw new Error("Expected a category scale");
             const color = rule.color;
             expect(color.stops.map(stop => stop.value)).toEqual(["ANIMALS", "NEW_SIGN"]);
-            expect(color.schemaTypes).toHaveLength(3);
+            expect(color).not.toHaveProperty("schemaTypes");
             const previous = before.find(candidate => candidate.color.mode === "categories" &&
                 candidate.color.field === color.field && candidate.geometry[0] === rule.geometry[0]);
             expect(color.stops).toEqual(previous?.color.mode === "categories" ? previous.color.stops : []);
@@ -134,9 +134,8 @@ describe("Feature Search automatic rule geometry", () => {
             for (const rule of rules) {
                 expect(rule.filter).toEqual([]);
                 expect(rule.applicability).toBeUndefined();
-                expect(rule.color).toMatchObject({mode: "gradient", schemaTypes: [
-                    {schemaId: "graph-0", typeId: 1}, {schemaId: "graph-1", typeId: 2}, {schemaId: "graph-2", typeId: 3}
-                ]});
+                expect(rule.color).toMatchObject({mode: "gradient"});
+                expect(rule.color).not.toHaveProperty("schemaTypes");
             }
         }
     });
@@ -292,7 +291,7 @@ describe("Feature Search automatic rule geometry", () => {
         }, "#123456", {mapId: "Map", layerId: "Road", scope: "attribute"})]);
         expect(rules).toHaveLength(2);
         for (const rule of rules) {
-            expect(rule.color).toMatchObject({schemaTypes: [{schemaId: "test-schema", typeId: 11}, {schemaId: "test-schema", typeId: 22}]});
+            expect(rule.color).not.toHaveProperty("schemaTypes");
             expect(rule.filter).toEqual([]);
         }
     });

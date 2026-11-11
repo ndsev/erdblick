@@ -616,7 +616,7 @@ bool validateGeometry(YAML::Node const& ruleYaml, std::string const& rulePath, S
 
 /**
  * Validate scale structure, stop ordering or typed categorical uniqueness, and
- * schema guards for special values. Literal colors follow Color's accepted input
+ * exceptional-value overrides. Literal colors follow Color's accepted input
  * formats; expression validity is checked separately from runtime value types.
  */
 bool validateColorScale(
@@ -735,49 +735,10 @@ bool validateColorScale(
             }
         }
     }
-    // Validate the same input spelling that FeatureStyleRule reads. An invalid
-    // current guard must not fall back to a different legacy identity.
-    auto validateType = [&](YAML::Node const& type, char const* idKey)
-    {
-        if (!type.IsMap() || !type["schemaId"].IsScalar() || type["schemaId"].Scalar().empty() ||
-            !type[idKey].IsScalar())
-            return fail(
-                "color-scale type guards require an exact schemaId and a positive typeId.",
-                type);
-        try {
-            auto id = type[idKey].as<uint64_t>();
-            if (id == 0 || id > simfil::MaxTypeId)
-                return fail("color-scale typeId is out of range.", type);
-        }
-        catch (YAML::Exception const&) {
-            return fail("color-scale typeId must be a positive integer.", type);
-        }
-        return true;
-    };
-    bool hasTypeGuard = false;
-    if (auto types = scale["schemaTypes"]; types.IsDefined()) {
-        if (!types.IsSequence() || types.size() == 0)
-            return fail(
-                "color-scale.schemaTypes requires a nonempty list of exact type guards.",
-                types);
-        for (auto const& type : types) {
-            if (!validateType(type, "typeId"))
-                return false;
-        }
-        hasTypeGuard = true;
-    }
-    else {
-        auto const hasCanonicalType = scale["schemaType"].IsDefined();
-        if (auto type = scale[hasCanonicalType ? "schemaType" : "domain"]; type.IsDefined()) {
-            if (!validateType(type, hasCanonicalType ? "typeId" : "domainId"))
-                return false;
-            hasTypeGuard = true;
-        }
-    }
     if (auto specials = scale["specials"]; specials.IsDefined()) {
-        if (!specials.IsSequence() || !hasTypeGuard)
+        if (!specials.IsSequence())
             return fail(
-                "color-scale.specials requires a list and an exact schema type guard.",
+                "color-scale.specials requires a list of numeric color overrides.",
                 specials);
         std::set<double> values;
         for (auto const& stop : specials) {

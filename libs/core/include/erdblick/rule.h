@@ -528,18 +528,11 @@ public:
         std::vector<ColorScaleStop> stops;
 
         /**
-         * Verified equivalent source types can share a generated color scale.
-         * An empty list leaves authored raw scales unrestricted.
+         * Explicit raw-value colors precede ordinary interpolation. Presence
+         * enables the current value's numeric-domain checks, even for an empty
+         * list: deleting every override must still route sentinels to fallback.
          */
-        struct TypeIdentity
-        {
-            std::string schemaId;
-            simfil::TypeId typeId = 0;
-        };
-        std::vector<TypeIdentity> schemaTypes;
-
-        /** Named numeric sentinels use exact colors before ordinary interpolation. */
-        std::vector<ColorScaleStop> specials;
+        std::optional<std::vector<ColorScaleStop>> specials;
         std::optional<glm::fvec4> fallback;
         std::optional<DenseIntegerScale<glm::fvec4>> denseIntegerStops;
     };

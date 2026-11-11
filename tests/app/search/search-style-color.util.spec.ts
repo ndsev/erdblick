@@ -45,12 +45,20 @@ describe("search style color helpers", () => {
         expect(result.success).toBe(true);
         expect(result.draft.gradientStops.map(stop => stop.value)).toEqual([classic ? 0 : 1, 50, 100, 150, 200, 250, 253]);
         expect(result.draft.specialStops?.map(stop => stop.value)).toEqual(classic ? [254, 255] : [0, 254, 255]);
-        expect(result.draft.schemaTypes).toEqual([{schemaId: schemaType.schemaId, typeId: 3}]);
+        expect(result.draft).not.toHaveProperty("schemaTypes");
         const properties = searchStyleColorProperties({mode: "gradient", field: "speed",
-            stops: serializableGradientStops(result.draft)!, schemaTypes: result.draft.schemaTypes,
+            stops: serializableGradientStops(result.draft)!,
             specials: result.draft.specialStops!.map(stop => ({value: stop.value, color: stop.color}))});
-        expect(properties["color-scale"]).toMatchObject({schemaTypes: result.draft.schemaTypes,
+        expect(properties["color-scale"]).not.toHaveProperty("schemaTypes");
+        expect(properties["color-scale"]).toMatchObject({
             specials: result.draft.specialStops!.map(stop => [stop.value, stop.color])});
+    });
+
+    it("retains an empty special list so deleted exceptions cannot enter the gradient", () => {
+        const properties = searchStyleColorProperties({mode: "gradient", field: "speed",
+            stops: [{value: 1, color: "#0000ff"}, {value: 253, color: "#ff0000"}], specials: []});
+        expect(properties["color-scale"]).toMatchObject({specials: []});
+        expect(properties["color-scale"]).not.toHaveProperty("schemaTypes");
     });
 
     it("chooses round measurement steps while storing the original encoding", () => {
@@ -76,7 +84,7 @@ describe("search style color helpers", () => {
             {label: "Car", value: draft.field, valueKind: "boolean"}, () => ++id);
         expect(result.success).toBe(true);
         expect(serializableCategoryStops(result.draft).map(stop => stop.value)).toEqual([false, true]);
-        expect(result.draft.schemaTypes).toBeUndefined();
+        expect(result.draft).not.toHaveProperty("schemaTypes");
     });
     it.each(["gradient", "categories"] as const)("omits a disabled %s fallback from generated YAML properties", mode => {
         const properties = searchStyleColorProperties({mode, field: "speed",

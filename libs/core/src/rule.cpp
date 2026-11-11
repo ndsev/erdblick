@@ -450,27 +450,11 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
             ? ColorScale::Mode::Categorical
             : ColorScale::Mode::Linear;
         scale.expression = scaleYaml["expression"].as<std::string>();
-        // Saved styles used singular schemaType, and earlier domain/domainId.
-        // Normalize those spellings at the YAML boundary only.
-        if (auto types = scaleYaml["schemaTypes"]; types.IsDefined()) {
-            for (auto const& type : types) {
-                scale.schemaTypes.push_back(
-                    {type["schemaId"].as<std::string>(), type["typeId"].as<simfil::TypeId>()});
-            }
-        }
-        else {
-            auto const hasCanonicalType = scaleYaml["schemaType"].IsDefined();
-            if (auto type = scaleYaml[hasCanonicalType ? "schemaType" : "domain"]; type.IsDefined())
-            {
-                scale.schemaTypes.push_back(
-                    {type["schemaId"].as<std::string>(),
-                     type[hasCanonicalType ? "typeId" : "domainId"].as<simfil::TypeId>()});
-            }
-        }
         if (auto specials = scaleYaml["specials"]; specials.IsDefined()) {
+            scale.specials.emplace();
             for (auto const& stopYaml : specials) {
                 auto key = parseColorScaleKey(stopYaml[0]);
-                scale.specials.push_back(
+                scale.specials->push_back(
                     {key,
                      Color(stopYaml[1].as<std::string>()).toFVec4(),
                      numericColorScaleKey(key)});
@@ -1188,37 +1172,28 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
             return color;
         };
         auto const evaluated = evalFun.evaluate(colorScale_->expression);
-        auto const type = evaluated.schemaType();
-        if (!colorScale_->schemaTypes.empty()) {
-            if (!type ||
-                std::none_of(
-                    colorScale_->schemaTypes.begin(),
-                    colorScale_->schemaTypes.end(),
-                    [&](auto const& accepted) {
-                        return type.id() == accepted.typeId &&
-                            type.pool()->identity() == accepted.schemaId;
-                    }))
-                return fallback();
-        }
-        // Special overrides precede clamping/interpolation. A computed plain
-        // number has no source type and cannot acquire a sentinel meaning here.
+        // Explicit raw-value overrides work across schema versions, and also
+        // for computed numbers. Type metadata only classifies values that have
+        // no override; it does not restrict a portable scale's source identity.
         auto const value = colorScaleKey(evaluated);
         if (!value)
             return fallback();
-        for (auto const& stop : colorScale_->specials) {
-            if (colorScaleKeysEqual(*value, stop.key)) {
-                auto color = stop.color;
-                color.a *= color_.a;
-                return color;
+        if (colorScale_->specials) {
+            for (auto const& stop : *colorScale_->specials) {
+                if (colorScaleKeysEqual(*value, stop.key)) {
+                    auto color = stop.color;
+                    color.a *= color_.a;
+                    return color;
+                }
             }
         }
         auto input = numericColorScaleKey(*value);
-        if (input && !colorScale_->schemaTypes.empty()) {
-            // Generated type-bound scales cover ordinary measurements only.
+        auto const type = evaluated.schemaType();
+        if (input && type && colorScale_->specials) {
+            // Exception-aware scales cover ordinary measurements only.
             // Deleting a special override exposes fallback, never a high-end
-            // gradient or ordinary category color for an exceptional code.
-            if (!type)
-                return fallback();
+            // gradient or ordinary category color for an exceptional code. Use
+            // the value's current metadata so a new compatible schema works.
             bool special = false;
             type.forEachNamedValue(
                 [&](simfil::SchemaType::NamedValue const& named)

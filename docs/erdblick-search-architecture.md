@@ -343,7 +343,8 @@ and attribute owner until all sources have contributed their rules. Equal
 appearances then merge, and a discovery condition is removed only when doing
 so admits no prepared context requiring a different appearance. Reduction
 prefers attribute names over source IDs and owner layout; one conjunction
-remains ordinary editable filter rows. Exact color type guards stay intact.
+remains ordinary editable filter rows. Generated scales use portable values;
+schema identities remain discovery metadata, not saved color restrictions.
 Mixed feature/attribute roots retain their result scope, while equal rules can
 still merge across sources within that scope. Live rendering and YAML export
 use the same applicability check; optional map/layer selectors retain explicit

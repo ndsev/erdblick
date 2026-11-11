@@ -8,6 +8,15 @@ import {
 } from "../../../app/search/search-definition.model";
 
 describe("FeatureSearchState", () => {
+    it.each([{specials: []}, {specials: [{value: 255, color: "#00ffff"}]}])("persists portable special colors (%j)", ({specials}) => {
+        const color = {mode: "gradient", field: "speed",
+            stops: [{value: 1, color: "#0000ff"}, {value: 253, color: "#ff0000"}], specials};
+        const [entry] = normalizeFeatureSearchState([{query: "true",
+            searchStyleRules: [{geometry: ["line"], filter: [], color}]}]);
+        expect(entry.searchStyleRules[0].color).toEqual(color);
+        expect(normalizeFeatureSearchState([entry])[0].searchStyleRules).toEqual(entry.searchStyleRules);
+    });
+
     it("persists shared result scopes without admitting rules at another evaluation root", () => {
         const [entry] = normalizeFeatureSearchState([{
             query: "true",
@@ -27,37 +36,22 @@ describe("FeatureSearchState", () => {
         expect(searchStyleRuleAppliesTo(restricted, {mapId: "First", layerId: "Lane", scope: "attribute"})).toBe(false);
     });
 
-    it("migrates saved scalar guards without dropping their special colors", () => {
-        const [entry] = normalizeFeatureSearchState([{
-            query: "true",
-            searchStyleRules: [{
-                geometry: ["line"], filter: [],
-                color: {
-                    mode: "gradient", field: "speed",
-                    stops: [{value: 1, color: "#0000ff"}, {value: 253, color: "#ff0000"}],
-                    domain: {schemaId: "saved-graph", domainId: 7},
-                    specials: [{value: 255, color: "#00ffff"}]
-                }
-            }]
-        }]);
-        expect(entry.searchStyleRules[0].color).toMatchObject({
-            schemaTypes: [{schemaId: "saved-graph", typeId: 7}],
-            specials: [{value: 255, color: "#00ffff"}]
-        });
-        expect(entry.searchStyleRules[0].color).not.toHaveProperty("domain");
+    it.each(["schemaTypes", "schemaType", "domain"])("discards obsolete %s restrictions without losing saved colors", key => {
+        const color = {mode: "gradient", field: "speed",
+            stops: [{value: 1, color: "#0000ff"}, {value: 253, color: "#ff0000"}],
+            specials: [{value: 255, color: "#00ffff"}]};
+        const [entry] = normalizeFeatureSearchState([{query: "true", searchStyleRules: [{
+            geometry: ["line"], filter: [], color: {...color, [key]: {schemaId: "old", typeId: 0}}
+        }]}]);
+        expect(entry.searchStyleRules[0].color).toEqual(color);
         expect(normalizeFeatureSearchState([entry])[0].searchStyleRules).toEqual(entry.searchStyleRules);
     });
 
-    it("uses fallback instead of reviving a legacy guard when the current guard is invalid", () => {
-        const [entry] = normalizeFeatureSearchState([{
-            query: "true",
-            searchStyleRules: [{geometry: ["line"], filter: [], color: {
-                mode: "gradient", field: "speed", stops: [], fallbackColor: "#abcdef",
-                schemaType: {schemaId: "current", typeId: 0},
-                domain: {schemaId: "legacy", domainId: 7},
-                specials: [{value: 255, color: "#00ffff"}]
-            }}]
-        }]);
+    it("uses fallback for malformed exceptional-value colors", () => {
+        const [entry] = normalizeFeatureSearchState([{query: "true", searchStyleRules: [{
+            geometry: ["line"], filter: [], color: {mode: "gradient", field: "speed", stops: [],
+                fallbackColor: "#abcdef", specials: {value: 255, color: "#00ffff"}}
+        }]}]);
         expect(entry.searchStyleRules[0].color).toEqual({mode: "solid", color: "#abcdef"});
     });
 

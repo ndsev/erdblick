@@ -504,16 +504,13 @@ Linear keys must be finite, numeric, and strictly increasing. Colors are
 interpolated between adjacent stops. `fallback` handles null, unsupported
 types, and values which cannot be mapped.
 
-Schema-generated numeric scales can accept several verified equivalent source
-types and give named exceptional values their own colors:
+Numeric scales can give exceptional raw values their own colors without binding
+the style to a schema hash or type ID:
 
 ```yaml
 color-scale:
   mode: linear
   expression: "properties.speed"
-  schemaTypes:
-    - {schemaId: "<exact schema token>", typeId: 42}
-    - {schemaId: "<another equivalent schema token>", typeId: 198}
   stops:
     - [1, blue]
     - [253, red]
@@ -524,25 +521,27 @@ color-scale:
   fallback: white
 ```
 
-This example illustrates a type whose ordinary range is 1–253; discover the
-actual token, type ID, field path and meanings from the selected source. Special
-colors are checked before gradient interpolation or categorical lookup. Removing
-a special override routes that value to the fallback. Values outside the
-type's ordinary ranges also use the fallback. A schema/type outside the accepted list, or an
-unqualified computed number, cannot reuse a bound scale. Equivalent speed types
-from several maps share two generated rules: points and other geometry. Types
-with different units, ranges or named special values remain separate. Existing
-manual scales without type guards retain their unrestricted behavior. `specials` requires an
-exact schema type guard and finite numeric keys; saved YAML preserves both the
-guards and edited colors. Historical `schemaType: {schemaId, typeId}` and
-`domain: {schemaId, domainId}` guards remain accepted when loading local searches
-or YAML styles, including server-hosted styles. Import normalizes them to the
-`schemaTypes` list emitted by newly generated styles.
+This example illustrates an ordinary range of 1–253. Check the field path, units,
+and exceptional raw values in the selected data. Explicit special colors are
+checked before interpolation or categorical lookup, including for computed
+numbers. They require unique finite numeric keys and work across schema versions.
+
+When `specials` is present, the renderer also consults the value's current type
+metadata: unlisted named exceptions and values outside its ordinary ranges use
+the fallback. Keep `specials: []` after deleting all overrides to retain this
+behavior. A plain computed number has no metadata to classify further exceptions.
+Manual scales without `specials` retain their ordinary raw-value behavior.
+
+Automatic styles compare numeric meaning while preparing palettes, including
+units, ranges, encoding and named exceptions. Equivalent sources share the two
+geometry rules; different meanings remain separate. The resulting scales do not
+store schema hashes or type IDs. Color scales contain no source identity
+restrictions; the expression and raw-value stops determine where they apply.
 
 Generated symbolic category scales combine labels across schema versions of the
 same field. Adding an enum entry or changing its wire ordinal does not change
-the color assigned to an existing logical label. The combined scale retains all
-accepted exact type identities and the union of category stops. This applies to
+the color assigned to an existing logical label. The combined scale retains the
+union of category stops without binding their source identities. This applies to
 new automatic styles; edited palettes are not merged or recolored.
 
 Stops use raw source numbers. The search editor can label scaled units and choose

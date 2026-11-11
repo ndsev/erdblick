@@ -291,8 +291,7 @@ export class SearchStyleRuleDraftCodec {
                 stops: serializableCategoryStops(
                     color,
                     this.fieldOption(color.field)?.valueKind ?? color.categoryValueKind),
-                ...(color.schemaTypes ? {schemaTypes: color.schemaTypes.map(type => ({...type}))} : {}),
-                ...(color.schemaTypes && color.specialStops ? {specials: color.specialStops.flatMap(stop =>
+                ...(color.specialStops ? {specials: color.specialStops.flatMap(stop =>
                     stop.value === null ? [] : [{value: stop.value, color: stop.color}])} : {}),
                 ...(color.fallbackEnabled === false ? {} : {fallbackColor})
             };
@@ -311,8 +310,7 @@ export class SearchStyleRuleDraftCodec {
             field: color.field,
             ...(color.customField ? {customField: true} : {}),
             stops: serializableGradientStops(color) ?? [],
-            ...(color.schemaTypes ? {schemaTypes: color.schemaTypes.map(type => ({...type}))} : {}),
-            ...(color.schemaTypes && color.specialStops ? {specials: color.specialStops.flatMap(stop =>
+            ...(color.specialStops ? {specials: color.specialStops.flatMap(stop =>
                 stop.value === null ? [] : [{value: stop.value, color: stop.color}])} : {}),
             ...(color.fallbackEnabled === false ? {} : {fallbackColor})
         };
@@ -336,7 +334,6 @@ export class SearchStyleRuleDraftCodec {
                 field,
                 customField: !!color.customField,
                 categoryValueKind: categoryValueKind(color.stops),
-                ...(color.schemaTypes ? {schemaTypes: color.schemaTypes.map(type => ({...type}))} : {}),
                 ...(color.specials ? {specialStops: gradientStopsToDraft(color.specials, () => this.nextColorStopId++)} : {}),
                 solidColor: fallbackColor,
                 fallbackEnabled: color.fallbackColor !== undefined,
@@ -352,7 +349,6 @@ export class SearchStyleRuleDraftCodec {
             solidColor: fallbackColor,
             fallbackEnabled: color.fallbackColor !== undefined,
             fallbackColor,
-            ...(color.schemaTypes ? {schemaTypes: color.schemaTypes.map(type => ({...type}))} : {}),
             ...(color.specials ? {specialStops: gradientStopsToDraft(color.specials, () => this.nextColorStopId++)} : {}),
             gradientStops: gradientStopsToDraft(color.stops, () => this.nextColorStopId++)
         };

@@ -67,36 +67,41 @@ describe("search style sheet codec", () => {
         layerIds: readonly string[] = []
     ) => ({name, defaultEnabled, layerIds});
 
-    it.each(["schemaTypes", "schemaType", "domain"])("round-trips type-bound special overrides through saved YAML (%s)", spelling => {
+    it.each([{specials: []}, {specials: [{value: 255, color: "#00ffff"}]}])("round-trips portable special colors through validated YAML (%j)", ({specials}) => {
         const rule: FeatureSearchStyleRule = {geometry: ["line"], filter: [], color: {
             mode: "gradient", field: "speed", stops: [{value: 1, color: "#111111"}, {value: 253, color: "#222222"}],
-            schemaTypes: [{schemaId: "saved-graph", typeId: 7}],
-            specials: [{value: 0, color: "#123456"}, {value: 255, color: "#abcdef"}], fallbackColor: "#ffffff"
+            specials, fallbackColor: "#ffffff"
         }};
-        const saved = convertSearchStyleRulesToYaml(saveOptions("Semantic colors"), [rule]);
-        expect(saved.source).toContain("schemaTypes:");
-        expect(saved.source).not.toContain("domainId:");
-        // Simulate a stylesheet saved before the type terminology change. Both
-        // the editor import and the native runtime must retain its exact guard.
-        const document = load(saved.source) as any;
-        if (spelling !== "schemaTypes") {
-            const scale = document.rules[0]["color-scale"];
-            scale[spelling] = spelling === "domain"
-                ? {schemaId: "saved-graph", domainId: 7} : scale.schemaTypes[0];
-            delete scale.schemaTypes;
-        }
-        const source = dump(document);
-        const loaded = projectStyleSourceForSearch(source, "feature");
-        expect(loaded.rules[0].color).toMatchObject(rule.color);
-        const rewritten = convertSearchStyleRulesToYaml(saveOptions("Semantic colors"), loaded.rules);
-        expect(rewritten.source).toContain("schemaTypes:");
-        expect(rewritten.source).not.toContain("domainId:");
-        const style = uint8ArrayToWasm(data => new coreLib.FeatureLayerStyle(data), new TextEncoder().encode(source))!;
+        const saved = convertSearchStyleRulesToYaml(saveOptions("Portable speed colors"), [rule]);
+        expect(saved.source).not.toContain("schemaTypes:");
+        const imported = projectStyleSourceForSearch(saved.source, "feature");
+        expect(imported.omissions).toEqual([]);
+        expect(imported.rules[0].color).toMatchObject(rule.color);
+        const rewritten = convertSearchStyleRulesToYaml(saveOptions("Portable speed colors"), imported.rules);
+        expect(rewritten.source).not.toContain("schemaTypes:");
+        expect((load(rewritten.source) as any).rules[0]["color-scale"].specials)
+            .toEqual(specials.map(stop => [stop.value, stop.color]));
+        const style = uint8ArrayToWasm(data => new coreLib.FeatureLayerStyle(data), new TextEncoder().encode(rewritten.source))!;
         try {
             expect(style.isValid(), JSON.stringify(style.validationReport())).toBe(true);
         } finally {
             style.delete();
         }
+    });
+
+    it.each(["schemaTypes", "schemaType", "domain"])("drops obsolete %s restrictions when importing saved YAML", key => {
+        const rule: FeatureSearchStyleRule = {geometry: ["line"], filter: [], color: {
+            mode: "gradient", field: "speed", stops: [{value: 1, color: "#111111"}, {value: 253, color: "#222222"}],
+            specials: [{value: 0, color: "#123456"}, {value: 255, color: "#abcdef"}], fallbackColor: "#ffffff"
+        }};
+        const saved = convertSearchStyleRulesToYaml(saveOptions("Portable colors"), [rule]);
+        const document = load(saved.source) as {rules: Array<Record<string, Record<string, unknown>>>};
+        document.rules[0]["color-scale"][key] = {schemaId: "obsolete", typeId: 0};
+        const imported = projectStyleSourceForSearch(dump(document), "feature");
+        expect(imported.rules[0].color).toMatchObject(rule.color);
+        expect(imported.rules[0].color).not.toHaveProperty(key);
+        const rewritten = convertSearchStyleRulesToYaml(saveOptions("Portable colors"), imported.rules);
+        expect(rewritten.source).not.toContain(`${key}:`);
     });
 
     it.each(["gradient", "categories"] as const)("preserves an omitted %s fallback through YAML", mode => {

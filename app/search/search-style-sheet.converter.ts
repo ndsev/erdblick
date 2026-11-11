@@ -11,7 +11,6 @@ import {
     searchStyleRuleAppliesTo
 } from "./search-definition.model";
 import {searchStyleColorProperties} from "./search-style-color.util";
-import {colorScaleTypesSchema} from "../mapdata/schema-type.model";
 
 const SUPPORTED_SEARCH_STYLE_OPERATORS = new Set(["=", "==", "!=", "<", "<=", ">", ">=", "contains"]);
 const ALL_GEOMETRY_TYPES = ["point", "line", "polygon", "mesh", "aabb", "gltf"];
@@ -621,13 +620,9 @@ function colorFromStyle(raw: Record<string, unknown>): FeatureSearchColorMode | 
         if (fallback !== undefined && (typeof fallback !== "string" || !normalizeHexLiteral(fallback))) {
             return undefined;
         }
-        // Read old saved YAML guards once at import; newly generated YAML uses
-        // schemaTypes and never publishes competing spellings.
-        const schemaTypes = colorScaleTypesSchema.safeParse(scale);
-        if (!schemaTypes.success) return undefined;
         const specials: Array<{value: unknown; color: string}> = [];
         if (scale["specials"] !== undefined) {
-            if (!schemaTypes.data || !Array.isArray(scale["specials"])) return undefined;
+            if (!Array.isArray(scale["specials"])) return undefined;
             for (const stop of scale["specials"]) {
                 if (!Array.isArray(stop) || stop.length !== 2 || !isFiniteNumber(stop[0]) ||
                     typeof stop[1] !== "string" || !normalizeHexLiteral(stop[1])) return undefined;
@@ -639,7 +634,6 @@ function colorFromStyle(raw: Record<string, unknown>): FeatureSearchColorMode | 
             field: expression,
             customField: true,
             stops: parsedStops,
-            ...(schemaTypes.data ? {schemaTypes: schemaTypes.data} : {}),
             ...(scale["specials"] !== undefined ? {specials} : {}),
             ...(typeof fallback === "string" ? {fallbackColor: normalizeHexLiteral(fallback)!} : {})
         };

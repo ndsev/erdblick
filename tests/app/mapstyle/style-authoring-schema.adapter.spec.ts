@@ -31,13 +31,12 @@ describe("native style authoring contract", () => {
         expect(fields).not.toContain("fidelity");
     });
 
-    it("edits saved search special colors without losing the source type or ordinary stops", () => {
+    it("edits saved search special colors without losing ordinary stops", () => {
         const saved = convertSearchStyleRulesToYaml(
             {name: "Domain colors", defaultEnabled: true, layerIds: ["Road"]},
             [{geometry: ["line"], filter: [], color: {
                 mode: "gradient", field: "speed",
                 stops: [{value: 1, color: "#111111"}, {value: 253, color: "#222222"}],
-                schemaTypes: [{schemaId: "source-graph", typeId: 7}],
                 specials: [{value: 0, color: "#123456"}, {value: 255, color: "#654321"}],
                 fallbackColor: "#ffffff"
             }}],
@@ -50,6 +49,8 @@ describe("native style authoring contract", () => {
         form.model = new StyleDocumentModel(saved.source);
         form.ngOnChanges();
         expect(form.unknownKeys).toEqual([]);
+        expect(Object.keys(form.catalog.records["color-scale"]).sort())
+            .toEqual(["expression", "fallback", "mode", "specials", "stops"]);
 
         // Exercise the same stop-cell edit as the shared Quick editor after Save and Open.
         const control = new StyleFieldInputComponent();
@@ -64,7 +65,6 @@ describe("native style authoring contract", () => {
         const result = projectStyleSourceForSearch(control.model.source, "feature");
         expect(result.omissions).toEqual([]);
         expect(result.rules[0].color).toMatchObject({
-            schemaTypes: [{schemaId: "source-graph", typeId: 7}],
             stops: [{value: 1, color: "#111111"}, {value: 253, color: "#222222"}],
             specials: [{value: 0, color: "#abcdef"}, {value: 255, color: "#654321"}],
             fallbackColor: "#ffffff"

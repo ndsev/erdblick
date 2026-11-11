@@ -1,8 +1,8 @@
 /**
  * Small native type projections used by inspection and search-style controls.
  * These describe one field's meaning, not a second schema graph in TypeScript.
- * The exact schema/type identity prevents two identically named fields with
- * different units or sentinel values from being merged into one color scale.
+ * Exact identities locate metadata in the installed schema. Color-scale reuse
+ * compares units, ranges and sentinel meanings rather than those identities.
  */
 import {z} from "zod";
 
@@ -16,33 +16,6 @@ export const schemaTypeIdentitySchema = z.object({
 });
 
 export type SchemaTypeIdentity = z.infer<typeof schemaTypeIdentitySchema>;
-
-/**
- * Saved searches and YAML styles predate the typeId spelling. Accept their
- * legacy numeric key only while reading persisted input; the normalized value
- * and all native worker messages use the current schema/type identity.
- */
-export const legacySchemaTypeIdentitySchema = z.object({
-    schemaId: schemaTypeIdentitySchema.shape.schemaId,
-    domainId: schemaTypeIdentitySchema.shape.typeId
-}).transform(value => ({schemaId: value.schemaId, typeId: value.domainId}));
-
-/**
- * A saved color scale can cover several verified equivalent source types.
- * Read historical singular guards at the persistence/YAML boundary; an invalid
- * current spelling must not fall through to a different legacy guard.
- */
-export const colorScaleTypesSchema = z.preprocess((value) => {
-    if (!value || typeof value !== "object") return value;
-    const input = value as Record<string, unknown>;
-    if (input["schemaTypes"] !== undefined) return input["schemaTypes"];
-    if (input["schemaType"] !== undefined) return [input["schemaType"]];
-    if (input["domain"] !== undefined) {
-        const old = legacySchemaTypeIdentitySchema.safeParse(input["domain"]);
-        return old.success ? [old.data] : [input["domain"]];
-    }
-    return undefined;
-}, z.array(schemaTypeIdentitySchema).min(1).optional());
 
 /** Presentation metadata borrowed from one installed native type. */
 export const schemaScalarTypeSchema = schemaTypeIdentitySchema.extend({

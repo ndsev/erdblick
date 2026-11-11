@@ -5,6 +5,23 @@ import {SearchStyleColorComponent} from "../../../app/search/search-style-color.
 import {defaultSearchStyleColorDraft} from "../../../app/search/search-style-color.util";
 
 describe("SearchStyleColorComponent", () => {
+    it("refreshes observed colors without binding a source or restoring deleted overrides", () => {
+        const component = new SearchStyleColorComponent() as any;
+        component.draft = {...defaultSearchStyleColorDraft("speed"), specialStops: []};
+        component.ngOnChanges({draft: {}});
+        const type = {schemaId: "new-schema-version", typeId: 19, typeName: "Speed",
+            namedValues: [{name: "UNLIMITED", value: 255, valueType: "integer", role: "special",
+                meaning: "unbounded", deprecated: false, removed: false}]};
+        const retained = component.observedColorBinding({schemaType: type});
+        expect(retained).not.toHaveProperty("schemaTypes");
+        expect(retained.specialStops).toEqual([]);
+
+        component.viewDraft.specialStops = undefined;
+        const initialized = component.observedColorBinding({schemaType: type});
+        expect(initialized).not.toHaveProperty("schemaTypes");
+        expect(initialized.specialStops.map((stop: {value: number}) => stop.value)).toEqual([255]);
+    });
+
     it("keeps category select options stable until the selected field changes", () => {
         const component = new SearchStyleColorComponent() as any;
         component.draft = {
