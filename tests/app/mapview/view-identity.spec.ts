@@ -16,15 +16,18 @@ import { FeatureWrapper } from '../../../app/mapdata/feature-inspection.adapter'
 import { Cartographic } from '../../../app/integrations/geo.adapter';
 import { VIEW_SYNC_POSITION, VIEW_SYNC_PROJECTION } from "../../../app/mapview/mapview.model";
 
+/**
+ * Shares the startup notification service between the registry and state owners.
+ * Recovery tests can then verify the errors shown for rejected persisted state.
+ */
 function setup(params: Record<string, unknown> = {}) {
     const messages = { showError: vi.fn(), showWarning: vi.fn() };
-    const toasts = { add: vi.fn() };
     const registry = new AppStateService({
         events: new Subject(), navigate: vi.fn().mockResolvedValue(true),
         routerState: { snapshot: { root: { queryParams: params } } }
-    } as never, toasts as never);
+    } as never, messages as never);
     const owners = new StateOwners(registry, messages as never);
-    return { registry, owners, messages, toasts };
+    return { registry, owners, messages };
 }
 
 beforeEach(() => { localStorage.clear(); window.history.replaceState({}, '', '/'); });
@@ -86,7 +89,7 @@ describe('logical view identity', () => {
             localStorage.setItem('visibility', JSON.stringify([[false], [true]]));
             localStorage.setItem('STY0~0~active', '0:1');
         }
-        const { registry, owners: { viewSettings: views, coordinates, layerState: layers }, toasts } = setup();
+        const { registry, owners: { viewSettings: views, coordinates, layerState: layers }, messages } = setup();
         try {
             expect(() => registry.initializePersistence()).not.toThrow();
             expect(registry.ready.value).toBe(true);
@@ -99,7 +102,7 @@ describe('logical view identity', () => {
                 position: [0, 0, 0]
             });
             expect(coordinates.state.marker).toBe(true);
-            expect(toasts.add).not.toHaveBeenCalled();
+            expect(messages.showError).not.toHaveBeenCalled();
             expect(() => views.setBackgroundState(1, 'osm', 50)).toThrow('unavailable');
             if (source === 'storage') {
                 expect(layers.layerVisibilityState.getValue(0)).toEqual([false]);
@@ -118,7 +121,7 @@ describe('logical view identity', () => {
         localStorage.setItem('numberOfViews', '1');
         localStorage.setItem('osm', JSON.stringify(['1~27', '0~40']));
         localStorage.setItem('cameraView', JSON.stringify([{ lon: 7, lat: 8, alt: 900 }]));
-        const { registry, owners: { viewSettings: views }, toasts } = setup({
+        const { registry, owners: { viewSettings: views }, messages } = setup({
             n: '2', vid: '5,5', osm: '0~6', lon: '42.5'
         });
         try {
@@ -127,7 +130,8 @@ describe('logical view identity', () => {
             expect(views.viewIds).toEqual(['8']);
             expect(views.getBackgroundState(0)).toEqual({ layerId: 'osm', opacity: 27 });
             expect(views.cameraViewDataState.getValue(0).destination).toEqual({ lon: 7, lat: 8, alt: 900 });
-            expect(toasts.add).toHaveBeenCalled();
+            expect(messages.showError).toHaveBeenCalledWith(
+                expect.stringContaining('Could not restore '), {scope: 'state-hydration'});
         } finally {
             registry.ngOnDestroy();
         }
@@ -433,34 +437,37 @@ describe('logical view identity', () => {
         localStorage.setItem('numberOfViews', '2');
         localStorage.setItem('cameraView', JSON.stringify([{ lon: 11, lat: 48, alt: 300 }, { lon: 12, lat: 49, alt: 400 }]));
         localStorage.setItem('marker', 'true');
-        const { registry, owners, messages, toasts } = setup();
+        const { registry, owners, messages } = setup();
         expect(() => registry.initializePersistence()).not.toThrow();
         expect(registry.ready.value).toBe(true);
         expect(new Set(owners.viewSettings.viewIds).size).toBe(2);
         expect(owners.viewSettings.cameraViewDataState.getValue(1).destination).toEqual({ lon: 12, lat: 49, alt: 400 });
         expect(owners.coordinates.state.marker).toBe(true);
-        expect(toasts.add).toHaveBeenCalled();
+        expect(messages.showError).toHaveBeenCalledWith(
+            expect.stringContaining('Could not restore '), {scope: 'state-hydration'});
         registry.ngOnDestroy();
     });
 
     it.each(['{', '0', '100', '"bad"'])('recovers a corrupt saved count while retaining valid identities: %s', count => {
         localStorage.setItem('viewIds', '["5","6"]');
         localStorage.setItem('numberOfViews', count);
-        const { registry, owners, messages, toasts } = setup();
+        const { registry, owners, messages } = setup();
         expect(() => registry.initializePersistence()).not.toThrow();
         expect(registry.ready.value).toBe(true);
         expect(owners.viewSettings.viewIds).toEqual(['5', '6']);
-        expect(toasts.add).toHaveBeenCalled();
+        expect(messages.showError).toHaveBeenCalledWith(
+            expect.stringContaining('Could not restore '), {scope: 'state-hydration'});
         registry.ngOnDestroy();
     });
 
     it('reports invalid startup identities and still completes startup with valid saved state', () => {
         localStorage.setItem('numberOfViews', '2');
-        const { registry, owners, messages, toasts } = setup({ n: '2', vid: '5,5' });
+        const { registry, owners, messages } = setup({ n: '2', vid: '5,5' });
         registry.initializePersistence();
         expect(registry.ready.value).toBe(true);
         expect(new Set(owners.viewSettings.viewIds).size).toBe(2);
-        expect(toasts.add).toHaveBeenCalled();
+        expect(messages.showError).toHaveBeenCalledWith(
+            expect.stringContaining('Could not restore '), {scope: 'state-hydration'});
         registry.ngOnDestroy();
     });
 });
