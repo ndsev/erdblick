@@ -142,6 +142,12 @@ Running **Search Features and Attributes** opens a persistent Search panel with
 its own query, map/layer and view selection, results, visualization and diagnostics.
 Results arrive progressively; visible matches do not mean the search has finished.
 
+The progress bar counts a tile once its results have arrived and been decoded,
+and stays forward-moving within a run. **Organizing results** means the viewer is
+finishing the result tree; **Complete** means the results are ready. Hover the bar
+for the detailed tile and result-tree counts.
+A rerun or an area update after completion starts fresh progress.
+
 Important controls:
 
 - **Docked or floating panel** - keep a search in the Search dock, undock it into a dialog, reorder docked panels by dragging their headers, or keep several searches open side by side.

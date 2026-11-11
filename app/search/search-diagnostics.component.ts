@@ -16,7 +16,9 @@ const INTERNAL_SEARCH_RESULT_FIELDS = new Set(["$layer", "$name", "$validityCoun
 /** Presents search diagnostics or its compact progress strip without owning summary computation. */
 @Component({selector: "search-diagnostics", changeDetection: ChangeDetectionStrategy.OnPush, standalone: false, host: {style: "display:contents"},
     template: `@if (mode === 'progress') {            <div class="feature-search-controls">
-                <div class="feature-search-progress-meter" [title]="progressTooltip">
+                <div class="feature-search-progress-meter" [title]="progressTooltip"
+                     role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                     [attr.aria-valuenow]="progressDisplayPercent" [attr.aria-valuetext]="progressLabel">
                     <p-metergroup [value]="progressMeterItems"
                                   [min]="0"
                                   [max]="100"
@@ -25,6 +27,7 @@ const INTERNAL_SEARCH_RESULT_FIELDS = new Set(["$layer", "$name", "$validityCoun
                     </p-metergroup>
                     <span class="feature-search-progress-label"
                           [style.--feature-search-progress]="progressDisplayPercent + '%'">
+                        @if (finishingResults) { <i class="pi pi-spinner pi-spin" aria-hidden="true"></i> }
                         {{ progressLabel }}
                     </span>
                 </div>
@@ -211,25 +214,19 @@ export class SearchDiagnosticsComponent implements OnChanges, OnDestroy {
 
     percentDone: number = 0;
 
-    resultTileIngressPercent: number = 0;
-
-    resultTreeIngressPercent: number = 0;
-
     progressMeterItems: MeterItem[] = [];
 
     totalTiles: number = 0;
 
     doneTiles: number = 0;
 
-    resultTileIngressDone: number = 0;
-
-    resultTileIngressTotal: number = 0;
-
     resultTreeIngressDone: number = 0;
 
     resultTreeIngressTotal: number = 0;
 
     progressDisplayPercent = 0;
+
+    finishingResults = false;
 
     progressLabel = "Preparing search...";
 
@@ -243,11 +240,9 @@ export class SearchDiagnosticsComponent implements OnChanges, OnDestroy {
 
     featureSearchScopeSummaryTitle = "";
 
-    private readonly progressPhaseWeights = {
-        search: 70,
-        ingress: 20,
-        tree: 10
-    };
+    private progressRunKey = "";
+    private progressHighWater = 0;
+    private progressWasComplete = false;
 
     private progressDisplayRefreshQueued = false;
 
@@ -316,9 +311,8 @@ export class SearchDiagnosticsComponent implements OnChanges, OnDestroy {
 
     /** Human-readable wait label for deferred value summaries. */
     protected valueSummaryWaitLabel(): string {
-        const total = this.resultTileIngressTotal || this.totalTiles;
-        if (this.resultTileIngressDone < total) {
-            return `Waiting for result chunks: ${this.resultTileIngressDone} / ${total} ingested.`;
+        if (this.doneTiles < this.totalTiles) {
+            return `Waiting for result tiles: ${this.doneTiles} / ${this.totalTiles} ingested.`;
         }
         return "Waiting for backend search to finish.";
     }
@@ -377,13 +371,16 @@ export class SearchDiagnosticsComponent implements OnChanges, OnDestroy {
         return Math.max(0, Math.min(100, Math.round((done / total) * 100)));
     }
 
-    /** Scales one phase completion percentage to its visual share in the metered progress bar. */
-    private progressPhaseValue(percent: number, share: number): number {
-        return Math.max(0, Math.min(share, (percent / 100) * share));
-    }
-
-    /** Updates the compact multi-phase progress display from the current session and tree state. */
+    /**
+     * Count each requested tile once its current result rows have been decoded.
+     * This covers backend processing and transfer without jumping to almost
+     * complete while most results are still in transit. The required tile set
+     * is already known; result-row totals keep growing as those tiles arrive.
+     * Giving an early, tiny row batch an independent percentage made the old
+     * meter jump backwards when the next large batch arrived.
+     */
     private refreshProgressDisplay(session: FeatureSearchSession): void {
+        this.finishingResults = false;
         // Disabled searches are not prepared on restore. Their saved settings
         // remain inspectable, without suggesting that background work is running.
         if (!session.definition.enabled) {
@@ -403,54 +400,47 @@ export class SearchDiagnosticsComponent implements OnChanges, OnDestroy {
             this.progressDisplayPercent = 0;
             return;
         }
-        this.percentDone = this.progressPercent(session.results.progressDone, session.results.progressTotal);
-        this.totalTiles = session.results.progressTotal;
-        this.doneTiles = session.results.progressDone;
-        this.resultTileIngressDone = session.results.resultTileIngressDone;
-        this.resultTileIngressTotal = session.results.resultTileIngressTotal;
-        this.resultTileIngressPercent = this.progressPercent(
-            session.results.resultTileIngressDone,
-            session.results.resultTileIngressTotal || session.results.progressTotal
+        this.totalTiles = session.results.resultTileIngressTotal;
+        this.doneTiles = session.results.resultTileIngressDone;
+        this.percentDone = this.progressPercent(this.doneTiles, this.totalTiles);
+        this.resultTreeIngressTotal = session.results.searchResults.length;
+        this.resultTreeIngressDone = Math.min(this.treeIngress.done, this.resultTreeIngressTotal);
+        const treePending = this.resultTreeIngressDone < this.resultTreeIngressTotal;
+        const complete = !session.paused && session.results.complete && !treePending;
+        const runKey = JSON.stringify([session.id, session.runId, session.refresh, session.startTime]);
+        if (runKey !== this.progressRunKey || (this.progressWasComplete && !session.results.complete)) {
+            this.progressRunKey = runKey;
+            this.progressHighWater = 0;
+        }
+        // Coverage can grow during auto-update. Preserve the progress already
+        // shown within this run; a rerun or renewed coverage after completion
+        // starts a fresh meter. Reserve 100% for finalization.
+        this.progressHighWater = Math.max(
+            this.progressHighWater,
+            complete ? 100 : Math.min(99, this.percentDone)
         );
-        this.refreshResultTreeIngressProgress(session);
-        const ingressPercent = this.resultTileIngressTotal > 0
-            ? this.resultTileIngressPercent
-            : (session.results.backendComplete ? 100 : 0);
-        const treePercent = this.resultTreeIngressTotal > 0
-            ? this.resultTreeIngressPercent
-            : (session.results.complete ? 100 : 0);
-        this.progressMeterItems = session.results.complete
-            ? [{ label: "Complete", value: 100, color: "var(--p-primary-color)" }]
-            : [
-                {
-                    label: "Search",
-                    value: this.progressPhaseValue(this.percentDone, this.progressPhaseWeights.search),
-                    color: "var(--p-blue-500)"
-                },
-                {
-                    label: "Ingress",
-                    value: this.progressPhaseValue(ingressPercent, this.progressPhaseWeights.ingress),
-                    color: "var(--p-cyan-500)"
-                },
-                {
-                    label: "Result tree",
-                    value: this.progressPhaseValue(treePercent, this.progressPhaseWeights.tree),
-                    color: "var(--p-primary-color)"
-                }
-            ].filter(item => (item.value ?? 0) > 0);
-        this.progressDisplayPercent = session.results.complete
-            ? 100
-            : Math.round(this.progressMeterItems.reduce((sum, item) => sum + Number(item.value ?? 0), 0));
-        const tileTotal = this.resultTileIngressTotal || this.totalTiles;
-        const treeSuffix = this.resultTreeIngressTotal > 0 && this.resultTreeIngressDone < this.resultTreeIngressTotal
-            ? `, tree ${this.resultTreeIngressDone}/${this.resultTreeIngressTotal}`
-            : "";
-        this.progressLabel = session.results.complete
-            ? `Complete, ${this.doneTiles}/${this.totalTiles} tiles`
-            : `Search ${this.doneTiles}/${this.totalTiles}, ingress ${this.resultTileIngressDone}/${tileTotal} chunks${treeSuffix}`;
+        this.progressDisplayPercent = this.progressHighWater;
+        this.progressWasComplete = !session.paused && session.results.complete;
+        const tilesReady = this.totalTiles > 0 && this.doneTiles >= this.totalTiles;
+        this.finishingResults = !complete && tilesReady && !session.paused;
+        // Use the stable percentage in the label too. Coverage changes can
+        // alter the raw counts; their exact values stay in the tooltip.
+        if (session.paused) {
+            this.progressLabel = `Paused, ${this.progressDisplayPercent}%`;
+        } else if (complete) {
+            this.progressLabel = `Complete, ${this.doneTiles}/${this.totalTiles} tiles`;
+        } else if (tilesReady) {
+            this.progressLabel = "Organizing results…";
+        } else {
+            this.progressLabel = `Searching, ${this.progressDisplayPercent}%`;
+        }
+        this.progressMeterItems = [{
+            label: this.progressLabel,
+            value: this.progressDisplayPercent,
+            color: "var(--p-primary-color)"
+        }];
         this.progressTooltip = [
-            `Search backend: ${this.doneTiles} / ${this.totalTiles} tiles`,
-            `Result chunk ingress: ${this.resultTileIngressDone} / ${tileTotal} chunks`,
+            `Received and decoded: ${this.doneTiles} / ${this.totalTiles} tiles`,
             `Result tree: ${this.resultTreeIngressDone} / ${this.resultTreeIngressTotal} entries`
         ].join("\n");
     }
@@ -486,15 +476,6 @@ export class SearchDiagnosticsComponent implements OnChanges, OnDestroy {
             this.refreshProgressDisplay(pendingSession);
             this.changeDetector.detectChanges();
         }));
-    }
-
-    /** Tracks how far the PrimeNG result tree has consumed the streamed result array. */
-    private refreshResultTreeIngressProgress(session: FeatureSearchSession): void {
-        this.resultTreeIngressTotal = session.results.searchResults.length;
-        this.resultTreeIngressDone = Math.min(this.treeIngress.done, this.resultTreeIngressTotal);
-        this.resultTreeIngressPercent = this.resultTreeIngressTotal > 0
-            ? this.progressPercent(this.resultTreeIngressDone, this.resultTreeIngressTotal)
-            : this.resultTileIngressPercent;
     }
 
     /** Refreshes the compact scope label from the same schema metadata used by the style field picker. */

@@ -121,6 +121,109 @@ describe("Search panel change detection", () => {
         expect(f.markForCheck).not.toHaveBeenCalled();
     });
 
+    it("keeps progress forward when streamed results and source totals grow", async () => {
+        const f = fixture();
+        f.session.results.progressDone = 2;
+        f.session.results.resultTileIngressDone = 2;
+        f.diagnostics.ngOnChanges();
+        await Promise.resolve();
+        expect(f.diagnostics.progressDisplayPercent).toBe(50);
+
+        // New coverage and later source reports must not take displayed progress
+        // away. Only fully received/decoded tiles contribute to the percentage.
+        f.session.results.resultTileIngressTotal = 8;
+        f.session.results.progressTotal = 8;
+        f.diagnostics.ngOnChanges();
+        await Promise.resolve();
+        expect(f.diagnostics.progressDisplayPercent).toBe(50);
+        f.session.results.progressDone = 6;
+        f.session.results.resultTileIngressDone = 6;
+        f.diagnostics.ngOnChanges();
+        await Promise.resolve();
+        expect(f.diagnostics.progressDisplayPercent).toBe(75);
+        expect(f.diagnostics.progressMeterItems).toHaveLength(1);
+
+        f.session.results.progressDone = 4;
+        f.diagnostics.ngOnChanges();
+        await Promise.resolve();
+        expect(f.diagnostics.progressLabel).toBe("Searching, 75%");
+        expect(f.diagnostics.progressTooltip).toContain("Received and decoded: 6 / 8 tiles");
+    });
+
+    it("waits for receiving and tree work, even before the tree's first report", async () => {
+        const f = fixture();
+        f.session.results.progressDone = 4;
+        f.session.results.backendComplete = true;
+        f.session.results.resultTileIngressDone = 1;
+        f.diagnostics.ngOnChanges();
+        await Promise.resolve();
+        expect(f.diagnostics.progressLabel).toBe("Searching, 25%");
+        expect(f.diagnostics.progressDisplayPercent).toBe(25);
+        expect(f.diagnostics.finishingResults).toBe(false);
+
+        f.session.results.searchResults.push({
+            label: "Road.1", mapId: "Map", layerId: "Road", featureId: "Road.1",
+            resultIndex: 0, resultKey: "one", mapTileKey: "tile", sourceTileKey: "tile",
+            sourceMapId: "Map", sourceLayerId: "Road", sourceTileId: 1, hoverFeatureId: "Road.1"
+        });
+        f.session.results.resultTileIngressDone = 4;
+        f.session.results.complete = true;
+        f.diagnostics.ngOnChanges();
+        await Promise.resolve();
+        expect(f.diagnostics.progressLabel).toBe("Organizing results…");
+        expect(f.diagnostics.progressDisplayPercent).toBe(99);
+        expect(f.diagnostics.finishingResults).toBe(true);
+
+        f.diagnostics.treeIngress = {done: 1, total: 1};
+        f.diagnostics.ngOnChanges();
+        await Promise.resolve();
+        expect(f.diagnostics.progressLabel).toBe("Complete, 4/4 tiles");
+        expect(f.diagnostics.progressDisplayPercent).toBe(100);
+        expect(f.diagnostics.finishingResults).toBe(false);
+    });
+
+    it("starts a fresh meter for a rerun and for new coverage after completion", async () => {
+        const f = fixture();
+        f.session.results.progressDone = 3;
+        f.session.results.resultTileIngressDone = 3;
+        f.diagnostics.ngOnChanges();
+        await Promise.resolve();
+        expect(f.diagnostics.progressDisplayPercent).toBe(75);
+
+        f.session.runId = "rerun";
+        f.session.results.progressDone = 1;
+        f.session.results.resultTileIngressDone = 1;
+        f.diagnostics.ngOnChanges();
+        await Promise.resolve();
+        expect(f.diagnostics.progressDisplayPercent).toBe(25);
+
+        f.session.results.complete = true;
+        f.session.results.progressDone = 4;
+        f.session.results.resultTileIngressDone = 4;
+        f.diagnostics.ngOnChanges();
+        await Promise.resolve();
+        expect(f.diagnostics.progressDisplayPercent).toBe(100);
+
+        f.session.results.complete = false;
+        f.session.results.progressDone = 1;
+        f.session.results.resultTileIngressDone = 1;
+        f.diagnostics.ngOnChanges();
+        await Promise.resolve();
+        expect(f.diagnostics.progressDisplayPercent).toBe(25);
+    });
+
+    it("keeps partial progress when pausing instead of treating paused completion as 100%", async () => {
+        const f = fixture();
+        f.session.results.resultTileIngressDone = 1;
+        f.session.results.complete = true;
+        f.session.paused = true;
+        f.diagnostics.ngOnChanges();
+        await Promise.resolve();
+        expect(f.diagnostics.progressLabel).toBe("Paused, 25%");
+        expect(f.diagnostics.progressDisplayPercent).toBe(25);
+        expect(f.diagnostics.finishingResults).toBe(false);
+    });
+
     it("ignores progress for another search", () => {
         const f = fixture();
         f.progress.next({...f.session, id: "other-search"});

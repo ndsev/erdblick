@@ -46,12 +46,18 @@
       display: flex;
       font-size: 0.78em;
       font-weight: 600;
+      gap: 0.4em;
       inset: 0;
       justify-content: center;
       pointer-events: none;
       position: absolute;
       text-align: center;
       z-index: 1;
+
+      .pi-spinner {
+        color: #fff;
+        -webkit-text-fill-color: currentColor;
+      }
     }
 
     @supports ((-webkit-background-clip: text) or (background-clip: text)) {
