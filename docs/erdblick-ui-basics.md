@@ -20,6 +20,10 @@ places or features, and the **2D/3D controls (3)** to change the projection.
 6. **Diagnostics indicator** – summarizes tile progress, backend connectivity, and error presence.
 7. **Coordinate readout** – shows cursor coordinates and tile IDs and lets you place a shared marker.
 
+The vertical attribution text at the map edge combines notices from loaded map
+data and the background imagery visible in all views. Hover it for the full text
+or click it to open **Copyright and Legal Information**, grouped by source.
+
 The workspace can keep the Search area, a modal tool, and several inspections
 visible at the same time:
 

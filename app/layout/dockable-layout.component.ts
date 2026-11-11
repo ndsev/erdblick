@@ -8,13 +8,13 @@ import {
     Renderer2,
     ViewChild
 } from '@angular/core';
-import { map, Observable, startWith, Subscription } from "rxjs";
+import { Observable, Subscription } from "rxjs";
 import { UiAutomationService } from "../action/ui-automation.service";
 import { AppStateService } from "../appstate/appstate.service";
 import { CoordinatesPolicyService } from "../coordinates/coordinates-policy.service";
 import { environment } from "../environments/environment";
 import { InspectionState } from "../inspection/inspection.state";
-import { MapDataService } from "../mapdata/mapdata.service";
+import { LegalInfoService } from "../mapdata/legalinfo.service";
 import { MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT } from "../mapview/render-view.model";
 import type { FeatureSearchSession } from "../search/search-session.model";
 import { SearchService } from "../search/search.service";
@@ -166,16 +166,12 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
         private featureSearchService: SearchService,
         private cdr: ChangeDetectorRef,
         private viewerUi: UiAutomationService,
-        mapService: MapDataService,
+        legalInfo: LegalInfoService,
         public readonly layout: LayoutService,
         public readonly inspectionState: InspectionState) {
-        // Keep the map-wide legal-information shortcut, but let layout—not a
-        // fixed character limit—shorten its first notice. The dialog lists all notices.
-        this.copyright$ = mapService.legalInformationUpdated.pipe(startWith(true), map(() => {
-            const notices = mapService.legalInformationPerMap.values().next().value;
-            const notice = notices?.values().next().value;
-            return notice ? `© ${notice}` : '';
-        }));
+        // Let available space shorten the visible text; the tooltip and linked
+        // dialog retain the full map-data and background-imagery notices.
+        this.copyright$ = legalInfo.attribution$;
         this.searchSessionsSubscription = this.featureSearchService.sessionsChanged.subscribe(() => this.cdr.markForCheck());
         this.observedDockOpen = this.layout.state.isDockOpen;
         // Synchronous rendering can create the inspection host. Wait until all

@@ -1,8 +1,7 @@
 import { Component } from "@angular/core";
-import { MapDataService } from "./mapdata.service";
+import { LegalInfoService } from "./legalinfo.service";
 import { LEGAL_INFO_DIALOG_LAYOUT_ID } from "../layout/layout.model";
 import { LayoutService } from "../layout/layout.service";
-import { AppStateService } from "../appstate/appstate.service";
 
 @Component({
     selector: 'legal-dialog',
@@ -14,14 +13,18 @@ import { AppStateService } from "../appstate/appstate.service";
                 <table class="stats-table">
                     <thead>
                         <tr>
-                            <th>Map Name</th>
+                            <th>Source</th>
                             <th>Legal Information</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <tr *ngFor="let info of aggregatedLegalInfo">
-                            <td>{{ info.mapName }}</td>
-                            <td>{{ info.entry }}</td>
+                        <tr *ngFor="let info of legalInfo.entries$ | async">
+                            <td>{{ info.source }}</td>
+                            <td>
+                                @for (notice of info.notices; track $index) {
+                                    <p>{{ notice }}</p>
+                                }
+                            </td>
                         </tr>
                     </tbody>
                 </table>
@@ -32,30 +35,16 @@ import { AppStateService } from "../appstate/appstate.service";
     standalone: false
 })
 /**
- * Display the legal and copyright notices supplied by the loaded maps.
- * MapDataService owns their aggregation and publishes changes as sources load;
- * this dialog formats those notices beside the other datasource-facing UI.
+ * Display complete map-data and background-imagery notices with their sources.
+ * The vertical attribution shortcut uses the same reactive collection.
  */
 export class LegalInfoDialogComponent {
     readonly dialogLayoutId = LEGAL_INFO_DIALOG_LAYOUT_ID;
-    public aggregatedLegalInfo: { mapName: string, entry: string }[] = [];
 
-    /** Rebuild map-grouped notices from the currently accumulated tile legal information. */
-    constructor(private mapService: MapDataService,
-        public stateService: AppStateService,
-        public readonly layout: LayoutService) {
-        this.mapService.legalInformationUpdated.subscribe(_ => {
-            this.aggregatedLegalInfo = [];
-            this.mapService.legalInformationPerMap.forEach((entries, mapName) => {
-                if (entries.size) {
-                    this.aggregatedLegalInfo.push({
-                        mapName: mapName,
-                        entry: Array.from(entries).join('\n\n')
-                    })
-                }
-            });
-        });
-    }
+    constructor(
+        public readonly legalInfo: LegalInfoService,
+        public readonly layout: LayoutService
+    ) {}
 
     get dialogVisible(): boolean {
         return this.layout.isDialogOpen(this.dialogLayoutId);

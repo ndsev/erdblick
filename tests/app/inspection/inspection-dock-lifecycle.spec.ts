@@ -76,7 +76,7 @@ function createDock(bridgeFirst: boolean) {
     const component = new DockableLayoutComponent(
         persistence, owners.coordinatePolicy, {} as Renderer2,
         owners.searchService, cdr, {} as never,
-        { legalInformationPerMap: new Map(), legalInformationUpdated: new Subject() } as never,
+        { attribution$: new Subject<string>() } as never,
         owners.layout, owners.inspectionState.state
     );
     const viewer = document.createElement("div");
