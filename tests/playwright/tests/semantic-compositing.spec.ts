@@ -31,7 +31,7 @@ test('semantic compositing can be bypassed, persisted and restored', async ({pag
     await expect.poll(() => page.evaluate(() =>
         localStorage.getItem('semanticCompositingEnabled')
     )).toBe('0');
-    await preferences.getByRole('button', {name: 'Close'}).click();
+    await preferences.getByRole('button', {name: 'Close', exact: true}).click();
 
     await page.reload();
     await expect.poll(() => page.evaluate(() =>

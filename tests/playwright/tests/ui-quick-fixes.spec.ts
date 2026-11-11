@@ -28,7 +28,7 @@ test.describe('UI quick-fix regressions', () => {
         const apply = preferences.getByTestId('apply-feature-zoom-clearance');
         await expect(apply).toBeEnabled();
         await apply.click();
-        await preferences.getByRole('button', {name: 'Close'}).click();
+        await preferences.getByRole('button', {name: 'Close', exact: true}).click();
 
         await page.reload();
         preferences = await openPreferencesDialog(page);
@@ -146,7 +146,7 @@ test.describe('UI quick-fix regressions', () => {
         await expect(coordinateSetting.locator('input')).toBeChecked();
         await coordinateSetting.click();
         await expect(coordinateSetting.locator('input')).not.toBeChecked();
-        await preferences.getByRole('button', {name: 'Close'}).click();
+        await preferences.getByRole('button', {name: 'Close', exact: true}).click();
 
         await expect(page.getByTestId('coordinates-display')).toBeHidden();
         await expect(page.getByTestId('map-marker-toggle')).toBeVisible();

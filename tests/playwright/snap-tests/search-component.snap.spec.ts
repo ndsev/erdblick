@@ -43,7 +43,9 @@ test.describe('Snapshot – search component', () => {
         const featureSearchDialog = page.getByTestId('feature-search-dialog').locator('.p-dialog').first();
         await expect(featureSearchDialog).toBeVisible();
         await expect(featureSearchDialog.getByTestId('feature-search-tree')).toBeVisible();
-        await expect(featureSearchDialog.getByText('Complete, 1/1 tiles', {
+        // This empty-search fixture has no output partitions. The meter now
+        // reports actual received tiles instead of the old minimum-one sentinel.
+        await expect(featureSearchDialog.getByText('Complete, 0/0 tiles', {
             exact: true
         })).toBeVisible();
         await expect(featureSearchDialog.getByText('No matches found.', {
