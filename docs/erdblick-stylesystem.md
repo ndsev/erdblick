@@ -118,65 +118,30 @@ Enable **Point clouds**, then choose a layer preset:
 
 **Colour by object** and **Subtle overlay** can also be combined in the
 layer's style options. All presets retain depth occlusion and object picking.
-Overlay changes point appearance. The style opts into count-based downsampling
-for `PointCloudObject`; picking still identifies the
-containing object. By default, objects with up to 14,000,000 points retain
-every point. Larger objects retain 14,000,000 original
-points, spaced evenly through the object's point sequence, including both
-endpoints. This is deterministic selection by source index; spatial coverage
-depends on source ordering. For example, a 16-million-point object
-retains approximately 87.5% of its points. Zooming out or opening another view
-does not reduce this per-object count. LiveSource converts the complete source
-objects; sampling applies only to visualization.
+Picking identifies the containing object, not an individual point.
 
-**Enable point-cloud downsampling** under **Preferences → Rendering → Point clouds**
-is on by default. **Maximum points per cloud object** sets the same quota for
-the backend and browser, from 100,000 to 14,000,000 points (default 14,000,000).
-Use the slider in 100,000-point steps or enter an exact count in the numeric field.
-With the standard style, the backend samples before transferring geometry; the
-browser retains every delivered point when the result already fits the quota.
-Turning the setting off requests exact backend geometry and renders all delivered
-points, subject to available memory.
+To reduce rendering load:
 
-When at least one object is downsampled, its tile receives a warning in the
-current tile diagnostics and the diagnostics log. The warning covers backend
-and viewer sampling once per tile value; it does not prevent rendering. Tiles
-that retain every point do not warn. An unsampled replacement clears the current
-warning; previous log entries remain as history. Inspection and export stay exact.
+1. Open **Edit -> Preferences -> Rendering -> Point clouds**.
+2. Leave **Enable point-cloud downsampling** on and lower **Maximum points per
+   cloud object**. The range is 100,000 to 14,000,000; the default is 14,000,000.
+   The slider steps by 100,000; the numeric field accepts an exact count.
+3. Press **Apply**. Editing the controls alone does not reload geometry.
 
-Both preferences persist in this browser and are included in
-exported state snapshots; neither is added to shared URLs. Press **Apply** to
-commit the change; dragging the slider alone does not reload geometry. Applying
-a different count releases the old cloud presentation before uploading its replacement,
-so retaining the old records cannot block a reduction in detail. A saved user
-choice takes precedence over the default.
+Objects within the count remain complete; larger objects retain evenly spaced
+original points. This is count-based sampling, not a spatial density guarantee.
+Zooming out or opening another view does not lower the per-object count. Turning
+downsampling off requests full geometry, subject to available memory. Inspection
+and GeoJSON export remain exact in either mode.
 
-Custom styles opt in on a top-level, feature-scope, point-only rule:
+A downsampled tile shows a warning without preventing rendering. An unsampled
+replacement clears its current warning; the log keeps previous entries. The
+preferences are browser-local and included in exported state snapshots, not
+shared URLs. The count is not a total memory budget: several smaller objects
+can still exhaust a GPU buffer. Lower **Max Tiles to Load** or hide unused
+layers as well when needed.
 
-```yaml
-rules:
-  - geometry: point
-    point-cloud: true
-    color: "#70D6C7"
-    width: 2
-```
-
-The preference combines each object's matching point geometries. Regular viewer
-rendering overrides any authored `point-cloud-max-points` value, including zero;
-styles opt in with `point-cloud: true` and do not choose a separate detail limit.
-The older key remains accepted for native filter-plan consumers, where zero
-requests exact geometry and positive unsigned 32-bit values specify a quota.
-Subrules inherit the policy and must not override it. Ordinary point/POI rules remain unchanged.
-Selection preserves original coordinates, source order and duplicates; Draco
-can use a different decoded order from native arrays. The canonical model,
-inspection and export remain exact.
-
-The frontend selects before projection and packet generation. Statistics expose
-delivered/rendered instance counts. Sampling does not depend on available memory
-or other visible clouds. The threshold is not a combined tile/view memory budget:
-several small objects can still exhaust a shared GPU buffer. Lower the threshold,
-hide unused layers/styles, narrow a style's filter, or lower **Max Tiles to Load**
-to reduce rendering demand.
+For custom styles, see [Point-cloud rules](#point-cloud-rules).
 
 <!-- mcp:
 keywords: [style, YAML, search visualization]
@@ -208,9 +173,13 @@ captured predicates remain and intersect with the new search. Explicitly differe
 scopes are incompatible. Older generic templates still work without reconstructing
 missing scope or query information.
 
-Empty affinity applies to any layer; exact IDs apply across maps. Layer affinity
-controls ordinary rendering and is not copied into a detached search. The stylesheet
-does not capture map IDs, tiles, result views, or density settings.
+Empty affinity imposes no root layer restriction; exact layer IDs match across
+maps. Separately, generated rule predicates retain the selected map/layer identities
+from the prepared search. Clearing affinity does not remove these source guards.
+Reusing the stylesheet on another dataset requires reviewing those predicates and
+its field/type assumptions. Layer affinity is not copied into a detached search,
+but captured predicates still intersect with that search. Tiles, result views and
+density settings are not saved in the stylesheet.
 
 The root `default` and the generated Boolean option are deliberately distinct.
 Root `default` determines whether the whole stylesheet is enabled when first
@@ -652,10 +621,15 @@ surface-shading: true
 
 <!-- mcp:
 title: "Style labels"
-keywords: ["label", "text", "caption", "speed limit", "value", "font"]
+keywords: ["put labels on features", "feature labels", "labels", "label", "text", "caption", "feature name", "feature ID", "speed limit", "value", "font"]
 hint: "Expressions run in the rule scope; verify the exact field path and units before showing values. Search help for \"Scopes\" and \"Attribute rules\" if a label should describe an attribute rather than its owning feature."
 -->
 ### Labels
+
+To put labels on features, edit their stylesheet and set `label-text` for fixed
+text or `label-text-expression` for a name, ID or other field. These labels are
+drawn on map geometry, not just in the hover readout. Choose the rule's feature
+or attribute scope and confirm the field exists in that dataset before applying.
 
 For feature-scope label expressions, use `_.id` when you want only the feature's
 canonical ID; unqualified recursive field lookup can also find nested `id` values.
@@ -972,6 +946,43 @@ This constrained material contract intentionally does not synthesize missing
 geometry or emulate arbitrary style rules.
 
 <!-- mcp:
+title: "Style point-cloud rules"
+keywords: ["point cloud", "point-cloud", "downsampling", "sampling", "point geometry"]
+-->
+## Point-cloud rules
+
+Use `point-cloud: true` on a top-level, feature-scope rule that selects only
+point geometry. It opts each object's matching point geometries into the
+viewer sampling preference; it does not combine objects into spatial groups.
+For example, adapt the layer and feature type to the actual dataset:
+
+```yaml
+name: "Custom point clouds"
+version: 2
+layer: "PointCloudObject"
+rules:
+  - scope: feature
+    type: PointCloudObject
+    geometry: point
+    point-cloud: true
+    color: "#70D6C7"
+    width: 2
+    billboard: true
+    depth-test: true
+    selectable: true
+```
+
+Keep the sampling policy on the top-level rule. Nested branches inherit it and
+must not override it; grouping and relation rules cannot opt in. Ordinary point
+and POI rules without this flag are unchanged. Selection retains original
+coordinates and duplicates, and picking identifies the owning object.
+
+Set the count through **Preferences -> Rendering -> Point clouds**, not through
+a separate YAML quota. See [NDS.Live point clouds](#ndslive-point-clouds) for
+the user workflow and the [developer reference](erdblick-dev-guide.md#point-cloud-sampling-and-lifetime)
+for the native quota compatibility contract and rendering lifetime.
+
+<!-- mcp:
 title: "Style point grouping"
 keywords: ["cluster", "mergeCount", "point grouping", "aggregation"]
 -->
@@ -1235,8 +1246,3 @@ transport identity is only `filterId + generation + output tile`.
 Deck picks store `(channel ordinal, typed-entry ordinal)` against the exact
 subset retained by the visualization. Nested render-rule and primitive details
 stay renderer-local.
-
-Point-cloud picking reuses compact worker-produced feature identities, without
-deserializing another full cloud on the main thread. Browser subset routing
-accepts metadata prefixes up to 256 KiB. Complete delivered sources within their
-point quota keep all records, including duplicates.

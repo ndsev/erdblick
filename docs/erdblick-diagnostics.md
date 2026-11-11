@@ -16,10 +16,10 @@ together, with actions to open statistics, inspect logs, or export diagnostics.
 
 The top-right side of the main bar contains the diagnostics indicator:
 
-- While tiles are still being fetched or rendered, it shows a spinner.
-- If the tile pipeline is paused, the spinner stays visible but switches to the paused styling.
-- Once the current workload is complete, the spinner turns into a status dot.
-- If the backend connection is down, the idle dot switches to the disconnected state.
+- While connected and actively fetching or rendering, it shows a spinner.
+- Pausing the tile pipeline changes its progress presentation, not connection status.
+- A green/red animation identifies active recovery, including connection retry waits or retrying datasources. Reduced-motion mode uses a static presentation.
+- Healthy idle state is green; a stopped failure is red. The tooltip and popover identify the cause and any retry wait. Pending counters alone do not keep the spinner running during a retry wait.
 - If erdblick has seen tile errors or log entries with error level, an extra error badge appears next to the indicator.
 
 Click the indicator to open the progress popover. It shows:
@@ -84,10 +84,6 @@ the currently filtered loaded tiles:
 
 The Peak, Average, and Min columns are available for every performance metric.
 
-![Performance statistics for the Munich city scene](screenshots/performance.png)
-
-This screenshot predates the source-feature and frame-interval labels described above.
-
 Use the **layer and tile filters** to narrow the measurements to the data
 you are investigating. Values describe the current session, not a benchmark.
 
@@ -116,6 +112,10 @@ The log collects:
 - transport and rendering errors that erdblick surfaces into the diagnostics stream
 
 Use the log when the map looks healthy at first glance but the indicator shows an error badge, or when a datasource intermittently disconnects and reconnects.
+
+For browser reconnection, use [Connection Retry](erdblick-ui-basics.md#connection-retry)
+in Preferences. These settings are separate from server-side datasource startup
+retries and tile expiry; use the reported cause to choose which one to investigate.
 
 <!-- mcp:
 title: "Export diagnostics bundle"

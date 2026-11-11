@@ -159,8 +159,8 @@ otherwise both appear as index zero/count one.
 ## Synthetic stylesheet
 
 `feature-search-style.adapter.ts` translates the session's GUI rules into flat
-top-level rules. The concrete search scope is applied only to this transient
-runtime source; it is not written into a reusable stylesheet. Labels,
+top-level rules with their concrete feature or attribute scope. Saving a reusable
+stylesheet also preserves that scope and the search membership predicates. Labels,
 category/gradient expressions, and geometry choices use the same native style
 properties as bundled styles.
 
@@ -172,7 +172,8 @@ without requiring either a schema enum or a working color scale first.
 Retiring a presentation also retires its filter-progress entries, so a style
 replacement cannot leave the session waiting for chunks from an obsolete filter.
 
-The ordinary planner produces one render channel per top-level rule. Erdblick
+The ordinary planner can coalesce compatible feature rules into one render
+channel, retaining their rule indices in its `style-rules:` ID. Erdblick
 preserves those channel IDs and native predicates, intersects their feature
 types with the search selection, and combines the normalized backend query
 with each channel's entry predicate. It then appends one dedicated
@@ -214,23 +215,31 @@ parallel configuration ID/revision store or generated YAML cache.
 the save dialog's checked-by-default enable choice as Boolean root `default`,
 optional exact layer-ID affinity, one `showSearchStyle` Boolean option whose
 display label is `Show <stylesheet name>` and which defaults on, and flat rules
-gated by that option. Empty affinity omits `layer`
-and means any layer. It deliberately
-excludes query, search scope, map identity, views, feature-type selection,
-density controls, UI row IDs, and automatic-rule metadata. The normal imported-style lifecycle parses,
+gated by that option. Each prepared branch supplies its concrete scope, normalized
+query, selected feature types and explicit map/layer guards. One GUI rule can
+therefore produce several YAML rules for different prepared branches. Feature
+predicates use `filter`; attribute predicates use `attribute-filter` and address
+the owner's identity through `$feature`. The converter combines predicates with
+existential `any(...)` semantics, rather than correlating independent streams.
+
+Empty affinity omits the root `layer` selector; exact affinity IDs match across
+maps. This selector does not remove the source restrictions inside the generated
+rules. A saved stylesheet independently matches the captured search, not every
+map with a similarly named layer. It excludes tiles, result views, density
+controls, UI row IDs and automatic-rule metadata. The normal imported-style lifecycle parses,
 persists, lists, edits, renders, and exports that source. Imported persistence
 stores only a versioned list of raw YAML sources; no legacy search-style store
 is read.
 
-The reverse codec parses the authoritative YAML into the shared Quick rule
-GUI. AST-based Quick edits preserve comments, root metadata, unsupported keys,
-and untouched rules. Ambiguous branch/dynamic rules remain read-only and are
-reported as warnings. Feature Search uses the same projection permissively:
+The Style Editor's Quick form edits the authoritative YAML, including nested
+rules, through AST patches that preserve comments, root metadata, unsupported
+keys and untouched rules. Detached Feature Search reuse has a narrower model:
 compatible rules are deep-copied, incompatible rules are omitted with visible
 reasons, and the YAML source is never changed. The generated option gate is
-removed from Quick/detached rule data and restored on Quick writes, including
-new rules. Detached reuse copies rules only; stylesheet `default`, `layer`, and
-option state continue to govern normal rendering.
+removed from detached rule data, while captured predicates remain and intersect
+with the receiving search. Explicitly incompatible scopes are rejected. Detached
+reuse copies rules only; stylesheet `default`, `layer`, and option state continue
+to govern normal rendering. The original YAML is not rewritten by reuse.
 
 The save dialog emits an action-bearing immutable request. Both **Save** and
 **Save and Open** import through the same transactional style lifecycle and use
@@ -268,11 +277,15 @@ cannot monopolize the browser thread. Tasks are generation-aware and
 cancellable. The frame loop is a utility, not an owner of search or map
 objects.
 
-Entry values follow the channel field schema. Scalar projection behavior is:
-
-- no result -> null;
-- first result wins;
-- later results are ignored.
+Entry `values` follow the channel's expression order. Each slot contains an
+ordered result sequence: `[]`, `[null]`, `[undefined]`, `[1, 2]` and `[[1, 2]]`
+are distinct. The native bridge preserves all results and undefined values;
+`valueErrors` separately identifies failed expressions. Summaries aggregate the
+actual results, not the sequence wrapper. Result labels unwrap only singleton
+sequences; they do not silently select the first of several results. Scalar
+style properties use their default for no result, and report an issue/default
+for multiple results. Authors must explicitly select or aggregate a multi-value
+expression when one displayed value is required.
 
 Structured projection values are not a hidden full-feature transport. Search
 exports and UI metadata should request explicit scalar fields.

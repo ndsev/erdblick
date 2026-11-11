@@ -154,8 +154,8 @@ EB_MAPGET_MCP_LOCAL=1 EB_MAPGET_CONFIG=tests/playwright/fixtures/mapget-native-g
   --project='' --workers=1
 ```
 
-This binds the test server to loopback and generates a test-only trust config
-under `tests/playwright/.cache/`, using the catalog in the built frontend. The test
+This binds the test server to loopback with `--mcp local`, using the catalog in
+the built frontend. No separate trust-config file is generated. The test
 uses two actual viewer origins (`localhost` and `127.0.0.1`) and the native MCP
 endpoint, including camera targeting, synchronization and stale-session rejection.
 It does not replace OAuth/Keycloak deployment acceptance. Use an unused
@@ -389,8 +389,11 @@ warm attachment cache in the initial implementation.
 ## Style planning
 
 Every active stylesheet is planned in WASM against concrete `LayerInfo`.
-There is exactly one filter channel per top-level style rule. Channels are not
-conflated for compression.
+Compatible feature rules share a filter channel when their membership and geometry
+policies agree, including the point-cloud quota. Their projected fields are
+unioned, and `style-rules:` channel IDs retain all source rule indices so the
+renderer still applies each rule independently. Grouped, attribute and relation
+channels are not coalesced by this optimization.
 
 For a nested `first-of` or `all-of` tree, planner eligibility is:
 
@@ -694,6 +697,22 @@ first request. The returned `searchId` addresses the ordinary visible, persisted
 search, including its layer/type/level/view scope, style rules and rendering
 strategy. Stop retains partial results; close removes the saved definition.
 Cancelling a completed creation call does not stop the resulting search.
+
+`viewer_get_search.preparation` reports readiness and interpretation choices,
+including each proposed `query`. `viewer_choose_search_interpretations` accepts
+exactly one choice; combined interpretations are rejected. Acceptance writes the
+ordinary expression into the session's `query`, which is also the saved/exported
+text. Later scope changes prepare that expression rather than re-resolving the
+original shorthand. `searchComplete` stays false until preparation and result
+ingestion finish.
+
+`viewer_get_search.schemaAnalysis` includes `status`, `concreteScope`,
+`normalizedQuery` and rewrite diagnostics; analysis errors appear in
+`status.errors`. Pending analysis has no final result count. `responseComplete`
+describes a bounded response, whereas `searchComplete` describes search progress.
+Final counts or absence claims need completed, error-free evidence for the
+requested scope, not merely an applied action or visible partial matches.
+
 `viewer_set_search` merges supplied settings into the current settings; omitted
 fields are retained. Its nested `renderStrategy` is also merged, while supplied
 arrays replace the whole array. Merely editing presentation does not switch an
@@ -1028,6 +1047,8 @@ whole input subset, and JavaScript can retain the completed packet arrays
 until transfer/upload. Bounded native allocations therefore do not imply
 constant total memory or remove the separate limits of shared GPU buffers.
 
+### Point-cloud sampling and lifetime
+
 `MapViewState.pointCloudPolicy` owns the enabled flag and per-object `maxPoints`.
 Regular `ViewLayerController` filter plans replace authored cloud quotas with this
 preference (zero when disabled); the worker receives the same value. Applying a
@@ -1036,6 +1057,32 @@ instead of retaining it as a replacement fallback. Otherwise old records can
 occupy the capacity needed to apply a lower count. Backend/native validation
 checks the quota's representation and channel semantics, not an independent
 14-million-point ceiling.
+
+The authoring flag `point-cloud: true` opts a top-level feature-scope point-only
+rule into this policy; nested rules must inherit it. The legacy YAML key
+`point-cloud-max-points` remains accepted for native filter-plan consumers:
+zero requests exact geometry and positive unsigned 32-bit values specify a quota.
+Regular viewer rendering overrides that authored value, including zero. Do not
+use the native key to bypass the viewer preference. See
+[Point-cloud rules](erdblick-stylesystem.md#point-cloud-rules) for authoring.
+
+Sampling combines each object's matching point geometries and selects original
+indices evenly through their sequence, including both endpoints when keeping at
+least two points. Complete inputs within quota retain all records, including
+duplicates. Source ordering therefore determines spatial coverage; Draco can
+decode in a different order from native arrays. Backend sampling happens before
+geometry transfer; the worker keeps every delivered point when it already fits
+the quota, otherwise samples before projection and packet generation. Neither
+camera scale nor other visible objects changes the count. Canonical source
+geometry, feature inspection and GeoJSON export remain exact.
+
+Point-cloud picking uses compact worker-produced feature identities rather than
+deserializing another full cloud on the main thread. Browser subset routing
+accepts metadata prefixes up to 256 KiB. Delivered/rendered counters feed the
+[downsampling warning](#tile-warnings-and-transient-datasource-recovery); the
+per-object quota is not a combined tile/view or GPU memory budget.
+
+### GLTF attachments
 
 Large GLBs are requested only after renderer output reports demand. The
 GLTF presenter combines attachment bytes with subset GLTF-node/AABB entries.
@@ -1315,7 +1362,7 @@ Failed tile values expire through the same `TileExpiryScheduler` as successful f
 
 Preferences → Connection edits the flat AppState keys `connectionRetryEnabled`, `connectionRetryInitialDelayMs`, `connectionRetryBackoffMultiplier` and `connectionRetryMaxDelayMs`. Defaults are enabled, 5000 ms, 2 and 60000 ms. They use normal browser persistence and snapshot/config ownership, with no URL parameters. Set deployment defaults in `config.json.state` or `mapviewer.yaml`'s `erdblick.state`; YAML overrides static defaults per key, while user-owned browser preferences remain authoritative. The UI displays seconds and validates the complete policy before Apply. Delays must be positive integer milliseconds within `2147483647`, the maximum must be at least the initial delay, and the multiplier must be finite and at least one. Malformed imported combinations fall back to default timing with a diagnostic.
 
-`connection-retry-policy.ts` owns browser transport backoff only. Preference changes recompute the connection deadline from its failure time; disabling retries removes the reconnect timer without disabling tile freshness. Compatible connection frames reset reconnect backoff. Server constructor policy and HTTP eligibility belong to `sources[].retry`, independently of this browser.
+`connection-retry-policy.model.ts` owns browser transport backoff only. Preference changes recompute the connection deadline from its failure time; disabling retries removes the reconnect timer without disabling tile freshness. Compatible connection frames reset reconnect backoff. Server constructor policy and HTTP eligibility belong to `sources[].retry`, independently of this browser.
 
 The diagnostics snapshot separates current recovery from socket connectivity and historical logs. Catalog `retrying` flags and the browser connection owner drive the mainbar circle's green/red animation; stopped failures use static red and healthy idle state uses green. The tooltip/popover identifies causes and retry waits. Reduced motion uses a static retry presentation. The existing spinner requires both a connected backend and active loading or pipeline work; unfinished counters during retry waits do not show it. Pausing progress does not freeze connection status. No health polling or additional retry timer is used for presentation.
 

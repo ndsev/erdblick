@@ -10,9 +10,9 @@ This separates state access from runtime dependencies. Reading dock preferences
 should not construct the dialog controller; reading search definitions should not
 construct the search engine, map catalog or renderer.
 
-The [structure workshop follow-up](erdblick-structure-followup.md) records the
-folder/naming decisions and the proposed next splits of the large rendering and
-search owners.
+See [Source roles and dependencies](erdblick-source-structure.md) for current
+folder and naming conventions, and [Search Architecture](erdblick-search-architecture.md)
+for the search owners and their lifetimes.
 
 ## Where to look
 
@@ -274,8 +274,10 @@ The deployed scalar codec compacts booleans to `0`/`1`; per-view snapshot and st
 arrays retain booleans. URL CSV encoding compacts both. Public controls expose their
 typed boolean values independently of these persistence formats.
 
-Share links carry ordered IDs in `vid`: 1–32 unique IDs, each 1–64 ASCII letters,
-digits, underscores or hyphens. Object.prototype property names are reserved.
+Share links carry 1–32 unique ordered IDs in `vid`. Each ID is a canonical
+nonnegative decimal safe integer, written as a string of at most 16 digits
+without leading zeros (except `0`). Named IDs and UUIDs are not supported.
+New views claim the smallest unused integer, starting at `0`.
 Repeated/malformed explicit IDs reject before mutation or navigation. If `n` is
 supplied it must agree; otherwise the explicit ID list determines the count.
 Empty/partial links without IDs keep saved/current membership and resize it once

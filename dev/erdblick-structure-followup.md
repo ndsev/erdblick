@@ -1,5 +1,11 @@
 # Structure workshop: decisions and next extractions
 
+Historical workshop record, not the current architecture reference. Subsequent
+work implemented several proposals below. See the maintained
+[source conventions](../docs/erdblick-source-structure.md),
+[search architecture](../docs/erdblick-search-architecture.md), and
+[renderer ownership](../docs/deck-render-view-contract.md) instead when changing code.
+
 This records the October 26 workshop and October 27 ownership follow-up against the lazyape implementation
 at `7fad0e8d`. Concrete moves, naming changes and the small cleanups below are
 implemented. The three large-file decompositions are **proposals for review**;
@@ -268,7 +274,7 @@ models. The earlier AppState-values model rename is retained. Deployed URL,
 storage, configuration and MCP keys are unchanged.
 
 The stable definitions and mechanical checks are in
-[Source roles and dependencies](erdblick-source-structure.md).
+[Source roles and dependencies](../docs/erdblick-source-structure.md).
 `MapLayerTree` is a controller supplied by MapDataService; its construction and
 lifetime stay intact. FrameBudgetLoop remains a utility with caller-managed
 queues, scheduling and cleanup. Component cardinality does not impose identical

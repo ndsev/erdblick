@@ -3,7 +3,7 @@
 This is the entry point for all erdblick end-user documentation. Each section links to a dedicated Markdown file so topics stay focused and easy to maintain.
 
 - [Setup Guide](erdblick-setup.md) – Download/build options, serving erdblick with `mapget`, `/static-config`, source-backed style editing, server-supplied `/config.erdblick` overrides, and browser prerequisites.
-- [Basic UI Layout Guide](erdblick-ui-basics.md) – Tour of panels, navigation controls, inspector slots, and toolbar actions.
+- [Basic UI Layout Guide](erdblick-ui-basics.md) – Panels, navigation, MCP agent controls, inspector slots, and preferences including connection retries.
 - [Search Guide](erdblick-search.md) – Jump-to targets, feature search expressions, history, and troubleshooting.
 - [Style System Guide](erdblick-stylesystem.md) – Managing styles in the UI, YAML structure, expression context, and debugging tips.
 - [Style 2.0 Migration Guide](erdblick-style-2.0-migration-guide.md) – Required and recommended changes for styles authored for MapViewer 2026.3.1.
@@ -12,6 +12,7 @@ This is the entry point for all erdblick end-user documentation. Each section li
 - [SourceData Inspection Guide](erdblick-sourcedata.md) – Opening blobs from the map, from inspector links, or via search commands.
 - [URL Guide](erdblick-url.md) – How erdblick encodes state in URLs, visualization-only parameters, and sharing best practices.
 - [Troubleshooting Guide](erdblick-troubleshooting.md) – Performance tuning, empty view fixes, style resets, and logging instructions.
+- [Diagnostics and Status Guide](erdblick-diagnostics.md) – Loading and recovery status, statistics, logs, and diagnostic exports.
 - [DataSource Editor Guide](erdblick-datasource-editor.md) – Enabling the experimental editor, validating changes, and handling auto-restarts.
 
 Each file doubles as a snippet source for downstream documentation portals, which keeps the erdblick material authoritative in one place.

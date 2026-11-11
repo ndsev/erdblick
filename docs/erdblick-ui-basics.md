@@ -68,6 +68,24 @@ The main bar provides these top-level entries:
 
 On narrower screens, the main bar collapses into a more compact mobile layout. In that mode, the **Maps** action also appears in the menu bar itself.
 
+### MCP Agent Controls
+
+When enabled by the deployment, the **MCP** button opens agent connection and
+activity controls. Give the tab a recognizable label so a remote agent can choose
+the intended viewer. The popover shows tool availability and recent action
+outcomes; a ready connection does not mean an agent is currently working.
+
+Choose **Configure**, then the platform and agent, to display setup instructions
+and copyable connection fields. App clients also ask you to choose **Remote MCP**
+or **WebMCP**. Copying a command does not execute it. Follow the displayed steps
+in your client and keep the viewer tab open; WebMCP requires a supported browser
+document, while remote MCP must be reachable from the agent's environment.
+
+**Stop current action** cancels pending agent work. It does not undo completed
+edits or stop searches you started yourself. If controls are unavailable, read
+the status detail; ordinary map use remains available. Developer integration
+details are in [Optional MCP browser actions](erdblick-dev-guide.md#optional-mcp-browser-actions).
+
 ### Cache Reset
 
 When enabled for your authenticated session, **Tools -> Cache Reset** lists the
@@ -182,7 +200,8 @@ For the feature workflow, continue with the [Feature Inspection Guide](erdblick-
 - persistent Search panels for results, visualization, and diagnostics
 - search history and inline validation
 
-The dedicated [Search and Jump](../../../docs/mv-search.md) guide covers targets, persistent feature-search panels, result visualization, diagnostics, and the query language.
+The [Search Guide](erdblick-search.md) covers targets, persistent Search panels,
+result visualization, diagnostics and query assistance.
 
 <!-- mcp:
 title: "Viewer preferences and resets"
@@ -203,8 +222,8 @@ Open **Edit -> Preferences** to access the main viewer preferences:
 - **Tile pull compression** toggles compressed tile downloads
 - **WebGL antialiasing** controls multisample rendering when the browser/device supports it
 - **Semantic layer compositing** is a default-on diagnostic switch. Disabling it recreates the renderer without semantic ordering passes and hides semantic decorations, such as cinematic lane markings, and their picking. It is saved locally, not in shared URLs; other rendering effects remain enabled.
-- **Enable point-cloud downsampling** under **Rendering → Point clouds** is on by default and controls count-based sampling on the server and in the viewer. Press **Apply** to commit the change. The setting is saved locally and included in exported state snapshots; it is not added to shared URLs. Turning it off requests and renders full geometry, subject to available memory. See [NDS.Live point clouds](erdblick-stylesystem.md#ndslive-point-clouds) for sampling behavior.
-- **Maximum points per cloud object** uses a slider and numeric field from 100,000 to 14,000,000 (default 14,000,000). It shares the downsampling **Apply** button and persistence. Objects below the count remain complete; larger objects use the selected count. This controls each object independently, not total tile/view memory.
+- **Point clouds** under **Rendering** controls downsampling and the maximum points per object. See [Point-cloud presets and preferences](erdblick-stylesystem.md#ndslive-point-clouds) for the count, Apply workflow, and persistence.
+- **Connection** controls automatic reconnection and its delays; see [Connection Retry](#connection-retry). It does not control datasource startup or tile freshness.
 - **Contact shading** uses final scene depth to darken nearby lower surfaces and can be disabled on slower GPUs
 - **LOD 3 Tile Threshold** controls the default visible-tile-count boundary between stylesheet LOD 2 and LOD 3; styles can override the full LOD ladder
 - **Dark Mode** switches between on, off, and automatic
@@ -229,6 +248,29 @@ visible until dismissed; further warnings do not stack while it is open. Its
 **Preferences → Rendering**. Enable point-cloud downsampling, lower **Maximum points
 per cloud object**, and press **Apply** to reload with fewer points. **Max Tiles to Load**
 can also reduce the total rendering load. The warning does not change settings automatically.
+
+### Connection Retry
+
+Open **Edit -> Preferences -> Connection** when this browser repeatedly loses
+its connection to mapget. The settings are:
+
+| Control | Meaning | Default |
+| --- | --- | --- |
+| **Automatic retry** | Reconnect automatically after a connection failure. | On |
+| **Initial delay (seconds)** | Wait before the first retry. | 5 |
+| **Backoff multiplier** | Multiply the delay after each failed attempt. | 2 |
+| **Maximum delay / cooldown (seconds)** | Cap the delay; retries continue at this interval during a prolonged outage. | 60 |
+
+Press **Apply** to commit the complete policy. Delays must be positive, the
+maximum must be at least the initial delay, and the multiplier must be at least
+one. A validation message explains invalid combinations. Settings persist in
+this browser and exported state snapshots, but not shared URLs.
+
+Turning retry off cancels scheduled reconnection; it does not turn off tile
+expiry or repair an unavailable datasource. Source startup retries are a server
+setting, and retained tiles refresh according to their own lifetimes. Inspect
+the diagnostics popover for the failing connection or source before changing
+these controls.
 
 <!-- mcp:
 title: "Hover label fields"
