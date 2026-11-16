@@ -77,7 +77,8 @@ function createDock(bridgeFirst: boolean) {
         persistence, owners.coordinatePolicy, {} as Renderer2,
         owners.searchService, cdr, {} as never,
         { attribution$: new Subject<string>() } as never,
-        owners.layout, owners.inspectionState.state
+        owners.layout, owners.inspectionState.state,
+        {changed: new Subject<void>(), docked: () => []} as never
     );
     const viewer = document.createElement("div");
     viewer.getBoundingClientRect = () => ({ width: viewerWidth }) as DOMRect;

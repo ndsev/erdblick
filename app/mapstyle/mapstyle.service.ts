@@ -466,29 +466,28 @@ export class MapStyleService implements AppActionContributor {
             return false;
         }
 
+        // Capture the submitted bytes. A later Apply may replace the active style object.
+        const {source, url} = style;
         try {
-            await firstValueFrom(this.httpClient.put(style.url, style.source, { responseType: "text" }));
+            await firstValueFrom(this.httpClient.put(url, source, { responseType: "text" }));
         } catch (error) {
-            console.error(`Failed to save style ${styleId} to ${style.url}.`, error);
+            console.error(`Failed to save style ${styleId} to ${url}.`, error);
             return false;
         }
 
-        const sourceHash = sipHash64Hex(style.source);
-        style.modified = false;
-        style.sourceRef = {
-            ...style.sourceRef,
-            sourceKind: style.additional ? "additional" : "base",
-            sourceHash
-        };
-        this.builtinStyleBaselines.set(style.url, { id: style.id, source: style.source });
-        this.styleHashes.set(style.url, {
-            id: style.id,
-            sha256: sourceHash,
-            isModified: false,
-            isUpdated: false
+        const sourceHash = sipHash64Hex(source);
+        const current = [...this.styles.values()].find(candidate => !candidate.imported && candidate.url === url);
+        const isModified = !!current && current.source !== source;
+        if (current && !isModified) {
+            current.modified = false;
+            current.sourceRef = {...current.sourceRef, sourceKind: current.additional ? "additional" : "base", sourceHash};
+        }
+        this.builtinStyleBaselines.set(url, { id: style.id, source });
+        this.styleHashes.set(url, {
+            id: current?.id ?? style.id, sha256: sourceHash, isModified, isUpdated: false
         });
         const persistedHashes = this.loadStyleHashes();
-        persistedHashes.set(style.url, sourceHash);
+        persistedHashes.set(url, sourceHash);
         localStorage.setItem("styleHashes", JSON.stringify([...persistedHashes]));
         this.saveModifiedBuiltinStyles();
         return true;

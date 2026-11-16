@@ -1,4 +1,4 @@
-import {Component, EventEmitter, Input, OnChanges, OnDestroy, Output} from "@angular/core";
+import {Component, EventEmitter, Input, OnChanges, OnDestroy, Output, SimpleChanges} from "@angular/core";
 import {z} from "zod";
 import {coreLib, ErdblickCore_, uint8ArrayToWasmOrThrow} from "../integrations/wasm.adapter";
 import {styleAuthoringSchema} from "./style-authoring-schema.adapter";
@@ -29,8 +29,10 @@ const reportSchema = z.object({valid: z.boolean(), issues: z.array(z.object({
             }
             @if (model) {
                 <fieldset [disabled]="!!parseError" class="style-form-body">
-                    <style-record-editor [model]="model" [catalog]="catalog" [skipMetadata]="skipMetadata"
-                        (edit)="apply($event)" (problem)="onProblem($event)"/>
+                    @for (version of [resetVersion]; track version) {
+                        <style-record-editor [sessionScope]="sessionScope" [model]="model" [catalog]="catalog" [skipMetadata]="skipMetadata"
+                            (edit)="apply($event)" (problem)="onProblem($event)"/>
+                    }
                 </fieldset>
             }
         </div>
@@ -38,6 +40,8 @@ const reportSchema = z.object({valid: z.boolean(), issues: z.array(z.object({
 })
 /** GUI for the complete native style model, sharing the editor's authoritative YAML source. */
 export class StyleDocumentEditorComponent implements OnChanges, OnDestroy {
+    @Input() sessionScope = 'style';
+    @Input() resetVersion = 0;
     @Input() source = "";
     @Input() skipMetadata = false;
     @Output() sourceChange = new EventEmitter<string>();
@@ -47,12 +51,14 @@ export class StyleDocumentEditorComponent implements OnChanges, OnDestroy {
     parseError = "";
     editError = "";
     issues: z.infer<typeof reportSchema>["issues"] = [];
+    get hasPendingInput(): boolean { return this.inputProblems.size > 0; }
     private inputProblems = new Map<string, string>();
     private validationTimer?: ReturnType<typeof setTimeout>;
     private nativeValid = false;
 
     /** Refreshes the form from source, retaining its last parsed view during incomplete YAML edits. */
-    ngOnChanges(): void {
+    ngOnChanges(changes?: SimpleChanges): void {
+        if (changes?.['resetVersion']) this.inputProblems.clear();
         try {
             this.model = new StyleDocumentModel(this.source);
             this.parseError = "";

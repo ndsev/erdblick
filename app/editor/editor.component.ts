@@ -91,8 +91,11 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
     private sessionSourceSubscription?: Subscription;
     private sessionChangedSubscription?: Subscription;
     private revealRequestedSubscription?: Subscription;
+    private readOnlySubscription?: Subscription;
+    private resizeObserver?: ResizeObserver;
     private modeObserver?: MutationObserver;
     private themeComp = new Compartment();
+    private readOnlyComp = new Compartment();
     private viewReady = false;
     private readonly DARK_MODE_CLASS = 'erdblick-dark';
 
@@ -114,6 +117,11 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
             }
         });
         this.initializeEditor();
+        this.readOnlySubscription = this.editorService.readOnlyChanged$.subscribe(id => {
+            if (id === this.sessionId) this.editorView?.dispatch({effects: this.readOnlyComp.reconfigure(this.readOnlyExtensions())});
+        });
+        this.resizeObserver = new ResizeObserver(() => this.editorView?.requestMeasure());
+        this.resizeObserver.observe(this.editorRef.nativeElement);
     }
 
     /** Rebuilds the editor when the bound session id changes. */
@@ -128,10 +136,12 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
 
     /** Disposes editor-owned subscriptions, observers, and CodeMirror state. */
     ngOnDestroy(): void {
+        this.resizeObserver?.disconnect();
         this.modeObserver?.disconnect();
         this.sessionSourceSubscription?.unsubscribe();
         this.sessionChangedSubscription?.unsubscribe();
         this.revealRequestedSubscription?.unsubscribe();
+        this.readOnlySubscription?.unsubscribe();
         this.editorView?.destroy();
     }
 
@@ -201,7 +211,7 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
         const root = document.documentElement;
         const isDark = root.classList.contains(this.DARK_MODE_CLASS);
         const lightTheme = EditorView.theme({}, {dark: false});
-        const languageExtensions = this.languageExtensions(session.language);
+        const languageExtensions = this.languageExtensions(session.language, session.styleCompletions);
 
         return EditorState.create({
             doc: session.source$.getValue(),
@@ -211,7 +221,7 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
                 keymap.of([this.saveCmd()]),
                 this.stopMouseWheelClipboard,
                 EditorState.tabSize.of(2),
-                EditorState.readOnly.of(session.readOnly),
+                this.readOnlyComp.of(this.readOnlyExtensions()),
                 highlightedLineField,
                 highlightedLineTheme,
                 EditorView.updateListener.of((update: ViewUpdate) => {
@@ -222,8 +232,14 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
         });
     }
 
+    /** Reflects write capability in both command handling and native content editing. */
+    private readOnlyExtensions(): Extension[] {
+        const readOnly = this.editorService.getSession(this.sessionId)?.readOnly ?? true;
+        return [EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)];
+    }
+
     /** Selects language-specific CodeMirror extensions for YAML or JSON editing. */
-    private languageExtensions(language: 'yaml' | 'json'): Extension[] {
+    private languageExtensions(language: 'yaml' | 'json', styleCompletions: boolean): Extension[] {
         if (language === 'json') {
             return [
                 json(),
@@ -233,7 +249,7 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
         }
         return [
             yaml(),
-            autocompletion({override: [this.styleCompletions]}),
+            ...(styleCompletions ? [autocompletion({override: [this.styleCompletions]})] : []),
             lintGutter(),
             this.yamlLinter
         ];

@@ -1197,7 +1197,7 @@ export class SearchService implements AppActionContributor {
         if (
             this.layout.state.isDockAutoCollapsible &&
             !this.inspectionState.selection.some((panel) => !panel.undocked) &&
-            this.getDockedSessions().length === 0
+            this.getDockedSessions().length === 0 && !this.layout.hasLiveDockedSurfaces()
         ) {
             this.layout.state.isDockOpen = false;
         }
@@ -2594,6 +2594,7 @@ export class SearchService implements AppActionContributor {
 
     /** Emits a shallow session snapshot so structural UI can re-render. */
     private notifySessionsChanged(): void {
+        this.layout.setDockTabCount(SEARCH_DOCK_TAB_ID, this.getDockedSessions().length);
         this.sessionsChanged.next([...this.searchSessions]);
     }
 

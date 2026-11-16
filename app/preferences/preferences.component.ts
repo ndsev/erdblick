@@ -1,3 +1,4 @@
+import {EditorWorkspaceService} from "../editor/editor-workspace.service";
 import {NgModel} from "@angular/forms";
 import {ToggleSwitchChangeEvent} from "primeng/toggleswitch";
 import {LocationPolicyService} from "../geolocation/location-policy.service";
@@ -20,7 +21,7 @@ import {
 } from "../inspection/inspection.model";
 import { InspectionState } from "../inspection/inspection.state";
 import { AppDialogComponent } from "../layout/app-dialog.component";
-import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID, PREFERENCES_DIALOG_LAYOUT_ID } from "../layout/layout.model";
+import { PREFERENCES_DIALOG_LAYOUT_ID } from "../layout/layout.model";
 import { LayoutService } from "../layout/layout.service";
 import { DialogStackService } from "../layout/dialog-stack.service";
 import { MapDataService } from "../mapdata/mapdata.service";
@@ -639,7 +640,6 @@ import { MapStyleService } from "../mapstyle/mapstyle.service";
  */
 export class PreferencesComponent implements OnInit, OnDestroy {
     readonly dialogLayoutId = PREFERENCES_DIALOG_LAYOUT_ID;
-    readonly advancedPreferencesDialogLayoutId = ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID;
 
     @ViewChild('pref') preferencesDialog?: AppDialogComponent;
 
@@ -713,7 +713,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
     private subscriptions: Subscription[] = [];
 
     /** Subscribes dialog fields to persisted preference state and runtime services. */
-    constructor(private messageService: InfoMessageService,
+    constructor(private readonly editorWorkspace: EditorWorkspaceService, private messageService: InfoMessageService,
         public mapService: MapViewService,
         public styleService: MapStyleService,
         public stateService: AppStateService,
@@ -1042,7 +1042,7 @@ export class PreferencesComponent implements OnInit, OnDestroy {
         if (environment.visualizationOnly) {
             return;
         }
-        this.layout.openDialog(this.advancedPreferencesDialogLayoutId);
+        this.editorWorkspace.open('preferences');
     }
 
     /** Toggles HTTP compression for `/interactive/payload` pull responses. */

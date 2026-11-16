@@ -1,5 +1,5 @@
 /**
- * Saved style visibility and the style currently open in the editor. Pure edits
+ * Saved style visibility and the legacy singleton editor target. Pure edits
  * to these AppStates can happen without loading style files or starting the
  * compiler; those operations remain in MapStyleService.
  */
@@ -17,6 +17,7 @@ export class MapStyleState {
         defaultValue: {}
     });
 
+    /** Retained only to migrate pre-workspace snapshots on full-UI startup. */
     readonly styleEditorTargetState = this.persistence.registerState<string | null>({
         name: "styleEditorTarget",
         defaultValue: null,

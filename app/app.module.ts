@@ -1,3 +1,9 @@
+import {EditorWorkspaceComponent} from "./editor/editor-workspace.component";
+import {EditorSurfaceComponent} from "./editor/editor-surface.component";
+import {EditorDockComponent} from "./editor/editor-dock.component";
+import {EditorContentOutletDirective} from "./editor/editor-content-outlet.directive";
+import {StyleEditorDocumentComponent} from "./mapstyle/style-editor-document.component";
+import {MapPresetEditorComponent} from "./mapstyle/map-preset-editor.component";
 import {environment} from "./environments/environment";
 import { provideHttpClient, withFetch } from "@angular/common/http";
 import { inject, Injector, NgModule, provideAppInitializer } from "@angular/core";
@@ -239,6 +245,13 @@ export const initializeServices = () => {
 
 @NgModule({
     declarations: [
+        EditorWorkspaceComponent,
+        EditorSurfaceComponent,
+        EditorDockComponent,
+        EditorContentOutletDirective,
+        StyleEditorDocumentComponent,
+        MapPresetEditorComponent,
+
         AppComponent,
         OmnibarComponent,
         MapPanelComponent,

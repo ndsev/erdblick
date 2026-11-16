@@ -45,8 +45,7 @@ declare let window: DebugWindow;
     template: `
         <dockable-layout></dockable-layout>
         @if (!environment.visualizationOnly) {
-            <datasources></datasources>
-            <advanced-preferences></advanced-preferences>
+            <editor-workspace/>
             <map-panel></map-panel>
             @if (layout.isDialogOpen(cacheResetDialogLayoutId)) {
                 <cache-reset-dialog></cache-reset-dialog>

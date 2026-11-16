@@ -386,7 +386,8 @@ Release baseline: `6f5ba2fd6d6cb3810cd9bf4c305e0d5b229f4ef8`. The actual owner s
 | `app/mapview/mapview.state.ts` (views) | `viewIds`, `numberOfViews`, `focus`, `viewSync`, `cameraView`, `mode2d`, `mapZoomStep`, `featureZoomClearanceMeters`, `background`, `tileBorders`, `tileGridMode`, `tileGridLevel`, `tileGridAutoLevel`, `tileGridColor`, `tileGridOpacity` |
 | `app/mapdata/mapdata.state.ts` | `layerSyncOptions`, `layerNames`, `visibility`, `zoomLevel`, `autoZoomLevel`, `styleOptions`, `stylePresetSelection`, `mapPresetSelection` |
 | `app/layout/layout.state.ts` | `mapsOpenState`, `dockOpenState`, `dockWidth`, `viewPanelSizes`, `dockActiveTabState`, `dockAutoCollapse`, `dialogLayouts` |
-| `app/mapstyle/mapstyle.state.ts` | `styleVisiblity`, `styleEditorTarget` |
+| `app/mapstyle/mapstyle.state.ts` | `styleVisiblity`, `styleEditorTarget` (legacy migration only) |
+| `app/editor/editor-workspace.state.ts` | `editorDocuments` (references only; no draft text) |
 | `app/diagnostics/diagnostics.state.ts` | `diagnosticsLogFilter`, `diagnosticsExportOptions` |
 | `app/mapdata/mapdata.state.ts` (transport) | `tilePullCompressionEnabled`, `connectionRetryEnabled`, `connectionRetryInitialDelayMs`, `connectionRetryBackoffMultiplier`, `connectionRetryMaxDelayMs` |
 | `app/inspection/inspection.state.ts` | `selected`, `inspectionsLimitState`, `drillPickRadius`, `inspectionTreeExpandByDefault`, `sourceDataInspectionDefaultColumns`, `inspectionTreeHiddenColumns`, `inspectionValueVaryColors`, `inspectionValueVaryOutlines`, `inspectionValueVaryStriping`, `hoverLabelsEnabled`, `hoverLabelFields`, `inspectionComparisonState` |
@@ -394,8 +395,9 @@ Release baseline: `6f5ba2fd6d6cb3810cd9bf4c305e0d5b229f4ef8`. The actual owner s
 | `app/search/search.state.ts` | `featureSearchGrouping`, `featureSearchState` |
 | `app/omnibar/omnibar.state.ts` | `searchHistory` |
 
-There are 70 registrations: the 68 release preference keys, `viewIds`, and the
-existing `searchHistory` key formerly persisted by the omnibar component.
+The original migration preserved the 68 release preference keys and added
+`viewIds` alongside the existing `searchHistory` key. Subsequent features register
+their own values; `editorDocuments` is the editor workspace restoration metadata.
 `distributionVersions` and `erdblickVersion` now describe the running deployment
 through `DiagnosticsState.versions` / `versions$`; they are never restored or
 exported as preferences. Old snapshots and config defaults can still contain
@@ -410,7 +412,8 @@ snapshot sharing. `numberOfViews` is a projection of ordered IDs; `focus` stores
 | Layer defaults, aligned arrays, option writes and preset selections | `MapDataState`; catalog/preset coordination in `MapDataService` |
 | Feature/source selection, panel locking/focus/colors, comparison and cleanup | `InspectionPanelService`; async work in `InspectionSelectionService` |
 | Search definitions and grouping | `SearchState`; runtime work in `SearchService` |
-| Style visibility and editor preference | `MapStyleState`; document operations in `MapStyleService` |
+| Style visibility | `MapStyleState`; document operations in `MapStyleService` |
+| Open standalone editors | `EditorWorkspaceState`; lifetime, placement and close guards in `EditorWorkspaceService` |
 | Marker/coordinate preferences and policy | `CoordinatesService`, `CoordinatesPolicyService` |
 | Rendering preferences | `MapViewState`; coordinated writes and controls in `MapViewService` |
 | Connection preferences | `MapDataState`; coordinated writes and controls in `MapDataService` |
@@ -422,3 +425,23 @@ snapshot sharing. `numberOfViews` is a projection of ordered IDs; `focus` stores
 AppState values and codecs live in state containers; workflow methods live in controllers. There is no forwarding domain facade on `AppStateService`. Public action/control schemas and bindings are inline in their controller registration methods.
 
 Raw line counts include moved code, formatting and comments and should not be treated as a complexity metric. The independent implementation comparison records separate production, infrastructure, test and generated-artifact changes.
+
+### Retained editor content
+
+`EditorWorkspaceService` owns one Angular component reference per open document.
+`EditorContentOutletDirective` moves its host between disposable
+`EditorSurfaceComponent` dialog/panel shells; the view remains attached to Angular
+until explicit document closure. This preserves CodeMirror history and Quick-form
+buffers that are not yet valid YAML. `EditorService` still owns text/save/reveal
+channels; document-specific components own validation and persistence destinations.
+
+The full UI registers the four factories through `EditorWorkspaceComponent`.
+Headless action-catalog generation registers only `EditorWorkspaceState`.
+Snapshot reconciliation keeps dirty/busy documents, parks omitted ones in Editors,
+rejects silent retargeting, and removes orphan editor layout records. Presentation
+resets park open editors and hide the dock. Legacy single-editor layout IDs and the
+style target migrate once. No draft source is serialized in `editorDocuments`.
+
+`LayoutService` tracks live per-tab counts so stale layout records cannot keep an
+empty dock open. Read-only changes reconfigure CodeMirror without recreating its
+history. Completion owners include the editor identity as well as the YAML path.

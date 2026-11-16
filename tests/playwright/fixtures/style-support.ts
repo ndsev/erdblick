@@ -27,12 +27,13 @@ rules:
 `;
 
 /** Supplies one deterministic style without depending on the standalone example bundle. */
-export async function installStyleSupportFixture(page: Page): Promise<void> {
+export async function installStyleSupportFixture(page: Page, multiple = false): Promise<void> {
     await page.route('**/static-config/config.json', async route => {
         const response = await route.fetch();
         const config = await response.json();
-        await route.fulfill({response, json: {...config, styles: [{id: 'Style Support', url: 'style-support.yaml'}]}});
+        await route.fulfill({response, json: {...config, ...(multiple ? {mapPresets: [{id: 'demo', name: 'Demo', enabled: true, layerPresets: [{layerId: 'WayLayer', styleId: 'Style Support', presetId: 'normal'}]}]} : {}), styles: [{id: 'Style Support', url: 'style-support.yaml'}, ...(multiple ? [{id: 'Other Style', url: 'other-style.yaml'}] : [])]}});
     });
+    if (multiple) await page.route('**/static-config/styles/other-style.yaml', route => route.fulfill({body: STYLE_SUPPORT_SOURCE.replace('name: Style Support', 'name: Other Style'), contentType: 'text/yaml'}));
     await page.route('**/static-config/styles/style-support.yaml', route =>
         route.fulfill({body: STYLE_SUPPORT_SOURCE, contentType: 'text/yaml'}));
 }

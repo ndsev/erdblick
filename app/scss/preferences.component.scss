@@ -192,7 +192,7 @@
 
 }
 
-.editor-dialog {
+:is(.editor-dialog, .editor-panel) {
   .spinner {
     display: flex;
     flex: 1 1 auto;
@@ -526,3 +526,28 @@ advanced-preferences {
     gap: 0.5em;
   }
 }
+
+// A document remains mounted while its disposable floating/docked slot changes.
+.editor-content-slot, .editor-document-content,
+.editor-document-content > style-editor-document,
+.editor-document-content > map-preset-editor {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+.editor-content-slot { container: editor-dialog-content / inline-size; overflow: hidden; }
+.editor-document-content { overflow: hidden; }
+.editor-document-error { color: var(--p-message-error-color); white-space: pre-wrap; padding: 0.5em; flex: 0 0 auto; max-height: 10em; overflow: auto; }
+editor-dock { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; min-height: 0; height: 100%; width: 100%; }
+.editor-dock-container { display: flex; flex-direction: column; min-height: 0; height: 100%; width: 100%; gap: 0.5em; }
+.editor-dock-container.single-panel > editor-surface { display: flex; flex: 1; min-height: 0; }
+.editor-dock-container.multi-panel { overflow-y: auto; }
+.editor-dock-container.multi-panel > editor-surface { display: block; flex: 0 0 auto; }
+.editor-panel { width: 100%; min-height: 0; }
+.editor-panel .editor-actions { display: flex; flex-wrap: wrap; gap: 0.5em; flex: 0 0 auto; padding-top: 0.5em; }
+.editor-dock-container .drop-before { border-top: 2px solid var(--p-primary-color); }
+.editor-dock-container .drop-after { border-bottom: 2px solid var(--p-primary-color); }

@@ -18,7 +18,7 @@ export interface StyleInputProblem {path: string; message: string;}
                 <simfil-expression-input [value]="text()" (valueChange)="set($event)"
                     [completionScope]="scope === 'attribute' && path.at(-1) !== 'filter' ? 'attribute' : 'feature'"
                     [completionEnabled]="scope !== 'relation'"
-                    [completionOwnerId]="id" [completionZIndex]="31050"/>
+                    [completionOwnerId]="sessionScope + ':' + id" [completionZIndex]="31050"/>
             }
             @case ('boolean') {
                 <select [attr.aria-label]="label" [ngModel]="value" (ngModelChange)="set($event)">
@@ -131,6 +131,7 @@ export class StyleFieldInputComponent implements OnChanges, OnDestroy {
     @Input({required: true}) model!: StyleDocumentModel;
     @Input({required: true}) path: StylePath = [];
     @Input({required: true}) field!: StyleField;
+    @Input() sessionScope = 'style';
     @Input() scope: "feature" | "attribute" | "relation" = "feature";
     @Output() edit = new EventEmitter<StyleDocumentEdit>();
     @Output() problem = new EventEmitter<StyleInputProblem>();

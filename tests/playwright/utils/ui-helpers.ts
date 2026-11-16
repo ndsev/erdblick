@@ -164,7 +164,7 @@ export async function openStylesDialog(page: Page): Promise<Locator> {
 
 export async function openDatasourcesDialog(page: Page): Promise<Locator> {
     await clickPrefButton(page, 'Datasources');
-    const dialog = page.locator('div').filter({ hasText: /^DataSource Configuration Editor$/ }).first();
+    const dialog = page.getByTestId('datasources-editor-dialog').locator('.p-dialog');
     await expect(dialog).toBeVisible();
     return dialog;
 }

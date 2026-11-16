@@ -1,6 +1,6 @@
 # UI Basics
 
-Erdblick centers its UI around a deck.gl map canvas, a top menu bar, a left-hand Maps & Layers panel, and a dock that can host Search, inspection, or SourceData panels. This guide explains the controls most users touch first.
+Erdblick centers its UI around a deck.gl map canvas, a top menu bar, a left-hand Maps & Layers panel, and a dock with Search, Inspection (including SourceData), and Editors tabs. This guide explains the controls most users touch first.
 
 !!! note "Focus on the layout before advanced features"
     If you are new to the viewer, get comfortable with the shell, map navigation, and Maps & Layers first. Search, inspection, SourceData, and diagnostics all build on those basics.
@@ -16,7 +16,7 @@ places or features, and the **2D/3D controls (3)** to change the projection.
 2. **Main bar** – the top menu bar contains the search panel plus the main entry points for editing, view management, tools, and help.
 3. **Map view** – one or two active views, depending on whether split view is enabled.
 4. **Maps & Layers panel** – shows maps, feature layers, metadata actions, per-layer style options, and per-view layer controls.
-5. **Dock** – hosts Search panels, feature panels, and SourceData panels. Panels can stay docked or be undocked into separate dialogs.
+5. **Dock** – hosts Search, Inspection, and Editors tabs. Panels can stay docked or be undocked into separate dialogs.
 6. **Diagnostics indicator** – summarizes tile progress, backend connectivity, and error presence.
 7. **Coordinate readout** – shows cursor coordinates and tile IDs and lets you place a shared marker.
 
@@ -216,6 +216,45 @@ Selecting a feature opens it in the inspection dock:
 
 For the feature workflow, continue with the [Feature Inspection Guide](erdblick-inspection.md). For raw payload inspection, see the [SourceData Inspection Guide](erdblick-sourcedata.md).
 
+## Editors
+
+Open several different style documents alongside the **Map Presets**,
+**Datasources**, and **Advanced Preferences** editors. Opening the same document
+again focuses its existing editor, including any unsaved draft.
+
+| Document | Open it from | Apply/save destination |
+| --- | --- | --- |
+| Style | A style's pencil/brush action | Active style and browser storage; **Save to Source** additionally writes a permitted server YAML file |
+| Map Presets | **Edit → Styles Configurator → Map Presets → Edit** | The complete server preset catalog, when writable |
+| Datasources | **Edit → Datasources** | Backend datasource configuration |
+| Advanced Preferences | **Edit → Preferences → Storage → Advanced** | This browser's application state |
+
+Use the **dock** button in an editor header, or drag that header onto the dock,
+to place it in **Editors**. Use **eject** to return it to a floating dialog.
+Docked editors can be reordered by dragging their headers, collapsed, expanded,
+and resized. A single panel fills the available dock height. New documents join
+Editors when that tab already contains a docked editor; otherwise they float.
+
+![Independent floating and docked editors](screenshots/editors-workspace.png)
+
+Moving an editor preserves its text, undo/redo history, selection, Quick/Advanced
+tab, and unfinished form input. The dock's side arrow hides or reveals the dock
+without closing documents. **Unsaved** identifies a draft that needs attention.
+Closing it offers its save action, **Discard**, and **Cancel**. Failed saves keep
+the editor open; an outstanding write must finish before the document can be
+discarded. **Ctrl/Cmd+S** applies to the focused editor; **Escape** first belongs
+to an open completion list or picker, then to that editor's guarded close action.
+
+Editor references and layout are restored after a page reload. Unsaved text,
+undo history, and unfinished form input are kept only for the current page
+session. The browser warns before leaving with unsaved work; a restored editor
+loads its current source rather than recovering an unsaved draft.
+
+Advanced Preferences captures a snapshot when opened. If live settings change
+before Save, review the listed conflicts and use **Apply reviewed snapshot** to
+confirm replacement. An import that changes the editor workspace is blocked while
+other editors have unsaved work. Export downloads the draft without applying it.
+
 ## Search, Jump, and History
 
 `Ctrl+K` focuses the search panel. It combines:
@@ -252,7 +291,7 @@ Open **Edit -> Preferences** to access the main viewer preferences:
 - **Contact shading** uses final scene depth to darken nearby lower surfaces and can be disabled on slower GPUs
 - **LOD 3 Tile Threshold** controls the default visible-tile-count boundary between stylesheet LOD 2 and LOD 3; styles can override the full LOD ladder
 - **Dark Mode** switches between on, off, and automatic
-- **Collapse Dock automatically** controls the inspection dock behavior
+- **Collapse Dock automatically** hides an empty dock after its last Inspection, Search, or Editors panel is removed
 - the **Clear** actions reset viewer/search state, imported styles, or modified built-in styles
 
 Preferences are grouped by purpose so navigation defaults, inspection and
