@@ -212,6 +212,7 @@ local presets, LOD thresholds, and hover/selection effects. Maps & Layers also p
 runtime controls for all non-internal option types. Color text accepts native named
 colors and RGB hex forms. Click the color swatch to open the picker; choosing a
 color writes RGB hex, while opening or dismissing it preserves the authored value.
+Press Escape to dismiss the picker while keeping the editor or Maps panel open.
 Scale rows retain numeric, string, and Boolean category keys and optional fallbacks.
 Numeric entry uses native
 validation rather than search-editor slider limits.

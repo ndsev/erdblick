@@ -1208,3 +1208,33 @@ describe('MapTileStreamClient', () => {
         }
     });
 });
+
+
+describe('Local dictionary isolation', () => {
+    it('excludes local and retired-local dictionary offsets from websocket snapshots and bounded HTTP envelopes', async () => {
+        const parser = new coreLib.TileLayerParser();
+        const offsets = vi.spyOn(parser, 'getFieldDictOffsets').mockReturnValue({remote: 40, 'drawing-local': 268});
+        const localOwners = new Set(['drawing-local']); // Ownership survives datasource deletion.
+        const include = (id: string) => !localOwners.has(id);
+        const websocket = new MapTileStreamClient('/interactive', parser, include);
+        const http = new MapTileStreamClientTiles('/tiles', parser, include);
+        const send = vi.fn().mockReturnValue(websocket);
+        websocket['sendSerializedRequests'] = send;
+        websocket.waitForSend = vi.fn().mockResolvedValue(undefined);
+        const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(packedFrames(
+            jsonFrame(MAP_TILE_STREAM_TYPE_END_OF_STREAM, {})
+        )));
+        vi.stubGlobal('fetch', fetchMock);
+        try {
+            await websocket.updateRequest([], true);
+            expect(JSON.parse(send.mock.calls[0][0][0]).stringPoolOffsets).toEqual({remote: 40});
+            await http.request([{mapId: 'Remote', layerId: 'Layer', tileIds: [0]}]);
+            expect(JSON.parse(String(fetchMock.mock.calls[0][1]!.body)).stringPoolOffsets).toEqual({remote: 40});
+            // A late native dictionary revision must not change remote demand or reveal its local ID.
+            offsets.mockReturnValue({remote: 40, 'drawing-local': 300});
+            expect(await websocket.updateRequest([])).toBe('unchanged');
+        } finally {
+            websocket.destroy(); http.destroy(); offsets.mockRestore(); parser.delete(); vi.unstubAllGlobals();
+        }
+    });
+});

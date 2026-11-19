@@ -12,6 +12,7 @@ import {
 import {basicSetup} from 'codemirror';
 import {
     Compartment,
+    Annotation,
     EditorState,
     Extension,
     StateEffect,
@@ -33,10 +34,12 @@ import {oneDark} from '@codemirror/theme-one-dark';
 import {Subscription} from 'rxjs';
 import * as jsyaml from 'js-yaml';
 import {EditorRevealRequest, EditorService} from './editor.service';
+import {applySourceChanges} from './editor-source.util';
 
 import {styleAuthoringCompletions} from "../mapstyle/style-authoring-schema.adapter";
 
 const setHighlightedLine = StateEffect.define<number | null>();
+const externalSourceUpdate = Annotation.define<boolean>();
 
 const highlightedLineField = StateField.define<DecorationSet>({
     create: () => Decoration.none,
@@ -162,14 +165,21 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
 
         this.sessionSourceSubscription = session.source$.subscribe(source => {
             const view = this.editorView;
-            if (!view || view.state.doc.toString() === source) {
+            if (!view || view.state.doc.eq(view.state.toText(source))) {
                 return;
             }
+            // Keep structured edits narrow so undo retains untouched source spans and selection.
+            const before = view.state.doc.toString(), after = view.state.toText(source).toString();
+            let from = 0, suffix = 0;
+            while (from < before.length && from < after.length && before[from] === after[from]) ++from;
+            while (suffix < before.length - from && suffix < after.length - from &&
+                before[before.length - suffix - 1] === after[after.length - suffix - 1]) ++suffix;
             view.dispatch({
+                annotations: externalSourceUpdate.of(true),
                 changes: {
-                    from: 0,
-                    to: view.state.doc.length,
-                    insert: source
+                    from,
+                    to: before.length - suffix,
+                    insert: after.slice(from, after.length - suffix)
                 }
             });
         });
@@ -225,7 +235,10 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
                 highlightedLineField,
                 highlightedLineTheme,
                 EditorView.updateListener.of((update: ViewUpdate) => {
-                    this.editorService.updateSessionSource(this.sessionId, update.state.doc.toString());
+                    if (!update.docChanged || update.transactions.some(transaction => transaction.annotation(externalSourceUpdate))) return;
+                    const source = session.preserveLineEndings
+                        ? applySourceChanges(session.source$.value, update.changes) : update.state.doc.toString();
+                    this.editorService.updateSessionSource(this.sessionId, source);
                 }),
                 this.themeComp.of(isDark ? oneDark : [lightTheme, syntaxHighlighting(defaultHighlightStyle)])
             ]
@@ -239,7 +252,8 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
     }
 
     /** Selects language-specific CodeMirror extensions for YAML or JSON editing. */
-    private languageExtensions(language: 'yaml' | 'json', styleCompletions: boolean): Extension[] {
+    private languageExtensions(language: 'yaml' | 'json' | 'text', styleCompletions: boolean): Extension[] {
+        if (language === 'text') return [];
         if (language === 'json') {
             return [
                 json(),

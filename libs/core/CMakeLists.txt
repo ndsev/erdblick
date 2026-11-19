@@ -2,6 +2,7 @@ project(erdblick-core)
 
 # For WASM modules, add_executable is used instead of add_library.
 set(ERDBLICK_SOURCE_FILES
+  include/erdblick/drawing.h
   include/erdblick/visualization.h
   include/erdblick/subset-renderer.h
   include/erdblick/gpu-render-packet.h
@@ -24,6 +25,8 @@ set(ERDBLICK_SOURCE_FILES
   include/erdblick/interop/js-object.h
   include/erdblick/geo/point-conversion.h
 
+  src/drawing.cpp
+  src/drawing-geometry.cpp
   src/subset-renderer.cpp
   src/gpu-render-packet.cpp
   src/gpu-render-records.cpp
@@ -110,4 +113,5 @@ target_link_libraries(erdblick-core
     glm
     mapbox-earcut
     mapget-model
+    erdblick-geodesic
     yaml-cpp)

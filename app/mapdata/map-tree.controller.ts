@@ -299,6 +299,9 @@ export interface MapTreeViewNode {
     id: string;
     key: string;
     type: string;
+    label?: string;
+    mapIds?: string[];
+    indeterminate?: boolean[];
     expanded?: boolean;
     children?: MapTreeViewNode[];
     visible?: boolean[];
@@ -332,16 +335,20 @@ function mapTreeNodeChildren(
         ];
     }
     if (node instanceof MapTreeNode) {
-        return [...node.children];
+        // The internal Drawing partition remains in the canonical tree for styling/visibility.
+        // Local maps expose its controls directly, without an artificial layer row.
+        return node.children.flatMap(layer => node.info.origin === "virtual" && layer.id === "Drawing"
+            ? mapTreeNodeChildren(layer, viewIndex, query) ?? [] : [layer]);
     }
     if (node instanceof GroupTreeNode) {
-        return [...node.children];
+        return node.children.filter(child => !(child instanceof MapTreeNode && child.info.transient));
     }
     return undefined;
 }
 
 /** Matches the identifiers rendered by the map tree and the human label of style options. */
 function mapTreeNodeMatches(node: MapTreeSourceNode, query: string): boolean {
+    if (node instanceof MapTreeNode && node.info.displayName?.toLocaleLowerCase().includes(query)) return true;
     if (node instanceof StyleOptionNode) {
         return node.id.toLocaleLowerCase().includes(query)
             || node.info.label.toLocaleLowerCase().includes(query);
@@ -420,9 +427,43 @@ function filterMapTreeNode(
 export function filterMapTreeNodes(
     nodes: Array<GroupTreeNode | MapTreeNode>,
     filterText: string,
-    viewIndex = 0
+    viewIndex = 0,
+    groupByOrigin = false,
+    originExpansion: Readonly<Record<string, boolean>> = {}
 ): MapTreeViewNode[] {
+    nodes = nodes.filter(node => !(node instanceof MapTreeNode && node.info.transient));
     const query = filterText.trim().toLocaleLowerCase();
+    if (groupByOrigin) {
+        return ["Local", "Remote"].flatMap(label => {
+            const local = label === "Local", key = "origin:" + label.toLowerCase();
+            const groupQuery = label.toLowerCase().includes(query) ? "" : query;
+            const project = (node: GroupTreeNode | MapTreeNode, text: string): MapTreeViewNode[] => {
+                if (node instanceof MapTreeNode) {
+                    if (node.info.transient || (node.info.origin === "virtual") !== local) return [];
+                    const filtered = text ? filterMapTreeNode(node, text, viewIndex) : cloneMapTreeSubtree(node, viewIndex, text);
+                    return filtered ? [filtered] : [];
+                }
+                const children = node.children.flatMap(child => project(child, mapTreeNodeMatches(node, text) ? "" : text));
+                if (!children.length) return [];
+                // Keep existing folder nesting inside each origin group.
+                return [{...node, children, ...(text ? {expanded: true} : {})}];
+            };
+            const children = nodes.flatMap(node => project(node, groupQuery));
+            if (!children.length) return [];
+            const maps: MapTreeViewNode[] = [];
+            const collect = (node: MapTreeViewNode): void => {
+                if (node.type === "Map") maps.push(node);
+                else node.children?.forEach(collect);
+            };
+            children.forEach(collect);
+            const viewCount = Math.max(1, ...maps.map(node => node.visible?.length ?? 0));
+            return [{id: key, key, type: "OriginGroup", label, children, mapIds: maps.map(node => node.id),
+                expanded: !!query || originExpansion[key] !== false,
+                visible: Array.from({length: viewCount}, (_, index) => maps.every(node => node.visible?.[index])),
+                indeterminate: Array.from({length: viewCount}, (_, index) =>
+                    maps.some(node => node.visible?.[index]) && !maps.every(node => node.visible?.[index]))}];
+        });
+    }
     if (!query) {
         return nodes.map(node => cloneMapTreeSubtree(node, viewIndex, query));
     }
@@ -696,7 +737,7 @@ export class MapLayerTree {
                 featureLayer.viewConfig = this.layerState.materializeLayerDefaults(
                     featureLayer.mapId,
                     featureLayer.info.layerId,
-                    defaultVisibility && (featureLayer.info.defaultVisible ?? true),
+                    (this.maps.get(featureLayer.mapId)?.info.origin === "virtual" || defaultVisibility) && (featureLayer.info.defaultVisible ?? true),
                     defaultLevel);
                 const options = layerStyleOptions(featureLayer);
                 for (const option of options) {

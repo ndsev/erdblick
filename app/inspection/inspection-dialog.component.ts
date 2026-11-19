@@ -76,6 +76,7 @@ import { SourceDataPanelComponent } from "./sourcedata-panel.component";
                                            [overlayOptions]="{autoZIndex: true, baseZIndex: 9500}"
                                            (click)="$event.stopPropagation()"
                                            (mousedown)="$event.stopPropagation()"
+                                           (onChange)="$event.originalEvent.preventDefault()"
                                            (ngModelChange)="onPanelColorChange($event)">
                             </p-colorpicker>
                         }

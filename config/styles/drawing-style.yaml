@@ -1,0 +1,39 @@
+name: Drawing
+version: 2
+layer: '^Drawing$'
+options:
+  - {id: drawingColor, label: Drawing color, type: color, default: '#20a6d2'}
+  - {id: measurementColor, label: Measurement color, type: color, default: '#ff8a24'}
+interaction-effects:
+  hover: {tint: yellow, tint-mix: 0.65, edge-width: 2}
+  selection: {tint: white, tint-mix: 0.7, edge-width: 3}
+rules:
+  - geometry: [point]
+    filter: "attributes.drawing.role != 'measurement-label'"
+    color-expression: "attributes.user.color or drawingColor"
+    width: 10
+  - geometry: [line]
+    filter: "not attributes.user.preview"
+    color-expression: "attributes.user.color or drawingColor"
+    width: 3
+  - geometry: [polygon]
+    color-expression: "attributes.user.color or drawingColor"
+    opacity: 0.2
+  - geometry: [line]
+    filter: "attributes.user.preview"
+    color-expression: "attributes.user.color or measurementColor"
+    opacity: 0.45
+    width: 3
+  - geometry: [point]
+    filter: "attributes.drawing.role == 'measurement-label'"
+    color: black
+    width: 0
+    label-text-expression: attributes.user.label
+    label-color: white
+    label-size: 13
+    label-font-weight: 600
+    label-pixel-offset: [0, -16]
+    label-background: true
+    label-background-color: '#17212e'
+    label-background-padding: [5, 3]
+    label-background-border-radius: [4, 4, 4, 4]

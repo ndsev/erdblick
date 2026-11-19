@@ -57,7 +57,7 @@ export class EditorWorkspaceService implements OnDestroy {
     /** Opens one document, or reveals the existing draft without reinitializing its content. */
     open(kind: EditorDocumentKind, target?: string, sourceUrl?: string): EditorWorkspaceEntry {
         let entry = this.entries.find(item => item.descriptor.kind === kind &&
-            (kind !== 'style' || item.descriptor.target === target || (!!sourceUrl && item.descriptor.sourceUrl === sourceUrl)));
+            ((kind !== 'style' && kind !== 'drawing') || item.descriptor.target === target || (!!sourceUrl && item.descriptor.sourceUrl === sourceUrl)));
         if (!entry) {
             entry = this.add({id: `editor-${crypto.randomUUID()}`, kind, ...(target ? {target} : {}), ...(sourceUrl ? {sourceUrl} : {})});
             if (this.docked().length) this.layout.setSurfaceDocked(entry.layoutId, true, EDITORS_DOCK_TAB_ID);
@@ -146,8 +146,10 @@ export class EditorWorkspaceService implements OnDestroy {
     }
 
     /** Discards one confirmed draft, never another document or an outstanding write. */
-    discard(): void {
-        if (this.closing && !this.closing.content?.instance.busy) this.dispose(this.closing);
+    async discard(): Promise<void> {
+        const entry = this.closing;
+        if (entry && !entry.content?.instance.busy &&
+            (!entry.content?.instance.discard || await entry.content.instance.discard())) this.dispose(entry);
         this.notify();
     }
 
@@ -175,7 +177,7 @@ export class EditorWorkspaceService implements OnDestroy {
         this.entries.push(entry);
         if (!this.layout.getDialogLayout(entry.layoutId)) {
             const legacyId = {style: 'style-editor-dialog', presets: 'style-preset-editor-dialog',
-                datasources: 'datasources-editor-dialog', preferences: 'advanced-preferences-dialog'}[descriptor.kind];
+                datasources: 'datasources-editor-dialog', preferences: 'advanced-preferences-dialog', drawing: 'drawing-editor-dialog'}[descriptor.kind];
             const legacyLayout = this.layout.getDialogLayout(legacyId);
             const width = Math.min(800, window.innerWidth - 24), height = Math.min(700, window.innerHeight - 24);
             const offset = (this.entries.length - 1) % 6 * 24;
@@ -213,6 +215,7 @@ export class EditorWorkspaceService implements OnDestroy {
             }
             this.legacyStyle.styleEditorTargetId = null;
             for (const entry of [...this.entries]) {
+                if (entry.descriptor.kind === 'drawing') { descriptors.push(entry.descriptor); continue; }
                 const incoming = descriptors.find(item => item.id === entry.descriptor.id);
                 if (incoming && incoming.kind === entry.descriptor.kind && incoming.target === entry.descriptor.target
                     && incoming.sourceUrl === entry.descriptor.sourceUrl) continue;
@@ -224,7 +227,7 @@ export class EditorWorkspaceService implements OnDestroy {
             }
             for (const descriptor of descriptors) {
                 if (!this.entries.some(entry => entry.descriptor.id === descriptor.id ||
-                    (entry.descriptor.kind === descriptor.kind && (descriptor.kind !== 'style' || entry.descriptor.target === descriptor.target
+                    (entry.descriptor.kind === descriptor.kind && ((descriptor.kind !== 'style' && descriptor.kind !== 'drawing') || entry.descriptor.target === descriptor.target
                         || (!!descriptor.sourceUrl && entry.descriptor.sourceUrl === descriptor.sourceUrl))))) this.add(descriptor);
             }
             for (const id of Object.keys(this.layout.state.dialogLayoutsState.getValue())) {
@@ -249,7 +252,7 @@ export class EditorWorkspaceService implements OnDestroy {
 
     /** Writes only safe references; equality avoids snapshot-observer feedback loops. */
     private persist(): void {
-        const descriptors = this.entries.map(entry => ({...entry.descriptor}));
+        const descriptors = this.entries.filter(entry => entry.descriptor.kind !== 'drawing').map(entry => ({...entry.descriptor}));
         if (JSON.stringify(descriptors) !== JSON.stringify(this.state.documents.getValue())) this.state.documents.next(descriptors);
         this.notify();
     }
@@ -264,9 +267,10 @@ export class EditorWorkspaceService implements OnDestroy {
     /** Parks editor content when a presentation replaces visible application state. */
     private readonly presentationReset = (): void => this.parkForPresentation();
 
-    /** Warns once for transient drafts without serializing source into local storage. */
+    /** Drawing documents own their autosave/unload guard; other Editors still require explicit saves. */
     private readonly beforeUnload = (event: BeforeUnloadEvent): void => {
-        if (this.entries.some(entry => entry.content?.instance.dirty || entry.content?.instance.busy)) {
+        if (this.entries.some(entry => entry.descriptor.kind !== 'drawing' &&
+            (entry.content?.instance.dirty || entry.content?.instance.busy))) {
             event.preventDefault(); event.returnValue = '';
         }
     };

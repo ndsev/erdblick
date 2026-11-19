@@ -787,7 +787,7 @@ describe("failed tile expiry", () => {
         const internal = service as any;
         const error = new TileDeliveryError("outage", Date.now() + 5000);
         const load = vi.spyOn(internal, "loadFeaturesOnce").mockRejectedValue(error);
-        await expect(service.loadFeatures([], new AbortController().signal)).rejects.toBe(error);
+        await expect(service.loadFeatures([{mapTileKey: "Features:Map:Layer:1:0", featureId: "Feature.1"}], new AbortController().signal)).rejects.toBe(error);
         await vi.advanceTimersByTimeAsync(6000);
         expect(load).toHaveBeenCalledOnce();
         expect(internal.activeInspectionLoads).toBe(0);

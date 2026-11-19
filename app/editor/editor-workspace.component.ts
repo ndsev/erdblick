@@ -1,3 +1,4 @@
+import {DrawingEditorComponent} from "../drawing/drawing-editor.component";
 import {ChangeDetectorRef, Component, OnDestroy, OnInit} from '@angular/core';
 import {Subscription} from 'rxjs';
 import {DatasourcesComponent} from '../mapdata/datasources.component';
@@ -37,7 +38,7 @@ export class EditorWorkspaceComponent implements OnInit, OnDestroy {
 
     /** Registers content types only in the full browser UI, after application initialization. */
     ngOnInit(): void {
-        this.workspace.initialize({style: StyleEditorDocumentComponent, presets: MapPresetEditorComponent, datasources: DatasourcesComponent, preferences: AdvancedPreferencesComponent});
+        this.workspace.initialize({style: StyleEditorDocumentComponent, presets: MapPresetEditorComponent, datasources: DatasourcesComponent, preferences: AdvancedPreferencesComponent, drawing: DrawingEditorComponent});
     }
 
     /** Releases the host subscription without treating it as a document-close command. */

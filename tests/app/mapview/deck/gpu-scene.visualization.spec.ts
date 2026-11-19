@@ -1931,3 +1931,22 @@ describe("GpuScene contribution lifecycle", () => {
     scene.finishRender(zero);
   });
 });
+
+
+describe("Drawing scene domains", () => {
+  it("separates identical materials while retaining one scene and global pick allocation", () => {
+    const {scene} = createScene();
+    for (const presentationDomain of ["map", "drawing"] as const) {
+      const reservation = scene.prepareRender("origin", [0, 0, 0], [{
+        identity: presentationDomain, mapTileKey: "Features:" + presentationDomain + ":Layer:1:0",
+        styleOrder: 0, lod: 7, presentationDomain
+      }]);
+      scene.applyPacket(pointPacket(reservation, {featureId: "Point.1"}), reservation);
+    }
+    expect(scene.materialStores("map")).toHaveLength(1);
+    expect(scene.materialStores("drawing")).toHaveLength(1);
+    expect(scene.materialStores()).toHaveLength(2);
+    expect(scene.materialStores("map")[0].store).not.toBe(scene.materialStores("drawing")[0].store);
+    expect(scene.snapshot().activeContributionCount).toBe(2);
+  });
+});

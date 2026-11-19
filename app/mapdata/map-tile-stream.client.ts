@@ -92,13 +92,19 @@ export abstract class MapTileStreamClientBase {
     onFields: ((frame: Uint8Array) => void) | null = null;
     onProtocolMismatch: ((mismatch: MapTileStreamProtocolMismatch) => void) | null = null;
 
-    protected constructor(parser?: TileLayerParser) {
+    protected constructor(parser?: TileLayerParser, private readonly includeStringPool: (id: string) => boolean = () => true) {
         this.ownsParser = !parser;
         this.parser = parser ?? new coreLib.TileLayerParser();
         this.protocolVersion = {
             major: coreLib.tileLayerStreamProtocolMajor(),
             minor: coreLib.tileLayerStreamProtocolMinor()
         };
+    }
+
+    /** A shared parser can contain browser-local dictionaries, including retired source tombstones. */
+    protected fieldDictOffsetsForRequest(): Record<string, unknown> {
+        return Object.fromEntries(Object.entries(this.parser.getFieldDictOffsets())
+            .filter(([id]) => this.includeStringPool(id)));
     }
 
     withFeaturesCallback(callback: (payload: Uint8Array) => void) {
@@ -309,8 +315,8 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
     onActionControl: ((payload: unknown, receivedAt: number) => void) | null = null;
 
     /** Creates or adopts the parser and remembers the relative backend path for websocket and pull calls. */
-    constructor(private path: string = "/interactive", parser?: TileLayerParser) {
-        super(parser);
+    constructor(private path: string = "/interactive", parser?: TileLayerParser, includeStringPool?: (id: string) => boolean) {
+        super(parser, includeStringPool);
         this.activeStreamPath = path;
     }
 
@@ -626,7 +632,7 @@ export class MapTileStreamClientInteractive extends MapTileStreamClientBase {
         force = false
     ): Promise<"sent" | "unchanged" | "failed"> {
         const generation = this.connectionGeneration;
-        const stringPoolOffsets = this.parser!.getFieldDictOffsets();
+        const stringPoolOffsets = this.fieldDictOffsetsForRequest();
         const requestBodyBase = {
             requests: tileLayerRequests,
             stringPoolOffsets,
@@ -1605,8 +1611,8 @@ export class MapTileStreamClientTiles extends MapTileStreamClientBase {
     private destroyed = false;
     private endOfStreamReceived = false;
 
-    constructor(private readonly path: string = "/tiles", parser?: TileLayerParser) {
-        super(parser);
+    constructor(private readonly path: string = "/tiles", parser?: TileLayerParser, includeStringPool?: (id: string) => boolean) {
+        super(parser, includeStringPool);
     }
 
     /** POST one bounded request envelope and resolve after its EndOfStream frame. */
@@ -1633,7 +1639,7 @@ export class MapTileStreamClientTiles extends MapTileStreamClientBase {
                 body: JSON.stringify({
                     ...filter,
                     responseType: "binary",
-                    stringPoolOffsets: this.parser.getFieldDictOffsets(),
+                    stringPoolOffsets: this.fieldDictOffsetsForRequest(),
                     requests: tileLayerRequests
                 }),
                 signal: controller.signal

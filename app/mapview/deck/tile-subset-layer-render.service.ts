@@ -1,6 +1,6 @@
 import type {MapSchemaArtifact} from "../../mapdata/source-catalog.model";
-import { Injectable, Optional } from "@angular/core";
-import { auditTime, skip, Subject } from "rxjs";
+import { Injectable, Optional, OnDestroy } from "@angular/core";
+import { auditTime, skip, Subject, Subscription } from "rxjs";
 import {
     DEFAULT_POINT_CLOUD_POLICY,
     type PointCloudRenderPolicy
@@ -179,7 +179,10 @@ export class StaleSubsetRenderError extends Error {
  * visualizations, view state, and Deck layers remain consumer-owned.
  */
 @Injectable({providedIn: "root"})
-export class TileSubsetLayerRenderService {
+export class TileSubsetLayerRenderService implements OnDestroy {
+    private drawingPreviewRenderer?: TileSubsetLayerRenderService;
+    private fixedWorkerCount?: number;
+    private readonly subscriptions = new Subscription();
     /** Fires after worker progress may have made another render slot available. */
     readonly capacityChanged = new Subject<void>();
     private readonly workers: Array<Worker | null> = [];
@@ -253,10 +256,10 @@ export class TileSubsetLayerRenderService {
         if (!appState) {
             return;
         }
-        appState.pointCloudPolicyChanges.pipe(auditTime(0)).subscribe(() => {
+        this.subscriptions.add(appState.pointCloudPolicyChanges.pipe(auditTime(0)).subscribe(() => {
             this.pointCloudPolicyChanged.next();
-        });
-        appState.tileSubsetRenderWorkerCountState.pipe(skip(1)).subscribe(() => {
+        }));
+        this.subscriptions.add(appState.tileSubsetRenderWorkerCountState.pipe(skip(1)).subscribe(() => {
             this.ensureWorkers()
                 .then(() => {
                     this.capacityChanged.next();
@@ -265,7 +268,31 @@ export class TileSubsetLayerRenderService {
                 .catch(error =>
                     console.error("Could not resize subset render workers.", error)
                 );
-        });
+        }));
+    }
+
+    /** Lazily reserve one worker for tiny cursor subsets, independent of the ordinary render queue. */
+    previewRenderer(): TileSubsetLayerRenderService {
+        if (!this.drawingPreviewRenderer) {
+            const renderer = new TileSubsetLayerRenderService();
+            renderer.fixedWorkerCount = 1;
+            this.subscriptions.add(renderer.capacityChanged.subscribe(() => this.capacityChanged.next()));
+            this.drawingPreviewRenderer = renderer;
+        }
+        return this.drawingPreviewRenderer;
+    }
+
+    /** Release worker heaps, ready packets and pending promises with the application owner. */
+    ngOnDestroy(): void {
+        this.subscriptions.unsubscribe();
+        this.drawingPreviewRenderer?.ngOnDestroy();
+        if (this.admissionTimer !== null) clearTimeout(this.admissionTimer);
+        for (const pending of this.queue.splice(0)) pending.reject(new StaleSubsetRenderError());
+        for (let index = 0; index < this.workers.length; ++index) this.retireWorker(index);
+        this.ready.length = 0;
+        if (this.workerBlobUrl) URL.revokeObjectURL(this.workerBlobUrl);
+        this.capacityChanged.complete();
+        this.pointCloudPolicyChanged.complete();
     }
 
     /**
@@ -284,6 +311,7 @@ export class TileSubsetLayerRenderService {
 
     /** Return the currently configured worker-credit ceiling. */
     activeWorkerCount(): number {
+        if (this.fixedWorkerCount !== undefined) return this.fixedWorkerCount;
         return resolveTileSubsetLayerRenderWorkerCount(
             this.appState?.tileSubsetRenderWorkerCount ??
                 AUTO_TILE_SUBSET_RENDER_WORKER_COUNT

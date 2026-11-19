@@ -1,3 +1,4 @@
+import {DrawingState} from "./drawing/drawing.state";
 import {EditorWorkspaceState} from "./editor/editor-workspace.state";
 import { Injector } from "@angular/core";
 import { AppActionRegistry } from "./action/action-registry.service";
@@ -40,6 +41,7 @@ export function registerApplication(injector: Injector): AppActionRegistry {
     // The palette owns persistence but contributes no domain actions itself.
     injector.get(OmnibarState);
     injector.get(EditorWorkspaceState);
+    injector.get(DrawingState);
     const controllers: AppActionContributor[] = [
         injector.get(UiAutomationService),
         injector.get(CoordinatesService),

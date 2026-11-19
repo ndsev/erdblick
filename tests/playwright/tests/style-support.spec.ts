@@ -25,7 +25,7 @@ test('Quick edits nested native fields, options and effects without losing sourc
     await expect(colorPicker).toHaveCSS('background-color', 'rgb(255, 0, 0)');
     await colorPicker.press('Space');
     await expect(page.locator('.p-colorpicker-panel')).toBeVisible();
-    await colorPicker.press('Escape');
+    await page.keyboard.press('Escape');
     await expect(page.locator('.p-colorpicker-panel')).toBeHidden();
     await expect(editor).toBeVisible();
     await expect(colorText).toHaveValue('red');
@@ -34,7 +34,7 @@ test('Quick edits nested native fields, options and effects without losing sourc
     await expect(colorPicker).toHaveCSS('background-color', 'rgb(26, 43, 60)');
     await colorPicker.click();
     await expect(page.locator('.p-colorpicker-panel')).toBeVisible();
-    await colorPicker.press('Escape');
+    await page.keyboard.press('Escape');
     await expect(colorText).toHaveValue('0x1A2B3C');
     await colorText.fill('red');
     await form.getByRole('button', {name: 'About Filter', exact: true}).first().focus();
@@ -72,7 +72,7 @@ test('Quick edits nested native fields, options and effects without losing sourc
     await tintPicker.click();
     await page.locator('.p-colorpicker-color-selector').click({position: {x: 75, y: 75}});
     await expect(tintDefault).toHaveValue(/^#[\da-f]{6}$/i);
-    await tintPicker.press('Escape');
+    await page.keyboard.press('Escape');
     await expect(page.locator('.p-colorpicker-panel')).toBeHidden();
     await tintDefault.fill('orange');
     await form.locator('summary').filter({hasText: /^Interaction$/}).click();
@@ -136,6 +136,34 @@ test('Quick edits nested native fields, options and effects without losing sourc
     const caption = layers.getByTestId(/style-option-0-.*Style-Support-caption/).first();
     // Existing runtime values survive changing the definition's default.
     await expect(tint).toHaveValue('blue');
+    const runtimePicker = layers.locator('.map-option-row').filter({has: page.getByTestId(/style-option-0-.*Style-Support-tint/)}).first()
+        .getByRole('textbox', {name: 'Color picker for Tint', exact: true});
+    await expect(runtimePicker).toHaveCSS('background-color', 'rgb(0, 0, 255)');
+    // Keyboard actions do not wait for the Maps opening transition to settle.
+    await runtimePicker.click({trial: true});
+    await runtimePicker.press('Space');
+    await expect(page.locator('.p-colorpicker-panel')).toBeInViewport({ratio: 1});
+    await expect(runtimePicker).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.p-colorpicker-panel')).toBeHidden();
+    await expect(tint).toHaveValue('blue');
+    await tint.fill('0x1A2B3C');
+    await tint.press('Tab');
+    await expect(runtimePicker).toHaveCSS('background-color', 'rgb(26, 43, 60)');
+    await runtimePicker.click();
+    await expect(page.locator('.p-colorpicker-panel')).toBeVisible();
+    await expect(runtimePicker).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.p-colorpicker-panel')).toBeHidden();
+    await expect(tint).toHaveValue('0x1A2B3C');
+    await runtimePicker.click();
+    await page.locator('.p-colorpicker-color-selector').click({position: {x: 75, y: 75}});
+    await expect(tint).toHaveValue(/^#[\da-f]{6}$/i);
+    const chosenColor = await tint.inputValue();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.p-colorpicker-panel')).toBeHidden();
+    await expect(tint).toHaveValue(chosenColor);
+    expect(JSON.stringify(await page.evaluate(() => window.ebDebug!.stateService.exportSnapshot()))).toContain(chosenColor);
     await tint.fill('#abcdef');
     await tint.press('Tab');
     await caption.fill('Edited caption');

@@ -46,6 +46,7 @@ declare let window: DebugWindow;
         <dockable-layout></dockable-layout>
         @if (!environment.visualizationOnly) {
             <editor-workspace/>
+            <drawing-workspace/>
             <map-panel></map-panel>
             @if (layout.isDialogOpen(cacheResetDialogLayoutId)) {
                 <cache-reset-dialog></cache-reset-dialog>

@@ -134,13 +134,6 @@ export class HoverDetailService implements OnDestroy {
         viewIndex: number,
         featureIds: readonly (TileFeatureId | null)[]
     ): HoverFeatureDetails[] {
-        if (!this.enabled) {
-            return [];
-        }
-        const fields = this.activeFields;
-        if (!fields.length) {
-            return [];
-        }
         const result: HoverFeatureDetails[] = [];
         const seen = new Set<string>();
         for (const target of featureIds) {
@@ -156,6 +149,9 @@ export class HoverDetailService implements OnDestroy {
             const parsed = this.tileStream.parseMapPartitionKeySafe(
                 target.mapTileKey
             );
+            const local = parsed && this.mapInfo.mapgetLayer(parsed[0], parsed[1])?.origin === "virtual";
+            const fields = local ? [{expression: "attributes.drawing.description", displayKey: "Description"}] : this.enabled ? this.activeFields : [];
+            if (!fields.length) continue;
             const values = parsed
                 ? this.valuesForFeature(
                     viewIndex,
@@ -221,9 +217,8 @@ export class HoverDetailService implements OnDestroy {
     /** Reconciles one view's configured projection against its latest visible coverage. */
     private reconcileLayersForView(viewIndex: number): void {
         const expressions = this.enabled ? this.projectedExpressions() : [];
-        const desiredCoverage = expressions.length
-            ? (this.desiredCoverageByView.get(viewIndex) ?? [])
-            : [];
+        const desiredCoverage = (this.desiredCoverageByView.get(viewIndex) ?? [])
+            .filter(entry => expressions.length || entry.mapgetLayer.origin === "virtual");
         const desiredKeys = new Set(desiredCoverage.map(entry =>
             this.layerKey(viewIndex, entry.mapgetLayer)));
         for (const [key, owned] of [...this.layers]) {
@@ -242,7 +237,7 @@ export class HoverDetailService implements OnDestroy {
                 owned = undefined;
             }
             if (!owned) {
-                owned = this.createLayer(viewIndex, coverage.mapgetLayer, expressions);
+                owned = this.createLayer(viewIndex, coverage.mapgetLayer, coverage.mapgetLayer.origin === "virtual" ? ["attributes.drawing.description"] : expressions);
                 this.layers.set(key, owned);
             }
             owned.layer.setPartitionCoverage(
@@ -343,7 +338,7 @@ export class HoverDetailService implements OnDestroy {
         if (!cached || cached.valueVersion !== state.valueVersion) {
             const valuesByFeatureId = this.decodeTile(
                 state.subsetBlob,
-                this.projectedExpressions()
+                owned.layer.mapgetLayer.origin === "virtual" ? ["attributes.drawing.description"] : this.projectedExpressions()
             );
             if (!valuesByFeatureId) {
                 return undefined;

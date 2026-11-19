@@ -2,6 +2,7 @@
   "coordinates-enabled": true,
   "surveys": [],
   "styles": [
+    {"id": "Drawing", "url": "drawing-style.yaml"},
     {"id": "Default Style", "url": "default-style.yaml"}
   ],
   "externalViewers": [

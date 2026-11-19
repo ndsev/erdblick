@@ -152,7 +152,7 @@ export class AppUrlStateService implements AppActionContributor {
 
         const layerEncoding = encodeLayerNamesV2(
             urlLayerNames,
-            sourceDataSelectionMapIds(this.inspectionState.selection)
+            sourceDataSelectionMapIds(this.inspectionState.persistableSelection())
         );
         if (layerEncoding.map) {
             params["map"] = layerEncoding.map;
@@ -167,7 +167,7 @@ export class AppUrlStateService implements AppActionContributor {
         this.serializeLayerIndexedMapViewParam(params, "az", this.layerState.layerAutoZoomLevelState, urlLayerNames, true, value => value ? "1" : "0");
 
         const selection = encodeSelectionsV2(
-            this.inspectionState.selection,
+            this.inspectionState.persistableSelection(),
             urlLayerNames,
             layerEncoding.mapNames,
             DEFAULT_HIGHLIGHT_COLORS
@@ -189,7 +189,7 @@ export class AppUrlStateService implements AppActionContributor {
 
     /** Returns URL layers that are currently visible or required by feature selections. */
     private urlLayerNamesForSerialization(): string[] {
-        const selectedLayerNames = new Set(featureSelectionLayerNames(this.inspectionState.selection));
+        const selectedLayerNames = new Set(featureSelectionLayerNames(this.inspectionState.persistableSelection()));
         const urlLayerNames: string[] = [];
         const addLayerName = (layerName: string) => {
             if (!urlLayerNames.includes(layerName)) {

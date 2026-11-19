@@ -117,6 +117,8 @@ export class MapDataService implements AppActionContributor {
 
     /** Server-ready metadata awaiting or retaining its local schema installation. */
     private catalogMetadata = new Map<string, MapInfoItem>();
+    private readonly virtualSources = new Map<string, MapInfoItem>();
+    private readonly virtualDictionaries = new Map<string, Uint8Array>();
 
     /** Coalesces binary downloads before allocating another copy of the same schema. */
     private readonly schemaRequests = new Map<string, {
@@ -184,6 +186,51 @@ export class MapDataService implements AppActionContributor {
     /** Returns the mutable map tree owned by the map info service. */
     get maps(): MapLayerTree {
         return this.maps$.getValue();
+    }
+
+    /** Install a browser-owned catalog entry without touching server readiness or transport. */
+    registerVirtualSource(source: MapInfoItem, artifact: MapSchemaArtifact, dictionary: Uint8Array): void {
+        if (this.sourceCatalogEntries.some(entry => entry.mapId === source.mapId && entry.origin !== "virtual")) {
+            throw new Error("A backend source already uses this local document identity.");
+        }
+        const local = {...source, origin: "virtual" as const, status: "ready", schemaStatus: "ready" as const};
+        this.state.registerVirtualMap(source.mapId);
+        this.inspectionState.state.registerSessionMap(source.mapId);
+        this.virtualSources.set(source.mapId, local);
+        this.virtualDictionaries.set(source.mapId, dictionary);
+        this.schemaArtifacts.set(artifact.schemaId, artifact);
+        this.catalogMetadata.set(JSON.stringify(this.sourceMetadata(local)), this.sourceMetadata(local));
+        this.sourceCatalogEntries = [...this.sourceCatalogEntries.filter(entry => entry.mapId !== source.mapId), local];
+        this.reconcileReadySources();
+    }
+
+    /** Append dictionary fields before any local subset/snapshot is admitted. */
+    installVirtualDictionary(mapId: string, dictionary: Uint8Array): void {
+        if (!this.virtualSources.has(mapId)) return;
+        this.virtualDictionaries.set(mapId, dictionary);
+        uint8ArrayToWasmOrThrow(bytes => this.tileLayerParser.addFieldDict(bytes), dictionary);
+        this.fieldDictBlobCache.delete(this.virtualSources.get(mapId)!.stringPoolId);
+    }
+
+    /** Change the file label without changing native source or feature identity. */
+    renameVirtualSource(mapId: string, displayName: string): void {
+        const source = this.virtualSources.get(mapId);
+        if (!source) return;
+        const next = {...source, displayName};
+        this.virtualSources.set(mapId, next);
+        this.publishSourceCatalogTree(this.sourceCatalogEntries.map(entry => entry.mapId === mapId ? next : entry));
+    }
+
+    /** Retire only this document's parser/catalog ownership; remote maps remain installed. */
+    removeVirtualSource(mapId: string, preserveViewState = false): void {
+        const source = this.virtualSources.get(mapId);
+        if (!source) { if (!preserveViewState) this.state.removeVirtualMap(mapId); return; }
+        this.virtualSources.delete(mapId);
+        if (!preserveViewState) this.state.removeVirtualMap(mapId);
+        this.virtualDictionaries.delete(mapId);
+        this.catalogMetadata.delete(JSON.stringify(this.sourceMetadata(source)));
+        this.sourceCatalogEntries = this.sourceCatalogEntries.filter(entry => entry.mapId !== mapId);
+        this.reconcileReadySources();
     }
 
     /** Exposes the shared WASM tile parser used by tile hydration, search schema helpers, and inspection. */
@@ -475,7 +522,10 @@ export class MapDataService implements AppActionContributor {
             const nextMetadata = new Map<string, MapInfoItem>();
             if (!Array.isArray(response.body)) throw new Error("Invalid datasource catalog: expected an array.");
             const result = response.body;
-            this.sourceCatalogEntries = this.normalizeSourceCatalogEntries(result).map(source => {
+            this.sourceCatalogEntries = this.normalizeSourceCatalogEntries([
+                ...result.map(source => ({...source, origin: "remote" as const})),
+                ...this.virtualSources.values()
+            ]).map(source => {
                 if (dataSourceCatalogStatus(source) !== "ready") return source;
                 const metadata = this.sourceMetadata(source);
                 const signature = JSON.stringify(metadata);
@@ -525,7 +575,8 @@ export class MapDataService implements AppActionContributor {
     /** Removes lifecycle decoration from the metadata identity and native input. */
     private sourceMetadata(source: MapInfoItem): MapInfoItem {
         const metadata = { ...source };
-        for (const field of ["status", "statusMessage", "progress", "configIndex", "retrying", "schemaStatus", "schemaMessage"]) {
+        for (const field of ["status", "statusMessage", "progress", "configIndex", "retrying", "schemaStatus", "schemaMessage",
+            "origin", "displayName", "transient", "renderLane"]) {
             delete metadata[field];
         }
         metadata.layers = Object.fromEntries(Object.entries(metadata.layers).map(([id, layer]) => {
@@ -577,6 +628,8 @@ export class MapDataService implements AppActionContributor {
                         uint8ArrayToWasmOrThrow(bytes => this.tileLayerParser.installMapSchema(bytes, artifact.schemaId), artifact.bytes);
                     }
                     this.applyNativeCatalogChanges([], [metadata]);
+                    const dictionary = this.virtualDictionaries.get(metadata.mapId);
+                    if (dictionary) this.installVirtualDictionary(metadata.mapId, dictionary);
                     this.readySourceMetadata.set(signature, metadata);
                     this.mapMetadataGenerations.set(metadata.mapId, ++this.nextMetadataGeneration);
                     this.renderDataSourceInfoBlobCache.delete(metadata.mapId);
@@ -728,10 +781,11 @@ export class MapDataService implements AppActionContributor {
         retrying: boolean; failed: boolean; sourceCount: number; failedSourceCount: number;
         catalogError: string; message: string;
     } {
-        const failures = this.sourceCatalogEntries.filter(entry => dataSourceReadinessStatus(entry) === "failed");
+        const remote = this.sourceCatalogEntries.filter(entry => entry.origin !== "virtual");
+        const failures = remote.filter(entry => dataSourceReadinessStatus(entry) === "failed");
         return {
             retrying: failures.some(entry => entry.retrying === true), failed: failures.length > 0,
-            sourceCount: this.sourceCatalogEntries.length, failedSourceCount: failures.length,
+            sourceCount: remote.length, failedSourceCount: failures.length,
             catalogError: [this.sourceConfigError, this.catalogRefreshFailure?.message].filter(Boolean).join("\n"),
             message: failures.map(entry => `${entry.mapId}: ${this.dataSourceStatusText(entry)}`).join("\n")
         };
@@ -803,7 +857,9 @@ export class MapDataService implements AppActionContributor {
                     source.stringPoolId,
                     source.mapId,
                     layer.layerId,
-                    layer
+                    layer,
+                    source.origin ?? "remote",
+                    source.origin === "virtual" ? source.renderLane : undefined
                 );
                 result.set(key, mapgetLayer);
             }

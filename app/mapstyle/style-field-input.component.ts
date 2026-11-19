@@ -114,7 +114,7 @@ export interface StyleInputProblem {path: string; message: string;}
                         [overlayOptions]="{baseZIndex: 31000}"
                         [pt]="{preview: {'aria-label': 'Color picker for ' + label}}"
                         (keydown.escape)="$event.stopPropagation()"
-                        (onChange)="set($event.value)"/>
+                        (onChange)="$event.originalEvent.preventDefault(); set($event.value)"/>
                     <input [attr.aria-label]="label" [ngModel]="text()" (ngModelChange)="set($event)"
                         placeholder="Named color or RGB hex">
                 </div>

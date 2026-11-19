@@ -16,6 +16,7 @@ import type { FeaturePickTarget } from "../../inspection/feature-identity.model"
 import { featureSetsEqual } from "../../mapdata/feature-inspection.adapter";
 import { RenderedFeaturePickResult, RenderNavigationTarget } from "../render-view.model";
 import { ErdblickVectorLayer } from "./erdblick-vector.layer";
+import {DrawingLayer} from "./drawing.layer";
 import { GpuScene } from "./gpu-scene.visualization";
 import { GpuTextLayerHost } from "./gpu-text-layer.host";
 import {
@@ -370,6 +371,7 @@ export class DeckPicking {
         const orderedVectorPicks = candidates
             .filter(candidate => candidate.order !== undefined)
             .sort((left, right) =>
+                (right.order!.presentationOrder ?? 0) - (left.order!.presentationOrder ?? 0) ||
                 right.order!.zIndex - left.order!.zIndex ||
                 right.order!.primitiveOrder - left.order!.primitiveOrder ||
                 left.index - right.index);
@@ -414,14 +416,15 @@ export class DeckPicking {
     /** Resolve ordering metadata for one GPU vector picking result. */
     private renderedPickOrder(
         picked: PickingInfo
-    ): { zIndex: number; primitiveOrder: number } | undefined {
+    ): { zIndex: number; primitiveOrder: number; presentationOrder?: number } | undefined {
         const globalPickIndex = Number(
             (picked.object as { globalPickIndex?: unknown } | undefined)
                 ?.globalPickIndex ?? picked.index
         );
         if (!this.gpuScene || !Number.isInteger(globalPickIndex) ||
             globalPickIndex < 0 ||
-            (!(picked.layer instanceof ErdblickVectorLayer) &&
+            (!(picked.layer instanceof DrawingLayer) &&
+                !(picked.layer instanceof ErdblickVectorLayer) &&
                 !(picked.sourceLayer instanceof ErdblickVectorLayer))) {
             return undefined;
         }
@@ -434,7 +437,7 @@ export class DeckPicking {
             (picked.object as { globalPickIndex?: unknown } | undefined)
                 ?.globalPickIndex ?? picked.index
         );
-        if ((picked.layer instanceof ErdblickVectorLayer ||
+        if ((picked.layer instanceof DrawingLayer || picked.layer instanceof ErdblickVectorLayer ||
             picked.sourceLayer instanceof ErdblickVectorLayer ||
             picked.layer instanceof GpuTextLayerHost ||
             picked.sourceLayer instanceof GpuTextLayerHost) &&

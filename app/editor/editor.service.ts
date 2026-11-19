@@ -2,7 +2,7 @@ import {Injectable} from '@angular/core';
 import {BehaviorSubject, Observable, Subject} from 'rxjs';
 
 /** Enumerates the editor modes supported by the shared code editor wrapper. */
-export type EditorLanguage = 'yaml' | 'json';
+export type EditorLanguage = 'yaml' | 'json' | 'text';
 
 /** Describes the initial state for one shared editor session. */
 export interface EditorSessionConfig {
@@ -11,6 +11,7 @@ export interface EditorSessionConfig {
     readOnly?: boolean;
     styleCompletions?: boolean;
     language?: EditorLanguage;
+    preserveLineEndings?: boolean;
 }
 
 /** Line-oriented navigation target for one shared editor session. */
@@ -34,6 +35,7 @@ export interface EditorSession {
     language: EditorLanguage;
     readOnly: boolean;
     styleCompletions: boolean;
+    preserveLineEndings: boolean;
 }
 
 @Injectable()
@@ -63,6 +65,7 @@ export class EditorService {
             saveRequested$: new Subject<void>(),
             language: config.language ?? 'yaml',
             styleCompletions: config.styleCompletions ?? false,
+            preserveLineEndings: config.preserveLineEndings ?? false,
             readOnly: config.readOnly ?? false
         };
         this.sessions.set(session.id, session);

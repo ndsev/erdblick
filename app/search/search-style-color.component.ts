@@ -55,6 +55,7 @@ import {
                                    [ngModel]="viewDraft.solidColor"
                                    appendTo="body"
                                    [overlayOptions]="colorPickerOverlayOptions"
+                                   (onChange)="$event.originalEvent.preventDefault()"
                                    (ngModelChange)="setSolidColor($event)">
                     </p-colorpicker>
                 }
@@ -109,6 +110,7 @@ import {
                         <p-colorpicker [ngModel]="viewDraft.fallbackColor" appendTo="body"
                                        [overlayOptions]="colorPickerOverlayOptions"
                                        aria-label="Fallback color"
+                                       (onChange)="$event.originalEvent.preventDefault()"
                                        (ngModelChange)="setFallbackColor($event)"></p-colorpicker>
                     }
                 </div>
@@ -125,6 +127,7 @@ import {
                             <p-colorpicker [ngModel]="stop.color" appendTo="body"
                                            [overlayOptions]="colorPickerOverlayOptions"
                                            [attr.aria-label]="specialColorLabel(stop)"
+                                           (onChange)="$event.originalEvent.preventDefault()"
                                            (ngModelChange)="setSpecialStopColor(stop, $event)"></p-colorpicker>
                             <span>{{ specialColorLabel(stop) }}</span>
                             <p-button icon="pi pi-times" severity="danger" [outlined]="true"
@@ -183,6 +186,7 @@ import {
                                            appendTo="body"
                                            [overlayOptions]="colorPickerOverlayOptions"
                                            [attr.aria-label]="'Gradient color ' + (stopIndex + 1)"
+                                           (onChange)="$event.originalEvent.preventDefault()"
                                            (ngModelChange)="setGradientStopColor(stop, $event)">
                             </p-colorpicker>
                             <input class="search-style-color-value-input"
@@ -225,6 +229,7 @@ import {
                                            appendTo="body"
                                            [overlayOptions]="colorPickerOverlayOptions"
                                            [attr.aria-label]="'Category color ' + (stopIndex + 1)"
+                                           (onChange)="$event.originalEvent.preventDefault()"
                                            (ngModelChange)="setCategoryStopColor(stop, $event)">
                             </p-colorpicker>
                             @if (categoryValueOptions.length > 0) {

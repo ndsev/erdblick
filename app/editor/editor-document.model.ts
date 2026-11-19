@@ -1,5 +1,5 @@
 /** Standalone documents supported by the editor workspace. */
-export type EditorDocumentKind = 'style' | 'presets' | 'datasources' | 'preferences';
+export type EditorDocumentKind = 'style' | 'presets' | 'datasources' | 'preferences' | 'drawing';
 
 /** Presentation reset hook for the optional full-UI editor workspace. */
 export const EDITOR_PRESENTATION_RESET_EVENT = 'erdblick-editors-presentation-reset';
@@ -30,6 +30,7 @@ export interface EditorDocumentController {
     readonly enabled?: boolean;
     setEnabled?(enabled: boolean): void;
     save(): Promise<boolean>;
+    discard?(): Promise<boolean>;
     activate?(location?: EditorDocumentLocation): void;
 }
 

@@ -66,7 +66,7 @@ export class EditorSurfaceComponent implements DoCheck, OnDestroy {
     get controller() { return this.entry.content?.instance; }
     get expanded(): boolean { return this.workspace.layout.getDialogLayout(this.entry.layoutId)?.panelExpanded ?? false; }
     get collapsed(): boolean { return this.workspace.layout.getDialogLayout(this.entry.layoutId)?.panelCollapsed ?? false; }
-    get testId(): string { return ({style: 'style-editor-dialog', presets: 'style-preset-editor-dialog', datasources: 'datasources-editor-dialog', preferences: 'advanced-preferences-dialog'})[this.entry.descriptor.kind]; }
+    get testId(): string { return ({style: 'style-editor-dialog', presets: 'style-preset-editor-dialog', datasources: 'datasources-editor-dialog', preferences: 'advanced-preferences-dialog', drawing: 'drawing-editor-dialog'})[this.entry.descriptor.kind]; }
 
     /** Raises only this dialog, registering its guarded close callback with the stack. */
     focusSurface(): void {

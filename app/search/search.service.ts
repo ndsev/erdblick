@@ -579,6 +579,7 @@ export class SearchService implements AppActionContributor {
     private activeFeatureSearchLayers(): FeatureSearchMapLayerRef[] {
         const selected = new Map<string, FeatureSearchMapLayerRef>();
         for (const [mapId, map] of this.mapInfo.maps.maps) {
+            if (map.info.origin === "virtual") continue;
             for (const layer of map.allFeatureLayers()) {
                 for (let viewIndex = 0; viewIndex < this.viewSettings.numViews; ++viewIndex) {
                     if (!this.mapInfo.maps.getMapLayerVisibility(viewIndex, mapId, layer.id)) {
@@ -609,6 +610,7 @@ export class SearchService implements AppActionContributor {
             return [];
         }
         for (const [mapId, map] of this.mapInfo.maps.maps) {
+            if (map.info.origin === "virtual") continue;
             for (const layer of map.allFeatureLayers()) {
                 if (!this.mapInfo.maps.getMapLayerVisibility(viewIndex, mapId, layer.id)) {
                     continue;
@@ -3156,6 +3158,7 @@ export class SearchService implements AppActionContributor {
     checkSearchTargets(mapLayers: Array<{ mapId: string; layerId: string }>, viewIds: string[]): void {
         for (const id of viewIds) this.viewState.requireViewIndex(id);
         for (const target of mapLayers) {
+            if (this.mapInfo.maps.maps.get(target.mapId)?.info.origin === "virtual") rejectAction("Local drawings do not support server-wide search.");
             const layer = this.mapInfo.requireLayer(target.mapId, target.layerId);
             if (layer.type === "SourceData" || !this.mapInfo.isMapLayerReady(target.mapId, target.layerId)) rejectAction("Search layers must be ready feature layers");
         }

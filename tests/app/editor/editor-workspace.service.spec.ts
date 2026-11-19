@@ -25,6 +25,17 @@ function controller(dirty = true): EditorDocumentController & {dirty: boolean; b
 }
 
 describe('Editor workspace document lifetime', () => {
+    it('delegates drawing reload protection to the autosave owner while still guarding other dirty Editors', () => {
+        const {service} = workspace();
+        const drawing = service.open('drawing', 'local');
+        drawing.content = {instance: controller(), hostView: {}, destroy: vi.fn()} as never;
+        const safe = new Event('beforeunload', {cancelable: true}); window.dispatchEvent(safe);
+        expect(safe.defaultPrevented).toBe(false);
+        const style = service.open('style', 'A');
+        style.content = {instance: controller(), hostView: {}, destroy: vi.fn()} as never;
+        const unsafe = new Event('beforeunload', {cancelable: true}); window.dispatchEvent(unsafe);
+        expect(unsafe.defaultPrevented).toBe(true);
+    });
     it('deduplicates a document while allowing two styles and every configuration editor', () => {
         const {service, persistence} = workspace();
         const first = service.open('style', 'A', '/styles/a.yaml');

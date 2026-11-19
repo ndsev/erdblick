@@ -530,6 +530,7 @@ advanced-preferences {
 // A document remains mounted while its disposable floating/docked slot changes.
 .editor-content-slot, .editor-document-content,
 .editor-document-content > style-editor-document,
+.editor-document-content > drawing-editor,
 .editor-document-content > map-preset-editor {
   display: flex;
   flex-direction: column;

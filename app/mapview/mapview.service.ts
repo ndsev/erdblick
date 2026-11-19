@@ -116,6 +116,15 @@ export class MapViewService implements AppActionContributor {
     private static readonly AUTO_LAYER_LEVEL_MAX_VISIBLE_TILES = 64;
     private static readonly SEARCH_COVERAGE_TILE_LIMIT = 1 << 20;
 
+    /** Optional full-UI drawing input owner, keyed by stable view identity. */
+    drawingInput?: {
+        click(viewId: string, point: [number, number], shift?: boolean): boolean;
+        move(viewId: string, point?: [number, number], shift?: boolean): void;
+        down(viewId: string, point: [number, number], shift?: boolean): boolean;
+        up(viewId: string, point?: [number, number]): void;
+        cancel(): void;
+        leave(viewId: string): void;
+    };
     readonly viewStateChanged = new Subject<ViewRecalculationReason | string>();
     /** Announces an accepted asynchronous navigation before its data/camera is ready. */
     readonly navigationStarted = new Subject<void>();

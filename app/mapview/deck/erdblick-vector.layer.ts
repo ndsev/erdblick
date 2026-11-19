@@ -275,6 +275,7 @@ export interface ErdblickVectorPickObject {
 
 /** Stable layer shell around one view-owned persistent GPU scene. */
 export type ErdblickVectorLayerProps = LayerProps & {
+  presentationDomain?: "map" | "drawing";
   scene: GpuScene;
   flattenZ: boolean;
   primitiveKinds?: readonly GpuPrimitiveKind[];
@@ -830,7 +831,7 @@ export class ErdblickVectorLayer extends Layer<ErdblickVectorLayerProps> {
       return;
     }
     const desired = new Set<bigint>();
-    for (const source of this.props.scene.materialStores()) {
+    for (const source of this.props.scene.materialStores(this.props.presentationDomain)) {
       if (!this.acceptsRenderMode(source.flags)) {
         continue;
       }
@@ -1217,6 +1218,7 @@ export function createErdblickVectorLayers(
   scene: GpuScene,
   flattenZ: boolean,
   sharedDisabledPickIndices = new Set<number>(),
+  presentationDomain: "map" | "drawing" = "map",
 ): readonly [
   ErdblickVectorLayer,
   ErdblickVectorLayer,
@@ -1237,6 +1239,7 @@ export function createErdblickVectorLayers(
       id: `${id}-${suffix}`,
       data: [],
       scene,
+      presentationDomain,
       flattenZ,
       primitiveKinds,
       ...styleOrderRange,

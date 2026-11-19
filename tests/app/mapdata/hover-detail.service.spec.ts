@@ -57,6 +57,7 @@ function createHarness(
         retainTileAttachment: vi.fn()
     };
     const mapInfo = {
+        mapgetLayer: vi.fn(),
         tileLayerParser: { readTileSubsetLayer: vi.fn() }
     };
     const service = new HoverDetailService(
@@ -75,6 +76,23 @@ function createHarness(
 }
 
 describe("HoverDetailService", () => {
+    it("decodes local descriptions when ordinary hover labels and their projection are disabled", () => {
+        const {service, filterRefs, mapInfo} = createHarness([], false);
+        const layer = new MapgetLayer('source', 'pool', 'Map', 'Road', {} as never, 'virtual');
+        mapInfo.mapgetLayer.mockReturnValue(layer);
+        const partition = tilePartition(545379780), mapTileKey = coreLib.getTileFeatureLayerKey('Map', 'Road', partition.id);
+        service.reconcileView(0, [{mapgetLayer: layer, partitions: [partition], priorityPartitions: [partition]}]);
+        mapInfo.tileLayerParser.readTileSubsetLayer.mockReturnValue({
+            channelSchema: () => ({featureFields: ['attributes.drawing.description'], entryCount: 1}),
+            entryRange: () => [{mapTileKey, featureId: 'DrawingFeature.1', values: [['Local description']]}], delete: vi.fn()
+        });
+        filterRefs[0].callbacks.onTile({blob: new Uint8Array([1]), filterId: 'hover-details', generation: 1,
+            mapId: 'Map', layerId: 'Road', partition, partitionKey: partitionKey(partition), mapTileKey, stringPoolId: 'pool',
+            dependencies: [], issues: [], info: {}, numEntries: 1, geometryVertexCount: 0, glbAttachmentName: '', receivedAt: 1});
+        expect(service.detailsFor(0, [{mapTileKey, featureId: 'DrawingFeature.1'}])[0].fields[0].value).toBe('Local description');
+        service.ngOnDestroy();
+    });
+
     it("derives concise display keys from leaf field names", () => {
         expect(defaultHoverLabelFieldKey("abc.speedLimit")).toBe("speedLimit");
         expect(defaultHoverLabelFieldKey("typeId")).toBe("typeId");
