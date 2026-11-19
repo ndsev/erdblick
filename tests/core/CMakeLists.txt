@@ -29,8 +29,12 @@ target_link_libraries(test.erdblick
 catch_discover_tests(test.erdblick)
 
 add_executable(test.erdblick-style-plan
+  test-drawing.cpp
   test-style-authoring.cpp
   test-style-filter-plan.cpp)
+
+target_compile_definitions(test.erdblick-style-plan PRIVATE
+  ERDBLICK_TEST_STYLES_DIRECTORY="${erdblick_SOURCE_DIR}/config/styles")
 
 target_link_libraries(test.erdblick-style-plan
   PUBLIC

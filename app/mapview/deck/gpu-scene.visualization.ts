@@ -226,6 +226,7 @@ interface InstalledSpan {
 }
 
 interface InstalledContribution {
+  presentationDomain: GpuPresentationDomain;
   identity: string;
   revision: number;
   contributionSlot: number;
@@ -264,6 +265,7 @@ interface StagedRender {
 }
 
 interface ReservedContribution {
+  presentationDomain: GpuPresentationDomain;
   identity: string;
   key: bigint;
   slot: number;
@@ -292,6 +294,7 @@ export interface GpuSceneRenderReservation {
 
 /** One independently replaceable subset/style input prepared for a render task. */
 export interface GpuSceneContributionInput {
+  presentationDomain?: GpuPresentationDomain;
   identity: string;
   mapTileKey: string;
   styleOrder: number;
@@ -322,6 +325,7 @@ const NO_PICK_REFERENCES: GpuScenePickFinder = () => [];
 
 /** Deck text datum retained outside the direct vector-buffer upload path. */
 export interface GpuSceneLabel extends GpuLabelRecordView {
+  presentationDomain?: GpuPresentationDomain;
   globalPickIndex: number | null;
   styleOrder: number;
 }
@@ -357,6 +361,7 @@ export interface GpuSceneSnapshot {
 
 /** One persistent primitive/material buffer consumed by the vector layer. */
 export interface GpuSceneMaterialStore {
+  presentationDomain?: GpuPresentationDomain;
   kind: number;
   flags: number;
   styleOrder: number;
@@ -366,6 +371,9 @@ export interface GpuSceneMaterialStore {
   atlasPage: number;
   store: GpuPrimitiveStore;
 }
+
+/** Browser presentation ownership; packet/model formats remain unchanged. */
+export type GpuPresentationDomain = "map" | "drawing";
 
 /** One exact semantic scene object selected for a transient GPU mask. */
 export interface GpuSceneInteractionPick {
@@ -686,6 +694,7 @@ export class GpuScene {
       kind: number;
       flags: number;
       styleOrder: number;
+      presentationDomain: GpuPresentationDomain;
       renderOrder: number;
       stride: number;
       glowColor: [number, number, number, number];
@@ -719,7 +728,7 @@ export class GpuScene {
   >();
   private readonly zIndexEntryBySignature = new Map<
     string,
-    GpuZIndexEntryView
+    GpuZIndexEntryView & {presentationDomain?: GpuPresentationDomain}
   >();
   private readonly zIndexSlotsBySignature = new Map<string, Set<number>>();
   private readonly zIndexSignatureBySlot = new Map<number, string>();
@@ -860,6 +869,7 @@ export class GpuScene {
           revision: entry.expectedRevision,
           mapTileKey: input.mapTileKey,
           styleOrder: input.styleOrder,
+          presentationDomain: input.presentationDomain ?? "map",
           resolvePick: input.resolvePick ?? NO_RESOLVED_PICK,
           findPickReferences: input.findPickReferences ?? NO_PICK_REFERENCES,
           installed: false,
@@ -1021,6 +1031,7 @@ export class GpuScene {
               activationToken: descriptor.activationToken,
               mapTileKey: reserved.mapTileKey,
               styleOrder: reserved.styleOrder,
+              presentationDomain: reserved.presentationDomain,
               lod: entry.lod,
               origin,
               spans: [],
@@ -1045,7 +1056,7 @@ export class GpuScene {
         }
         for (const span of descriptor.spans) {
           const stream = packet.streams[span.streamIndex];
-          const store = this.storeFor(stream, reserved.styleOrder);
+          const store = this.storeFor(stream, reserved.styleOrder, reserved.presentationDomain);
           const previousBufferRevision = store.bufferRevision;
           const range = store.allocate(span.recordCount);
           if (store.bufferRevision !== previousBufferRevision) {
@@ -1148,6 +1159,7 @@ export class GpuScene {
         item.installed.labels = item.labels.map((label) => ({
           ...label,
           styleOrder: item.reserved.styleOrder,
+          presentationDomain: item.reserved.presentationDomain,
           globalPickIndex:
             item.installed.pickingRange &&
             label.localPickIndex < item.installed.pickingRange.recordCount
@@ -1357,7 +1369,7 @@ export class GpuScene {
   /** Return the authored z-index and fixed primitive pass of one rendered pick. */
   pickOrder(
     globalPickIndex: number,
-  ): { zIndex: number; primitiveOrder: number } | undefined {
+  ): { zIndex: number; primitiveOrder: number; presentationOrder?: number } | undefined {
     const owned = this.ownedPackedPick(globalPickIndex);
     if (!owned) {
       return undefined;
@@ -1376,6 +1388,7 @@ export class GpuScene {
     return {
       zIndex: Number.isFinite(zIndex) ? (zIndex === 0 ? 0 : zIndex) : 0,
       primitiveOrder: record.presentationPrimitiveOrder,
+      ...(installed.presentationDomain === "drawing" ? {presentationOrder: 1} : {}),
     };
   }
 
@@ -1593,11 +1606,11 @@ export class GpuScene {
   }
 
   /** Return all active labels as one logical snapshot for the bounded TextLayer host. */
-    labels(): GpuSceneLabel[] {
+    labels(domain?: GpuPresentationDomain): GpuSceneLabel[] {
         const result: GpuSceneLabel[] = [];
         for (const entry of this.contributionByIdentity.values()) {
             const active = entry.active;
-            if (active) {
+            if (active && (!domain || active.presentationDomain === domain)) {
                 result.push(
                     ...active.labels.filter(
                         (label) => label.minLod <= Math.ceil(active.lod),
@@ -1723,14 +1736,16 @@ export class GpuScene {
   }
 
   /** Expose live material stores and immutable layouts to the vector layer. */
-  materialStores(): readonly GpuSceneMaterialStore[] {
+  materialStores(domain?: GpuPresentationDomain): readonly GpuSceneMaterialStore[] {
     const result: GpuSceneMaterialStore[] = [];
     for (const [materialKey, store] of this.storesByMaterial) {
       const layout = this.streamLayoutByMaterial.get(materialKey);
       if (!layout) {
         throw new Error("GPU material store has no stream layout.");
       }
+      if (domain && layout.presentationDomain !== domain) continue;
       result.push({
+        presentationDomain: layout.presentationDomain,
         kind: layout.kind,
         flags: layout.flags,
         styleOrder: layout.styleOrder,
@@ -1809,6 +1824,7 @@ export class GpuScene {
   private storeFor(
     stream: GpuRenderPacketView["streams"][number],
     styleOrder: number,
+    presentationDomain: GpuPresentationDomain,
   ): GpuPrimitiveStore {
     if (
       !Number.isSafeInteger(styleOrder) ||
@@ -1821,7 +1837,10 @@ export class GpuScene {
     // order is a separate bounded draw bucket: unlike tiles, it must remain a
     // model boundary because no-depth and translucent records cannot recover
     // authored paint order from clip-space bias alone.
-    const drawMaterialKey = (stream.materialKey << 32n) | BigInt(styleOrder);
+    // A physical store cannot mix records consumed by different visible hosts.
+    // The additional bit is browser-local, above the native uint64 material key.
+    const drawMaterialKey = (stream.materialKey << 32n) | BigInt(styleOrder) |
+      (presentationDomain === "drawing" ? 1n << 96n : 0n);
     const existingLayout = this.streamLayoutByMaterial.get(drawMaterialKey);
     if (
       existingLayout &&
@@ -1851,6 +1870,7 @@ export class GpuScene {
         kind: stream.kind,
         flags: stream.flags,
         styleOrder,
+        presentationDomain,
         renderOrder: stream.renderOrder,
         stride: stream.recordStride,
         glowColor: [...stream.glowColor],
@@ -2059,7 +2079,7 @@ export class GpuScene {
     }
     installed.zIndices.forEach((entry, index) => {
       const slot = installed.zIndexRange!.firstRecord + index;
-      const signature = zIndexOrderSignature(entry);
+      const signature = installed.presentationDomain + ":" + zIndexOrderSignature(entry);
       if (delta > 0) {
         if (this.zIndexSignatureBySlot.has(slot)) {
           throw new Error("GPU scene z-index slot is already active.");
@@ -2069,7 +2089,8 @@ export class GpuScene {
         if (!slots) {
           slots = new Set<number>();
           this.zIndexSlotsBySignature.set(signature, slots);
-          this.zIndexEntryBySignature.set(signature, entry);
+          this.zIndexEntryBySignature.set(signature, {...entry, presentationDomain: installed.presentationDomain});
+          domainChanged = true;
         }
         slots.add(slot);
         this.pendingZIndexLookupSlots.add(slot);
@@ -2087,6 +2108,7 @@ export class GpuScene {
         if (slots.size === 0) {
           this.zIndexSlotsBySignature.delete(signature);
           this.zIndexEntryBySignature.delete(signature);
+          domainChanged = true;
           this.encodedZIndexRowsBySignature.delete(signature);
         }
       }
@@ -2240,6 +2262,7 @@ export class GpuScene {
     const step = this.authoredZIndexReferenceCount > 0
       ? MAX_LOCAL_CLIP_SPACE_BIAS / depthRanks.slotCount
       : 0;
+    const hasDrawings = [...this.zIndexEntryBySignature.values()].some(entry => entry.presentationDomain === "drawing");
     const result = new Map<string, Float32Array>();
     for (const [signature, entry] of this.zIndexEntryBySignature) {
       const authored = Number.isFinite(entry.value);
@@ -2257,6 +2280,8 @@ export class GpuScene {
         : 0;
       const row = new Float32Array(4);
       row[0] = (allocation.firstSlot + tieOrdinal) * step;
+      if (hasDrawings) row[0] = row[0] / 2 +
+        (entry.presentationDomain === "drawing" ? MAX_LOCAL_CLIP_SPACE_BIAS / 2 : 0);
       const semanticGroup = entry.semanticGroup >>> 0;
       if (semanticGroup !== 0) {
         row[1] = compactSemanticGroups.get(semanticGroup) ?? 0;

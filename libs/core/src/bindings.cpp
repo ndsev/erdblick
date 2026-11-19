@@ -28,6 +28,7 @@ const char *__asan_default_options() {
 
 #include "aabb.h"
 #include "buffer.h"
+#include "drawing.h"
 #include "interop/js-object.h"
 #include "mapget/model/info.h"
 #include "mapget/model/point.h"
@@ -631,6 +632,28 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .constructor<uint32_t>()
         .function("getSize", &SharedUint8Array::getSize)
         .function("getPointer", &SharedUint8Array::getPointer);
+
+    ////////// Browser-owned drawing models; no service or HTTP dependency.
+    em::class_<DrawingSource>("DrawingSource")
+        .constructor<std::string>()
+        .function("replace", &DrawingSource::replace)
+        .function("rows", &DrawingSource::rows)
+        .function("describe", &DrawingSource::describe)
+        .function("source", &DrawingSource::source)
+        .function("checkpoint", &DrawingSource::checkpoint)
+        .function("restore", &DrawingSource::restore)
+        .function("editDescription", &DrawingSource::editDescription)
+        .function("append", &DrawingSource::append)
+        .function("join", &DrawingSource::join)
+        .function("schema", &DrawingSource::schema)
+        .function("dictionary", &DrawingSource::dictionary)
+        .function("filter", &DrawingSource::filter)
+        .function("snapshot", &DrawingSource::snapshot);
+    em::function("drawingDistance", &drawingDistance);
+    em::function("drawingCoordinatesToGeoJson", &drawingCoordinatesToGeoJson);
+    em::function("drawingToolGeoJson", &drawingToolGeoJson);
+    em::function("drawingMetrics", &drawingMetrics);
+    em::function("drawingSnap", &drawingSnap);
 
     ////////// Point
     em::value_object<mapget::Point>("Point")

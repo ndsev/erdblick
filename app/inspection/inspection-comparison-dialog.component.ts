@@ -93,6 +93,7 @@ interface ComparisonExpiryOwner extends RetainedTileExpiryOwner {
                                 <div class="comparison-column-header">
                                     <span class="comparison-column-header-left">
                                         <p-colorpicker [(ngModel)]="column.selectionColor"
+                                                       (onChange)="$event.originalEvent.preventDefault()"
                                                        (ngModelChange)="onSelectionColorChange(column, $event)"></p-colorpicker>
                                         <div class="comparison-column-title"
                                              [pTooltip]="column.entry.label"

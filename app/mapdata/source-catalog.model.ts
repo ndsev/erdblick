@@ -65,6 +65,12 @@ export interface LayerInfoItem extends Record<string, any> {
 
 /** Expected structure of a list entry in the /sources endpoint. */
 export interface MapInfoItem extends Record<string, any> {
+    /** Session-owned sources are acquired locally and never registered with the backend. */
+    origin?: "remote" | "virtual";
+    displayName?: string;
+    transient?: boolean;
+    /** Reserved client render capacity for the bounded measurement cursor contribution. */
+    renderLane?: "drawing-preview";
     extraJsonAttachment: any;
     layers: Record<string, LayerInfoItem>;
     mapId: string;

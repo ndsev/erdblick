@@ -1,3 +1,5 @@
+import {EditorWorkspaceState} from "../../app/editor/editor-workspace.state";
+import {DrawingState} from "../../app/drawing/drawing.state";
 import { MapPresetService } from "../../app/mapstyle/map-preset.service";
 import { MapDataService } from "../../app/mapdata/mapdata.service";
 import { MapDataState } from '../../app/mapdata/mapdata.state';
@@ -32,6 +34,8 @@ import { InfoMessageService } from '../../app/diagnostics/info.service';
  * Tests address each owner explicitly; there is no production compatibility facade.
  */
 export class StateOwners {
+    readonly editors = new EditorWorkspaceState(this.persistence);
+    readonly drawing = new DrawingState(this.persistence);
     readonly omnibar = new OmnibarState(this.persistence);
     readonly configService = new AppConfigService({} as never);
     readonly layout = new LayoutService(this.persistence, new LayoutState(this.persistence));

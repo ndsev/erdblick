@@ -16,8 +16,8 @@ hint: "Native mapget_get_config reads masked datasource configuration and persis
 
 Before the editor can accept changes, the backend has to expose a configuration endpoint and make clear whether its contents are writable:
 
-- Your backend must expose a `/config` endpoint that returns configuration data and, optionally, a JSON schema. If the endpoint is missing or returns an error, the editor will show a read‑only error message.
-- Newer mapget-compatible backends may return HTTP `200` with `datasourceConfigUnavailable: true` when datasource config is hidden. With `readOnly: true`, the editor reports datasource configuration as disabled. With `readOnly: false`, erdblick shows an empty editor and warns that applying changes will replace the hidden datasource configuration.
+- Your backend must expose a `/config` endpoint that returns configuration data and a JSON schema. If the endpoint is missing or returns an error, the editor will show a read‑only error message.
+- Newer mapget-compatible backends may return HTTP `200` with `datasourceConfigUnavailable: true` when datasource config is hidden. With `readOnly: true`, the editor reports datasource configuration as disabled. With `readOnly: false`, erdblick shows the supplied empty model and warns that applying changes will replace the hidden datasource configuration.
 - To allow changes to be persisted, the backend must accept `POST` requests on `/config` and be configured with a writable configuration store (for example a non–read‑only config file or volume).
 - The backend can indicate that editing is disabled by marking the configuration as read‑only. In that case erdblick still displays the configuration, but the **Apply** button is hidden. 
 
@@ -33,7 +33,16 @@ Once the editor is available, you can adjust data sources directly from within e
 1. Open **Edit -> Datasources** from the main bar.
 2. Erdblick loads the current configuration from the `/config` endpoint and shows it in the editor panel.
 3. Update fields such as data source `type`, `uri`, `mapId`, coverage settings, or HTTP scopes according to your backend’s schema.
-4. Click **Apply** to send the edited configuration back to the backend and refresh the list of maps and layers.
+4. Click **Apply** to send the edited configuration back to the backend and refresh the list of maps and layers. The draft becomes saved only after acknowledgement; any text entered while the request is running remains unsaved.
+
+The editor can float or join the [Editors dock](erdblick-ui-basics.md#editors)
+alongside styles and other configuration documents. Opening Datasources again
+focuses the same draft. Docking and hiding the dock do not reload it.
+
+A failed or timed-out write retains the draft and explains that the server may
+have accepted the request. Check the server state before retrying. **Reload
+configuration** asks before replacing an unsaved draft. Closing an unsaved editor
+offers Apply, Discard, and Cancel; Discard is unavailable during a write.
 
 <!-- mcp:
 title: "Datasource configuration persistence"
@@ -61,4 +70,4 @@ The DataSource editor deliberately focuses on a narrow slice of configuration so
 
 - Only data source definitions exposed by the backend appear in the form. Styles and other runtime settings are not part of this editor.
 - Public `/config` sections such as MapViewer's `erdblick` defaults are read by the startup config loader, not edited in this dialog.
-- Validation covers schema correctness but cannot verify that the referenced service actually exists. Keep the `Maps & Layers` panel open to verify connectivity after each change.
+- The editor checks JSON syntax; the backend validates its configuration schema. Neither check proves that a referenced service is reachable. Keep the `Maps & Layers` panel open to verify connectivity after each change.

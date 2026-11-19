@@ -4,6 +4,7 @@ This is the entry point for all erdblick end-user documentation. Each section li
 
 - [Setup Guide](erdblick-setup.md) – Download/build options, serving erdblick with `mapget`, `/static-config`, source-backed style editing, server-supplied `/config.erdblick` overrides, and browser prerequisites.
 - [Basic UI Layout Guide](erdblick-ui-basics.md) – Panels, navigation, MCP agent controls, inspector slots, and preferences including connection retries.
+- [Editors](erdblick-ui-basics.md#editors) – Multiple style and configuration documents, docking, unsaved drafts, and safe closing.
 - [Search Guide](erdblick-search.md) – Jump-to targets, feature search expressions, history, and troubleshooting.
 - [Style System Guide](erdblick-stylesystem.md) – Managing styles in the UI, YAML structure, expression context, and debugging tips.
 - [Style 2.0 Migration Guide](erdblick-style-2.0-migration-guide.md) – Required and recommended changes for styles authored for MapViewer 2026.3.1.

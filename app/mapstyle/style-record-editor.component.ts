@@ -73,7 +73,7 @@ interface FormGroup {name: string; fields: FormField[]; presentFields: FormField
                     @if (item.present) {
                         @if (item.definition.kind === 'record') {
                             @if (model.isRecord(fieldPath(item.key))) {
-                                <style-record-editor class="style-nested-record" [model]="model" [catalog]="catalog"
+                                <style-record-editor [sessionScope]="sessionScope" class="style-nested-record" [model]="model" [catalog]="catalog"
                                     [record]="item.definition.record!" [path]="fieldPath(item.key)" [scope]="childScope(item.key)"
                                     (edit)="edit.emit($event)" (problem)="problem.emit($event)"/>
                             } @else {
@@ -101,7 +101,7 @@ interface FormGroup {name: string; fields: FormField[]; presentFields: FormField
                                     </div>
                                     @if (itemOpen(item.key, index) || visitedItems.has(item.key + ':' + index)) {
                                         @if (model.isRecord(itemPath(item.key, index))) {
-                                            <style-record-editor [hidden]="!itemOpen(item.key, index)" [model]="model" [catalog]="catalog"
+                                            <style-record-editor [sessionScope]="sessionScope" [hidden]="!itemOpen(item.key, index)" [model]="model" [catalog]="catalog"
                                                 [record]="item.definition.record!" [path]="itemPath(item.key, index)" [scope]="effectiveScope"
                                                 (edit)="edit.emit($event)" (problem)="problem.emit($event)"/>
                                         } @else {
@@ -119,7 +119,7 @@ interface FormGroup {name: string; fields: FormField[]; presentFields: FormField
                                 <button type="button" (click)="addField(item)">Replace with editable list</button>
                             }
                         } @else {
-                            <style-field-input [model]="model" [field]="item.definition" [path]="fieldPath(item.key)" [scope]="effectiveScope"
+                            <style-field-input [sessionScope]="sessionScope" [model]="model" [field]="item.definition" [path]="fieldPath(item.key)" [scope]="effectiveScope"
                                 (edit)="edit.emit($event)" (problem)="problem.emit($event)"/>
                         }
                     }
@@ -132,6 +132,7 @@ interface FormGroup {name: string; fields: FormField[]; presentFields: FormField
 export class StyleRecordEditorComponent implements OnChanges {
     @Input({required: true}) model!: StyleDocumentModel;
     @Input({required: true}) catalog!: StyleAuthoringSchema;
+    @Input() sessionScope = 'style';
     @Input() record = "stylesheet";
     @Input() path: StylePath = [];
     @Input() skipMetadata = false;

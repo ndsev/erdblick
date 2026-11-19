@@ -30,7 +30,8 @@ describe("Map attribution", () => {
             {} as never,
             legalInfo,
             owners.layout,
-            owners.inspectionState.state
+            owners.inspectionState.state,
+            {changed: new Subject<void>(), docked: () => []} as never
         );
         const values: string[] = [];
         const subscription = layout["copyright$"].subscribe(value => values.push(value));

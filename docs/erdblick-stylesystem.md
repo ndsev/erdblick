@@ -190,6 +190,14 @@ The Style Editor has **Quick** and **Advanced** tabs for every loaded base or
 search style. Its header switch controls current visibility without changing YAML
 `default`. Both tabs edit the same source; Apply updates the stylesheet.
 
+Different styles can remain open together. Each has its own draft and undo
+history, and can float or join the [Editors dock](erdblick-ui-basics.md#editors).
+Opening an already-open style focuses it without resetting the draft. If another
+action changes or removes that style, the editor reports the stale source and
+blocks overwriting it. **Reload current style** explicitly replaces the draft
+after confirmation. A diagnostic from an older source revision opens the editor
+without selecting a potentially incorrect line.
+
 Quick exposes the name and exact layer affinity at the top. No selected layer means
 Any, and a custom regular expression can be edited directly or replaced with exact
 IDs. Common controls include exact native geometry choices, feature and attribute
@@ -204,6 +212,7 @@ local presets, LOD thresholds, and hover/selection effects. Maps & Layers also p
 runtime controls for all non-internal option types. Color text accepts native named
 colors and RGB hex forms. Click the color swatch to open the picker; choosing a
 color writes RGB hex, while opening or dismissing it preserves the authored value.
+Press Escape to dismiss the picker while keeping the editor or Maps panel open.
 Scale rows retain numeric, string, and Boolean category keys and optional fallbacks.
 Numeric entry uses native
 validation rather than search-editor slider limits.
@@ -302,6 +311,12 @@ presets. A map preset applies to the component layers present on the current
 map, with at least one matching component required. If a present layer lacks
 the referenced preset, that composition cannot be applied to the map.
 Selecting a map preset leaves unrelated layers and options alone.
+
+The raw **Edit** action opens one dockable document for the complete map-preset
+catalog. Read-only deployments allow inspection but disable editing and Apply.
+A writable catalog is saved against the revision loaded by that document. If the
+catalog changed in the meantime, the draft stays open; review it before choosing
+**Reload catalog**. Reload asks before replacing unsaved text.
 
 ## Rule channels
 

@@ -104,7 +104,7 @@ export class FeatureSearchSchemaService {
      */
     public completeQuery(query: string, point: number | undefined) {
         const selectedMapLayers = [...this.mapInfo.maps.allFeatureLayers()]
-            .filter(layer => this.mapInfo.isMapLayerReady(layer.mapId, layer.id))
+            .filter(layer => this.mapInfo.maps.maps.get(layer.mapId)?.info.origin !== "virtual" && this.mapInfo.isMapLayerReady(layer.mapId, layer.id))
             .map(layer => ({mapId: layer.mapId, layerId: layer.id}));
         this.completeQueryForOwner(FeatureSearchSchemaService.DEFAULT_COMPLETION_OWNER_ID, query, point, {selectedMapLayers});
     }

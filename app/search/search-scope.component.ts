@@ -318,6 +318,7 @@ export class SearchScopeComponent implements OnChanges, OnDestroy {
     private availableSearchMapLayerSignature(): string {
         const layerKeys: string[] = [];
         for (const [mapId, mapInfo] of this.mapService.maps.maps) {
+            if (mapInfo.info.origin === "virtual") continue;
             for (const layer of mapInfo.allFeatureLayers()) {
                 const featureTypeSignature = this.mapService.featureTypesForLayer(mapId, layer.id)
                     .sort()

@@ -27,6 +27,21 @@ export class LayoutService {
         return parseFloat(window.getComputedStyle(document.documentElement).fontSize);
     }
 
+    private readonly dockTabCounts = new Map<string, number>();
+
+    /** Publishes actual runtime content instead of inferring it from saved geometry. */
+    setDockTabCount(tab: string, count: number): void {
+        const previous = this.dockTabCounts.get(tab) ?? 0;
+        this.dockTabCounts.set(tab, count);
+        if (previous > 0 && count === 0) queueMicrotask(() => {
+            // Allow other domains to publish their next counts before collapsing.
+            if (this.state.isDockAutoCollapsible && !this.hasDockedSurface()) this.state.isDockOpen = false;
+        });
+    }
+
+    /** Returns whether any registered domain still owns docked content. */
+    hasLiveDockedSurfaces(): boolean { return [...this.dockTabCounts.values()].some(count => count > 0); }
+
     private readonly pendingOpenDialogs = new Set<string>();
 
     /** Returns the persisted layout for a dialog if one exists. */
@@ -130,8 +145,10 @@ export class LayoutService {
 
     /** Returns whether any generic surface is docked, optionally filtered by tab id. */
     hasDockedSurface(tabId?: string): boolean {
+        if (tabId && this.dockTabCounts.has(tabId)) return this.dockTabCounts.get(tabId)! > 0;
+        if (!tabId && this.hasLiveDockedSurfaces()) return true;
         return Object.values(this.state.dialogLayoutsState.getValue()).some(
-            (layout) => (layout.docked ?? false) && (tabId === undefined || layout.dockTab === tabId)
+            layout => layout.docked && !this.dockTabCounts.has(layout.dockTab ?? '') && (tabId === undefined || layout.dockTab === tabId)
         );
     }
 

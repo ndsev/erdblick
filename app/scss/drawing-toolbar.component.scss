@@ -1,0 +1,70 @@
+.drawing-toolbar {
+    position: fixed;
+    // Above map controls; below PrimeNG menus, popovers and dialogs.
+    z-index: 500;
+    left: 50%;
+    bottom: 3.5rem;
+    transform: translateX(-50%);
+    width: max-content;
+    max-width: calc(100vw - 16px);
+    color: var(--p-text-color);
+    background: var(--p-content-background);
+    border: 1px solid var(--p-content-border-color);
+    border-radius: 6px;
+    box-shadow: 0 2px 10px #0003;
+
+    &.positioned { bottom: auto; transform: none; }
+}
+.tool-strip, .tool-group { display: flex; align-items: center; }
+.tool-strip { flex-wrap: wrap; padding: 4px; gap: 4px; }
+.tool-group { gap: 2px; border-left: 1px solid var(--p-content-border-color); padding-left: 4px; }
+.tool-strip button, .color-control {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 30px;
+    height: 30px;
+    padding: 4px;
+    border: 0;
+    border-radius: 4px;
+    color: var(--p-text-color);
+    background: transparent;
+    cursor: pointer;
+
+    &:hover { background: var(--p-content-hover-background); }
+    &:focus-visible { outline: 2px solid var(--p-primary-color); outline-offset: 1px; }
+    &:disabled { opacity: .4; cursor: default; }
+    &.selected { color: var(--p-highlight-color); background: var(--p-highlight-background); }
+    &.finish { color: var(--p-primary-color); }
+}
+.tool-strip .grip { width: 16px; padding: 0; cursor: grab; touch-action: none; color: var(--p-text-muted-color); }
+.grip:active { cursor: grabbing; }
+.grip span { font-size: 18px; }
+svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.measure-readout {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    padding: 5px 9px;
+    border-top: 1px solid var(--p-content-border-color);
+    color: var(--p-text-muted-color);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    line-height: 16px;
+
+    span { white-space: nowrap; }
+    strong { color: var(--p-text-color); font-weight: 600; margin-left: 3px; }
+}
+.mode-status { color: var(--p-text-color); }
+.position-count { margin-left: auto; }
+.snap-indicator.enabled { color: var(--p-primary-color); font-weight: bold; }
+.tool-error { margin: 0; padding: 6px 9px; max-width: 29rem; color: var(--p-message-error-color); font-size: .8rem; }
+.tool-options {
+    width: min(240px, calc(100vw - 48px));
+    font-size: .85rem;
+
+    p { color: var(--p-text-muted-color); line-height: 1.5; margin: .5rem 0 .8rem; }
+    label { display: flex; align-items: center; justify-content: space-between; margin-bottom: .5rem; }
+    select { background: var(--p-content-background); color: var(--p-text-color); padding: .35rem; border: 1px solid var(--p-content-border-color); border-radius: 4px; }
+}

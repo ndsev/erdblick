@@ -104,6 +104,7 @@ function appendCoverage(entries: unknown[], kind: 'js' | 'css'): void {
  */
 type SnapshotFixtures = {
     stateSnapshot: string | null;
+    stateSnapshotOnce: boolean;
     darkMode: 'on' | 'off' | 'auto';
 };
 
@@ -117,19 +118,23 @@ async function packedTileIdForTestPosition(locationIndex = 0): Promise<number> {
 
 export const test = base.extend<SnapshotFixtures>({
     stateSnapshot: [TEST_STATE_SNAPSHOT, { option: true }],
+    stateSnapshotOnce: [false, {option: true}],
     darkMode: [FORCED_DARK_MODE_SETTING, {option: true}],
-    context: async ({ context, stateSnapshot, darkMode }, use) => {
+    context: async ({ context, stateSnapshot, stateSnapshotOnce, darkMode }, use) => {
         const snapshotEntries = loadStateSnapshotLocalStorageEntries(stateSnapshot);
-        await context.addInitScript(({darkModeKey, darkModeValue, entries}) => {
+        await context.addInitScript(({darkModeKey, darkModeValue, entries, once}) => {
             // A newly opened tab first visits an opaque about:blank document,
             // where localStorage is unavailable. Seed the actual application
             // document before Angular starts, including after a reload.
             if (!['http:', 'https:'].includes(window.location.protocol)) return;
             window.localStorage.setItem(darkModeKey, darkModeValue);
+            const hydrationKey = 'erdblick-test-state-hydrated';
+            if (once && window.sessionStorage.getItem(hydrationKey)) return;
             for (const [key, value] of Object.entries(entries ?? {})) {
                 window.localStorage.setItem(key, value);
             }
-        }, {darkModeKey: DARK_MODE_KEY, darkModeValue: darkMode, entries: snapshotEntries});
+            if (once) window.sessionStorage.setItem(hydrationKey, '1');
+        }, {darkModeKey: DARK_MODE_KEY, darkModeValue: darkMode, entries: snapshotEntries, once: stateSnapshotOnce});
 
         await use(context);
     },

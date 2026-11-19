@@ -1,3 +1,4 @@
+import {EditorWorkspaceService} from "../editor/editor-workspace.service";
 import {
     AfterViewInit,
     ChangeDetectorRef,
@@ -19,7 +20,7 @@ import { MAP_VIEW_LAYOUT_RESIZE_PREPARE_EVENT } from "../mapview/render-view.mod
 import type { FeatureSearchSession } from "../search/search-session.model";
 import { SearchService } from "../search/search.service";
 import { DockedPanelDragController, DockedPanelDragOffset } from "./docked-panel-drag.controller";
-import { INSPECTION_DOCK_TAB_ID, LEGAL_INFO_DIALOG_LAYOUT_ID, SEARCH_DOCK_TAB_ID } from "./layout.model";
+import { INSPECTION_DOCK_TAB_ID, LEGAL_INFO_DIALOG_LAYOUT_ID, SEARCH_DOCK_TAB_ID, EDITORS_DOCK_TAB_ID } from "./layout.model";
 import { LayoutService } from "./layout.service";
 
 @Component({
@@ -74,6 +75,9 @@ import { LayoutService } from "./layout.service";
                                         <p-badge [value]="dockedFeatureSearchCount()"/>
                                     </p-tab>
                                 }
+                                @if (editors.docked().length) {
+                                    <p-tab [value]="editorsDockTabId" data-testid="editors-dock-tab"><span>Editors</span><p-badge [value]="editors.docked().length"/></p-tab>
+                                }
                             </p-tablist>
                             <p-button class="dock-tabbar-close-button"
                                       icon="pi pi-times"
@@ -109,6 +113,7 @@ import { LayoutService } from "./layout.service";
                                         </div>
                                     </p-tabpanel>
                                 }
+                                @if (editors.docked().length) { <p-tabpanel [value]="editorsDockTabId"><editor-dock/></p-tabpanel> }
                             </p-tabpanels>
                         </p-tabs>
                     } @else {
@@ -149,6 +154,8 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
     private dockPauseEndRafSecond?: number;
     private dockResizePauseActive = false;
     private dockOpenSubscription: Subscription;
+    private readonly editorSubscription: Subscription;
+    protected readonly editorsDockTabId = EDITORS_DOCK_TAB_ID;
     private readonly searchSessionsSubscription: Subscription;
     private observedDockOpen: boolean;
     private unregisterResizeTarget?: () => void;
@@ -168,10 +175,12 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
         private viewerUi: UiAutomationService,
         legalInfo: LegalInfoService,
         public readonly layout: LayoutService,
-        public readonly inspectionState: InspectionState) {
+        public readonly inspectionState: InspectionState,
+        public readonly editors: EditorWorkspaceService) {
         // Let available space shorten the visible text; the tooltip and linked
         // dialog retain the full map-data and background-imagery notices.
         this.copyright$ = legalInfo.attribution$;
+        this.editorSubscription = editors.changed.subscribe(() => this.cdr.markForCheck());
         this.searchSessionsSubscription = this.featureSearchService.sessionsChanged.subscribe(() => this.cdr.markForCheck());
         this.observedDockOpen = this.layout.state.isDockOpen;
         // Synchronous rendering can create the inspection host. Wait until all
@@ -279,6 +288,7 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
 
     /** Keeps the selected tab aligned with tabs that are currently visible. */
     ngDoCheck(): void {
+        this.layout.setDockTabCount(INSPECTION_DOCK_TAB_ID, this.dockedInspectionCount());
         const tabs = this.visibleDockTabs();
         if (tabs.length === 0 || tabs.includes(this.layout.state.dockActiveTab)) {
             return;
@@ -294,6 +304,7 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
         this.detachCancel?.();
         this.dockOpenSubscription.unsubscribe();
         this.searchSessionsSubscription.unsubscribe();
+        this.editorSubscription.unsubscribe();
         this.searchDockDrag.destroy();
         this.clearScheduledDockResizePauseEnd();
         this.dispatchDockResizePauseEnd();
@@ -430,6 +441,7 @@ export class DockableLayoutComponent implements AfterViewInit, DoCheck, OnDestro
         if (this.isFeatureSearchDocked()) {
             tabs.push(SEARCH_DOCK_TAB_ID);
         }
+        if (this.editors.docked().length) tabs.push(EDITORS_DOCK_TAB_ID);
         return tabs;
     }
 }

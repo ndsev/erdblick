@@ -66,7 +66,9 @@ export class InspectionFeatureTile {
      */
     constructor(
         private readonly parser: TileLayerParser,
-        readonly blob: Uint8Array
+        readonly blob: Uint8Array,
+        readonly origin: "remote" | "virtual" = "remote",
+        private readonly includeStringPool?: (id: string) => boolean
     ) {
         const metadata = uint8ArrayToWasm(
             data => parser.readTileLayerMetadata(data),
@@ -137,6 +139,7 @@ export class InspectionFeatureTile {
 
     /** Ask native schema metadata whether this feature has any deferred incoming families. */
     hasIncomingRelations(featureId: string): boolean {
+        if (this.origin === "virtual") return false;
         return this.peek(layer => this.parser.hasIncomingRelations(layer,
             stripFeatureInspectionTarget(featureId))) ?? false;
     }
@@ -150,8 +153,9 @@ export class InspectionFeatureTile {
      */
     async loadIncoming(featureId: string, signal: AbortSignal): Promise<IncomingInspectionResult> {
         signal.throwIfAborted();
+        if (this.origin === "virtual") throw new Error("Incoming relation discovery is unavailable for local drawings.");
         const canonicalId = stripFeatureInspectionTarget(featureId);
-        const client = new MapTileStreamClientTiles("/filter", this.parser);
+        const client = new MapTileStreamClientTiles("/filter", this.parser, this.includeStringPool);
         const snapshots: InspectionFeatureTile[] = [];
         const manifests: any[] = [];
         let successful = false;
@@ -164,7 +168,7 @@ export class InspectionFeatureTile {
             bytes += blob.byteLength;
             if (snapshots.length >= 64 || bytes > 64 * 1024 * 1024)
                 throw new Error("Incoming inspection exceeds its snapshot limit.");
-            snapshots.push(new InspectionFeatureTile(this.parser, blob));
+            snapshots.push(new InspectionFeatureTile(this.parser, blob, "remote", this.includeStringPool));
         };
         client.onSubsets = () => { throw new Error("Backend does not support incoming inspection."); };
         client.onFrame = (frame, type) => {

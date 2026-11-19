@@ -1,8 +1,10 @@
+import {DrawingDocumentsService} from "../drawing/drawing-documents.service";
 import {stylePickerColor} from "../mapstyle/style-color.util";
 import { Component, ViewChild } from "@angular/core";
 import { MenuItem, TreeNode } from "primeng/api";
 import { Menu } from "primeng/menu";
 import { Popover } from "primeng/popover";
+import { ColorPickerChangeEvent } from "primeng/colorpicker";
 import {
     BehaviorSubject,
     combineLatest,
@@ -140,6 +142,12 @@ const MAP_FILTER_DELAY_MS = 300;
                                     <span>Maps</span>
                                 </div>
                                 <div class="maps-config">
+                                    <button pButton type="button" (click)="toggleSourceGrouping($event)" (mousedown)="$event.stopPropagation()" (keydown)="$event.stopPropagation()"
+                                            [attr.data-testid]="'source-grouping-' + index" aria-label="Group local and remote datasources"
+                                            [attr.aria-pressed]="layerState.groupLocalRemoteSources.value"
+                                            [ngClass]="layerState.groupLocalRemoteSources.value ? 'map-controls-button p-button-success' : 'map-controls-button p-button-primary'"
+                                            icon="pi pi-sitemap" pTooltip="Toggle Local/Remote grouping" tooltipPosition="bottom"></button>
+
                                     <p-button onEnterClick (click)="syncOptionsForView($event, index)"
                                               [styleClass]="syncedOptions[index] ? 'map-controls-button p-button-success' : 'map-controls-button p-button-primary'"
                                               [style]="{'padding-left': '0', 'padding-right': '0'}"
@@ -249,6 +257,7 @@ const MAP_FILTER_DELAY_MS = 300;
                                             <div class="tile-grid-appearance-row" [ngClass]="{'disabled': !tileBordersEnabled[index]}">
                                                 <p-colorpicker class="tile-grid-color-picker"
                                                                [ngModel]="tileGridColors[index]"
+                                                               (onChange)="$event.originalEvent.preventDefault()"
                                                                (ngModelChange)="setTileGridColor(index, $event)"
                                                                format="hex"
                                                                appendTo="body"
@@ -353,6 +362,17 @@ const MAP_FILTER_DELAY_MS = 300;
                                         (onNodeExpand)="updateMapTreeNodeExpansion($event.node, true)"
                                         (onNodeCollapse)="updateMapTreeNodeExpansion($event.node, false)"
                                         [attr.data-testid]="'map-tree-' + index">
+                                    <ng-template let-node pTemplate="OriginGroup">
+                                        <div class="flex-container map-group-row" [attr.data-testid]="node.key">
+                                            <span class="checkbox-entry map-tree-title">
+                                                <p-checkbox [ngModel]="node.visible[index]" [binary]="true"
+                                                            [indeterminate]="node.indeterminate[index]"
+                                                            (click)="$event.stopPropagation()" (ngModelChange)="toggleOriginGroup(index, node, $event)"
+                                                            [inputId]="index + '_' + node.key"/>
+                                                <label [for]="index + '_' + node.key">{{node.label}}</label>
+                                            </span>
+                                        </div>
+                                    </ng-template>
                                     <!-- Template for Group nodes -->
                                     <ng-template let-node pTemplate="Group">
                                         <div class="flex-container map-group-row">
@@ -367,7 +387,7 @@ const MAP_FILTER_DELAY_MS = 300;
                                                             [binary]="true"
                                                             [inputId]="index + '_' + node.id"
                                                             [name]="index + '_' + node.id" tabindex="0"/>
-                                                <label [for]="index + '_' + node.id">{{ removeGroupPrefix(node.id) }}</label>
+                                                <label [for]="index + '_' + node.id">{{ node.info?.displayName || removeGroupPrefix(node.id) }} @if (node.info?.origin === "virtual") { <p-tag value="local" severity="info"/> }</label>
                                             </span>
                                         </div>
                                     </ng-template>
@@ -407,6 +427,7 @@ const MAP_FILTER_DELAY_MS = 300;
                                                     </span>
                                                 }
                                                 <span onEnterClick class="material-symbols-outlined menu-toggler" tabindex="0"
+                                                      role="button" [attr.aria-label]="'Map actions for ' + (node.info?.displayName || node.id)"
                                                       (click)="showLayersToggleMenu($event, index, node.id, '')">
                                                         more_vert
                                                 </span>
@@ -419,10 +440,21 @@ const MAP_FILTER_DELAY_MS = 300;
                                                             [name]="index + '_' + node.id" tabindex="0"/>
                                                 <label [for]="index + '_' + node.id"
                                                        [ngClass]="{'disabled-label': dataSourceStatus(node.info) !== 'ready'}">
-                                                    {{ removeGroupPrefix(node.id) }}
+                                                    {{ node.info?.displayName || removeGroupPrefix(node.id) }} @if (node.info?.origin === "virtual") { <p-tag value="local" severity="info"/> }
                                                 </label>
                                             </span>
                                             <div class="map-controls">
+                                                @if (node.info?.origin === 'virtual') {
+                                                    <p-button icon="pi pi-pencil" [text]="true"
+                                                              [ariaLabel]="'Edit ' + node.info.displayName"
+                                                              pTooltip="Edit GeoJSON" tooltipPosition="bottom"
+                                                              (click)="$event.stopPropagation(); drawingDocuments.open(node.id)"/>
+                                                    <p-button icon="pi pi-trash" [text]="true" severity="danger"
+                                                              [ariaLabel]="'Delete ' + node.info.displayName"
+                                                              pTooltip="Delete local datasource" tooltipPosition="bottom"
+                                                              (click)="$event.stopPropagation(); drawingDocuments.remove(node.id)"/>
+                                                }
+
                                                 @if (node.mapPresets.length > 0) {
                                                     <p-select class="map-preset-select"
                                                               [options]="mapPresetOptionsForView(node.id, index)"
@@ -574,9 +606,11 @@ const MAP_FILTER_DELAY_MS = 300;
                                                     [name]="index + '_' + node.key"/>
                                             } @else {
                                                 @if (node.type === 'Color') {
-                                                    <input type="color" aria-label="Option color picker"
-                                                        [value]="optionPickerColor(node.value[index])"
-                                                        (input)="setStyleColorOption(node, index, $event)">
+                                                    <p-colorpicker [ngModel]="optionPickerColor(node.value[index])" format="hex" appendTo="body"
+                                                        [overlayOptions]="{baseZIndex: 31000}"
+                                                        [pt]="{preview: {'aria-label': 'Color picker for ' + node.info.label}}"
+                                                        (keydown.escape)="$event.stopPropagation()"
+                                                        (onChange)="setStyleColorOption(node, index, $event)"/>
                                                 }
                                                 <input pInputText [attr.data-testid]="styleOptionCheckboxTestId(node, index)"
                                                     [id]="index + '_' + node.key" [attr.aria-label]="node.info.label"
@@ -638,6 +672,7 @@ export class MapPanelComponent {
         ),
         distinctUntilChanged()
     );
+    private readonly originExpansion: Record<string, boolean> = {};
     private readonly stylePresetProjectionChanges = new BehaviorSubject(0);
     readonly mapTreeView$: Observable<MapPanelTreeView> = combineLatest([
         // A catalog refresh replaces the tree after this panel may already be
@@ -652,7 +687,8 @@ export class MapPanelComponent {
             numViews: this.viewSettings.numViews,
             ids: this.viewSettings.viewIds,
             layerPresets: this.layerState.layerPresetSelectionState.appState.value,
-            mapPresets: this.layerState.mapPresetSelectionState.appState.value
+            mapPresets: this.layerState.mapPresetSelectionState.appState.value,
+            groupSources: this.layerState.groupLocalRemoteSources.value
         }), deepEquals),
         this.stylePresetProjectionChanges,
         this.mapService.layerStateChanged.pipe(
@@ -660,11 +696,11 @@ export class MapPanelComponent {
             startWith("visibility")
         )
     ]).pipe(
-        map(([mapTree, filterText, { numViews }]) => ({
+        map(([mapTree, filterText, { numViews, groupSources }]) => ({
             size: mapTree.size,
             nodesByView: Array.from(
                 { length: numViews },
-                (_, viewIndex) => filterMapTreeNodes(mapTree.nodes, filterText, viewIndex))
+                (_, viewIndex) => filterMapTreeNodes(mapTree.nodes, filterText, viewIndex, groupSources, this.originExpansion))
         }))
     );
 
@@ -697,7 +733,7 @@ export class MapPanelComponent {
     metadataLayerOptions = new Map<string, MetadataLayerOption[]>();
 
     /** Subscribes the panel UI to map, app-state, and dialog-stack updates. */
-    constructor(public mapService: MapDataService,
+    constructor(public readonly drawingDocuments: DrawingDocumentsService, public mapService: MapDataService,
         private readonly viewState: MapViewService,
         public appModeService: AppModeService,
         public stateService: AppStateService,
@@ -857,7 +893,8 @@ export class MapPanelComponent {
     /** Persists normal tree expansion while keeping filtered projection expansion temporary. */
     updateMapTreeNodeExpansion(node: TreeNode, expanded: boolean): void {
         if (!this.mapFilterText.trim() && node.key !== undefined) {
-            this.mapService.maps.setNodeExpanded(node.key, expanded);
+            if (node.type === "OriginGroup") this.originExpansion[node.key] = expanded;
+            else this.mapService.maps.setNodeExpanded(node.key, expanded);
         }
     }
 
@@ -929,6 +966,11 @@ export class MapPanelComponent {
         this.toggleMenu.toggle(event);
         const selectedMapLayers = this.featureSearchMapLayersForMenuScope(mapId, layerId);
         this.toggleMenuItems = [
+            ...(this.drawingDocuments.documents.has(mapId) ? [
+                {label: 'Open in Editor', command: () => this.drawingDocuments.open(mapId)},
+                {label: 'Remove local map', command: () => { void this.drawingDocuments.remove(mapId); }},
+                {separator: true}
+            ] : []),
             {
                 label: 'Toggle All Off But This',
                 command: () => {
@@ -978,6 +1020,7 @@ export class MapPanelComponent {
         const isExactMap = this.mapService.maps.maps.has(mapId);
         const result: FeatureSearchMapLayerRef[] = [];
         for (const layer of this.mapService.maps.allFeatureLayers()) {
+            if (this.mapService.maps.maps.get(layer.mapId)?.info.origin === "virtual") continue;
             const mapMatches = isExactMap ? layer.mapId === mapId : layer.mapId.startsWith(mapId);
             if (!mapMatches || (layerId && layer.id !== layerId)) {
                 continue;
@@ -1123,6 +1166,17 @@ export class MapPanelComponent {
             mapTileKey: option.mapTileKey
         } as SelectedSourceData);
         popover.hide();
+    }
+
+    /** Toggle the persisted presentation preference without changing datasource ownership. */
+    toggleSourceGrouping(event: Event): void {
+        event.stopPropagation();
+        this.layerState.groupLocalRemoteSources.next(!this.layerState.groupLocalRemoteSources.value);
+    }
+
+    /** Group controls target real map IDs; synthetic grouping IDs never reach acquisition. */
+    toggleOriginGroup(viewIndex: number, node: MapTreeViewNode, visible: boolean): void {
+        for (const mapId of node.mapIds ?? []) this.toggleLayer(viewIndex, mapId, '', visible);
     }
 
     /** Sets the visibility of one map or layer entry for a specific view. */
@@ -1352,8 +1406,10 @@ export class MapPanelComponent {
     protected readonly optionPickerColor = stylePickerColor;
 
     /** Routes picker edits through the same option state owner as text and Boolean controls. */
-    setStyleColorOption(node: StyleOptionNode, viewIndex: number, event: Event): void {
-        node.value[viewIndex] = (event.target as HTMLInputElement).value;
+    setStyleColorOption(node: StyleOptionNode, viewIndex: number, event: ColorPickerChangeEvent): void {
+        event.originalEvent.preventDefault();
+        if (typeof event.value !== "string") return;
+        node.value[viewIndex] = event.value;
         this.updateStyleOption(node, viewIndex);
     }
 

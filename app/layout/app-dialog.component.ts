@@ -107,6 +107,9 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     @Input() closable = true;
     @Input() draggable = true;
     @Input() resizable = true;
+    /** Optional minimum floating dimensions, reduced when the viewport is smaller. */
+    @Input() minWidthPx = 1;
+    @Input() minHeightPx = 1;
     @Input() style: { [key: string]: any } = {};
     @Input() position: any = null;
     @Input() showHeader = true;
@@ -158,7 +161,7 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
 
     /** Refreshes dialog layout style when inputs change. */
     ngOnChanges(changes: SimpleChanges): void {
-        if (changes['style'] || changes['layoutId'] || changes['persistLayout'] || changes['persistOpenState'] || changes['resizable'] || changes['visible']) {
+        if (changes['style'] || changes['layoutId'] || changes['persistLayout'] || changes['persistOpenState'] || changes['resizable'] || changes['visible'] || changes['minWidthPx'] || changes['minHeightPx']) {
             const becameVisible = changes['visible']?.currentValue === true;
             this.refreshEffectiveStyle(becameVisible);
         }
@@ -410,8 +413,8 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
 
     /** Reads finite CSS resize constraints and clamps them to the current viewport. */
     private resizeLimits(computedStyle: CSSStyleDeclaration): AppDialogResizeLimits {
-        const minWidth = resolveAppDialogCssLength(computedStyle.minWidth, window.innerWidth, 1);
-        const minHeight = resolveAppDialogCssLength(computedStyle.minHeight, window.innerHeight, 1);
+        const minWidth = Math.min(window.innerWidth, Math.max(this.minWidthPx, resolveAppDialogCssLength(computedStyle.minWidth, window.innerWidth, 1)));
+        const minHeight = Math.min(window.innerHeight, Math.max(this.minHeightPx, resolveAppDialogCssLength(computedStyle.minHeight, window.innerHeight, 1)));
         const maxWidth = resolveAppDialogCssLength(
             computedStyle.maxWidth,
             window.innerWidth,
@@ -533,12 +536,12 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
         };
     }
 
-    /** Clamps a persisted dialog layout to the current viewport. */
+    /** Applies usable minimum dimensions before clamping size and position to the viewport. */
     private normalizeLayout(layout: AppDialogLayout): AppDialogLayout {
         const viewportWidth = window.innerWidth;
         const viewportHeight = window.innerHeight;
-        const width = Math.max(1, Math.min(Math.round(layout.size.width), viewportWidth));
-        const height = Math.max(1, Math.min(Math.round(layout.size.height), viewportHeight));
+        const width = Math.max(1, Math.min(Math.max(this.minWidthPx, Math.round(layout.size.width)), viewportWidth));
+        const height = Math.max(1, Math.min(Math.max(this.minHeightPx, Math.round(layout.size.height)), viewportHeight));
         const maxLeft = Math.max(0, viewportWidth - width);
         const maxTop = Math.max(0, viewportHeight - height);
         const left = Math.min(Math.max(0, Math.round(layout.position.left)), maxLeft);
@@ -568,6 +571,8 @@ export class AppDialogComponent implements OnChanges, OnDestroy {
     /** Rebuilds the style object passed to the wrapped dialog. */
     private refreshEffectiveStyle(hideUntilApplied: boolean = false, layoutOverride?: AppDialogLayout): void {
         const nextStyle = { ...this.style };
+        if (this.minWidthPx > 1) nextStyle['min-width'] = `min(${this.minWidthPx}px, 100vw)`;
+        if (this.minHeightPx > 1) nextStyle['min-height'] = `min(${this.minHeightPx}px, 100vh)`;
         const layout = layoutOverride ?? (this.persistLayout && this.layoutId
             ? this.layout.getDialogLayout(this.layoutId)
             : this.resizedLayout);

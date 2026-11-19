@@ -494,6 +494,21 @@ describe("ViewLayerController", () => {
         ]);
     });
 
+    it("dispatches the measurement preview when ordinary render workers are occupied", () => {
+        const controller = Object.create(ViewLayerController.prototype) as any;
+        const ordinary = {owner: {mapgetLayer: {}}};
+        const preview = {owner: {mapgetLayer: {renderLane: "drawing-preview"}}};
+        controller.sceneHandle = {scene: {}};
+        controller.pendingVisualizationRenders = new Set([ordinary, preview]);
+        controller.styledLayers = new Map();
+        const previewRenderer = {availableWorkerSlots: vi.fn().mockReturnValueOnce(1).mockReturnValue(0)};
+        controller.renderService = {availableWorkerSlots: vi.fn(() => 0), previewRenderer: () => previewRenderer};
+        controller.startVisualizationRender = vi.fn();
+        controller.drainPendingTiles();
+        expect(controller.startVisualizationRender).toHaveBeenCalledExactlyOnceWith(preview);
+        expect(controller.pendingVisualizationRenders).toEqual(new Set([ordinary]));
+    });
+
     it("reattaches scene owners by queueing rather than rendering immediately", () => {
         const controller = Object.create(
             ViewLayerController.prototype

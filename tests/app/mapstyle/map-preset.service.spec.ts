@@ -79,6 +79,15 @@ function createService(
 }
 
 describe("MapPresetService", () => {
+    it("rejects a stale raw-editor baseline even after the shared catalog revision advanced", async () => {
+        const {service, config, http} = createService();
+        const draftRevision = service.revision;
+        config.snapshot.mapPresetConfig.revision = 'rev-2';
+        expect(await service.applyOverrideSource('[]', draftRevision)).toBe(false);
+        expect(http.patch).not.toHaveBeenCalled();
+        expect(service.presets).toEqual(configured);
+    });
+
     beforeEach(() => localStorage.clear());
 
     it("loads config definitions and resolves embedded presets for an affine layer", () => {
