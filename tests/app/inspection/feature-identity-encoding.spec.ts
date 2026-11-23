@@ -19,8 +19,9 @@ const target = (featureId: string, mapTileKey = "Map/Layer/42") => ({
 describe("tile feature interaction identity", () => {
     it("restores the exact original vertex and source revision through a URL round trip", () => {
         const point = {scope: "shapepoint" as const, baseFeatureId: "Lane.545555028.2", geometryOrdinal: 1,
-            pointIndex: 0, sourceId: "source/@南,1", sourceRevision: "revision:%2@previous"};
+            pointIndex: 0, sourceId: "source/@南~1", sourceRevision: "revision:%2@previous~epoch"};
         const encoded = formatFeatureInspectionTarget(point);
+        expect(encoded).not.toContain("~");
         const url = new URLSearchParams({selection: encoded}).toString();
         expect(parseFeatureInspectionTarget(new URLSearchParams(url).get("selection")!)).toEqual(point);
         expect(stripFeatureInspectionTarget(encoded)).toBe(point.baseFeatureId);

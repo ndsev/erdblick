@@ -4,6 +4,7 @@
  * across inspection, selection, hover and search without loading a feature.
  */
 import { z } from "zod";
+import { encodeUrlToken } from "../appstate/url-state-codec.util";
 import { identifierSchema, indexSchema } from "../action/action.model";
 
 const count = indexSchema;
@@ -236,7 +237,7 @@ export function formatFeatureInspectionTarget(
     }
     if (target.scope === "shapepoint") {
         return `${target.baseFeatureId}:shapepoint#${target.geometryOrdinal}.${target.pointIndex}`
-            + `@${encodeURIComponent(target.sourceId)}@${encodeURIComponent(target.sourceRevision)}`;
+            + `@${encodeUrlToken(target.sourceId)}@${encodeUrlToken(target.sourceRevision)}`;
     }
     const entryIndex = target.scope === "attribute"
         ? target.attributeIndex
@@ -247,7 +248,7 @@ export function formatFeatureInspectionTarget(
     return `${target.baseFeatureId}:${target.scope}#${entryIndex}${validitySuffix}`;
 }
 
-/** Returns true when an id addresses an attribute or relation inspection row. */
+/** Returns true when an ID selects a vertex, attribute, relation or validity on its host. */
 export function isFeatureInspectionSubTarget(targetId: string): boolean {
     return parseFeatureInspectionTarget(targetId).scope !== "feature";
 }
