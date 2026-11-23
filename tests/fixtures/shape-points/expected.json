@@ -39,8 +39,8 @@
       ]
     ]
   },
-  "schemaId": "mapget-schema:sha256:40c1fa82d182d8f54107a68652788cb9a21ac09694f780269d8a01a0b364311e",
+  "schemaId": "mapget-schema:sha256:b255aaa59cfb601ec2e9092930c77fa8cdb592f4835af3eac285533a5d97f2a5",
   "sourceId": "shape-point-test-source",
-  "sourceRevision": "sha256:6ec39b10e3aae3f7a021fa1fac8c4019ab0fc4e0ef9cd88fe99274540f4addd3",
+  "sourceRevision": "sha256:9a8977159a1f74b49a94084ec2efa94b62c2b3cac1f5d866abe3875a63cc1420",
   "unit": "m^-1"
 }

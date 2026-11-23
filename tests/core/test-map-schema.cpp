@@ -65,6 +65,28 @@ erdblick::SharedUint8Array schemaBytes(mapget::MapSchema const& graph)
 
 }  // namespace
 
+TEST_CASE("Finishing style completion releases its point projection on cache eviction",
+          "[erdblick.schema][shapepoint]")
+{
+    const auto first = schemaFixture("first");
+    erdblick::TileLayerParser parser;
+    const std::string id(first->schemaId());
+    parser.installMapSchema(schemaBytes(*first), id);
+    parser.setDataSourceInfo(sourceFixture("First", id));
+    const std::string prefix = "$pointInd";
+    const auto candidates = parser.completeSearchQuery(prefix, static_cast<int>(prefix.size()), {{"scope", "shapepoint"}});
+    REQUIRE(candidates.dump().find("$pointIndex") != std::string::npos);
+
+    auto layer = parser.info_.at("First").layers_.at("Road")->layerSchema();
+    auto completed = layer->shapePointQueryType("Road").pool()->weak_from_this();
+    REQUIRE_FALSE(completed.expired());
+    const auto second = schemaFixture("second");
+    const auto third = schemaFixture("third");
+    REQUIRE(second->layer("Road")->shapePointQueryType("Road"));
+    REQUIRE(third->layer("Road")->shapePointQueryType("Road"));
+    CHECK(completed.expired());
+}
+
 TEST_CASE("The same named geometry supplies style completions and vertex inspection with raw links",
           "[erdblick.schema][erdblick.inspection][shapepoint]")
 {
@@ -75,6 +97,10 @@ TEST_CASE("The same named geometry supplies style completions and vertex inspect
         {{"name", "Road"}, {"uniqueIdCompositions", {{{{"partId", "roadId"}, {"datatype", "U32"}}}}}}));
     layer->setRootSchema(road.id());
     auto attr = graph->newAttribute("grades", "Grades");
+    auto direction = graph->newEnumType();
+    direction.setTypeName("Grades.Direction");
+    direction.addSymbol("UPHILL");
+    attr.addField("direction", direction);
     auto codes = graph->schemaType(layer->addSchema(Kind::Array));
     codes.asArray().addElement(graph->schemaType(graph->primitive(Kind::Int)));
     attr.addField("codes", codes);
@@ -100,6 +126,12 @@ TEST_CASE("The same named geometry supplies style completions and vertex inspect
     const std::string prefix = "$attributes.Adas.GRADE.*.slo";
     auto hints = parser.completeSearchQuery(prefix, static_cast<int>(prefix.size()), {{"scope", "shapepoint"}});
     CHECK(hints.dump().find("slope") != std::string::npos);
+    // Ordinary feature completion between two vertex requests uses a different
+    // schema pool. The enum literal must still be completed on the grade occurrence.
+    parser.completeSearchQuery("i", 1, {{"scope", "feature"}});
+    const std::string enumPrefix = "$attributes.Adas.GRADE.*.direction == \"UP";
+    auto enumHints = parser.completeSearchQuery(enumPrefix, static_cast<int>(enumPrefix.size()), {{"scope", "shapepoint"}});
+    CHECK(enumHints.dump().find("UPHILL") != std::string::npos);
 
     auto tile = std::make_shared<mapget::TileFeatureLayer>(mapget::TileId::fromWgs84(11., 48., 13),
         "Profiles", "Profiles", parser.info_.at("Profiles").layers_.at("Road"), std::make_shared<mapget::StringPool>("Profiles"));

@@ -30,7 +30,7 @@
       "minor": 4,
       "patch": 0
     },
-    "schemaId": "mapget-schema:sha256:40c1fa82d182d8f54107a68652788cb9a21ac09694f780269d8a01a0b364311e",
+    "schemaId": "mapget-schema:sha256:b255aaa59cfb601ec2e9092930c77fa8cdb592f4835af3eac285533a5d97f2a5",
     "sourceId": "shape-point-test-source",
     "stringPoolId": "shape-point-fixture-pool"
   }
