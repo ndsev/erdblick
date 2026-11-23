@@ -93,7 +93,6 @@ interface IncomingSectionState {
             <inspection-tree [treeData]="treeData" [columns]="columns" [panelId]="panel().id"
                              [geoJson]="geoJson"
                              [featureIds]="featureIds"
-                             [firstHighlightedItemIndex]="firstHighlightedItemIndex"
                              [filterText]="filterText()" (filterTextChange)="filterTextChange.emit($event)"
                              [showFilter]="showFilter()"
                              [enableSourceDataNavigation]="enableSourceDataNavigation()"
@@ -124,7 +123,6 @@ export class FeaturePanelComponent implements OnDestroy {
     featureIds: string[] = [];
     selectedFeatures?: FeatureWrapper[];
     loading: boolean = false;
-    firstHighlightedItemIndex?: number;
     private rebuildQueued = false;
     private destroyed = false;
     private catalogSubscription?: Subscription;
@@ -235,7 +233,6 @@ export class FeaturePanelComponent implements OnDestroy {
         if (!this.selectedFeatures.length) {
             this.featureIds = [];
             this.treeData = [];
-            this.firstHighlightedItemIndex = undefined;
             return;
         }
 
@@ -282,7 +279,7 @@ export class FeaturePanelComponent implements OnDestroy {
         }
 
         this.restoreTreeExpansionState(nextTreeData, previousExpansionState);
-        this.firstHighlightedItemIndex = this.highlightSelectedInspectionTarget(nextTreeData);
+        this.highlightSelectedInspectionTarget(nextTreeData);
         this.treeData = nextTreeData;
         this.inspectionTree?.refreshLayout();
     }
@@ -394,7 +391,7 @@ export class FeaturePanelComponent implements OnDestroy {
     }
 
     /** Marks and expands the inspection row or subtree addressed by a suffixed selected feature id. */
-    private highlightSelectedInspectionTarget(nodes: TreeTableNode[]): number | undefined {
+    private highlightSelectedInspectionTarget(nodes: TreeTableNode[]): void {
         const selectedTargetIds = (this.selectedFeatures ?? [])
             .map(feature => feature.featureId)
             .filter(isFeatureInspectionSubTarget);
@@ -403,11 +400,9 @@ export class FeaturePanelComponent implements OnDestroy {
             .map(stripFeatureInspectionValidity)
             .filter(isFeatureInspectionSubTarget));
         if (!exactTargetIds.size) {
-            return undefined;
+            return;
         }
 
-        let highlightedNode: TreeTableNode | undefined;
-        let highlightedParents: TreeTableNode[] = [];
         let selectedHighlightTarget: string | undefined;
         let selectedHighlightMode: "soft" | "strong" = "soft";
         const rowTargetsForNode = (node: TreeTableNode): string[] => {
@@ -420,41 +415,26 @@ export class FeaturePanelComponent implements OnDestroy {
         };
         const findTarget = (
             node: TreeTableNode,
-            parents: TreeTableNode[],
             targetIds: ReadonlySet<string>
         ): boolean => {
             const rowTargets = rowTargetsForNode(node);
             const matchedTarget = rowTargets.find(target => targetIds.has(target));
             const rowMatches = matchedTarget !== undefined;
-            if (rowMatches && !highlightedNode) {
-                highlightedNode = node;
-                highlightedParents = parents;
+            if (rowMatches && selectedHighlightTarget === undefined) {
                 selectedHighlightTarget = matchedTarget;
-                selectedHighlightMode = matchedTarget &&
-                    hasFeatureInspectionValidity(matchedTarget)
+                selectedHighlightMode = hasFeatureInspectionValidity(matchedTarget)
                     ? "strong"
                     : "soft";
-                for (const parent of parents) {
-                    parent.expanded = true;
-                }
+                // The table can restore a different set of expanded rows. Keep the
+                // selected node itself so it can find its final scroll position.
+                node.data.inspectionFocus = true;
                 node.expanded = true;
-                if (node.data?.["pointSelected"]) {
-                    // Open the measured fields first. Raw sample records remain individually expandable.
-                    for (const section of node.children ?? []) {
-                        section.expanded = true;
-                        for (const occurrence of section.children ?? []) {
-                            occurrence.expanded = true;
-                            const measurements = occurrence.children?.find(child => child.data?.["key"] === "Measurements");
-                            if (measurements) measurements.expanded = true;
-                        }
-                    }
-                }
                 return true;
             }
 
             let childMatches = false;
             for (const child of node.children ?? []) {
-                childMatches = findTarget(child, [...parents, node], targetIds) || childMatches;
+                childMatches = findTarget(child, targetIds) || childMatches;
             }
             if (childMatches) {
                 node.expanded = true;
@@ -464,20 +444,16 @@ export class FeaturePanelComponent implements OnDestroy {
 
         const findInTree = (targetIds: ReadonlySet<string>) => {
             for (const node of nodes) {
-                findTarget(node, [], targetIds);
+                findTarget(node, targetIds);
             }
         };
         findInTree(exactTargetIds);
-        if (!highlightedNode) {
+        if (selectedHighlightTarget === undefined) {
             findInTree(parentTargetIds);
         }
-        if (!highlightedNode || !selectedHighlightTarget) {
-            return undefined;
+        if (selectedHighlightTarget === undefined) {
+            return;
         }
-        for (const parent of highlightedParents) {
-            parent.expanded = true;
-        }
-        highlightedNode.expanded = true;
 
         const applySelectionHighlight = (nodeList: TreeTableNode[]) => {
             for (const node of nodeList) {
@@ -497,24 +473,6 @@ export class FeaturePanelComponent implements OnDestroy {
             }
         };
         applySelectionHighlight(nodes);
-
-        let visibleIndex = 0;
-        const visibleIndexOf = (nodeList: TreeTableNode[]): number | undefined => {
-            for (const node of nodeList) {
-                if (node === highlightedNode) {
-                    return visibleIndex;
-                }
-                visibleIndex += 1;
-                if (node.expanded && node.children?.length) {
-                    const childIndex = visibleIndexOf(node.children);
-                    if (childIndex !== undefined) {
-                        return childIndex;
-                    }
-                }
-            }
-            return undefined;
-        };
-        return visibleIndexOf(nodes);
     }
 
     /** Converts the WASM inspection model into PrimeNG tree nodes and annotates hover/highlight groups. */

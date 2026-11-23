@@ -10,7 +10,6 @@ import {
     input,
     output
 } from "@angular/core";
-import { toObservable } from "@angular/core/rxjs-interop";
 import { DomSanitizer } from "@angular/platform-browser";
 import { MenuItem, TreeNode, TreeTableNode } from "primeng/api";
 import { Menu } from "primeng/menu";
@@ -71,7 +70,7 @@ export class FeatureFilterOptions {
                      [resizableColumns]="true"
                      [rowHover]="true"
                      [virtualScroll]="true"
-                     [virtualScrollItemSize]="'1.5em'"
+                     [virtualScrollItemSize]="rowHeightPx"
                      [tableStyle]="{'min-height': '1px', 'padding': '0px'}"
                      [globalFilterFields]="filterFields">
             <ng-template pTemplate="caption">
@@ -198,7 +197,7 @@ export class FeatureFilterOptions {
                                         <i class="pi pi-spinner pi-spin" role="status" aria-label="Loading incoming relations"></i>
                                     }
                                     @if (col.key === "value" && rowData["pointTarget"] && !rowData["pointSelected"]) {
-                                        <button type="button" class="inspection-row-actions" data-testid="inspect-shape-point"
+                                        <button type="button" class="inspection-value-action" data-testid="inspect-shape-point"
                                                 aria-label="Inspect vertex" title="Inspect vertex measurements"
                                                 (click)="inspectPointRow($event, rowData)"><i class="pi pi-search"></i></button>
                                     }
@@ -211,7 +210,7 @@ export class FeatureFilterOptions {
                                         </span>
                                     }
                                     @if (col.key === "value" && rowData["sourceNodeId"]) {
-                                        <button type="button" class="inspection-row-actions" aria-label="Open source record"
+                                        <button type="button" class="inspection-value-action" aria-label="Open source record"
                                                 title="Open source record"
                                                 (click)="onValueBubbleClick($event, {targetNodeId: rowData['sourceNodeId']})">
                                             <i class="pi pi-arrow-up-right"></i></button>
@@ -406,7 +405,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     columns = input.required<Column[]>();
     panelId = input.required<number>();
     firstHighlightedItemIndex = input<number>();
-    firstHighlightedItemIndex$ = toObservable(this.firstHighlightedItemIndex);
+    /** Initial estimate until a visible row can be measured at the user's font size. */
+    protected rowHeightPx = 22;
     subscriptions: Subscription[] = [];
     filterOptions = input<FeatureFilterOptions>();
     filterText = input<string | undefined>();
@@ -557,9 +557,6 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.suppressFilterEmit = false;
             this.cdr.markForCheck();
         });
-        this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
-            this.scrollToHighlightedIndex(index);
-        }));
         this.subscriptions.push(this.inspectionState.state.inspectionTreeExpandByDefaultState.subscribe(expandByDefault => {
             if (!this.data.length) {
                 return;
@@ -711,6 +708,15 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             return;
         }
 
+        // PrimeNG takes a pixel count for virtual scrolling. A CSS length falls
+        // back to 28 px, which can put a selected vertex hundreds of rows away.
+        const host = this.table.el.nativeElement as HTMLElement;
+        const row = host.querySelector(".p-treetable-tbody > tr[data-inspection-node-id]");
+        const height = row?.getBoundingClientRect().height;
+        if (height && height !== this.rowHeightPx) {
+            this.rowHeightPx = height;
+            this.cdr.detectChanges();
+        }
         scroller.setSpacerSize?.();
         scroller.setSize?.();
         scroller.calculateOptions?.();
