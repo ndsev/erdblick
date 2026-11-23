@@ -70,6 +70,8 @@ export interface InspectionPanelModel<FeatureRepresentation> {
 
     /** Runtime-only marker used while feature identities are resolving into inspectable wrappers. */
     loading?: boolean;
+    /** Exact vertex selections whose original source partition could no longer be opened. */
+    unavailablePoints?: string[];
 }
 
 /** Transient expansion state for one mounted inspection tree. */

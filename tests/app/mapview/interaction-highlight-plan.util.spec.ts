@@ -42,6 +42,17 @@ const plan = (...channels: FilterChannelDefinition[]): StyleFilterPlan => ({
 });
 
 describe("remote interaction highlight planning", () => {
+    it("isolates selected vertices by source snapshot and limits each request to its geometry and vertex", () => {
+        const a = target("Road.7:shapepoint#1.0@s@rev1");
+        const b = target("Road.7:shapepoint#0.3@s@rev2");
+        const plans = planRemoteInteractionHighlights(plan(channel("shapepoint"), channel("feature"), channel("relation")), [a, b]);
+        expect(plans.map(entry => entry.sourceSnapshot)).toEqual([
+            {sourceId: "s", sourceRevision: "rev1"}, {sourceId: "s", sourceRevision: "rev2"}
+        ]);
+        expect(plans[0].plan.channels).toHaveLength(1);
+        expect(plans[0].plan.channels[0].entryFilter).toBe('($feature.id == "Road.7" and $geometryOrdinal == 1 and $pointIndex == 0)');
+        expect(plans[1].plan.channels[0].entryFilter).toContain("$geometryOrdinal == 0 and $pointIndex == 3");
+    });
     it("does not activate attribute channels for a bare feature target", () => {
         const [result] = planRemoteInteractionHighlights(
             plan(

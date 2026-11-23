@@ -1,7 +1,7 @@
 import {CommonModule} from "@angular/common";
 import {Component, EventEmitter, Input, OnChanges, Output} from "@angular/core";
 import {TooltipModule} from "primeng/tooltip";
-import {StyleAuthoringSchema, StyleField} from "./style-authoring-schema.adapter";
+import {StyleAuthoringSchema, StyleField, StyleRuleScope} from "./style-authoring-schema.adapter";
 import {StyleDocumentEdit, StyleDocumentModel, StylePath} from "./style-document.model";
 import {StyleFieldInputComponent, StyleInputProblem} from "./style-field-input.component";
 
@@ -135,7 +135,7 @@ export class StyleRecordEditorComponent implements OnChanges {
     @Input() record = "stylesheet";
     @Input() path: StylePath = [];
     @Input() skipMetadata = false;
-    @Input() scope: "feature" | "attribute" | "relation" = "feature";
+    @Input() scope: StyleRuleScope = "feature";
     @Output() edit = new EventEmitter<StyleDocumentEdit>();
     @Output() problem = new EventEmitter<StyleInputProblem>();
     groups: FormGroup[] = [];
@@ -145,13 +145,13 @@ export class StyleRecordEditorComponent implements OnChanges {
     visitedItems = new Set<string>();
     private expandedItems = new Map<string, boolean>();
 
-    get effectiveScope(): "feature" | "attribute" | "relation" {
+    get effectiveScope(): StyleRuleScope {
         const value = this.record === "rule" && this.path.length === 2 ? this.model.value(this.fieldPath("scope")) : this.scope;
-        return value === "attribute" || value === "relation" ? value : "feature";
+        return value === "attribute" || value === "relation" || value === "shapepoint" ? value : "feature";
     }
 
     /** Endpoint substyles run on features; other nested records retain their rule's entry context. */
-    childScope(key: string): "feature" | "attribute" | "relation" {
+    childScope(key: string): StyleRuleScope {
         return ["relation-source-style", "relation-target-style"].includes(key)
             ? "feature" : this.effectiveScope;
     }
@@ -164,6 +164,11 @@ export class StyleRecordEditorComponent implements OnChanges {
             if (this.skipMetadata && (key === "name" || key === "layer")) continue;
             const present = this.model.has(this.fieldPath(key));
             if (!present && definition.topLevel && this.path.length !== 2) continue;
+            // Keep an invalid authored field editable so the user can remove it.
+            // A new point rule offers the controls that evaluate at each vertex.
+            if (!present && this.effectiveScope === "shapepoint" &&
+                (key.startsWith("attribute-") || key.startsWith("relation-"))) continue;
+            if (!present && key === "point-filter" && this.effectiveScope !== "shapepoint") continue;
             if (!present && this.record === "rule" && this.path.length === 2
                 && this.model.value(this.fieldPath("scope")) === "relation"
                 && (key === "all-of" || key === "first-of")) continue;

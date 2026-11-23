@@ -314,6 +314,7 @@ FeatureStyleRule::FeatureStyleRule(const FeatureStyleRule& other, bool resetNonI
         exactType_.reset();
         type_.reset();
         filter_.clear();
+        if (scope_ == ShapePoint) entryFilter_.reset();
         branchMode_ = BranchMode::None;
         subRules_.clear();
     }
@@ -349,6 +350,9 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         }
         else if (scopeStr == "attribute") {
             scope_ = Attribute;
+        }
+        else if (scopeStr == "shapepoint") {
+            scope_ = ShapePoint;
         }
         else {
             std::cout << "Unsupported scope: " << scopeStr << std::endl;
@@ -727,9 +731,9 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
         attributeTypePattern_ = yaml["attribute-type"].as<std::string>();
         attributeType_ = *attributeTypePattern_;
     }
-    if (yaml["attribute-filter"].IsDefined()) {
-        // Parse an attribute based on its field value, e.g. `speedLimitKmh > 100`
-        attributeFilter_ = yaml["attribute-filter"].as<std::string>();
+    auto entryFilter = yaml[scope_ == ShapePoint ? "point-filter" : "attribute-filter"];
+    if (entryFilter.IsDefined()) {
+        entryFilter_ = entryFilter.as<std::string>();
     }
     if (yaml["attribute-layer-type"].IsDefined()) {
         // Parse an attribute type regular expression, e.g. `Road.*Layer`
@@ -913,6 +917,13 @@ bool FeatureStyleRule::forEachMatchingRule(
         }
     }
 
+    // first-of selects a leaf for this original geometry. A sibling may
+    // target another named line on the same feature at identical coordinates.
+    if (branchMode_ == BranchMode::None && context.sourceGeometryType &&
+        !supports(*context.sourceGeometryType, context.sourceGeometryName)) {
+        return false;
+    }
+
     if (relationType_ && context.relationName) {
         if (!std::regex_match(
                 context.relationName->begin(),
@@ -966,9 +977,8 @@ bool FeatureStyleRule::forEachMatchingRule(
     };
     auto const& hostEvalFun = featureEvalFun ? *featureEvalFun : entryEvalFun;
     if (!expressionMatches(hostEvalFun, filter_) ||
-        (context.attributeName &&
-         attributeFilter_ &&
-         !expressionMatches(entryEvalFun, *attributeFilter_)))
+        ((context.attributeName || scope_ == ShapePoint) && entryFilter_ &&
+         !expressionMatches(entryEvalFun, *entryFilter_)))
     {
         return false;
     }
@@ -1139,8 +1149,8 @@ FeatureStyleRule::expressionUses() const
         }
     };
     append("filter", filter_);
-    if (attributeFilter_) {
-        append("attribute-filter", *attributeFilter_);
+    if (entryFilter_) {
+        append(scope_ == ShapePoint ? "point-filter" : "attribute-filter", *entryFilter_);
     }
     append("color-expression", colorExpression_);
     if (colorScale_) {
@@ -1951,9 +1961,9 @@ std::optional<std::string> const& FeatureStyleRule::attributeTypePattern() const
     return attributeTypePattern_;
 }
 
-std::optional<std::string> const& FeatureStyleRule::attributeFilter() const
+std::optional<std::string> const& FeatureStyleRule::entryFilter() const
 {
-    return attributeFilter_;
+    return entryFilter_;
 }
 
 std::optional<std::regex> const& FeatureStyleRule::attributeLayerType() const

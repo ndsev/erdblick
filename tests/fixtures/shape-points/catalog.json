@@ -1,0 +1,37 @@
+[
+  {
+    "addOn": false,
+    "extraJsonAttachment": null,
+    "layers": {
+      "Lane": {
+        "canRead": true,
+        "canWrite": false,
+        "coverage": [],
+        "layerId": "Lane",
+        "partitionKind": "tile",
+        "type": "Features",
+        "version": {
+          "major": 0,
+          "minor": 0,
+          "patch": 0
+        },
+        "zoomLevels": []
+      }
+    },
+    "mapFormat": {
+      "name": "",
+      "subsystems": [],
+      "version": ""
+    },
+    "mapId": "PointFixture",
+    "maxParallelJobs": 8,
+    "protocolVersion": {
+      "major": 6,
+      "minor": 4,
+      "patch": 0
+    },
+    "schemaId": "mapget-schema:sha256:40c1fa82d182d8f54107a68652788cb9a21ac09694f780269d8a01a0b364311e",
+    "sourceId": "shape-point-test-source",
+    "stringPoolId": "shape-point-fixture-pool"
+  }
+]

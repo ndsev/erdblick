@@ -168,6 +168,8 @@ interface PacketOptions {
   label?: string;
   materialKey?: bigint;
   navigationAltitude?: number;
+  /** A second authored style channel labels the same semantic target as the marker. */
+  separateLabelPick?: boolean;
   pointByte?: number;
   zIndex?: number;
   depthTieKey?: number;
@@ -203,7 +205,7 @@ function pointPacket(
   const spanOffset = contributionOffset + CONTRIBUTION_BYTES;
   let cursor = spanOffset + SPAN_BYTES;
   const pickOffset = cursor;
-  const pickCount = options.featureId ? 1 : 0;
+  const pickCount = options.featureId ? (options.separateLabelPick && options.label ? 2 : 1) : 0;
   cursor += pickCount * PICK_BYTES;
   const memberOffset = cursor;
   const labelOffset = cursor;
@@ -223,7 +225,7 @@ function pointPacket(
     contribution.resolvePick = () => options.featureId;
     contribution.findPickReferences = (target) =>
       target === options.featureId
-        ? [{ channelOrdinal: 0, entryOrdinal: 0, endpointRole: 0 }]
+        ? Array.from({length: pickCount}, (_, channelOrdinal) => ({ channelOrdinal, entryOrdinal: 0, endpointRole: 0 }))
         : [];
   }
 
@@ -279,27 +281,28 @@ function pointPacket(
   view.setUint32(spanOffset + 4, 0, true);
   view.setUint32(spanOffset + 8, 1, true);
 
-  if (pickCount) {
-    view.setUint32(pickOffset, 0, true);
-    view.setUint32(pickOffset + 4, 0, true);
-    view.setUint32(pickOffset + 8, 0, true);
-    view.setUint32(pickOffset + 12, 0, true);
-    view.setUint32(pickOffset + 16, 0, true);
+  for (let pick = 0; pick < pickCount; ++pick) {
+    const offset = pickOffset + pick * PICK_BYTES;
+    view.setUint32(offset, 0, true);
+    view.setUint32(offset + 4, pick, true);
+    view.setUint32(offset + 8, pick, true);
+    view.setUint32(offset + 12, 0, true);
+    view.setUint32(offset + 16, 0, true);
     view.setFloat32(
-      pickOffset + 20,
+      offset + 20,
       options.navigationAltitude ?? 0,
       true,
     );
-    view.setUint32(pickOffset + 24, 0, true);
+    view.setUint32(offset + 24, 0, true);
     view.setUint32(
-      pickOffset + 28,
+      offset + 28,
       options.presentationPrimitiveOrder ?? 3,
       true,
     );
   }
   if (labelCount) {
     view.setUint32(labelOffset, 0, true);
-    view.setUint32(labelOffset + 4, 0xffffffff, true);
+    view.setUint32(labelOffset + 4, pickCount === 2 ? 1 : 0xffffffff, true);
     view.setFloat64(labelOffset + 8, 11, true);
     view.setFloat64(labelOffset + 16, 48, true);
     view.setUint32(labelOffset + 32, 0, true);
@@ -1706,6 +1709,43 @@ describe("GpuScene contribution lifecycle", () => {
     const values = table.values;
     expect(values[reservation.contributions[0].slot * 4 + 1]).toBe(3.5);
     expect(scene.setContributionLod("tile", 3.5)).toBe(false);
+  });
+
+  it("highlights an already-picked vertex in every authored channel and drops retired rows", () => {
+    const { scene } = createScene();
+    const target = {mapTileKey: "Features:Map:Layer:1:0", featureId: "Lane.2:shapepoint#1.0@survey@r1"};
+    const identities = new Set(["tile"]);
+    const input = [{identity: "tile", mapTileKey: target.mapTileKey, styleOrder: 0, lod: 7}];
+    const initial = scene.prepareRender("origin", [11, 48, 0], input);
+    const packet = pointPacket(initial, {
+      featureId: target.featureId, label: "curvature", separateLabelPick: true,
+    });
+    const find = vi.fn(initial.contributions[0].findPickReferences);
+    initial.contributions[0].findPickReferences = find;
+    scene.applyPacket(packet, initial);
+    scene.finishRender(initial);
+    scene.publishPresentation();
+
+    // Pointer-picking the marker proves that this vertex is present. Its
+    // label uses a separate row, which only a complete reverse lookup finds.
+    expect(scene.resolvePick(0)).toEqual([target]);
+    expect(scene.hasInteractionTarget(identities, target)).toBe(true);
+    expect(find).not.toHaveBeenCalled();
+    expect(scene.interactionPicks(identities, [target]).map(row => row.globalPickIndex)).toEqual([0, 1]);
+    expect(scene.interactionPicks(identities, [target])).toHaveLength(2);
+    expect(find).toHaveBeenCalledTimes(1);
+
+    const replacement = scene.prepareRender("origin", [11, 48, 0], input);
+    const nextPacket = pointPacket(replacement, {featureId: target.featureId});
+    const findReplacement = vi.fn(replacement.contributions[0].findPickReferences);
+    replacement.contributions[0].findPickReferences = findReplacement;
+    scene.applyPacket(nextPacket, replacement);
+    scene.finishRender(replacement);
+    expect(scene.interactionPicks(identities, [target])).toHaveLength(1);
+    expect(findReplacement).toHaveBeenCalledTimes(1);
+    scene.removeContribution("tile");
+    scene.publishPresentation();
+    expect(scene.interactionPicks(identities, [target])).toEqual([]);
   });
 
   it("excludes a retiring same-identity pick from interaction presence", () => {

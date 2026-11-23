@@ -262,6 +262,18 @@ struct TileSubsetLayer
         int64_t entryIndex,
         int64_t validityIndex) const;
 
+    /**
+     * Find picks for one original vertex across style channels in this partition.
+     * A changed revision or datasource yields an empty result, even when the
+     * replacement feature still has a vertex with the same ordinal.
+     */
+    NativeJsValue findShapePointPickReferences(
+        std::string const& featureId,
+        uint32_t geometryOrdinal,
+        uint32_t pointIndex,
+        std::string const& sourceId,
+        std::string const& sourceRevision) const;
+
     /** Return a compact JSON representation for diagnostics and tests. */
     std::string toJson() const;
 

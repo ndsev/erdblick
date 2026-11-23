@@ -1,5 +1,6 @@
 #include "inspection.h"
 #include "mapget/model/featurelayer.h"
+#include "mapget/model/shapepoint.h"
 #include "mapget/model/sourcedatareference.h"
 #include "simfil/model/nodes.h"
 #include <algorithm>
@@ -1142,6 +1143,46 @@ BubblePropagation buildPropagatedValueBubbles(InspectionNode& node, std::string_
 
 }
 
+namespace {
+bool matchesPointSnapshot(Feature const& feature, std::string const& sourceId, std::string const& revision)
+{
+    return !revision.empty() && feature.model().sourceId() == sourceId && feature.model().sourceRevision() == revision;
+}
+}
+
+JsValue InspectionConverter::shapePointPosition(model_ptr<Feature> const& feature, uint32_t geometry,
+                                               uint32_t index, std::string const& sourceId, std::string const& revision)
+{
+    if (matchesPointSnapshot(*feature, sourceId, revision)) {
+        if (auto point = feature->shapePoints(geometry).at(index)) {
+            const auto position = point->position();
+            return JsValue::Dict({{"x", JsValue(position.x)}, {"y", JsValue(position.y)}, {"z", JsValue(position.z)}});
+        }
+    }
+    return JsValue();
+}
+
+JsValue InspectionConverter::convertAtShapePoint(model_ptr<Feature> const& feature,
+                                                uint32_t geometryOrdinal, uint32_t pointIndex,
+                                                std::string const& sourceId, std::string const& revision)
+{
+    auto unavailable = [](std::string_view reason) {
+        return JsValue::List({JsValue::Dict({
+            {"key", JsValue("Shape point unavailable")}, {"type", JsValue(static_cast<uint32_t>(ValueType::String))},
+            {"value", JsValue(std::string(reason))}, {"reopenFeature", JsValue(true)}
+        })});
+    };
+    if (!matchesPointSnapshot(*feature, sourceId, revision))
+        return unavailable("The source has changed. Open the current feature or pick the vertex again.");
+    auto point = feature->shapePoints(geometryOrdinal).at(pointIndex);
+    if (!point)
+        return unavailable("This geometry or vertex is missing from the selected feature.");
+
+    selectedPoint_ = {geometryOrdinal, pointIndex};
+    selectedPointContext_ = point->queryContext();
+    return convert(feature);
+}
+
 JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
 {
     remainingPointPreview_ = 256;
@@ -1214,8 +1255,8 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
     {
         auto scope = push(convertString("Attribute Layers"), RawPath{"attributes.layer"}, ValueType::Section);
         size_t attributeIndex = 0;
-        layers->forEachLayer([this, &attributeIndex](auto&& layerName, auto&& layer) -> bool {
-            convertAttributeLayer(layerName, layer, attributeIndex);
+        layers->forEachLayer([this, &featurePtr, &attributeIndex](auto&& layerName, auto&& layer) -> bool {
+            convertAttributeLayer(featurePtr, layerName, layer, attributeIndex);
             return true;
         });
     }
@@ -1238,21 +1279,22 @@ JsValue InspectionConverter::convert(model_ptr<Feature> const& featurePtr)
         auto scope = push(convertString("Geometry"), RawPath{"geometry"}, ValueType::Section);
         const auto exportAsGeometryCollection = geomCollection->numGeometries() > 1;
         uint32_t exportGeometryIndex = 0;
-        uint32_t displayGeometryIndex = 0;
         geomCollection->forEachGeometry(
-            [this, &exportGeometryIndex, &displayGeometryIndex, exportAsGeometryCollection]
+            [this, &exportGeometryIndex, exportAsGeometryCollection]
             (model_ptr<Geometry> const& geom) -> bool {
             const auto currentExportGeometryIndex = exportGeometryIndex++;
             const auto geometryObjectPath = exportAsGeometryCollection
                 ? fmt::format("geometries[{}]", currentExportGeometryIndex)
                 : std::string{};
-            convertGeometry(JsValue(displayGeometryIndex++), geom, geometryObjectPath);
+            convertGeometry(JsValue(currentExportGeometryIndex), geom, geometryObjectPath, currentExportGeometryIndex);
             return true;
         });
     }
 
     // Assign row IDs before summaries copy their navigation targets.
     finalizeTree(root_);
+    for (auto const& [link, source] : sourceLinks_)
+        link->sourceNodeId_ = source->nodeId_;
     return root_.childrenToJsValue(tile_->mapId());
 }
 
@@ -1360,6 +1402,7 @@ void InspectionConverter::pop()
 }
 
 void InspectionConverter::convertAttributeLayer(
+    model_ptr<Feature> const& feature,
     const std::string_view& name,
     const model_ptr<AttributeLayer>& l,
     size_t& attributeIndex)
@@ -1382,7 +1425,7 @@ void InspectionConverter::convertAttributeLayer(
     }
 
     size_t layerAttributeIndex = 0;
-    l->forEachAttribute([this, &attributeFieldIds, &attributeIndex, &layerAttributeIndex](model_ptr<Attribute> const& attr)
+    l->forEachAttribute([&, this](model_ptr<Attribute> const& attr)
     {
         auto const featureAttributeIndex = static_cast<uint32_t>(attributeIndex++);
         auto const thisLayerAttributeIndex = layerAttributeIndex++;
@@ -1392,12 +1435,26 @@ void InspectionConverter::convertAttributeLayer(
 
         auto fieldName = fieldId ? convertString(fieldId).toString() : convertString(attr->name()).toString();
         auto attrScope = push(convertString(fieldId), fieldName, ValueType::Null);
+        if (selectedPoint_)
+            rawAttributes_.push_back(&*attrScope);
         convertSourceDataReferences(attr->sourceDataReferences(), *attrScope);
 
+        std::optional<mapget::AttributeValidityView> view;
+        auto markerDiagnostic = [&](mapget::PointQueryError const& error) {
+            push("Marker diagnostic", RawPath{""}, ValueType::String)->value_ = convertString(error.what());
+        };
+        try {
+            view = attr->validityView(feature, name);
+        } catch (mapget::PointQueryError const& error) {
+            markerDiagnostic(error);
+        }
+        const bool virtualPointMarkers = view && view->hasVirtualPointValidities();
         auto hasFields = false;
         attr->forEachField(
-            [this, &hasFields, &attr](auto const& fieldName, auto const& val)
+            [this, &hasFields, &attr, virtualPointMarkers](auto const& fieldName, auto const& val)
             {
+                if (fieldName == "_mapgetPointSeriesBranch" || fieldName == "_mapgetPointSeriesGeometry" ||
+                    (virtualPointMarkers && fieldName == "pointValidities")) return true;
                 hasFields = true;
                 convertField(
                     convertString(fieldName),
@@ -1415,8 +1472,44 @@ void InspectionConverter::convertAttributeLayer(
         attrScope->mapId_ = JsValue(tile_->mapId());
         attrScope->hoverId_ = featureId_ + ":attribute#" +
                               std::to_string(featureAttributeIndex);
-        if (auto validity = attr->validityOrNull()) {
-            convertValidity(convertString("validity"), validity, &attrScope->hoverId_);
+        if (!view) return true;
+        // Use the public validity indices also used by attribute filtering. An
+        // unrelated raw field named pointValidities was already displayed above.
+        auto appendView = [&](bool pointValidities) {
+            const auto count = pointValidities ? view->pointCount() : view->size();
+            if (!count && !pointValidities && !attr->validityOrNull()) return;
+            const char* key = pointValidities ? "pointValidities" : "validity";
+            auto collection = push(key, key);
+            auto append = [&](uint32_t i, InspectionNode& row) {
+                if (!pointValidities) row.hoverId_ = attrScope->hoverId_ + ":validity#" + std::to_string(i);
+                try {
+                    auto validity = pointValidities ? view->pointAt(i) : view->at(i);
+                    if (validity) convertSingleValidity(*validity);
+                    else row.info_ = "This sample has no position on the selected geometry.";
+                } catch (mapget::PointQueryError const& error) {
+                    markerDiagnostic(error);
+                }
+                // A raw station can still be inspected when it has no corresponding position.
+                try {
+                    addMeasurements(row, view->markerSamples(i, pointValidities), &*attrScope);
+                } catch (mapget::PointQueryError const& error) {
+                    markerDiagnostic(error);
+                }
+            };
+            if (count == 1 && !pointValidities) {
+                append(0, *collection);
+                return;
+            }
+            for (uint32_t i = 0; i < count; ++i) {
+                auto row = push(JsValue(i), i);
+                append(i, *row);
+            }
+        };
+        try {
+            appendView(false);
+            if (virtualPointMarkers) appendView(true);
+        } catch (mapget::PointQueryError const& error) {
+            markerDiagnostic(error);
         }
         return true;
     });
@@ -1481,7 +1574,8 @@ void InspectionConverter::convertRelation(const model_ptr<Relation>& r)
 void InspectionConverter::convertGeometry(
     JsValue const& key,
     const model_ptr<Geometry>& g,
-    std::optional<std::string_view> geometryObjectPath)
+    std::optional<std::string_view> geometryObjectPath,
+    std::optional<uint32_t> geometryOrdinal)
 {
     std::string keyPath;
     auto geomScope = [&]() {
@@ -1549,6 +1643,7 @@ void InspectionConverter::convertGeometry(
     if (g->geomType() == GeomType::Points) {
         remainingPointPreview_ -= previewCount;
         if (previewCount < g->numPoints()) {
+            if (geometryOrdinal) geomScope->pointRange_ = std::pair{*geometryOrdinal, uint32_t(g->numPoints())};
             auto count = push("pointCount", RawPath{""}, ValueType::Number);
             count->value_ = JsValue(double(g->numPoints()));
             count->geoJsonPath_.clear();
@@ -1556,22 +1651,278 @@ void InspectionConverter::convertGeometry(
                                       previewCount, g->numPoints());
         }
     }
+    auto appendPoint = [&](uint32_t index, mapget::Point const& position) {
+        const auto path = geometryCoordinatePath(g, index);
+        auto coordinate = push(JsValue(index), RawPath{path}, ValueType::Number | ValueType::ArrayBit);
+        coordinate->value_ = pointArrayValue(position);
+        if (geometryOrdinal) {
+            coordinate->shapePoint_ = std::pair{*geometryOrdinal, index};
+            if (selectedPoint_ == coordinate->shapePoint_)
+                convertPointAttributes(*coordinate);
+        }
+    };
     uint32_t index = 0;
-    g->forEachPoint(
-        [this, &g, &index, previewCount](auto&& pt)
-        {
-            if (index >= previewCount)
-                return false;
-            const auto coordinatePath = geometryCoordinatePath(g, index);
-            auto ptScope = push(
-                JsValue(index),
-                RawPath{coordinatePath},
-                ValueType::Number | ValueType::ArrayBit);
-            ptScope->value_ = pointArrayValue(pt);
-            ++index;
-            return true;
-        });
+    g->forEachPoint([&](auto const& position) {
+        if (index >= previewCount) return false;
+        appendPoint(index++, position);
+        return true;
+    });
+    // A picked point cloud vertex can lie beyond the bounded inspection preview.
+    if (selectedPoint_ && geometryOrdinal == selectedPoint_->first && selectedPoint_->second >= previewCount)
+        appendPoint(selectedPoint_->second, g->pointAt(selectedPoint_->second));
     geomScope->geoJsonPath_ = appendGeoJsonPathField(geometryObjectGeoJsonPath, "type");
+}
+
+namespace {
+using PointInspectionNode = InspectionConverter::InspectionNode;
+
+/** Virtual point fields have their own model. Only the original attribute tree owns GeoJSON paths. */
+void inspectPointValue(PointInspectionNode& row, simfil::ModelNode::Ptr const& value,
+                       simfil::StringPool const& strings)
+{
+    if (!value || row.setScalarValue(simfil::Value::field(*value))) return;
+    bool array = value->type() == simfil::ValueType::Array;
+    if (array) row.type_ = InspectionConverter::ValueType::ArrayBit;
+    for (uint32_t i = 0; i < value->size(); ++i) {
+        auto& child = row.children_.emplace_back();
+        auto key = value->keyAt(i);
+        child.key_ = array ? JsValue(i) : JsValue(std::string(strings.resolve(key).value_or("")));
+        inspectPointValue(child, value->at(i), strings);
+    }
+}
+
+/** Match a decoded path component against a displayed field or array index, retaining its type. */
+template<class Node>
+auto inspectionChild(Node& row, JsValue const& key) -> Node*
+{
+    for (auto& child : row.children_)
+        if (child.key_.type() == key.type() && child.key_.toString() == key.toString())
+            return &child;
+    return nullptr;
+}
+}
+
+void InspectionConverter::addMeasurements(InspectionNode& row, simfil::ModelNode::Ptr const& samples,
+                                         InspectionNode const* raw)
+{
+    if (!samples || !samples->size()) return;
+    auto& readings = row.children_.emplace_back();
+    readings.key_ = JsValue("Measurements");
+    inspectPointValue(readings, samples, *stringPool_);
+
+    // A contributor names the original raw attribute field including its array
+    // index. Store a tree link only when that exact path is present in this feature.
+    for (auto& field : readings.children_) {
+        for (auto& candidate : field.children_) {
+            auto value = inspectionChild(candidate, JsValue("value"));
+            auto unit = inspectionChild(candidate, JsValue("unit"));
+            auto status = inspectionChild(candidate, JsValue("status"));
+            if (value && value->value_.type() != JsValue::Type::Null) {
+                candidate.displayValue_ = value->value_.toString();
+                if (unit) candidate.displayValue_ += " " + unit->value_.toString();
+            } else if (status) {
+                candidate.displayValue_ = status->value_.toString();
+            }
+            if (field.children_.size() == 1)
+                field.displayValue_ = candidate.displayValue_;
+            if (!raw) continue;
+            auto contributors = inspectionChild(candidate, JsValue("contributors"));
+            if (!contributors) continue;
+            for (auto& record : contributors->children_) {
+                auto path = inspectionChild(record, JsValue("path"));
+                if (!path) continue;
+                auto source = raw;
+                for (auto const& part : path->children_) {
+                    source = inspectionChild(*source, part.value_);
+                    if (!source) break;
+                }
+                if (source) sourceLinks_.emplace_back(&record, source);
+            }
+        }
+    }
+}
+
+void InspectionConverter::convertPointAttributes(InspectionNode& coordinate)
+{
+    auto& section = coordinate.children_.emplace_back();
+    section.key_ = JsValue("Point attributes");
+    section.type_ = ValueType::Section;
+    try {
+        const auto occurrences = selectedPointContext_->get(stringPool_->get("$attributes"));
+        if (!occurrences || !occurrences->size()) {
+            section.value_ = JsValue("No attributes cover this vertex.");
+            return;
+        }
+        for (uint32_t i = 0; i < occurrences->size(); ++i) {
+            auto occurrence = occurrences->at(i);
+            auto get = [&](std::string_view key) { return occurrence->get(stringPool_->get(key)); };
+            auto& row = section.children_.emplace_back();
+            auto name = get("$name"), layer = get("$layer");
+            row.key_ = JsValue(fmt::format("{}.{}", layer->toJson().get<std::string>(), name->toJson().get<std::string>()));
+
+            InspectionNode const* raw = nullptr;
+            if (auto index = get("$attributeIndex")) {
+                auto ordinal = index->toJson().get<uint32_t>();
+                if (ordinal < rawAttributes_.size()) {
+                    raw = rawAttributes_[ordinal];
+                    sourceLinks_.emplace_back(&row, raw);
+                    row.sourceDataRefs_ = raw->sourceDataRefs_;
+                }
+            }
+            auto add = [&](std::string_view title, simfil::ModelNode::Ptr const& value) -> InspectionNode* {
+                if (!value) return nullptr;
+                auto& field = row.children_.emplace_back();
+                field.key_ = JsValue(std::string(title));
+                inspectPointValue(field, value, *stringPool_);
+                return &field;
+            };
+            // Named lookup exposes provenance even for two alternatives that have no single scalar value.
+            addMeasurements(row, get("$samples"), raw);
+            auto validities = add("Matching validities", get("$validities"));
+            add("Layer ID", get("$layerId"));
+            if (raw && validities) {
+                if (auto list = inspectionChild(*raw, JsValue("validity"))) {
+                    for (auto& validity : validities->children_) {
+                        auto source = !list->hoverId_.empty() ? list : inspectionChild(*list, validity.value_);
+                        if (source) sourceLinks_.emplace_back(&validity, source);
+                    }
+                }
+            }
+            for (uint32_t j = 0; j < occurrence->size(); ++j) {
+                auto key = occurrence->keyAt(j);
+                auto field = stringPool_->resolve(key);
+                if (!field || field->starts_with('$')) continue;
+                try {
+                    add(*field, occurrence->get(key));
+                } catch (mapget::PointQueryError const& error) {
+                    auto& diagnostic = row.children_.emplace_back();
+                    diagnostic.key_ = JsValue(std::string(*field));
+                    diagnostic.value_ = JsValue(std::string(error.what()));
+                    diagnostic.type_ = ValueType::String;
+                }
+            }
+        }
+    } catch (mapget::PointQueryError const& error) {
+        section.value_ = JsValue(std::string(error.what()));
+    }
+}
+
+void InspectionConverter::convertSingleValidity(Validity const& v)
+{
+    auto attrPointIndex = v.attrPointIndex();
+    auto attrPointIndexRange = v.attrPointIndexRange();
+
+    if (auto direction = v.direction()) {
+        auto dirScope = push("direction", "direction", ValueType::String);
+        switch (direction) {
+        case Validity::Positive:
+            dirScope->value_ = convertString("POSITIVE");
+            break;
+        case Validity::Negative:
+            dirScope->value_ = convertString("NEGATIVE");
+            break;
+        case Validity::Both:
+            dirScope->value_ = convertString("COMPLETE");
+            break;
+        case Validity::None:
+            dirScope->value_ = convertString("NONE");
+            break;
+        default: break;
+        }
+    }
+
+    if (auto featureId = v.featureId()) {
+        auto featureIdScope = push("featureId", "featureId", ValueType::FeatureId);
+        assignFeatureReference(*featureIdScope, featureId);
+        if (attrPointIndex || attrPointIndexRange) {
+            featureIdScope->geoJsonPath_.clear();
+        }
+    }
+
+    if (auto transitionNumber = v.transitionNumber()) {
+        push("transitionNumber", "transitionNumber", ValueType::Number)->value_ =
+            JsValue(*transitionNumber);
+        if (auto fromFeature = v.transitionFromFeature()) {
+            auto fromScope = push("from", "from", ValueType::FeatureId);
+            fromScope->value_ = convertString(fromFeature->id()->toString());
+            fromScope->mapId_ = JsValue(fromFeature->model().mapId());
+        }
+        if (auto fromConnectedEnd = v.transitionFromConnectedEnd()) {
+            push("fromConnectedEnd", "fromConnectedEnd", ValueType::String)->value_ =
+                convertString(*fromConnectedEnd == Validity::End ? "END" : "START");
+        }
+        if (auto toFeature = v.transitionToFeature()) {
+            auto toScope = push("to", "to", ValueType::FeatureId);
+            toScope->value_ = convertString(toFeature->id()->toString());
+            toScope->mapId_ = JsValue(toFeature->model().mapId());
+        }
+        if (auto toConnectedEnd = v.transitionToConnectedEnd()) {
+            push("toConnectedEnd", "toConnectedEnd", ValueType::String)->value_ =
+                convertString(*toConnectedEnd == Validity::End ? "END" : "START");
+        }
+        return;
+    }
+
+    if (attrPointIndex) {
+        convertAttrPointValidity(
+            convertString("attrPointIndex"),
+            attrPointIndex->sequence(),
+            attrPointIndex->index());
+        return;
+    }
+
+    if (attrPointIndexRange) {
+        convertAttrPointValidity(
+            convertString("attrPointIndexRange"),
+            attrPointIndexRange->sequence(),
+            attrPointIndexRange->start(),
+            attrPointIndexRange->end());
+        return;
+    }
+
+    if (auto geom = v.simpleGeometry()) {
+        convertGeometry(JsValue("simpleGeometry"), geom);
+        return;
+    }
+
+    if (auto geometryName = v.geometryName()) {
+        push("geometryName", "geometryName", ValueType::String)->value_ =
+            convertString(*geometryName);
+    }
+
+    auto renderOffset = [this, &v](Point const& data, std::string_view const& name)
+    {
+        switch (v.geometryOffsetType()) {
+        case Validity::InvalidOffsetType:
+            break;
+        case Validity::GeoPosOffset: {
+            auto ptScope = push(name, name, ValueType::Number | ValueType::ArrayBit);
+            ptScope->value_ = JsValue::List({JsValue(data.x), JsValue(data.y), JsValue(data.z)});
+            break;
+        }
+        case Validity::BufferOffset: {
+            push(name, name, ValueType::Number)->value_ =
+                JsValue(fmt::format("Point Index {}", static_cast<uint32_t>(data.x)));
+            break;
+        }
+        case Validity::RelativeLengthOffset:
+            push(name, name, ValueType::Number)->value_ =
+                JsValue(fmt::format("{:.2f}%", data.x * 100.));
+            break;
+        case Validity::MetricLengthOffset:
+            push(name, name, ValueType::Number)->value_ =
+                JsValue(fmt::format("{:.2f}m", data.x));
+            break;
+        }
+    };
+
+    if (auto rangeOffset = v.offsetRange()) {
+        renderOffset(rangeOffset->first, "start");
+        renderOffset(rangeOffset->second, "end");
+    }
+    else if (auto pointOffset = v.offsetPoint()) {
+        renderOffset(*pointOffset, "point");
+    }
 }
 
 void InspectionConverter::convertValidity(
@@ -1580,123 +1931,8 @@ void InspectionConverter::convertValidity(
     std::string const* hoverIdPrefix)
 {
     auto scope = push(key, key.as<std::string>());
-    auto renderValidity = [this](Validity const& v) -> bool {
-
-        auto attrPointIndex = v.attrPointIndex();
-        auto attrPointIndexRange = v.attrPointIndexRange();
-
-        if (auto direction = v.direction()) {
-            auto dirScope = push("direction", "direction", ValueType::String);
-            switch (direction) {
-            case Validity::Positive:
-                dirScope->value_ = convertString("POSITIVE");
-                break;
-            case Validity::Negative:
-                dirScope->value_ = convertString("NEGATIVE");
-                break;
-            case Validity::Both:
-                dirScope->value_ = convertString("COMPLETE");
-                break;
-            case Validity::None:
-                dirScope->value_ = convertString("NONE");
-                break;
-            default: break;
-            }
-        }
-
-        if (auto featureId = v.featureId()) {
-            auto featureIdScope = push("featureId", "featureId", ValueType::FeatureId);
-            assignFeatureReference(*featureIdScope, featureId);
-            if (attrPointIndex || attrPointIndexRange) {
-                featureIdScope->geoJsonPath_.clear();
-            }
-        }
-
-        if (auto transitionNumber = v.transitionNumber()) {
-            push("transitionNumber", "transitionNumber", ValueType::Number)->value_ =
-                JsValue(*transitionNumber);
-            if (auto fromFeature = v.transitionFromFeature()) {
-                auto fromScope = push("from", "from", ValueType::FeatureId);
-                fromScope->value_ = convertString(fromFeature->id()->toString());
-                fromScope->mapId_ = JsValue(fromFeature->model().mapId());
-            }
-            if (auto fromConnectedEnd = v.transitionFromConnectedEnd()) {
-                push("fromConnectedEnd", "fromConnectedEnd", ValueType::String)->value_ =
-                    convertString(*fromConnectedEnd == Validity::End ? "END" : "START");
-            }
-            if (auto toFeature = v.transitionToFeature()) {
-                auto toScope = push("to", "to", ValueType::FeatureId);
-                toScope->value_ = convertString(toFeature->id()->toString());
-                toScope->mapId_ = JsValue(toFeature->model().mapId());
-            }
-            if (auto toConnectedEnd = v.transitionToConnectedEnd()) {
-                push("toConnectedEnd", "toConnectedEnd", ValueType::String)->value_ =
-                    convertString(*toConnectedEnd == Validity::End ? "END" : "START");
-            }
-            return true;
-        }
-
-        if (attrPointIndex) {
-            convertAttrPointValidity(
-                convertString("attrPointIndex"),
-                attrPointIndex->sequence(),
-                attrPointIndex->index());
-            return true;
-        }
-
-        if (attrPointIndexRange) {
-            convertAttrPointValidity(
-                convertString("attrPointIndexRange"),
-                attrPointIndexRange->sequence(),
-                attrPointIndexRange->start(),
-                attrPointIndexRange->end());
-            return true;
-        }
-
-        if (auto geom = v.simpleGeometry()) {
-            convertGeometry(JsValue("simpleGeometry"), geom);
-            return true;
-        }
-
-        if (auto geometryName = v.geometryName()) {
-            push("geometryName", "geometryName", ValueType::String)->value_ =
-                convertString(*geometryName);
-        }
-
-        auto renderOffset = [this, &v](Point const& data, std::string_view const& name)
-        {
-            switch (v.geometryOffsetType()) {
-            case Validity::InvalidOffsetType:
-                break;
-            case Validity::GeoPosOffset: {
-                auto ptScope = push(name, name, ValueType::Number | ValueType::ArrayBit);
-                ptScope->value_ = JsValue::List({JsValue(data.x), JsValue(data.y), JsValue(data.z)});
-                break;
-            }
-            case Validity::BufferOffset: {
-                push(name, name, ValueType::Number)->value_ =
-                    JsValue(fmt::format("Point Index {}", static_cast<uint32_t>(data.x)));
-                break;
-            }
-            case Validity::RelativeLengthOffset:
-                push(name, name, ValueType::Number)->value_ =
-                    JsValue(fmt::format("{:.2f}%", data.x * 100.));
-                break;
-            case Validity::MetricLengthOffset:
-                push(name, name, ValueType::Number)->value_ =
-                    JsValue(fmt::format("{:.2f}m", data.x));
-                break;
-            }
-        };
-
-        if (auto rangeOffset = v.offsetRange()) {
-            renderOffset(rangeOffset->first, "start");
-            renderOffset(rangeOffset->second, "end");
-        }
-        else if (auto pointOffset = v.offsetPoint()) {
-            renderOffset(*pointOffset, "point");
-        }
-
+    auto renderValidity = [this](Validity const& value) {
+        convertSingleValidity(value);
         return true;
     };
 
@@ -2081,6 +2317,16 @@ JsValue InspectionConverter::InspectionNode::toJsValue(std::string_view const& m
         newDict.set("scalarType", *scalarType_);
     if (!hoverId_.empty())
         newDict.set("hoverId", JsValue(hoverId_));
+    if (shapePoint_) {
+        newDict.set("geometryOrdinal", JsValue(shapePoint_->first));
+        newDict.set("pointIndex", JsValue(shapePoint_->second));
+    }
+    if (pointRange_) {
+        newDict.set("pointGeometryOrdinal", JsValue(pointRange_->first));
+        newDict.set("originalPointCount", JsValue(pointRange_->second));
+    }
+    if (!sourceNodeId_.empty())
+        newDict.set("sourceNodeId", JsValue(sourceNodeId_));
     if (!info_.empty())
         newDict.set("info", JsValue(info_));
     if (!children_.empty())

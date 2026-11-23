@@ -736,6 +736,18 @@ EMSCRIPTEN_BINDINGS(erdblick)
                 [](FeaturePtr& self) {
                     return *InspectionConverter().convert(self); }))
         .function(
+            "inspectionModelAtShapePoint",
+            std::function<em::val(FeaturePtr&, uint32_t, uint32_t, std::string const&, std::string const&)>(
+                [](FeaturePtr& self, uint32_t geometry, uint32_t point,
+                   std::string const& sourceId, std::string const& revision) {
+                    return *InspectionConverter().convertAtShapePoint(self, geometry, point, sourceId, revision); }))
+        .function(
+            "shapePointPosition",
+            std::function<em::val(FeaturePtr&, uint32_t, uint32_t, std::string const&, std::string const&)>(
+                [](FeaturePtr& self, uint32_t geometry, uint32_t point,
+                   std::string const& sourceId, std::string const& revision) {
+                    return *InspectionConverter::shapePointPosition(self, geometry, point, sourceId, revision); }))
+        .function(
             "center",
             std::function<mapget::Point(FeaturePtr&)>(
                 [](FeaturePtr& self){
@@ -799,6 +811,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("valueSummaries", &TileSubsetLayer::valueSummaries)
         .function("resolvePick", &TileSubsetLayer::resolvePick)
         .function("findPickReferences", &TileSubsetLayer::findPickReferences)
+        .function("findShapePointPickReferences", &TileSubsetLayer::findShapePointPickReferences)
         .function("toJson", &TileSubsetLayer::toJson)
         .function("copyDiagnostics", &TileSubsetLayer::copyDiagnostics);
 
@@ -871,6 +884,8 @@ EMSCRIPTEN_BINDINGS(erdblick)
     em::value_object<TileLayerParser::TileLayerMetadata>("TileLayerMetadata")
         .field("id", &TileLayerParser::TileLayerMetadata::id)
         .field("stringPoolId", &TileLayerParser::TileLayerMetadata::stringPoolId)
+        .field("sourceId", &TileLayerParser::TileLayerMetadata::sourceId)
+        .field("sourceRevision", &TileLayerParser::TileLayerMetadata::sourceRevision)
         .field("mapName", &TileLayerParser::TileLayerMetadata::mapName)
         .field("layerName", &TileLayerParser::TileLayerMetadata::layerName)
         .field("partition", &TileLayerParser::TileLayerMetadata::partition)

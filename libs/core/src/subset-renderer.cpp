@@ -313,7 +313,8 @@ mapget::SelfContainedGeometry applyPresentationTransform(
         : geometry;
 }
 
-mapget::Point offsetAabbOrigin(
+/** Apply the style's altitude and local displacement to a single WGS84 position. */
+mapget::Point transformPoint(
     mapget::Point origin,
     FeatureStyleRule const& rule,
     glm::dvec3 const& offset)
@@ -862,6 +863,12 @@ void TileSubsetLayerRenderer::run()
                             return true;
                         });
                     break;
+                case mapget::Scope::ShapePoint:
+                    channel->forEachShapePointEntry([&](auto const& entry) {
+                        renderShapePoint(currentChannelOrdinal, entryOrdinal++, binding, entry);
+                        return true;
+                    });
+                    break;
                 case mapget::Scope::Relation:
                     channel->forEachRelationEntry(
                         [&](mapget::model_ptr<mapget::RelationEntry> const& entry) {
@@ -1175,10 +1182,7 @@ void TileSubsetLayerRenderer::renderFeatureRule(
     uint32_t entryOrdinal)
 {
     if (rule.selectable() && !selectablePick) {
-        selectablePick = featurePickIndex(
-            channelOrdinal,
-            entryOrdinal,
-            true);
+        selectablePick = entryPickIndex(channelOrdinal, entryOrdinal);
     }
     auto const pick = rule.selectable()
         ? *selectablePick
@@ -1241,10 +1245,7 @@ bool TileSubsetLayerRenderer::renderFeatureRulePair(
         return false;
     }
     if (innerRule.selectable() && !selectablePick) {
-        selectablePick = featurePickIndex(
-            channelOrdinal,
-            entryOrdinal,
-            true);
+        selectablePick = entryPickIndex(channelOrdinal, entryOrdinal);
     }
     auto const pick = innerRule.selectable()
         ? *selectablePick
@@ -1446,6 +1447,60 @@ void TileSubsetLayerRenderer::renderAttribute(
             }
         },
         &hostEval);
+}
+
+void TileSubsetLayerRenderer::renderShapePoint(
+    uint32_t channelOrdinal,
+    uint32_t entryOrdinal,
+    ChannelBinding const& binding,
+    mapget::model_ptr<mapget::ShapePointEntry> const& entry)
+{
+    auto const featureId = entry->featureId();
+    if (!featureId) {
+        return;
+    }
+    currentDepthIdentity_ = mapget::Hash{}
+        .mix(featureDepthIdentity(featureId))
+        .mix(entry->geometryOrdinal())
+        .mix(entry->pointIndex())
+        .value();
+    auto const geometryName = entry->geometryName();
+    FeatureStyleRule::MatchContext context{
+        .featureType = featureId->typeId(),
+        .sourceGeometryType = entry->sourceGeometryType(),
+        .sourceGeometryName = geometryName,
+    };
+    ProjectedEvalState hostState;
+    ProjectedEvalState pointState;
+    auto hostEval = makeEvalFun(binding.featureFields, entry->hostValues(), hostState);
+    auto pointEval = makeEvalFun(binding.entryFields, entry->values(), pointState);
+    std::optional<uint32_t> selectablePick;
+    binding.rules.front()->forEachMatchingRule(context, pointEval, [&](FeatureStyleRule const& rule) {
+        // Curvature can colour a marker while slope supplies the label. Either
+        // measurement can be present on its own at a particular vertex.
+        auto const color = rule.color(pointEval);
+        auto const label = rule.hasLabel() ? rule.labelText(pointEval) : std::string{};
+        if (!color && label.empty()) {
+            return;
+        }
+        if (rule.selectable() && !selectablePick) {
+            selectablePick = entryPickIndex(channelOrdinal, entryOrdinal);
+        }
+        auto const pick = rule.selectable() ? *selectablePick : kUnselectable;
+        auto const position = projectWgsPoint(transformPoint(entry->position(), rule, rule.offset()));
+        auto const zIndex = resolvedZIndex(rule, pointEval);
+        if (color) {
+            if (rule.hasIconUrl()) {
+                appendIcon(position, rule.iconUrl(pointEval), rule, pointEval, *color, zIndex, pick);
+            }
+            else {
+                appendPoint(position, rule, pointEval, *color, zIndex, pick);
+            }
+        }
+        if (!label.empty()) {
+            appendLabel(position, label, rule, pointEval, zIndex, pick);
+        }
+    }, &hostEval);
 }
 
 void TileSubsetLayerRenderer::renderGroup(
@@ -1690,7 +1745,7 @@ bool TileSubsetLayerRenderer::renderGeometryCollection(
         auto const zIndex = resolvedStyle ? resolvedStyle->zIndex : resolvedZIndex(rule, evalFun);
         auto const icon = rule.hasIconUrl() ? rule.iconUrl(evalFun) : std::string{};
         mapget::PointCloudGeometrySample::forEach(collection, selection, [&](auto const& record) {
-            auto const point = projectWgsPoint(offsetAabbOrigin(record.point, rule, offset));
+            auto const point = projectWgsPoint(transformPoint(record.point, rule, offset));
             if (!labelPosition) labelPosition = point;
             if (rule.hasIconUrl()) appendIcon(point, icon, rule, evalFun, *color, zIndex, pick);
             else appendPoint(point, rule, evalFun, *color, zIndex, pick);
@@ -1834,7 +1889,7 @@ bool TileSubsetLayerRenderer::renderGeometry(
         }
         else {
             appendAabb(
-                offsetAabbOrigin(
+                transformPoint(
                     geometry->gltfNodeAabbOrigin(),
                     rule,
                     offset),
@@ -1849,7 +1904,7 @@ bool TileSubsetLayerRenderer::renderGeometry(
     }
     if (type == mapget::GeomType::AABB) {
         appendAabb(
-            offsetAabbOrigin(
+            transformPoint(
                 geometry->aabbOrigin(),
                 rule,
                 offset),
@@ -3067,14 +3122,10 @@ uint32_t TileSubsetLayerRenderer::pickIndex(
     return index;
 }
 
-uint32_t TileSubsetLayerRenderer::featurePickIndex(
+uint32_t TileSubsetLayerRenderer::entryPickIndex(
     uint32_t channelOrdinal,
-    uint32_t entryOrdinal,
-    bool selectable)
+    uint32_t entryOrdinal)
 {
-    if (!selectable) {
-        return kUnselectable;
-    }
     auto const index = static_cast<uint32_t>(pickRefs_.size());
     pickRefs_.push_back({channelOrdinal, entryOrdinal, 0U});
     pickNavigationAltitudes_.push_back(
@@ -3992,6 +4043,18 @@ JsValue TileSubsetLayerRenderer::pickResultsToJs(bool includeReferences) const
         }
         auto const found = bridgePickResults_.find(index);
         if (found == bridgePickResults_.end()) {
+            // A mixed point-cloud contribution releases its subset after rendering.
+            // Preserve any ordinary shape-point picks through the same resolver
+            // used lazily by contributions that keep their subset bytes.
+            if (includeReferences) {
+                auto const& reference = pickRefs_[index];
+                auto const channel = subset_->at(reference.channelOrdinal);
+                if (channel && channel->scope() == mapget::Scope::ShapePoint) {
+                    results.push(JsValue(TileSubsetLayer(subset_).resolvePick(
+                        reference.channelOrdinal, reference.entryOrdinal, reference.endpointRole)));
+                    continue;
+                }
+            }
             results.push(item);
             continue;
         }

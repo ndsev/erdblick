@@ -7,6 +7,18 @@ import {
 import {FeaturePanelComponent} from "../../../app/inspection/feature-panel.component";
 
 describe("point cloud selection and export", () => {
+    it("opens the exact picked revision and leaves replacement incoming snapshots out of the point tree", () => {
+        const model = vi.fn(() => []);
+        const component = Object.create(FeaturePanelComponent.prototype) as any;
+        component.treeData = [];
+        component.incoming = new Map();
+        component.panel = () => ({id: 1, features: [{featureId: "Lane.2:shapepoint#1.0@feed@r1",
+            mapTileKey: "Features:Map:Lane:42", featureTile: {sourceId: "feed", sourceRevision: "r2"},
+            peek: (cb: any) => cb({inspectionModelAtShapePoint: model})}]});
+        component.getFeatureTreeDataFromModel = () => [];
+        component.rebuildInspectionTree();
+        expect(model).toHaveBeenCalledWith(1, 0, "feed", "r1");
+    });
     it("rebuilds inspection without exporting geometry and exports all coordinates on demand", () => {
         const coordinates = Array.from({length: 1000}, (_, i) => [8.7, 47.4, i]);
         const native = {
@@ -28,8 +40,25 @@ describe("point cloud selection and export", () => {
 
     it("does not put empty comma-separated entries into exports when a wrapper is unavailable", () => {
         const component = Object.create(FeaturePanelComponent.prototype) as any;
-        component.selectedFeatures = [{peek: () => null}, {peek: () => '{"type":"Feature"}'}];
+        component.selectedFeatures = [
+            {featureId: "Road.1", peek: () => null},
+            {featureId: "Road.2", peek: () => '{"type":"Feature"}'}
+        ];
         expect(JSON.parse(component.exportGeoJson()).features).toEqual([{type: "Feature"}]);
+    });
+
+    it("exports a point's host only while its original datasource and revision match", () => {
+        const component = Object.create(FeaturePanelComponent.prototype) as any;
+        const tile = {sourceId: "feed", sourceRevision: "r1"};
+        const peek = vi.fn(() => '{"type":"Feature","id":"Lane.2"}');
+        component.selectedFeatures = [{featureId: "Lane.2:shapepoint#1.0@feed@r1", featureTile: tile, peek}];
+        expect(JSON.parse(component.exportGeoJson()).features).toEqual([{type: "Feature", id: "Lane.2"}]);
+        tile.sourceId = "another feed";
+        expect(JSON.parse(component.exportGeoJson()).features).toEqual([]);
+        tile.sourceId = "feed";
+        tile.sourceRevision = "r2";
+        expect(JSON.parse(component.exportGeoJson()).features).toEqual([]);
+        expect(peek).toHaveBeenCalledTimes(1);
     });
 });
 

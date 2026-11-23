@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include "../support/scalar-schema.h"
 #include "erdblick/inspection.h"
@@ -7,6 +8,7 @@
 #include "erdblick/parser.h"
 #include "erdblick/rule.h"
 #include "mapget/model/mapschema.h"
+#include "mapget/model/pointseries.h"
 #include "mapget/model/sourcedata.h"
 #include "mapget/model/subsetlayer.h"
 
@@ -62,6 +64,91 @@ erdblick::SharedUint8Array schemaBytes(mapget::MapSchema const& graph)
 }
 
 }  // namespace
+
+TEST_CASE("The same named geometry supplies style completions and vertex inspection with raw links",
+          "[erdblick.schema][erdblick.inspection][shapepoint]")
+{
+    using Kind = simfil::SchemaType::Kind;
+    auto graph = std::make_shared<mapget::MapSchema>();
+    auto layer = graph->newLayer("Road", mapget::LayerType::Features);
+    auto road = layer->newFeature(mapget::FeatureTypeInfo::fromJson(
+        {{"name", "Road"}, {"uniqueIdCompositions", {{{{"partId", "roadId"}, {"datatype", "U32"}}}}}}));
+    layer->setRootSchema(road.id());
+    auto attr = graph->newAttribute("grades", "Grades");
+    auto codes = graph->schemaType(layer->addSchema(Kind::Array));
+    codes.asArray().addElement(graph->schemaType(graph->primitive(Kind::Int)));
+    attr.addField("codes", codes);
+    attr.addField("pointValidities", graph->schemaType(graph->builtin(mapget::MapSchema::Builtin::Validities)));
+    layer->bindAttribute(attr, "Road", "Adas", "GRADE");
+    mapget::PointSeries series;
+    series.featureType_ = "Road";
+    series.attributeLayer_ = "Adas";
+    series.attribute_ = "GRADE";
+    series.geometryName_ = "profile";
+    series.omittedValidityCovers_ = true;
+    series.records_ = {"codes"};
+    series.markers_ = mapget::PointSeries::Markers::PointValidities;
+    series.fields_ = {{.name_ = "slope", .unit_ = "%", .codec_ = "fifths"}};
+    layer->addPointCodec("fifths", {.scale_ = .2});
+    layer->addPointSeries(std::move(series));
+    graph->finalize();
+
+    erdblick::TileLayerParser parser;
+    auto id = std::string(graph->schemaId());
+    parser.installMapSchema(schemaBytes(*graph), id);
+    parser.setDataSourceInfo(sourceFixture("Profiles", id));
+    const std::string prefix = "$attributes.Adas.GRADE.*.slo";
+    auto hints = parser.completeSearchQuery(prefix, static_cast<int>(prefix.size()), {{"scope", "shapepoint"}});
+    CHECK(hints.dump().find("slope") != std::string::npos);
+
+    auto tile = std::make_shared<mapget::TileFeatureLayer>(mapget::TileId::fromWgs84(11., 48., 13),
+        "Profiles", "Profiles", parser.info_.at("Profiles").layers_.at("Road"), std::make_shared<mapget::StringPool>("Profiles"));
+    auto feature = tile->newFeature("Road", {{"roadId", 1}});
+    for (std::string_view name : {"centerline", "profile"}) {
+        auto geom = tile->newGeometry(mapget::GeomType::Line);
+        geom->setName(name);
+        geom->append({11., 48., 0.});
+        geom->append({11.001, 48., 0.});
+        feature->addGeometry(geom);
+    }
+    auto occurrence = feature->attributeLayers()->newLayer("Adas")->newAttribute("GRADE");
+    occurrence->setPointSeriesGeometry(1);
+    auto values = tile->newArray();
+    values->append(int64_t{0});
+    values->append(int64_t{-13});
+    REQUIRE(occurrence->addField("codes", values));
+    auto inspect = [&](uint32_t geometry, uint32_t point) {
+        return *erdblick::InspectionConverter().convertAtShapePoint(feature, geometry, point, tile->sourceId(), tile->sourceRevision());
+    };
+    auto children = [](nlohmann::json const& parent, nlohmann::json const& key) -> nlohmann::json const& {
+        auto const& rows = parent.is_array() ? parent : parent.at("children");
+        auto found = std::ranges::find_if(rows, [&](auto const& row) { return row.at("key") == key; });
+        REQUIRE(found != rows.end());
+        return *found;
+    };
+    auto readPoint = [&](auto const& tree, uint32_t geometry, uint32_t point) -> nlohmann::json const& {
+        return children(children(children(children(tree, "Geometry"), geometry), point), "Point attributes");
+    };
+    auto reading = inspect(1, 1);
+    const auto& output = children(readPoint(reading, 1, 1), "Adas.GRADE");
+    CHECK(children(output, "slope").at("value").get<double>() == Catch::Approx(-2.6));
+    const auto& sample = children(children(children(output, "Measurements"), "slope"), 0);
+    CHECK(children(sample, "unit").at("value") == "%");
+    const auto& record = children(children(sample, "contributors"), 0);
+    CHECK(children(record, "raw").at("value") == -13);
+    const auto& rawOccurrence = children(children(children(reading, "Attribute Layers"), "Adas"), "GRADE");
+    CHECK(record.at("sourceNodeId") == children(children(rawOccurrence, "codes"), 1).at("nodeId"));
+    const auto& markers = children(rawOccurrence, "pointValidities");
+    REQUIRE(markers.at("children").size() == 2);
+    const auto& marker = children(children(children(children(markers, 1), "Measurements"), "slope"), 0);
+    CHECK(children(marker, "value").at("value").get<double>() == Catch::Approx(-2.6));
+    CHECK(children(children(marker, "contributors"), 0).at("sourceNodeId") == record.at("sourceNodeId"));
+    CHECK(rawOccurrence.dump().find("_mapgetPointSeriesGeometry") == std::string::npos);
+    auto zero = inspect(1, 0);
+    CHECK(children(children(readPoint(zero, 1, 0), "Adas.GRADE"), "slope").at("value") == 0);
+    auto centerline = inspect(0, 1);
+    CHECK(readPoint(centerline, 0, 1).at("value") == "No attributes cover this vertex.");
+}
 
 TEST_CASE(
     "Schema installation validates supplied bytes even with a warm graph cache",

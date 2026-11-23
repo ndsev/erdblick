@@ -67,6 +67,11 @@ public:
         JsValue direction_;
         std::string geoJsonPath_;
         std::string nodeId_;
+        /** Only original Geometry coordinates can open a vertex. Synthetic validity points have no selector. */
+        std::optional<std::pair<uint32_t, uint32_t>> shapePoint_;
+        /** Visible point clouds show a bounded preview; an index input reaches every original vertex. */
+        std::optional<std::pair<uint32_t, uint32_t>> pointRange_;
+        std::string sourceNodeId_;
 
         /** Source owner for incoming relation rows, independent of the selected target. */
         std::string mapTileKey_;
@@ -171,6 +176,16 @@ public:
     /** Converts a non-null feature on a fresh converter, including identifiers, attributes, relations and geometry. */
     JsValue convert(mapget::model_ptr<mapget::Feature> const& featurePtr);
 
+    /** Open one vertex against the snapshot that supplied the pick or saved Geometry row. */
+    JsValue convertAtShapePoint(mapget::model_ptr<mapget::Feature> const& feature,
+                                uint32_t geometryOrdinal, uint32_t pointIndex,
+                                std::string const& sourceId, std::string const& sourceRevision);
+
+    /** Camera focus uses the vertex coordinate without evaluating any of its attributes. */
+    static JsValue shapePointPosition(mapget::model_ptr<mapget::Feature> const& feature,
+                                      uint32_t geometryOrdinal, uint32_t pointIndex,
+                                      std::string const& sourceId, std::string const& sourceRevision);
+
     /** Push an already prepared node onto the conversion stack. */
     InspectionNodeScope push(InspectionNode* node);
 
@@ -185,6 +200,7 @@ public:
 
     /** Convert one attribute layer while sharing the feature-wide attribute index used in hover ids. */
     void convertAttributeLayer(
+        mapget::model_ptr<mapget::Feature> const& feature,
         std::string_view const& name,
         mapget::model_ptr<mapget::AttributeLayer> const& l,
         size_t& attributeIndex);
@@ -210,13 +226,15 @@ public:
     void convertGeometry(
         JsValue const& key,
         mapget::model_ptr<mapget::Geometry> const& r,
-        std::optional<std::string_view> geometryObjectPath = std::nullopt);
+        std::optional<std::string_view> geometryObjectPath = std::nullopt,
+        std::optional<uint32_t> geometryOrdinal = std::nullopt);
 
     /** Convert a validity collection and optionally namespace the emitted hover ids. */
     void convertValidity(
         JsValue const& key,
         mapget::model_ptr<mapget::MultiValidity> const& r,
         std::string const* hoverIdPrefix = nullptr);
+    void convertSingleValidity(mapget::Validity const& validity);
 
     /**
      * Expand an interwoven attribute-point validity into source indices and
@@ -269,6 +287,14 @@ public:
     JsValue convertString(const char* s);
 
     std::string featureId_;
+    std::optional<std::pair<uint32_t, uint32_t>> selectedPoint_;
+    simfil::ModelNode::Ptr selectedPointContext_;
+    // A contributor links to the ordinary attribute tree in this very feature.
+    // Fill link IDs after finalizeTree assigns IDs to both ends.
+    std::vector<InspectionNode*> rawAttributes_;
+    std::vector<std::pair<InspectionNode*, InspectionNode const*>> sourceLinks_;
+    void convertPointAttributes(InspectionNode& coordinate);
+    void addMeasurements(InspectionNode& row, simfil::ModelNode::Ptr const& samples, InspectionNode const* raw);
 
     /** Shared across all point geometries in one selected feature. */
     size_t remainingPointPreview_ = 256;

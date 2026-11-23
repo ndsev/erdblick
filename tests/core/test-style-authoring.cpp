@@ -144,3 +144,45 @@ TEST_CASE("Authoring geometry choices agree with native acceptance", "[erdblick.
     FeatureLayerStyle invalid{SharedUint8Array(std::string("name: Invalid\nversion: 2\nrules: [{geometry: invented}]\n"))};
     CHECK_FALSE(invalid.isValid());
 }
+
+TEST_CASE("Shape-point rule branches reject options that require an attribute or relation entry",
+          "[erdblick.style-authoring][shapepoint]")
+{
+    auto accepts = [](std::string const& branch) {
+        FeatureLayerStyle style{SharedUint8Array(
+            "name: Vertices\nversion: 2\nrules:\n  - scope: shapepoint\n    geometry: line\n    all-of:\n      - " +
+            branch + "\n")};
+        return style.isValid();
+    };
+    CHECK(accepts("color: blue"));
+    CHECK(accepts("point-filter: $pointIndex == 2"));
+    CHECK_FALSE(accepts("relation-line-geometry: centers"));
+    CHECK_FALSE(accepts("attribute-validity-geom: required"));
+}
+
+TEST_CASE("A style can select original vertices before sending them to the renderer",
+          "[erdblick.style-authoring][shapepoint]")
+{
+    auto source = searchStyleSource();
+    FeatureLayerStyle style{SharedUint8Array(std::string(R"yaml(
+name: Third vertex
+version: 2
+rules:
+  - type: Road
+    scope: shapepoint
+    geometry: line
+    point-filter: $pointIndex == 2
+    color: blue
+)yaml"))};
+    REQUIRE(style.isValid());
+    auto plan = planStyleFilter(style, *source->layerInfo(), FeatureStyleRule::NoHighlight, FeatureStyleRule::kMaximumLod);
+    REQUIRE(plan.valid);
+    REQUIRE(plan.channels.size() == 1);
+    REQUIRE(plan.channels[0].entryFilter_ == "$pointIndex == 2");
+    auto result = mapget::FeatureLayerFilterRequest{.filterId_ = "third", .generation_ = 1, .channels_ = plan.channels}.filter(*source);
+    REQUIRE(result);
+    REQUIRE(*result);
+    auto entries = (*result)->at(0);
+    REQUIRE(entries->shapePointEntryCount() == 1);
+    CHECK(entries->shapePointEntryAt(0)->pointIndex() == 2);
+}

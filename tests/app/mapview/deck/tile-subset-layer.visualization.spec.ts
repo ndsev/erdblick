@@ -8,6 +8,7 @@ import {
 } from "vitest";
 
 import {SceneMode} from "../../../../app/integrations/geo.adapter";
+import type {GpuSceneContributionInput} from "../../../../app/mapview/deck/gpu-scene.visualization";
 import {coreLib} from "../../../../app/integrations/wasm.adapter";
 import {
     deckSubsetInteractionProps,
@@ -96,12 +97,104 @@ describe("TileSubsetLayerVisualization", () => {
         expect(finishRender).toHaveBeenCalledOnce();
     });
 
+    it.each([false, true])("picks the visible packet until retirement (preserve contribution: %s)", async preserve => {
+        const {visualization, renderService, scene, sceneHandle} = renderFixture();
+        const contributions: GpuSceneContributionInput[] = [];
+        const prepare = scene.prepareRender.getMockImplementation()!;
+        scene.prepareRender.mockImplementation((...args: unknown[]) => {
+            const entries = args[2] as readonly GpuSceneContributionInput[];
+            contributions.push(entries[0]);
+            return prepare();
+        });
+        scene.applyPacket.mockReturnValue({});
+        visualization.applyResult = vi.fn(async () => []);
+        visualization.installRenderStats = vi.fn();
+        visualization.recordRuntimeStyleIssues = vi.fn();
+        const catalog = vi.fn(() => 1);
+        visualization.owner.mapInfo.mapMetadataGeneration = catalog;
+        const reference = {channelOrdinal: 0, entryOrdinal: 0, endpointRole: 0};
+        const releaseSubset = vi.fn();
+        const findPickReferences = vi.fn(() => []);
+        const readTileSubsetLayer = vi.fn((buffer: {getPointer(): number}) => {
+            // A single byte identifies each simulated native subset. Both use
+            // row zero, but that row names a different original source vertex.
+            const pointIndex = coreLib.HEAPU8[Number(buffer.getPointer())];
+            const sourceRevision = `r${pointIndex}`;
+            return {
+                delete: releaseSubset,
+                findPickReferences,
+                resolvePick: () => ({
+                    scope: "shapepoint",
+                    featureId: "Road.7",
+                    geometryOrdinal: 1,
+                    pointIndex,
+                    sourceId: "survey",
+                    sourceRevision
+                }),
+                findShapePointPickReferences: (
+                    id: string, geometry: number, vertex: number, source: string, revision: string
+                ) => {
+                    const matches = id === "Road.7" && geometry === 1 && vertex === pointIndex &&
+                        source === "survey" && revision === sourceRevision;
+                    return matches ? [reference] : [];
+                }
+            };
+        });
+        visualization.owner.mapInfo.tileLayerParser = {readTileSubsetLayer};
+        renderService.render.mockImplementationOnce(async (_request, accept) => {
+            accept({});
+            return {};
+        });
+        visualization.state.subsetBlob = Uint8Array.of(1);
+        expect(await visualization.render(sceneHandle)).toBe(true);
+
+        // Deliver the next subset before the user has ever picked the first one.
+        let finishPacket!: () => void;
+        renderService.render.mockImplementationOnce((_request, accept) => new Promise(resolve => {
+            finishPacket = () => {
+                accept({});
+                resolve({});
+            };
+        }));
+        visualization.state.subsetBlob = Uint8Array.of(2);
+        visualization.state.valueVersion++;
+        const next = visualization.render(sceneHandle);
+        const firstTarget = "Road.7:shapepoint#1.1@survey@r1";
+        const secondTarget = "Road.7:shapepoint#1.2@survey@r2";
+        expect(contributions[0].resolvePick!(reference)).toBe(firstTarget);
+        expect(contributions[0].findPickReferences!(firstTarget)).toEqual([reference]);
+        expect(contributions[0].findPickReferences!(secondTarget)).toEqual([]);
+        expect(contributions[0].findPickReferences!("Road.7")).toEqual([]);
+        expect(findPickReferences).toHaveBeenCalledWith("Road.7", "feature", -1n, -1n);
+        expect(readTileSubsetLayer).toHaveBeenCalledTimes(1);
+
+        finishPacket();
+        expect(await next).toBe(true);
+        expect(contributions[1].resolvePick!(reference)).toBe(secondTarget);
+        expect(contributions[1].findPickReferences!(firstTarget)).toEqual([]);
+        expect(readTileSubsetLayer).toHaveBeenCalledTimes(2);
+        // A replacement datasource can reuse the dictionary namespace. Old
+        // packet bytes must never be decoded against that new catalog.
+        catalog.mockReturnValue(2);
+        expect(contributions[1].resolvePick!(reference)).toBeUndefined();
+        expect(contributions[1].findPickReferences!(secondTarget)).toEqual([]);
+        expect(readTileSubsetLayer).toHaveBeenCalledTimes(2);
+        visualization.destroy(sceneHandle, preserve);
+        catalog.mockReturnValue(1);
+        // A requeued style temporarily keeps the previous packet visible.
+        // Its former owner releases every transient model used by those picks.
+        expect(contributions[1].resolvePick!(reference)).toBe(preserve ? secondTarget : undefined);
+        expect(contributions[1].findPickReferences!(secondTarget)).toEqual(preserve ? [reference] : []);
+        expect(readTileSubsetLayer).toHaveBeenCalledTimes(preserve ? 4 : 2);
+        expect(releaseSubset).toHaveBeenCalledTimes(readTileSubsetLayer.mock.calls.length);
+    });
+
     it("resolves cloud picks from entry identities without parsing another subset", () => {
         const reference = {channelOrdinal: 2, entryOrdinal: 3, endpointRole: 0};
         const firstPicks = [{...reference, featureId: "PointCloudObject.1"}];
         const secondPicks = [{...reference, featureId: "PointCloudObject.2"}];
         const visualization = Object.assign(Object.create(TileSubsetLayerVisualization.prototype), {
-            gpuPickSubset: vi.fn(() => { throw new Error("Unexpected main-thread parse"); })
+            withGpuPickSubset: vi.fn(() => { throw new Error("Unexpected main-thread parse"); })
         });
         expect(visualization.resolveGpuPick(reference, firstPicks)).toBe("PointCloudObject.1");
         expect(visualization.resolveGpuPick(reference, secondPicks)).toBe("PointCloudObject.2");
@@ -112,7 +205,13 @@ describe("TileSubsetLayerVisualization", () => {
         expect(visualization.findGpuPickReferences("PointCloudObject.1", secondPicks)).toEqual([]);
         expect(visualization.resolveGpuPick({...reference, entryOrdinal: 4}, firstPicks)).toBeUndefined();
         expect(visualization.resolveGpuPick(reference, [])).toBeUndefined();
-        expect(visualization.gpuPickSubset).not.toHaveBeenCalled();
+        const vertex = {...reference, scope: "shapepoint", featureId: "Road.7",
+            geometryOrdinal: 0, pointIndex: 1, sourceId: "survey", sourceRevision: "r1"};
+        const target = "Road.7:shapepoint#0.1@survey@r1";
+        expect(visualization.resolveGpuPick(reference, [vertex])).toBe(target);
+        expect(visualization.findGpuPickReferences(target, [vertex])).toEqual([vertex]);
+        expect(visualization.findGpuPickReferences("Road.7:shapepoint#0.1@survey@r2", [vertex])).toEqual([]);
+        expect(visualization.withGpuPickSubset).not.toHaveBeenCalled();
     });
 
     it("retains foreign endpoint parts and prefers an available local relation row", () => {

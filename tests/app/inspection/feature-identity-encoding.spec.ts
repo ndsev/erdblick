@@ -17,6 +17,18 @@ const target = (featureId: string, mapTileKey = "Map/Layer/42") => ({
 });
 
 describe("tile feature interaction identity", () => {
+    it("restores the exact original vertex and source revision through a URL round trip", () => {
+        const point = {scope: "shapepoint" as const, baseFeatureId: "Lane.545555028.2", geometryOrdinal: 1,
+            pointIndex: 0, sourceId: "source/@南,1", sourceRevision: "revision:%2@previous"};
+        const encoded = formatFeatureInspectionTarget(point);
+        const url = new URLSearchParams({selection: encoded}).toString();
+        expect(parseFeatureInspectionTarget(new URLSearchParams(url).get("selection")!)).toEqual(point);
+        expect(stripFeatureInspectionTarget(encoded)).toBe(point.baseFeatureId);
+        expect(stripFeatureInspectionValidity(encoded)).toBe(encoded);
+        expect(hasFeatureInspectionValidity(encoded)).toBe(false);
+        expect(formatFeatureInspectionTarget({...point, geometryOrdinal: 0})).not.toBe(encoded);
+        expect(formatFeatureInspectionTarget({...point, sourceRevision: "new"})).not.toBe(encoded);
+    });
     it("writes named foreign parts without losing integer precision, names or string types", () => {
         const reference = {
             mapId: "Target / map", typeId: "Road",

@@ -792,6 +792,24 @@ TEST_CASE("FeatureInspection preserves external feature-reference map ids", "[er
     }
 }
 
+TEST_CASE("Undeclared pointValidities remains an ordinary producer field in inspection", "[erdblick.inspection][shapepoint]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    auto attr = feature->attributeLayers()->newLayer("Survey")->newAttribute("counts");
+    auto counts = tile->newArray();
+    counts->append(int64_t{7});
+    REQUIRE(attr->addField("pointValidities", counts));
+    const auto tree = InspectionConverter().convert(feature);
+    const auto* row = findInspectionNodeByKey(*tree, "counts");
+    REQUIRE(row);
+    const auto& children = row->at("children");
+    REQUIRE(std::ranges::count_if(children, [](auto const& child) { return child.at("key") == "pointValidities"; }) == 1);
+    const auto* field = findInspectionNodeByKey(*row, "pointValidities");
+    REQUIRE(field);
+    CHECK(field->at("children").at(0).at("value") == 7);
+}
+
 TEST_CASE("FeatureInspection exposes traversal-based attribute hover ids", "[erdblick.inspection]")
 {
     auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
@@ -891,6 +909,17 @@ TEST_CASE("FeatureInspection bounds point previews across clusters without trunc
     REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[2].coordinates[56]"));
     REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[3].coordinates[0]"));
     REQUIRE((*inspection).dump().find("Showing 0 of 200 coordinates") != std::string::npos);
+    auto const revision = tile->sourceRevision();
+    const auto picked = InspectionConverter().convertAtShapePoint(feature, 3, 150, tile->sourceId(), revision);
+    auto vertex = findInspectionNodeByGeoJsonPath(*picked, "geometry.geometries[3].coordinates[150]");
+    REQUIRE(vertex);
+    REQUIRE(vertex->at("geometryOrdinal") == 3);
+    REQUIRE(vertex->at("pointIndex") == 150);
+    REQUIRE(findInspectionNodeByKey(*vertex, "Point attributes"));
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*picked, "geometry.geometries[3].coordinates[149]"));
+    auto stale = InspectionConverter().convertAtShapePoint(feature, 3, 150, tile->sourceId(), "previous");
+    REQUIRE(findInspectionNodeByKey(*stale, "Shape point unavailable"));
+    REQUIRE_FALSE(findInspectionNodeByKey(*stale, "Point attributes"));
     REQUIRE(feature->geom()->toJson() == exported);
     REQUIRE(exported.at("geometries").at(3).at("coordinates").size() == 200);
 }

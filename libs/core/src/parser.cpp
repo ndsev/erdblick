@@ -1708,6 +1708,8 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
     return {
         tileLayer.id().toString(),
         tileLayer.stringPoolId(),
+        tileLayer.sourceId(),
+        tileLayer.sourceRevision(),
         tileLayer.id().mapId_,
         tileLayer.id().layerId_,
         *JsValue::fromPartition(tileLayer.partitionId()),
@@ -1741,6 +1743,8 @@ TileLayerParser::TileSubsetLayerMetadata TileLayerParser::readTileSubsetLayerMet
             {"layerId", JsValue(dependency.sourceTileKey_.layerId_)},
             {"partition", JsValue::fromPartition(dependency.sourceTileKey_.partitionId_)},
             {"sourceFeatureCount", JsValue(dependency.sourceFeatureCount_)},
+            {"sourceId", JsValue(dependency.sourceId_)},
+            {"sourceRevision", JsValue(dependency.sourceRevision_)},
         }));
     }
     auto issues = JsValue::List();
@@ -1960,8 +1964,9 @@ NativeJsValue TileLayerParser::completeSearchQuery(
     if (options.has("scope")) {
         scope = options["scope"].as<std::string>();
     }
-    auto const includeFeatureScope = scope != "attribute";
-    auto const includeAttributeScope = scope != "feature";
+    auto const pointScope = scope == "shapepoint";
+    auto const includeFeatureScope = !pointScope && scope != "attribute";
+    auto const includeAttributeScope = !pointScope && scope != "feature";
     // A feature's shorthand index already includes all owned attribute fields
     // and enum symbols. Scanning every attribute again for a bare keyword
     // spends the full completion budget returning duplicates. Paths and the
@@ -2013,7 +2018,7 @@ NativeJsValue TileLayerParser::completeSearchQuery(
                 candidate =
                     enrichCompletionCandidate(std::move(candidate), registry, rootSchema.id());
                 bool qualified = false;
-                if (candidate.location.offset == 0 && candidate.location.size == query.size()) {
+                if (!pointScope && candidate.location.offset == 0 && candidate.location.size == query.size()) {
                     auto const symbol = completionConstantSymbol(candidate.text);
                     auto const exact = symbol == completionConstantSymbol(query);
                     if (candidate.type == simfil::CompletionCandidate::Type::FIELD) {
@@ -2085,6 +2090,17 @@ NativeJsValue TileLayerParser::completeSearchQuery(
                 continue;
             }
 
+            // A style expression at a vertex uses the same contextual schema as
+            // the native filter. Whole-query enum rewrites belong to feature search.
+            if (pointScope) {
+                for (auto const& featureType : registry->featureTypes()) {
+                    auto root = registry->shapePointQuerySchema(featureType);
+                    if (root != simfil::NoTypeId)
+                        addCandidates(registry, registry->mapSchema()->schemaType(root));
+                    if (completionBudgetExhausted()) break;
+                }
+                continue;
+            }
             auto const attributeOwners = registry->attributeScopes();
             for (auto const& featureType : registry->featureTypes()) {
                 auto const featureSchema = registry->featureSchema(featureType);

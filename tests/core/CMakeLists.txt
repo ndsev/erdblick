@@ -44,6 +44,9 @@ add_executable(test.erdblick-subset-renderer
   test-gpu-render-packet.cpp
   test-gpu-render-records.cpp)
 
+target_compile_definitions(test.erdblick-subset-renderer PRIVATE
+  ERDBLICK_TEST_FIXTURES_DIRECTORY="${erdblick_SOURCE_DIR}/tests/fixtures")
+
 target_link_libraries(test.erdblick-subset-renderer
   PUBLIC
     erdblick-core

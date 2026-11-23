@@ -22,7 +22,7 @@ import type { FeatureWrapper } from "../mapdata/feature-inspection.adapter";
 import type { MapTreeNode } from "../mapdata/map-tree.controller";
 import { parseMapPartitionKey } from "../mapdata/partition.model";
 import { InfoMessageService } from "../diagnostics/info.service";
-import { stripFeatureInspectionTarget } from "./feature-identity.model";
+import { stripFeatureInspectionTarget, tileFeatureInteractionTargetsEqual } from "./feature-identity.model";
 import { boundedUnicodeString } from "../utils/unicode-string.util";
 import { AppStateService } from "../appstate/appstate.service";
 import {
@@ -293,8 +293,21 @@ export class InspectionPanelService implements AppActionContributor {
         return;
     }
 
-    /** Toggles one inspection panel between base-feature and attribute/validity-highlight pseudo-feature ids. */
+    /** Toggle a feature row's detail highlight from its context menu. */
     toggleInspectionFeatureHighlight(panelId: number, mapTileKey: string, targetFeatureId: string): void {
+        const base = stripFeatureInspectionTarget(targetFeatureId);
+        this.updateFeatureTargets(panelId, mapTileKey, current => {
+            if (stripFeatureInspectionTarget(current) !== base) return current;
+            return current === targetFeatureId ? base : targetFeatureId;
+        });
+    }
+
+    /** Change the selected row only. A panel can hold several vertices on the same feature. */
+    openInspectionTarget(panelId: number, mapTileKey: string, currentId: string, targetId: string): void {
+        this.updateFeatureTargets(panelId, mapTileKey, id => id === currentId ? targetId : id);
+    }
+
+    private updateFeatureTargets(panelId: number, mapTileKey: string, nextId: (current: string) => string): void {
         this.persistence.transaction(() => {
             const allPanels = structuredClone(this.state.selectionState.getValue());
             const panelIndex = allPanels.findIndex(
@@ -304,21 +317,14 @@ export class InspectionPanelService implements AppActionContributor {
                 return;
             }
 
-            const targetBaseFeatureId = stripFeatureInspectionTarget(targetFeatureId);
             const panel = allPanels[panelIndex];
             let changed = false;
             const nextFeatures = panel.features.map((feature) => {
-                if (
-                    feature.mapTileKey !== mapTileKey ||
-                    stripFeatureInspectionTarget(feature.featureId) !== targetBaseFeatureId
-                ) {
-                    return feature;
-                }
+                if (feature.mapTileKey !== mapTileKey) return feature;
+                const featureId = nextId(feature.featureId);
+                if (featureId === feature.featureId) return feature;
                 changed = true;
-                return {
-                    ...feature,
-                    featureId: feature.featureId === targetFeatureId ? targetBaseFeatureId : targetFeatureId
-                };
+                return {...feature, featureId};
             });
             if (!changed) {
                 return;
@@ -327,7 +333,8 @@ export class InspectionPanelService implements AppActionContributor {
             const nextPanels = allPanels.slice();
             nextPanels[panelIndex] = {
                 ...panel,
-                features: nextFeatures
+                features: nextFeatures.filter((feature, index) =>
+                    nextFeatures.findIndex(other => tileFeatureInteractionTargetsEqual(feature, other)) === index)
             };
             this.state.selectionState.next(nextPanels);
             if (!panel.undocked) {

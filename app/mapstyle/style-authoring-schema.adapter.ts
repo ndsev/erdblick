@@ -21,6 +21,7 @@ const catalogSchema = z.object({
 });
 
 export type StyleField = z.infer<typeof fieldSchema>;
+export type StyleRuleScope = "feature" | "attribute" | "relation" | "shapepoint";
 export type StyleAuthoringSchema = z.infer<typeof catalogSchema>;
 let catalog: StyleAuthoringSchema | undefined;
 

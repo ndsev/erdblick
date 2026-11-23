@@ -1,6 +1,7 @@
 import type {PreparedSearchBranch} from "./search-preparation.model";
 import type { FeatureSearchAttributeScopeCandidate, FeatureSearchStyleFieldInventory, FeatureSearchStyleFieldOptions } from "./search.model";
 import type {FeatureSearchMapLayerRef, FeatureSearchScope} from "./search-definition.model";
+import type {ExpressionCompletionScope} from "./search-session.model";
 import type {CompletionCandidate} from "./search.model";
 import type {MapSchemaArtifact} from "../mapdata/source-catalog.model";
 
@@ -8,7 +9,7 @@ import type {MapSchemaArtifact} from "../mapdata/source-catalog.model";
 export interface SearchCompletionWorkerOptions {
     limit: number;
     timeoutMs: number;
-    scope?: FeatureSearchScope;
+    scope?: ExpressionCompletionScope;
     selectedMapLayers?: FeatureSearchMapLayerRef[];
 }
 

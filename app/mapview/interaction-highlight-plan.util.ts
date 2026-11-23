@@ -4,7 +4,7 @@
  * selection and view owners decide when to open the corresponding subscriptions.
  */
 import type { TileFeatureId } from "../inspection/inspection.model";
-import type { FilterChannelDefinition } from "../mapdata/filter-subscription.model";
+import type { FilterChannelDefinition, SourceSnapshot } from "../mapdata/filter-subscription.model";
 import {
     partitionKey,
     type PartitionId
@@ -25,6 +25,7 @@ export interface RemoteInteractionHighlightPlan {
     plan: StyleFilterPlan;
     partitions: PartitionId[];
     roots: Array<{ partition: PartitionId; featureId: string }>;
+    sourceSnapshot?: SourceSnapshot;
 }
 
 /** Exact targets already represented by regular/search scene geometry. */
@@ -99,7 +100,8 @@ function channelTargets(
             target.inspectionTarget.scope === "feature" ||
             target.inspectionTarget.scope === "relation");
     }
-    return [...targets];
+    if (channel.scope === "shapepoint") return targets.filter(target => target.inspectionTarget.scope === "shapepoint");
+    return targets.filter(target => target.inspectionTarget.scope !== "shapepoint");
 }
 
 /**
@@ -149,6 +151,11 @@ function restrictChannel(
             channel.entryFilter,
             entryRestriction
         );
+    } else if (channel.scope === "shapepoint") {
+        const selected = remoteTargets.flatMap(({inspectionTarget: point}) => point.scope === "shapepoint"
+            ? [`($feature.id == ${JSON.stringify(point.baseFeatureId)} and $geometryOrdinal == ${point.geometryOrdinal} and $pointIndex == ${point.pointIndex})`]
+            : []);
+        channel.entryFilter = restrictExpression(channel.entryFilter, selected.join(" or "));
     } else if (channel.scope === "relation") {
         const exactRelationTargets = remoteTargets.filter(
             (target): target is ResolvedInteractionTarget & {
@@ -189,12 +196,13 @@ export function planRemoteInteractionHighlights(
             ...feature,
             inspectionTarget: parseFeatureInspectionTarget(feature.featureId)
         }));
-    let targetGroups = [targets];
+    const ordinaryTargets = targets.filter(target => target.inspectionTarget.scope !== "shapepoint");
+    let targetGroups = [ordinaryTargets];
     if (rawPlan.channels.some(channel => channel.scope === "relation")) {
         const wholeFeatures = targets.filter(target =>
             target.inspectionTarget.scope === "feature");
         const wholeFeatureKeys = new Set(wholeFeatures.map(interactionTargetKey));
-        const exactRows = targets.filter(target =>
+        const exactRows = ordinaryTargets.filter(target =>
             target.inspectionTarget.scope !== "feature" &&
             // A whole feature already requests this row's authored relations.
             !(target.inspectionTarget.scope === "relation" &&
@@ -204,6 +212,18 @@ export function planRemoteInteractionHighlights(
                 }))));
         targetGroups = [wholeFeatures, exactRows];
     }
+    // A selection can contain two versions of a partition or the same feature ID
+    // in different partitions. Each point group has its own delivery check.
+    const pointsBySnapshot = new Map<string, ResolvedInteractionTarget[]>();
+    for (const target of targets) {
+        const point = target.inspectionTarget;
+        if (point.scope !== "shapepoint") continue;
+        const key = JSON.stringify([target.mapTileKey, point.sourceId, point.sourceRevision]);
+        const group = pointsBySnapshot.get(key) ?? [];
+        group.push(target);
+        pointsBySnapshot.set(key, group);
+    }
+    targetGroups.push(...pointsBySnapshot.values());
     return targetGroups.flatMap(group => {
         const plan = planRemoteInteractionHighlight(rawPlan, group, options);
         return plan ? [plan] : [];
@@ -268,6 +288,10 @@ function planRemoteInteractionHighlight(
     return {
         plan,
         partitions,
+        ...(admittedTargets[0].inspectionTarget.scope === "shapepoint" ? {sourceSnapshot: {
+            sourceId: admittedTargets[0].inspectionTarget.sourceId,
+            sourceRevision: admittedTargets[0].inspectionTarget.sourceRevision
+        }} : {}),
         roots: [...roots.values()]
     };
 }

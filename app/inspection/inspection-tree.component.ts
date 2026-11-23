@@ -27,6 +27,7 @@ import type { FeatureSearchMapLayerRef } from "../search/search-definition.model
 import { InfoMessageService } from "../diagnostics/info.service";
 import {
     isFeatureInspectionSubTarget,
+    formatFeatureInspectionTarget,
     parseFeatureInspectionTarget,
     stripFeatureInspectionTarget
 } from "./feature-identity.model";
@@ -195,6 +196,28 @@ export class FeatureFilterOptions {
                                     }
                                     @if (col.key === "key" && rowData["incomingLoading"]) {
                                         <i class="pi pi-spinner pi-spin" role="status" aria-label="Loading incoming relations"></i>
+                                    }
+                                    @if (col.key === "value" && rowData["pointTarget"] && !rowData["pointSelected"]) {
+                                        <button type="button" class="inspection-row-actions" data-testid="inspect-shape-point"
+                                                aria-label="Inspect vertex" title="Inspect vertex measurements"
+                                                (click)="inspectPointRow($event, rowData)"><i class="pi pi-search"></i></button>
+                                    }
+                                    @if (col.key === "value" && rowData["pointRange"]; as range) {
+                                        <span (click)="$event.stopPropagation()">
+                                            <input #vertex type="number" aria-label="Vertex index" placeholder="Vertex index"
+                                                   min="0" [max]="range.count - 1" step="1" style="width: 8em"
+                                                   (keydown.enter)="inspectVertexIndex($event, rowData, vertex)"/>
+                                            <button type="button" (click)="inspectVertexIndex($event, rowData, vertex)">Inspect</button>
+                                        </span>
+                                    }
+                                    @if (col.key === "value" && rowData["sourceNodeId"]) {
+                                        <button type="button" class="inspection-row-actions" aria-label="Open source record"
+                                                title="Open source record"
+                                                (click)="onValueBubbleClick($event, {targetNodeId: rowData['sourceNodeId']})">
+                                            <i class="pi pi-arrow-up-right"></i></button>
+                                    }
+                                    @if (col.key === "value" && rowData["reopenPointTarget"]; as target) {
+                                        <button type="button" (click)="inspectPointRow($event, target)">Open current feature</button>
                                     }
                                     @if (col.key === "key" && rowData["retryIncoming"]) {
                                         <button type="button" aria-label="Reload incoming relations"
@@ -771,10 +794,34 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             return;
         }
         const node: TreeNode = rowNode.node;
+        if (node.data?.pointTarget && !node.data.pointSelected) {
+            this.inspectPointRow(event, node.data);
+            return;
+        }
         node.expanded = !node.expanded;
         this.data = [...this.data];
         this.refreshLayout();
         this.cdr.markForCheck();
+    }
+
+    /** The geometry row and the rendered marker select the same revision-bound vertex. */
+    protected inspectPointRow(event: MouseEvent, row: {mapTileKey: string; inspectedFeatureId: string; pointTarget: string}): void {
+        event.stopPropagation();
+        this.inspectionState.openInspectionTarget(this.panelId(), row.mapTileKey, row.inspectedFeatureId, row.pointTarget);
+    }
+
+    /** Jump directly to an original vertex outside the point cloud's bounded coordinate preview. */
+    protected inspectVertexIndex(event: Event, row: any, input: HTMLInputElement): void {
+        event.stopPropagation();
+        const index = input.valueAsNumber;
+        if (!Number.isInteger(index) || index < 0 || index >= row.pointRange.count) {
+            input.setCustomValidity(`Enter a vertex index from 0 to ${row.pointRange.count - 1}.`);
+            input.reportValidity();
+            input.setCustomValidity("");
+            return;
+        }
+        const target = formatFeatureInspectionTarget({scope: "shapepoint", ...row.pointRange, pointIndex: index});
+        this.inspectionState.openInspectionTarget(this.panelId(), row.mapTileKey, row.inspectedFeatureId, target);
     }
 
     /** Opens feature-id navigation from the value column while preserving text-selection behavior. */
@@ -1240,21 +1287,23 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             if (this.inspectionMenuItems.length) {
                 this.inspectionMenuItems.push({ separator: true });
             }
-            const targetLabel = parseFeatureInspectionTarget(inspectionTarget)
-                .scope === "relation"
-                ? "Relation/Validity"
-                : "Attr/Validity";
+            const scope = parseFeatureInspectionTarget(inspectionTarget).scope;
+            const targetLabel = scope === "shapepoint" ? "vertex" : scope === "relation" ? "Relation/Validity" : "Attr/Validity";
             const baseId = stripFeatureInspectionTarget(inspectionTarget);
             const ownedByPanel = this.inspectionState.state.selection.find(panel => panel.id === this.panelId())
                 ?.features.some(feature => feature.mapTileKey === mapTileKey
                     && stripFeatureInspectionTarget(feature.featureId) === baseId);
             this.inspectionMenuItems.push({
-                label: !ownedByPanel ? "Inspect source relation" : this.isInspectionTargetHighlighted(mapTileKey, inspectionTarget)
+                label: !ownedByPanel ? (scope === "shapepoint" ? "Inspect vertex" : "Inspect source relation") : this.isInspectionTargetHighlighted(mapTileKey, inspectionTarget)
                     ? `Unhighlight ${targetLabel}`
                     : `Highlight ${targetLabel}`,
                 icon: 'pi pi-bullseye',
                 command: () => {
-                    if (ownedByPanel) {
+                    if (ownedByPanel && scope === "shapepoint" && rowData["inspectedFeatureId"]) {
+                        const current = rowData["inspectedFeatureId"];
+                        this.inspectionState.openInspectionTarget(this.panelId(), mapTileKey, current,
+                            current === inspectionTarget ? baseId : inspectionTarget);
+                    } else if (ownedByPanel) {
                         this.inspectionState.toggleInspectionFeatureHighlight(this.panelId(), mapTileKey, inspectionTarget);
                     } else {
                         this.inspectionState.setSelection([{ mapTileKey, featureId: inspectionTarget }]);

@@ -323,6 +323,16 @@ private:
         ChannelBinding const& binding,
         mapget::model_ptr<mapget::AttributeValidityEntry> const& entry);
 
+    /**
+     * Emit a marker and its independently projected label at an original vertex.
+     * Branches select the source geometry and share the vertex's packet pick.
+     */
+    void renderShapePoint(
+        uint32_t channelOrdinal,
+        uint32_t entryOrdinal,
+        ChannelBinding const& binding,
+        mapget::model_ptr<mapget::ShapePointEntry> const& entry);
+
     /** Render one group entry and preserve its member-feature pick semantics. */
     void renderGroup(
         uint32_t channelOrdinal,
@@ -411,11 +421,10 @@ private:
         bool selectable,
         std::function<PickResult()> const& resultFactory);
 
-    /** Allocate one tuple-addressed pick shared by this feature entry's rules. */
-    [[nodiscard]] uint32_t featurePickIndex(
+    /** Allocate one tuple-addressed pick shared by all leaves drawn for a row. */
+    [[nodiscard]] uint32_t entryPickIndex(
         uint32_t channelOrdinal,
-        uint32_t entryOrdinal,
-        bool selectable);
+        uint32_t entryOrdinal);
 
     /** Retain one representative physical height independently of render-depth bias. */
     void recordPickNavigationAltitude(

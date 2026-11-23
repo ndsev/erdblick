@@ -198,6 +198,7 @@ function decodePickRecord(
  */
 export class GpuRetainedPickTable {
   private readonly storage: PickStorage;
+  private sourceRowsOrdered?: boolean;
 
   /** Own copied tuple bytes independent of the source packet. */
   constructor(picks: Uint8Array) {
@@ -247,6 +248,60 @@ export class GpuRetainedPickTable {
   /** Read one source-row tuple after Deck or an interaction lookup selects it. */
   record(index: number): GpuPickRecordView {
     return decodePickRecord(this.storage, index);
+  }
+
+  /**
+   * Find marker or label records for a native subset row and endpoint. The
+   * renderer normally emits rows in channel and entry order. Check that once,
+   * then binary-search the packed bytes on subsequent selections. An unordered
+   * fragment is still valid and uses a scan without allocating a row index.
+   */
+  *matchingRecords(
+    reference: Pick<GpuPickRecordView, "channelOrdinal" | "entryOrdinal" | "endpointRole">,
+  ): IterableIterator<GpuPickRecordView> {
+    const data = this.storage.picks;
+    if (this.sourceRowsOrdered === undefined) {
+      this.sourceRowsOrdered = true;
+      let previousChannel = -1;
+      let previousEntry = -1;
+      for (let offset = 0; offset < data.byteLength; offset += PICK_RECORD_BYTES) {
+        const channel = data.getUint32(offset + 8, true);
+        const entry = data.getUint32(offset + 12, true);
+        if (channel < previousChannel || (channel === previousChannel && entry < previousEntry)) {
+          this.sourceRowsOrdered = false;
+          break;
+        }
+        previousChannel = channel;
+        previousEntry = entry;
+      }
+    }
+
+    const compare = (index: number) => {
+      const offset = index * PICK_RECORD_BYTES;
+      return data.getUint32(offset + 8, true) - reference.channelOrdinal ||
+        data.getUint32(offset + 12, true) - reference.entryOrdinal;
+    };
+    let first = 0;
+    if (this.sourceRowsOrdered) {
+      let end = this.count;
+      while (first < end) {
+        const mid = first + Math.floor((end - first) / 2);
+        if (compare(mid) < 0) {
+          first = mid + 1;
+        } else {
+          end = mid;
+        }
+      }
+    }
+    for (let index = first; index < this.count; ++index) {
+      const row = compare(index);
+      if (this.sourceRowsOrdered && row > 0) {
+        break;
+      }
+      if (row === 0 && data.getUint32(index * PICK_RECORD_BYTES + 16, true) === reference.endpointRole) {
+        yield this.record(index);
+      }
+    }
   }
 }
 

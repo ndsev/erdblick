@@ -22,10 +22,11 @@ nlohmann::ordered_json const& styleAuthoringSchema()
           "interaction-effects": {"kind":"record","record":"effects","group":"Interaction"}
         },
         "rule": {
-          "scope": {"kind":"enum","values":["feature","attribute","relation"],"group":"Common","topLevel":true},
+          "scope": {"kind":"enum","values":["feature","attribute","relation","shapepoint"],"group":"Common","topLevel":true,"help":"Shape-point rules draw a marker or label at each original vertex of the selected source geometry."},
           "geometry": {"kind":"enum-list","values":["point","line","polygon","mesh","aabb","gltf"],"group":"Common"},
           "filter": {"kind":"expression","group":"Common","help":"Feature predicate; in relation scope, evaluated on each relation ($source, $target, $twoway)."},
           "attribute-filter": {"kind":"expression","group":"Common","help":"Attribute/validity predicate ($feature, $name, $layer, $validityIndex)."},
+          "point-filter": {"kind":"expression","group":"Common","help":"Keep original vertices matching this expression. Use $pointIndex or measurements from $attributes."},
           "color": {"kind":"color","group":"Common","exclusive":["color-expression","color-scale"]},
           "color-expression": {"kind":"expression","group":"Common","exclusive":["color","color-scale"]},
           "color-scale": {"kind":"record","record":"color-scale","group":"Common","exclusive":["color","color-expression"]},

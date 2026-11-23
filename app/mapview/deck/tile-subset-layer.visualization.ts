@@ -66,11 +66,28 @@ interface GpuPickSubset {
     findPickReferences(
         featureId: string,
         scope: string,
-        entryIndex: number,
-        validityIndex: number
+        entryIndex: bigint,
+        validityIndex: bigint
+    ): GpuScenePickReference[];
+    findShapePointPickReferences(
+        featureId: string,
+        geometryOrdinal: number,
+        pointIndex: number,
+        sourceId: string,
+        sourceRevision: string
     ): GpuScenePickReference[];
     delete(): void;
 }
+
+/** Bytes used by one installed GPU packet, with the catalog needed to decode its dictionary. */
+interface SubsetPickSnapshot {
+    readonly blob: Uint8Array;
+    readonly valueVersion: number;
+    readonly catalogRevision: number;
+}
+
+// A point-cloud worker can release the full subset after supplying compact pick identities.
+type GpuPickSource = SubsetPickSnapshot | readonly PointCloudPickResult[];
 
 const FLAT_2D_MODEL_MATRIX = new Matrix4().scale([1, 1, 0]);
 const UNSELECTABLE = 0xffffffff;
@@ -78,8 +95,9 @@ const UNSELECTABLE = 0xffffffff;
 /**
  * One logical Deck visualization for one independently owned TileSubsetLayer.
  *
- * Workers resolve compact pick identities while they own the exact parsed
- * subset. The main thread retains only raw immutable bytes and render output.
+ * Each installed packet retains the subset bytes that its picks address. The
+ * first interaction decodes those bytes on the main thread. Point-cloud workers
+ * return compact identities so the packet can release its full point payload.
  */
 export class TileSubsetLayerVisualization {
     readonly visualizationId: string;
@@ -92,6 +110,7 @@ export class TileSubsetLayerVisualization {
     private requestedSignature = "";
     private failedSignature = "";
     private disposed = false;
+    private gpuPicksRetired = false;
     private pointCloud: PointCloudRenderPolicy | undefined;
     private pointCloudScale: number | null = null;
     private sceneHandle: IRenderSceneHandle | null = null;
@@ -103,6 +122,7 @@ export class TileSubsetLayerVisualization {
     private readonly failedIconUris = new Set<string>();
     private pickSubset: GpuPickSubset | null = null;
     private pickSubsetValueVersion = -1;
+    private pickSubsetCatalogRevision = -1;
 
     /** Retain one immutable tile subset and its stable scene contribution identity. */
     constructor(
@@ -276,12 +296,17 @@ export class TileSubsetLayerVisualization {
             return false;
         this.requestedSignature = signature;
         const valueVersion = this.state.valueVersion;
+        const subsetBlob = this.state.subsetBlob!;
+        const catalogRevision = this.owner.mapInfo.mapMetadataGeneration(this.state.mapId);
         const sceneRevision = this.sceneRevision;
         const startedAt = performance.now();
-        // Each installed GPU revision keeps its own identities. Populate them
-        // during preparation, before packet admission can resolve any picks.
-        let pointCloudPicks: readonly PointCloudPickResult[] | undefined =
-            this.pointCloud ? [] : undefined;
+        // The old packet stays interactive while its replacement is being prepared.
+        // Its row ordinals continue to address the snapshot that produced it.
+        let pickSource: GpuPickSource = this.pointCloud ? [] : {
+            blob: subsetBlob, valueVersion, catalogRevision
+        };
+        const picksAvailable = () => !this.gpuPicksRetired &&
+            catalogRevision === this.owner.mapInfo.mapMetadataGeneration(this.state.mapId);
         const reservation = scene.prepareRender(
             `${this.viewIndex}:${nativeOrigin
                 ? this.state.mapTileKey
@@ -293,9 +318,9 @@ export class TileSubsetLayerVisualization {
                 styleOrder: this.owner.styleOrder,
                 lod: this.lod,
                 resolvePick: reference =>
-                    this.resolveGpuPick(reference, pointCloudPicks),
+                    picksAvailable() ? this.resolveGpuPick(reference, pickSource) : undefined,
                 findPickReferences: targetFeatureId =>
-                    this.findGpuPickReferences(targetFeatureId, pointCloudPicks)
+                    picksAvailable() ? this.findGpuPickReferences(targetFeatureId, pickSource) : []
             }]
         );
         const contribution = reservation.contributions[0];
@@ -324,12 +349,12 @@ export class TileSubsetLayerVisualization {
                     activationToken: contribution.activationToken
                 },
                 mapId: this.state.mapId,
-                catalogRevision: this.owner.mapInfo.mapMetadataGeneration(this.state.mapId),
+                catalogRevision,
                 dataSourceInfoBlob,
                 schemas: this.owner.mapInfo.getSchemaArtifacts([this.state.mapId]),
                 stringPoolId,
                 fieldDictBlob,
-                subsetBlob: this.state.subsetBlob!,
+                subsetBlob,
                 inputGeometryVertexCount: this.state.geometryVertexCount,
                 styleKey: this.owner.renderStyleKey,
                 styleSource: this.owner.style.source,
@@ -372,8 +397,8 @@ export class TileSubsetLayerVisualization {
                         "Subset renderer returned an invalid geometry anchor."
                     );
                 }
-                if (pointCloudPicks !== undefined) {
-                    pointCloudPicks = buffers.bridge.pointCloudPicks ?? [];
+                if (!("blob" in pickSource)) {
+                    pickSource = buffers.bridge.pointCloudPicks ?? [];
                 }
                 scene.resolveRenderOrigin(reservation, origin);
                 this.coordinateOrigin = origin;
@@ -589,6 +614,7 @@ export class TileSubsetLayerVisualization {
         const preservedIdentity = preserveContribution && sceneHandle
             ? this.contributionIdentity(this.state)
             : null;
+        this.gpuPicksRetired = preservedIdentity === null;
         this.renderService.cancel(this.visualizationId);
         const registry = sceneHandle ? this.registry(sceneHandle) : null;
         this.gltfPresentation.destroy(registry);
@@ -606,6 +632,7 @@ export class TileSubsetLayerVisualization {
         this.pickSubset?.delete();
         this.pickSubset = null;
         this.pickSubsetValueVersion = -1;
+        this.pickSubsetCatalogRevision = -1;
         this.pendingIconUris.clear();
         this.failedIconUris.clear();
         this.sceneHandle = null;
@@ -755,32 +782,30 @@ export class TileSubsetLayerVisualization {
     /** Resolve one compact GPU tuple only after Deck reports an actual interaction. */
     private resolveGpuPick(
         reference: GpuScenePickReference,
-        pointCloudPicks?: readonly PointCloudPickResult[]
+        source: GpuPickSource
     ): FeaturePickIdentity | readonly FeaturePickIdentity[] | undefined {
-        if (pointCloudPicks !== undefined) {
-            return this.featureIdsForPickResult(pointCloudPicks.find(pick =>
+        if (!("blob" in source)) {
+            return this.featureIdsForPickResult(source.find(pick =>
                 pick.channelOrdinal === reference.channelOrdinal &&
                 pick.entryOrdinal === reference.entryOrdinal &&
                 pick.endpointRole === reference.endpointRole));
         }
-        const subset = this.gpuPickSubset();
-        return subset
-            ? this.featureIdsForPickResult(subset.resolvePick(
+        return this.withGpuPickSubset(source, subset =>
+            this.featureIdsForPickResult(subset.resolvePick(
                 reference.channelOrdinal,
                 reference.entryOrdinal,
                 reference.endpointRole
-            ))
-            : undefined;
+            )));
     }
 
     /** Locate packet tuples for one restored semantic target without scanning strings. */
     private findGpuPickReferences(
         targetFeatureId: string,
-        pointCloudPicks?: readonly PointCloudPickResult[]
+        source: GpuPickSource
     ): readonly GpuScenePickReference[] {
-        if (pointCloudPicks !== undefined) {
+        if (!("blob" in source)) {
             const target = parseFeatureInspectionTarget(targetFeatureId);
-            return pointCloudPicks.filter(pick => {
+            return source.filter(pick => {
                 if (target.scope === "relation" && pick.relationId) {
                     // A merged two-way identity contains both source descriptor
                     // ordinals. Mirror the native lookup for either endpoint.
@@ -801,43 +826,57 @@ export class TileSubsetLayerVisualization {
                     id === targetFeatureId);
             });
         }
-        const subset = this.gpuPickSubset();
-        if (!subset) {
-            return [];
-        }
         const target = parseFeatureInspectionTarget(targetFeatureId);
+        if (target.scope === "shapepoint") {
+            return this.withGpuPickSubset(source, subset => subset.findShapePointPickReferences(
+                target.baseFeatureId,
+                target.geometryOrdinal,
+                target.pointIndex,
+                target.sourceId,
+                target.sourceRevision
+            )) ?? [];
+        }
         const entryIndex = target.scope === "attribute"
             ? target.attributeIndex
             : target.scope === "relation"
                 ? target.relationIndex
                 : -1;
-        return subset.findPickReferences(
+        return this.withGpuPickSubset(source, subset => subset.findPickReferences(
             target.baseFeatureId,
             target.scope,
-            entryIndex,
-            target.scope === "feature"
-                ? -1
-                : target.validityIndex ?? -1
-        );
+            BigInt(entryIndex),
+            BigInt(target.scope === "feature" ? -1 : target.validityIndex ?? -1)
+        )) ?? [];
     }
 
-    /** Lazily parse and retain only an interacted immutable subset revision. */
-    private gpuPickSubset(): GpuPickSubset | null {
-        if (this.pickSubsetValueVersion === this.state.valueVersion) {
-            return this.pickSubset;
+    /** Keep one decoded model while the tile owner can release it on disposal. */
+    private withGpuPickSubset<T>(
+        snapshot: SubsetPickSnapshot,
+        read: (subset: GpuPickSubset) => T
+    ): T | undefined {
+        if (!this.disposed && this.pickSubsetValueVersion === snapshot.valueVersion &&
+            this.pickSubsetCatalogRevision === snapshot.catalogRevision) {
+            return this.pickSubset ? read(this.pickSubset) : undefined;
         }
         this.pickSubset?.delete();
         this.pickSubset = null;
-        this.pickSubsetValueVersion = this.state.valueVersion;
-        const blob = this.state.subsetBlob;
-        if (!blob) {
-            return null;
-        }
-        this.pickSubset = uint8ArrayToWasm(
+        const subset: GpuPickSubset | null = uint8ArrayToWasm(
             data => this.owner.mapInfo.tileLayerParser.readTileSubsetLayer(data),
-            blob
-        ) as unknown as GpuPickSubset | null;
-        return this.pickSubset;
+            snapshot.blob
+        );
+        if (this.disposed) {
+            // A style replacement can preserve this visible packet beyond its
+            // owner's lifetime. Release its temporary WASM model after the pick.
+            try {
+                return subset ? read(subset) : undefined;
+            } finally {
+                subset?.delete();
+            }
+        }
+        this.pickSubsetValueVersion = snapshot.valueVersion;
+        this.pickSubsetCatalogRevision = snapshot.catalogRevision;
+        this.pickSubset = subset;
+        return subset ? read(subset) : undefined;
     }
 
     /** Keep foreign references structural while formatting local inspection row suffixes. */
@@ -863,6 +902,20 @@ export class TileSubsetLayerVisualization {
         }
         if (!result.featureId) {
             return undefined;
+        }
+        if (result.scope === "shapepoint") {
+            if (result.geometryOrdinal === undefined || result.pointIndex === undefined ||
+                result.sourceId === undefined || !result.sourceRevision) {
+                return undefined;
+            }
+            return formatFeatureInspectionTarget({
+                scope: "shapepoint",
+                baseFeatureId: result.featureId,
+                geometryOrdinal: result.geometryOrdinal,
+                pointIndex: result.pointIndex,
+                sourceId: result.sourceId,
+                sourceRevision: result.sourceRevision
+            });
         }
         let featureId = result.featureId;
         const attributeIndex = result.attributeIndex;

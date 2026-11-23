@@ -422,8 +422,9 @@ function projectRule(
         const branch = "first-of" in raw ? "first-of" : "all-of";
         return readOnlyRule(sourceIndex, `${path}.${branch}`, "branch-rule", `uses ${branch}; nested rule trees cannot be copied into the search rules editor.`);
     }
-    if (raw["scope"] === "relation") {
-        return readOnlyRule(sourceIndex, `${path}.scope`, "relation-scope", "uses relation scope, which cannot be copied into a feature/attribute search.");
+    if (raw["scope"] === "relation" || raw["scope"] === "shapepoint") {
+        const scope = raw["scope"];
+        return readOnlyRule(sourceIndex, `${path}.scope`, `${scope}-scope`, `uses ${scope} scope, which cannot be copied into a feature/attribute search.`);
     }
 
     const label = typeof raw["label-text-expression"] === "string";

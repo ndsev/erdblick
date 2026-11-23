@@ -202,7 +202,7 @@ Predicate attributeEntryPredicate(FeatureStyleRule const& rule)
         result.push_back('"');
         return result;
     };
-    auto result = rule.attributeFilter() ? Predicate{*rule.attributeFilter()} : Predicate{};
+    auto result = Predicate{rule.entryFilter()};
     if (auto const& pattern = rule.attributeTypePattern()) {
         result = conjunction(std::move(result), Predicate{"$name == " + regexLiteral(*pattern)});
     }
@@ -224,7 +224,7 @@ Predicate attributeEntryPredicate(FeatureStyleRule const& rule)
 bool membershipUsesMergeCount(FeatureStyleRule const& rule)
 {
     if (containsIdentifier(rule.filter(), kMergeCount) ||
-        (rule.attributeFilter() && containsIdentifier(*rule.attributeFilter(), kMergeCount)))
+        (rule.entryFilter() && containsIdentifier(*rule.entryFilter(), kMergeCount)))
     {
         return true;
     }
@@ -302,10 +302,10 @@ void collectFeatureTree(
 }
 
 /**
- * Project feature filters against the owning feature and all other expressions
- * against the attribute/validity entry, including nested branches.
+ * Attribute and shape-point rules select their host with the ordinary filter.
+ * Their colours, labels and other presentation fields use the terminal entry.
  */
-void collectAttributeTree(FeatureStyleRule const& rule, ExpressionCollection& result)
+void collectEntryTree(FeatureStyleRule const& rule, ExpressionCollection& result)
 {
     for (auto const& [property, expression] : rule.expressionUses()) {
         appendExpression(
@@ -315,7 +315,7 @@ void collectAttributeTree(FeatureStyleRule const& rule, ExpressionCollection& re
             false);
     }
     for (auto const& child : rule.subRules()) {
-        collectAttributeTree(child, result);
+        collectEntryTree(child, result);
     }
 }
 
@@ -484,6 +484,7 @@ std::string scopeName(mapget::FeatureLayerFilterScope scope)
     case mapget::FeatureLayerFilterScope::Feature: return "feature";
     case mapget::FeatureLayerFilterScope::Attribute: return "attribute";
     case mapget::FeatureLayerFilterScope::Relation: return "relation";
+    case mapget::FeatureLayerFilterScope::ShapePoint: return "shapepoint";
     case mapget::FeatureLayerFilterScope::Auto: return "auto";
     }
     return "feature";
@@ -667,13 +668,22 @@ StyleFilterPlan planStyleFilter(
                 mapget::FeatureLayerPointGridGroup{glm::dvec3{0.0, 0.0, 0.0}, *group.size};
             channel.entryFields_ = expressions.entry.take();
         }
-        else if (rule.scope() == FeatureStyleRule::Attribute) {
-            collectAttributeTree(rule, expressions);
-            channel.scope_ = mapget::FeatureLayerFilterScope::Attribute;
+        else if (rule.scope() == FeatureStyleRule::Attribute ||
+                 rule.scope() == FeatureStyleRule::ShapePoint) {
+            collectEntryTree(rule, expressions);
+            if (rule.scope() == FeatureStyleRule::Attribute) {
+                channel.scope_ = mapget::FeatureLayerFilterScope::Attribute;
+                channel.entryFilter_ = eligible(rule, attributeEntryPredicate).expression;
+            }
+            else {
+                channel.scope_ = mapget::FeatureLayerFilterScope::ShapePoint;
+                channel.entryFilter_ = eligible(rule, [](FeatureStyleRule const& branch) {
+                    return Predicate{branch.entryFilter()};
+                }).expression;
+            }
             channel.geometryTypes_ = rule.effectiveGeometryTypesMask();
             channel.geometryName_ = rule.effectiveGeometryName();
             channel.featureFilter_ = eligible(rule, featurePredicate).expression;
-            channel.entryFilter_ = eligible(rule, attributeEntryPredicate).expression;
             channel.featureFields_ = expressions.feature.take();
             channel.entryFields_ = expressions.entry.take();
         }

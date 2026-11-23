@@ -241,6 +241,8 @@ interface InstalledContribution {
   labels: GpuSceneLabel[];
   pickTables: GpuRetainedPickTable[];
   resolvedPickIndices: number[];
+  /** Targets whose marker, label and other matching rows have all been looked up in this revision. */
+  indexedInteractionTargets?: Set<string>;
   resolvePick: GpuScenePickResolver;
   findPickReferences: GpuScenePickFinder;
 }
@@ -1409,18 +1411,12 @@ export class GpuScene {
   ): GpuSceneInteractionPick[] {
     const result = new Map<number, GpuSceneInteractionPick>();
     for (const target of targets) {
-      let indices = this.pickIndicesByTileAndFeature
+      // A pointer pick may already have indexed one marker. A separate style
+      // channel or contribution can draw another marker or label for it.
+      this.findInteractionTarget(contributionIdentities, target);
+      const indices = this.pickIndicesByTileAndFeature
         .get(target.mapTileKey)
         ?.get(target.featureId);
-      if (
-        indices === undefined ||
-        !this.pickIndicesIncludeContribution(indices, contributionIdentities)
-      ) {
-        this.findInteractionTarget(contributionIdentities, target);
-        indices = this.pickIndicesByTileAndFeature
-          .get(target.mapTileKey)
-          ?.get(target.featureId);
-      }
       if (indices === undefined) {
         continue;
       }
@@ -1530,10 +1526,9 @@ export class GpuScene {
   }
 
   /**
-   * Resolve a persisted target by scanning only relevant packed contributions.
-   *
-   * Ordinary pointer hover already decoded the exact Deck pick, so this slower
-   * path is reserved for URL-restored selections and externally supplied targets.
+   * Resolve all matching pick references once per target and installed revision.
+   * A replacement contribution starts with its own empty lookup cache, even if it
+   * uses the same tile identity. Unrequested rows keep their packed representation.
    */
   private findInteractionTarget(
     contributionIdentities: ReadonlySet<string>,
@@ -1542,53 +1537,38 @@ export class GpuScene {
     for (const identity of contributionIdentities) {
       const installed = this.contributionByIdentity.get(identity)?.active;
       const range = installed?.pickingRange;
-      if (!installed || !range || installed.mapTileKey !== target.mapTileKey) {
+      if (!installed || !range || installed.mapTileKey !== target.mapTileKey ||
+          installed.indexedInteractionTargets?.has(target.featureId)) {
         continue;
       }
-      const references = installed.findPickReferences(target.featureId);
-      if (references.length === 0) {
-        continue;
-      }
-      for (let local = 0; local < range.recordCount; ++local) {
-        const globalPickIndex = range.firstRecord + local;
-        const record = this.packedPick(installed, local);
-        // Native filtering retains source-row tuples even when an admitted
-        // rule emits no primitive. Only materialized rows receive the finite
-        // navigation-altitude sentinel while the primitive is appended.
-        if (!Number.isFinite(record.navigationAltitude)) {
-          continue;
-        }
-        if (
-          !references.some(
-            (reference) =>
-              reference.channelOrdinal === record.channelOrdinal &&
-              reference.entryOrdinal === record.entryOrdinal &&
-              reference.endpointRole === record.endpointRole,
-          )
-        ) {
-          continue;
-        }
-        const selected = this.picks.get(globalPickIndex) ??
-          this.cacheScenePick(
-            globalPickIndex,
-            installed,
-            installed.resolvePick(record),
-            record.navigationAltitude,
-          );
-        if (!selected) {
-          continue;
-        }
-        const canonicalTarget = selected.featureIds.includes(target.featureId);
-        if (!canonicalTarget &&
-            !selected.interactionAliases?.has(target.featureId)) {
-          (selected.interactionAliases ??= new Set()).add(target.featureId);
-          this.addPickIndex(
-            selected.mapTileKey,
-            target.featureId,
-            globalPickIndex,
-          );
+      for (const reference of installed.findPickReferences(target.featureId)) {
+        for (const table of installed.pickTables) {
+          for (const record of table.matchingRecords(reference)) {
+            this.indexInteractionPick(installed, range.firstRecord + record.localPickIndex, record, target.featureId);
+          }
         }
       }
+      (installed.indexedInteractionTargets ??= new Set()).add(target.featureId);
+    }
+  }
+
+  /** Index a rendered primitive under its canonical identity and any matched relation endpoint. */
+  private indexInteractionPick(
+    installed: InstalledContribution,
+    globalPickIndex: number,
+    record: GpuPickRecordView,
+    targetFeatureId: string,
+  ): void {
+    // Filtering can admit a row whose style emits no primitive. It gets a
+    // finite navigation altitude only when a primitive is appended.
+    if (!Number.isFinite(record.navigationAltitude)) {
+      return;
+    }
+    const selected = this.picks.get(globalPickIndex) ??
+      this.cacheScenePick(globalPickIndex, installed, installed.resolvePick(record), record.navigationAltitude);
+    if (selected && !selected.featureIds.includes(targetFeatureId) && !selected.interactionAliases?.has(targetFeatureId)) {
+      (selected.interactionAliases ??= new Set()).add(targetFeatureId);
+      this.addPickIndex(selected.mapTileKey, targetFeatureId, globalPickIndex);
     }
   }
 

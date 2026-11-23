@@ -321,8 +321,8 @@ Mapget schema-compiles all four lists in their real contexts. Styles do not use
 search-query normalization.
 
 <!-- mcp:
-keywords: [feature scope, attribute scope, relation scope]
-hint: "Choose the rule scope from the requested entity: whole feature, attribute/validity, or relation. Verify real dataset field paths before authoring. Search help for \"Attribute rules\" or \"Relation rules\" for the corresponding expression context."
+keywords: [feature scope, attribute scope, relation scope, shapepoint, vertex, curvature, slope]
+hint: "Use shapepoint to draw or label original vertices of a named source geometry. Inspect one vertex under Geometry to see its attribute occurrences, units and contributing source records."
 -->
 ## Scopes
 
@@ -330,7 +330,8 @@ hint: "Choose the rule scope from the requested entity: whole feature, attribute
 
 - `feature` (default);
 - `attribute`;
-- `relation`.
+- `relation`
+- `shapepoint` for individual vertices of the selected source geometry.
 
 Nested `first-of`/`all-of` rules may not change scope. A single channel never
 mixes feature and attribute terminal rows.
@@ -338,6 +339,47 @@ mixes feature and attribute terminal rows.
 A top-level relation rule may not contain `first-of` or `all-of`; its
 `relation-source-style` and `relation-target-style` are feature-style trees and
 may use branches.
+
+### Styling and inspecting a shape point
+
+On an NDS.Live lane, the following rule colors each vertex of the ADAS line by
+signed curvature in inverse metres. A separate series supplies the slope label
+in percent. A missing curvature uses the grey fallback. Zero is a measurement.
+
+```yaml
+name: Lane curvature and slope
+version: 2
+rules:
+  - scope: shapepoint
+    type: Lane
+    geometry: line
+    geometry-name: ADAS
+    width: 6
+    color-scale:
+      mode: linear
+      expression: $attributes.LaneAdasLayerWithGeo.CURVATURE.*.curvature
+      stops: [[-0.16, "#2864dc"], [0, "#f1f1ee"], [0.16, "#d34d38"]]
+      fallback: "#888888"
+    label-text-expression: $attributes.LaneAdasLayerWithGeo.SLOPE_ARRAY.*.slope.((_ as string) + '%')
+```
+
+`geometry` and `geometry-name` select the input geometry. The marker and label
+share its vertex. The ordinary `filter` reads the host feature. Color, size and
+label expressions read the vertex context. An optional `point-filter` selects
+vertices before transmission. For example, `point-filter: $pointIndex == 31`
+draws only vertex 31 of each matching geometry. `$geometryOrdinal` and `$pointIndex`
+identify the original geometry and vertex. `$feature` accesses the original
+feature. `$attributes.*` visits the covering occurrences in source order.
+Within an occurrence, `$validities` identifies the matching assignments and
+`$samples.<field>.*` exposes individual readings and their contributors when
+several alternatives apply.
+
+Pick the marker or its label, or open **Geometry** in feature inspection and
+click **Inspect vertex** beside a coordinate. **Point attributes** shows the
+decoded values, units, source codes and interpolation weights supplied for that
+vertex. **Open source record** jumps to the original field. Geometry inspection
+works with the style switched off. Saved vertex selections retain their source
+revision and report when the map has changed.
 
 <!-- mcp:
 title: "Style matching fields"

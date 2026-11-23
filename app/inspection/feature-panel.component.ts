@@ -12,11 +12,13 @@ import { TreeTableNode } from "primeng/api";
 import { Subscription } from "rxjs";
 import { Feature } from '../../build/libs/core/erdblick-core';
 import { coreLib } from "../integrations/wasm.adapter";
-import { FeatureWrapper, IncomingInspectionResult } from "../mapdata/feature-inspection.adapter";
+import { FeatureWrapper, IncomingInspectionResult, readFeatureInspectionModel } from "../mapdata/feature-inspection.adapter";
 import { MapDataService } from "../mapdata/mapdata.service";
 import {
+    formatFeatureInspectionTarget,
     hasFeatureInspectionValidity,
     isFeatureInspectionSubTarget,
+    parseFeatureInspectionTarget,
     stripFeatureInspectionTarget,
     stripFeatureInspectionValidity
 } from "./feature-identity.model";
@@ -48,6 +50,12 @@ interface InspectionModelData {
     scalarType?: unknown;
     info?: string;
     hoverId?: string;
+    geometryOrdinal?: number;
+    pointIndex?: number;
+    pointGeometryOrdinal?: number;
+    originalPointCount?: number;
+    reopenFeature?: boolean;
+    sourceNodeId?: string;
     geoJsonPath?: string;
     mapId?: string;
     mapTileKey?: string;
@@ -124,13 +132,22 @@ export class FeaturePanelComponent implements OnDestroy {
 
     /** Keep source fidelity and incomplete-data notices visible beside inspection/export controls. */
     get selectionWarnings(): string[] {
-        return [...new Set((this.selectedFeatures ?? []).flatMap(feature => feature.featureTile.warnings))];
+        return [...new Set([...(this.panel().unavailablePoints ?? []),
+            ...(this.selectedFeatures ?? []).flatMap(feature => feature.featureTile.warnings)])];
     }
 
-    /** Export the full current selection, skipping wrappers whose native tile was released. */
+    /** A point selection exports its host from the revision that supplied the vertex. */
     private exportGeoJson(): string {
-        const features = (this.selectedFeatures ?? []).map(wrapper =>
-            this.inspectionFeature(wrapper).peek((feature: Feature) => feature.geojson() as string)).filter(value => value !== null);
+        const features = (this.selectedFeatures ?? []).flatMap(wrapper => {
+            const target = parseFeatureInspectionTarget(wrapper.featureId);
+            if (target.scope === "shapepoint" &&
+                (wrapper.featureTile.sourceId !== target.sourceId || wrapper.featureTile.sourceRevision !== target.sourceRevision)) {
+                return [];
+            }
+            const snapshot = target.scope === "shapepoint" ? wrapper : this.inspectionFeature(wrapper);
+            const json = snapshot.peek(feature => feature.geojson() as string);
+            return json === null ? [] : [json];
+        });
         return `{"type":"FeatureCollection","features":[${features.join(",")}]}`;
     }
 
@@ -229,16 +246,19 @@ export class FeaturePanelComponent implements OnDestroy {
 
         const selectedFeatureInspectionModels: InspectionModelData[][] = [];
         this.selectedFeatures.forEach(featureWrapper => {
+            const target = parseFeatureInspectionTarget(featureWrapper.featureId);
+            let model: InspectionModelData[] = [];
             try {
-                this.inspectionFeature(featureWrapper).peek((feature: Feature) => {
-                    const model = feature.inspectionModel() as InspectionModelData[];
-                    const incoming = this.incomingSection(featureWrapper);
+                const point = target.scope === "shapepoint" ? target : undefined;
+                const snapshot = point ? featureWrapper : this.inspectionFeature(featureWrapper);
+                snapshot.peek((feature: Feature) => {
+                    model = readFeatureInspectionModel(feature, target);
+                    const incoming = point ? undefined : this.incomingSection(featureWrapper);
                     if (incoming) {
                         // Keep Geometry last, including while incoming relations are loading.
                         const geometryIndex = model.findIndex(section => section.geoJsonPath === "geometry");
                         model.splice(geometryIndex < 0 ? model.length : geometryIndex, 0, incoming);
                     }
-                    selectedFeatureInspectionModels.push(model);
                 });
             } catch (error) {
                 console.error("Failed to read inspection model for selected feature.", {
@@ -248,6 +268,7 @@ export class FeaturePanelComponent implements OnDestroy {
                     error
                 });
             }
+            selectedFeatureInspectionModels.push(model);
         });
         let nextTreeData: TreeTableNode[] = [];
         try {
@@ -417,6 +438,17 @@ export class FeaturePanelComponent implements OnDestroy {
                     parent.expanded = true;
                 }
                 node.expanded = true;
+                if (node.data?.["pointSelected"]) {
+                    // Open the measured fields first. Raw sample records remain individually expandable.
+                    for (const section of node.children ?? []) {
+                        section.expanded = true;
+                        for (const occurrence of section.children ?? []) {
+                            occurrence.expanded = true;
+                            const measurements = occurrence.children?.find(child => child.data?.["key"] === "Measurements");
+                            if (measurements) measurements.expanded = true;
+                        }
+                    }
+                }
                 return true;
             }
 
@@ -490,6 +522,7 @@ export class FeaturePanelComponent implements OnDestroy {
         interface HoverAnnotationContext {
             mapTileKey: string;
             mapId?: string;
+            feature?: FeatureWrapper;
             softHoverGroupId?: string;
             strongHoverGroupId?: string;
             nodePath: string;
@@ -603,6 +636,27 @@ export class FeaturePanelComponent implements OnDestroy {
                 if (data?.hasOwnProperty("hoverId")) {
                     node.data["hoverId"] = data.hoverId;
                 }
+                if (data.sourceNodeId) node.data["sourceNodeId"] = context.nodeIdPrefix + data.sourceNodeId;
+                const feature = context.feature;
+                if (feature?.featureTile.sourceRevision && data.pointGeometryOrdinal !== undefined && data.originalPointCount) {
+                    node.data["inspectedFeatureId"] = feature.featureId;
+                    node.data["pointRange"] = {
+                        count: data.originalPointCount, geometryOrdinal: data.pointGeometryOrdinal,
+                        baseFeatureId: stripFeatureInspectionTarget(feature.featureId),
+                        sourceId: feature.featureTile.sourceId, sourceRevision: feature.featureTile.sourceRevision
+                    };
+                }
+                if (data.geometryOrdinal !== undefined && data.pointIndex !== undefined && feature?.featureTile.sourceRevision) {
+                    const target = formatFeatureInspectionTarget({
+                        scope: "shapepoint", baseFeatureId: stripFeatureInspectionTarget(feature.featureId),
+                        geometryOrdinal: data.geometryOrdinal, pointIndex: data.pointIndex,
+                        sourceId: feature.featureTile.sourceId, sourceRevision: feature.featureTile.sourceRevision
+                    });
+                    node.data["hoverId"] = target;
+                    node.data["pointTarget"] = target;
+                    node.data["inspectedFeatureId"] = feature.featureId;
+                    node.data["pointSelected"] = target === feature.featureId;
+                }
                 if (data?.hasOwnProperty("mapId")) {
                     node.data["mapId"] = data.mapId;
                 }
@@ -625,13 +679,14 @@ export class FeaturePanelComponent implements OnDestroy {
 
                 let nextSoftHoverGroupId = context.softHoverGroupId;
                 let nextStrongHoverGroupId = context.strongHoverGroupId;
-                if (typeof data?.hoverId === "string") {
-                    if (hasFeatureInspectionValidity(data.hoverId)) {
+                const hoverId = node.data["hoverId"];
+                if (typeof hoverId === "string") {
+                    if (hasFeatureInspectionValidity(hoverId)) {
                         nextSoftHoverGroupId =
-                            stripFeatureInspectionValidity(data.hoverId);
-                        nextStrongHoverGroupId = data.hoverId;
+                            stripFeatureInspectionValidity(hoverId);
+                        nextStrongHoverGroupId = hoverId;
                     } else {
-                        nextSoftHoverGroupId = data.hoverId;
+                        nextSoftHoverGroupId = hoverId;
                         nextStrongHoverGroupId = undefined;
                     }
                 }
@@ -646,6 +701,7 @@ export class FeaturePanelComponent implements OnDestroy {
                     Array.isArray(data?.children) ? data.children : [],
                     {
                         mapTileKey: node.data["mapTileKey"],
+                        feature: context.feature,
                         mapId: typeof node.data["mapId"] === "string" ? node.data["mapId"] : context.mapId,
                         softHoverGroupId: nextSoftHoverGroupId,
                         strongHoverGroupId: nextStrongHoverGroupId,
@@ -676,6 +732,9 @@ export class FeaturePanelComponent implements OnDestroy {
             }
             const mapTileKey = this.selectedFeatures?.[featureIndex]?.mapTileKey ?? "";
             const mapId = this.selectedFeatures?.[featureIndex]?.featureTile.mapName ?? "";
+            const wrapper = this.selectedFeatures?.[featureIndex];
+            const snapshot = wrapper && parseFeatureInspectionTarget(wrapper.featureId).scope !== "shapepoint"
+                ? this.inspectionFeature(wrapper) : wrapper;
             const nodeIdPrefix = `feature-${featureIndex}:`;
             for (const section of inspectionModels) {
                 const node: TreeTableNode = {};
@@ -691,6 +750,12 @@ export class FeaturePanelComponent implements OnDestroy {
                     nodeId: sectionNodeId,
                     mapId
                 };
+                if (section.reopenFeature && wrapper) {
+                    node.data["reopenPointTarget"] = {
+                        mapTileKey, inspectedFeatureId: wrapper.featureId,
+                        pointTarget: stripFeatureInspectionTarget(wrapper.featureId)
+                    };
+                }
                 if (section?.hasOwnProperty("info")) {
                     node.data["info"] = section.info;
                 }
@@ -709,6 +774,7 @@ export class FeaturePanelComponent implements OnDestroy {
                     {
                         mapTileKey,
                         mapId,
+                        feature: snapshot,
                         nodePath: sectionNodeId,
                         nodeIdPrefix
                     }

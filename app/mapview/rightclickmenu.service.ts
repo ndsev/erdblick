@@ -1,4 +1,5 @@
 import { Injectable } from "@angular/core";
+import {displayFeatureId} from "../inspection/feature-identity.model";
 import { MenuItem } from "primeng/api";
 import { BehaviorSubject, Subject } from "rxjs";
 import { DiagnosticsFacadeService } from "../diagnostics/diagnostics-facade.service";
@@ -271,7 +272,7 @@ export class RightClickMenuService {
         return {
             id: row.identity,
             automationId: `inspect-picked-feature-${index}`,
-            label: row.feature.featureId,
+            label: displayFeatureId(row.feature.featureId, true),
             mapIdLabel: row.mapIdLabel,
             hoverFeature: row.feature,
             command: () => this.inspectionSelection.inspectFeatureIds([row.feature])

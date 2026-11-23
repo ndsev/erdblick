@@ -19,7 +19,7 @@ export interface FilterChannelDefinition {
     channelId: string;
     /** Exact schema used to prepare this search predicate. */
     schemaId?: string;
-    scope: "feature" | "attribute" | "relation" | "auto";
+    scope: "feature" | "attribute" | "relation" | "shapepoint" | "auto";
     rewrite: boolean;
     featureTypes: string[];
     featureFields: string[];
@@ -48,6 +48,12 @@ export interface FilterSubscriptionDefinition {
     sourceId?: string;
     channels: FilterChannelDefinition[];
     bindings?: Record<string, FilterBindingValue>;
+}
+
+/** Geometry and vertex ordinals in a pick belong to one published feature partition. */
+export interface SourceSnapshot {
+    sourceId: string;
+    sourceRevision: string;
 }
 
 /** Mutable output demand for one filter definition. Order is significant. */
@@ -80,6 +86,8 @@ export interface TileSubsetDelivery {
         layerId: string;
         partition: PartitionId;
         sourceFeatureCount: number;
+        sourceId?: string;
+        sourceRevision?: string;
     }>;
     readonly error?: string | null;
     readonly warnings?: readonly string[];
