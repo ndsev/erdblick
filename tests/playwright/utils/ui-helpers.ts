@@ -244,7 +244,9 @@ export async function closeLayerDialog(page: Page): Promise<void> {
         return;
     }
 
-    await dialog.locator('.close-maps-button button').click();
+    const toggle = page.getByTestId('maps-toggle');
+    if (await toggle.isVisible()) await toggle.click();
+    else await dialog.locator('.close-maps-button button').click();
     await expect(dialog).toBeHidden();
 }
 

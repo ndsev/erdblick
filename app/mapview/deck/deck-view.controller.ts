@@ -185,11 +185,11 @@ export abstract class DeckMapView implements IRenderView {
     private readonly searchOverlay = new DeckSearchOverlay(this.layerRegistry, () => this.searchOverlayFrame());
     private readonly extentOverlay = new DeckSpatialExtentOverlay(this.layerRegistry,
         () => this.spatialExtentFrame(),
-        (layer, viewport) => this.mapInfo.tileLayerParser.coverageRectangles(layer.mapId, layer.layerId, viewport, layer.level) as SpatialExtentBounds[],
-        (layer, longitude, latitude) => {
-            const tile = coreLib.getTileIdFromPosition(longitude, latitude, layer.level);
-            const region = this.mapInfo.tileLayerParser.coverageRegion(layer.mapId, layer.layerId, tile);
-            return region < 0 ? [] : this.mapInfo.tileLayerParser.coverageDisplayBounds(layer.mapId, layer.layerId, region, layer.level) as SpatialExtentBounds[];
+        {
+            rectangles: (layer, viewport) => this.mapInfo.tileLayerParser.coverageRectangles(layer.mapId, layer.layerId, viewport, layer.level) as SpatialExtentBounds[],
+            tileAt: (longitude, latitude, level) => coreLib.getTileIdFromPosition(longitude, latitude, level),
+            region: (layer, tile) => this.mapInfo.tileLayerParser.coverageRegion(layer.mapId, layer.layerId, tile),
+            bounds: (layer, region) => this.mapInfo.tileLayerParser.coverageDisplayBounds(layer.mapId, layer.layerId, region, layer.level) as SpatialExtentBounds[]
         });
     private readonly tileOverlay = new DeckTileOverlay(this.layerRegistry,
         () => this.tileOverlayFrame(),
@@ -1637,6 +1637,7 @@ export abstract class DeckMapView implements IRenderView {
                 .subscribe(() => this.tileOverlay.scheduleUpdate())
         );
         this.subscriptions.push(
+            this.mapInfo.dataSourceInfoChanged.subscribe(mapIds => this.extentOverlay.invalidateMaps(mapIds)),
             this.mapInfo.layerStateChanged.subscribe(() => this.extentOverlay.scheduleUpdate()),
             this.mapViewState.viewStateChanged.subscribe(() => this.extentOverlay.scheduleUpdate()),
             this.mapInfo.maps$.subscribe(() => this.extentOverlay.scheduleUpdate())

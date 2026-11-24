@@ -6,7 +6,7 @@ import {StateOwners, testPersistence} from "../../support/state-owners";
 import {coreLib, uint8ArrayToWasmOrThrow} from "../../../app/integrations/wasm.adapter";
 import {VIEW_SYNC_LAYERS} from "../../../app/mapview/mapview.model";
 import {spatialExtentEnvelope, unionSpatialTileRectangles} from "../../../app/mapview/spatial-extent-bounds.util";
-import {DeckSpatialExtentOverlay, type SpatialExtentFrame} from "../../../app/mapview/deck/deck-spatial-extent.presentation";
+import {DeckSpatialExtentOverlay, type SpatialExtentFrame, type SpatialExtentLayer} from "../../../app/mapview/deck/deck-spatial-extent.presentation";
 import {SearchService} from "../../../app/search/search.service";
 import {createFeatureSearchStateEntry} from "../../../app/search/search-definition.model";
 
@@ -68,7 +68,7 @@ describe("spatial extent ownership and native boundary", () => {
                 const inside=Number(coreLib.getTileIdFromPosition(x+step/2,y+step/2,15)), outside=Number(coreLib.getTileIdFromPosition(x-1,y-1,15));
                 expect(parser.permitsCoverageTile('Tiny','Road',inside)).toBe(true);
                 expect(parser.permitsCoverageTile('Tiny','Road',outside)).toBe(false);
-                expect(parser.coverageInfo('Tiny','Road').regions).toHaveLength(1);
+                expect(parser.coverageSummary('Tiny','Road')).toEqual({complete: true, valid: true, hasBounds: true, regionCount: 1});
                 const selected=parser.selectCoverageTileIds('Tiny','Road',{west:x-2,south:y-2,width:4,height:4,camPosLon:x-1,camPosLat:y-1,orientation:0},15,1,true);
                 expect(selected).toEqual([inside]);
             }
@@ -98,7 +98,7 @@ describe("spatial extent ownership and native boundary", () => {
             const tiles = parser.selectCoverageTileIds("Map", "Road", viewport, 13, 8, true) as number[];
             expect(tiles).toHaveLength(8);
             expect(tiles.every(tile => parser.permitsCoverageTile("Map", "Road", tile))).toBe(true);
-            expect(parser.coverageInfo("Map", "Road").regions).toHaveLength(2);
+            expect(parser.coverageSummary("Map", "Road").regionCount).toBe(2);
             const center = Number(coreLib.getTileIdFromPosition(0, 0, 13));
             expect(parser.permitsCoverageTile("Map", "Road", center)).toBe(false);
             install(true, []);
@@ -168,8 +168,11 @@ describe("spatial extent presentation", () => {
         vi.stubGlobal("cancelAnimationFrame", vi.fn());
         const registry = {upsert: vi.fn(), remove: vi.fn()};
         let frame: SpatialExtentFrame = {viewport, layers: ["A", "B"].map(layerId => ({mapId:"Map",layerId,level:13,revision:1}))};
-        const overlay = new DeckSpatialExtentOverlay(registry as never, () => frame,
-            () => [[0,0,10,10]], (_layer, lon) => lon > 5 ? [[7,7,8,8]] : [[1,1,2,2]]);
+        const overlay = new DeckSpatialExtentOverlay(registry as never, () => frame, {
+            rectangles: () => [[0,0,10,10]], tileAt: lon => lon > 5 ? 1 : 0,
+            region: (_layer, tile) => tile,
+            bounds: (_layer, region) => region === 1 ? [[7,7,8,8]] : [[1,1,2,2]]
+        });
         overlay.scheduleUpdate(); overlay.scheduleUpdate();
         expect(frames).toHaveLength(1); frames.shift()!(0);
         expect(registry.upsert).toHaveBeenCalledOnce();
@@ -178,5 +181,46 @@ describe("spatial extent presentation", () => {
         frame = {...frame, layers: []}; overlay.scheduleUpdate(); frames.shift()!(0);
         expect(registry.remove).toHaveBeenCalledOnce(); expect(overlay.hit(6,6)).toBeNull();
         overlay.destroy();
+    });
+
+    it("caches only the latest tile hit per layer and never exports bounds for hover labels", () => {
+        const frames: FrameRequestCallback[] = [];
+        vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => frames.push(callback));
+        vi.stubGlobal("cancelAnimationFrame", vi.fn());
+        let frame: SpatialExtentFrame = {viewport, layers: [{mapId: "Map", layerId: "Road", level: 13, revision: 1}]};
+        const region = vi.fn((_layer: SpatialExtentLayer, tile: number) => tile > 5 ? -1 : 0);
+        const bounds = vi.fn(() => [[0,0,1,1]] as [number, number, number, number][]);
+        const overlay = new DeckSpatialExtentOverlay({upsert: vi.fn(), remove: vi.fn()} as never, () => frame, {
+            rectangles: () => [[0,0,1,1]], tileAt: lon => Math.floor(lon), region, bounds
+        });
+        const update = () => {overlay.scheduleUpdate(); frames.shift()!(0);};
+        update();
+        expect(overlay.label(1.1, 0)).toBe("Map · Spatial extent · Level 13");
+        expect(overlay.label(1.9, 0)).not.toBeNull();
+        expect(region).toHaveBeenCalledTimes(1);
+        expect(bounds).not.toHaveBeenCalled();
+        expect(overlay.hit(1.5, 0)).toEqual({west: 0, east: 1, south: 0, north: 1});
+        expect(bounds).toHaveBeenCalledOnce();
+        expect(region).toHaveBeenCalledTimes(1);
+        expect(overlay.label(6.1, 0)).toBeNull();
+        expect(overlay.label(6.9, 0)).toBeNull();
+        expect(region).toHaveBeenCalledTimes(2);
+        for (const patch of [{revision: 2}, {level: 14}]) {
+            frame = {...frame, layers: [{...frame.layers[0], ...patch}]}; update();
+            expect(overlay.label(6.1, 0)).toBeNull();
+        }
+        expect(region).toHaveBeenCalledTimes(4);
+        expect(bounds).toHaveBeenCalledOnce();
+        overlay.invalidateMaps(["Map"]);
+        expect(overlay.label(1, 0)).toBeNull();
+        frames.shift()!(0);
+        expect(overlay.label(1, 0)).not.toBeNull();
+        frame = {...frame, layers: []}; update();
+        expect(overlay.label(1, 0)).toBeNull();
+        frame = {...frame, layers: [{mapId: "Map", layerId: "Road", level: 14, revision: 2}]}; update();
+        expect(overlay.label(1, 0)).not.toBeNull();
+        expect(region).toHaveBeenCalledTimes(6);
+        overlay.destroy();
+        expect(overlay.label(1, 0)).toBeNull();
     });
 });

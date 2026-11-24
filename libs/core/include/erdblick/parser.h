@@ -65,10 +65,17 @@ public:
     /** Select coverage before capacity, using the same evaluator as the service guard. */
     NativeJsValue selectCoverageTileIds(std::string const& mapId, std::string const& layerId,
         Viewport const& viewport, int level, int limit, bool restrict) const;
-    /** Project complete region bounds and their stable original indices for focus and clicks. */
     /** Complete originating region bounds expanded to the displayed tile area. */
     NativeJsValue coverageDisplayBounds(std::string const& mapId, std::string const& layerId, int region, int level) const;
-    NativeJsValue coverageInfo(std::string const& mapId, std::string const& layerId) const;
+    /** Constant-size coverage status; no geometry crosses the UI boundary. */
+    struct CoverageSummary {
+        bool complete = false;
+        bool valid = true;
+        bool hasBounds = false;
+        size_t regionCount = 0;
+    };
+    /** Read normalized metadata without enumerating or exporting its region bounds. */
+    CoverageSummary coverageSummary(std::string const& mapId, std::string const& layerId) const;
     /** Compact display rectangles cover every intersecting tile without sampling. */
     NativeJsValue coverageRectangles(std::string const& mapId, std::string const& layerId,
         Viewport const& viewport, int level) const;

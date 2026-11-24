@@ -1,5 +1,6 @@
 import "@angular/compiler";
-import { BehaviorSubject } from "rxjs";
+import { BehaviorSubject, of } from "rxjs";
+import {HttpResponse} from "@angular/common/http";
 import {
     afterEach,
     describe,
@@ -43,8 +44,9 @@ function fixture() {
         presets: [], presets$: new BehaviorSubject([]),
         isAvailable: () => true, presetsForLayer: () => [], matchesPresetValues: () => false
     } as unknown as MapPresetService;
+    const httpGet = vi.fn();
     const maps = new MapDataService(
-        {} as never, persistence, styles, presets, {} as never,
+        {get: httpGet} as never, persistence, styles, presets, {} as never,
         owners.layerState, owners.viewSettings, owners.inspectionState
     );
     // The runtime coordinator exists before the network catalog installs its
@@ -73,7 +75,8 @@ function fixture() {
         owners.configService, {} as never, owners.searchService, {} as never, {} as never,
         presets, styles, owners.layerState, owners.layout.state, owners.inspectionState, owners.viewSettings
     );
-    cleanup.push(() => panel.subscriptions.forEach(subscription => subscription.unsubscribe()));
+    cleanup.push(() => panel.ngOnDestroy());
+    cleanup.push(() => maps.tileLayerParser.delete());
     const projections: MapTreeViewNode[][][] = [];
     const subscription = panel.mapTreeView$.subscribe(value => projections.push(value.nodesByView));
     cleanup.push(() => subscription.unsubscribe());
@@ -83,10 +86,54 @@ function fixture() {
         const option = projectedLayer.children!.find(node => node.id === "details")!;
         return { ...projectedLayer.viewConfig![index], details: option.value![index] };
     });
-    return { persistence, owners, maps, panel, tree, projections, layer, values, metadata, styles, presets };
+    return { persistence, owners, maps, panel, tree, projections, layer, values, metadata, styles, presets, httpGet };
 }
 
 describe("map panel owner projections", () => {
+    it("projects coverage status for hidden layers and fetches geometry only on Focus activation", async () => {
+        const test = fixture();
+        test.metadata.layers['Roads'].spatialExtent = [{bounds: [10, 40, 11, 41]}];
+        test.metadata.layers['Roads'].coverageComplete = false;
+        const reload = async () => {
+            test.httpGet.mockReturnValueOnce(of(new HttpResponse({body: structuredClone([test.metadata])})));
+            expect(await test.maps.reloadDataSources()).toBe(true);
+        };
+        await reload();
+        const summary = vi.spyOn(test.maps.tileLayerParser, "coverageSummary");
+        const bounds = vi.spyOn(test.maps.tileLayerParser, "coverageDisplayBounds");
+        const moves = vi.fn();
+        const subscription = test.panel["viewState"].moveToRectangleTopic.subscribe(moves);
+        cleanup.push(() => {subscription.unsubscribe(); summary.mockRestore(); bounds.mockRestore(); test.maps.maps.destroy();});
+        const nodes = () => test.projections.at(-1)![0];
+        expect(nodes()[0]).toMatchObject({canFocus: true, hasIncompleteSpatialExtent: true});
+        expect(test.layer(nodes()).canFocus).toBe(true);
+        expect(test.layer(nodes()).viewConfig![0].visible).toBe(false);
+        test.panel.addView();
+        test.owners.layerState.groupLocalRemoteSources.next(true);
+        test.owners.layerState.groupLocalRemoteSources.next(false);
+        expect(summary).not.toHaveBeenCalled();
+        expect(bounds).not.toHaveBeenCalled();
+
+        test.panel.focusMap(new Event("click"), 0, "Map");
+        test.panel.focusMap(new Event("click"), 0, "Map");
+        expect(bounds).toHaveBeenCalledExactlyOnceWith("Map", "Roads", -1, 8);
+        expect(moves).toHaveBeenCalledTimes(2);
+        test.panel["viewState"].setMapLayerLevel(0, "Map", "Roads", 9);
+        expect(bounds).toHaveBeenCalledTimes(1);
+        test.panel.focusMap(new Event("click"), 0, "Map");
+        expect(bounds).toHaveBeenLastCalledWith("Map", "Roads", -1, 9);
+        expect(bounds).toHaveBeenCalledTimes(2);
+
+        test.metadata.layers['Roads'].spatialExtent = [];
+        test.metadata.layers['Roads'].coverageComplete = true;
+        await reload();
+        expect(summary).toHaveBeenCalledOnce();
+        expect(nodes()[0]).toMatchObject({canFocus: false, hasIncompleteSpatialExtent: false});
+        test.panel.focusMap(new Event("click"), 0, "Map");
+        expect(bounds).toHaveBeenCalledTimes(2);
+        expect(moves).toHaveBeenCalledTimes(3);
+    });
+
     it("publishes imported style options after a catalog replaces the tree beneath an open panel", () => {
         const test = fixture();
         // Catalog loading can replace the tree after the panel has subscribed.

@@ -20,13 +20,6 @@ export interface SpatialRequestContext {
 /** WGS84 rectangle; east may exceed 180 for a connected dateline-crossing area. */
 export type SpatialExtentBounds = [number, number, number, number];
 
-/** Native validation result and every original coverage region's compact bounds. */
-export interface SpatialExtentInfo {
-    complete: boolean;
-    valid: boolean;
-    regions: SpatialExtentBounds[][];
-}
-
 /** Known spatial exclusion is a terminal user-visible state, distinct from missing data. */
 export class OutsideSpatialExtentError extends Error {
     constructor() { super("Outside spatial extent"); this.name = "OutsideSpatialExtentError"; }

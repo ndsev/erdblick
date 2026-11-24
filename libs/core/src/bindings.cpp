@@ -834,6 +834,12 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("vertexCount", &TileSubsetLayerRenderer::vertexCount);
 
     ////////// TileLayerMetadata
+    em::value_object<TileLayerParser::CoverageSummary>("CoverageSummary")
+        .field("complete", &TileLayerParser::CoverageSummary::complete)
+        .field("valid", &TileLayerParser::CoverageSummary::valid)
+        .field("hasBounds", &TileLayerParser::CoverageSummary::hasBounds)
+        .field("regionCount", &TileLayerParser::CoverageSummary::regionCount);
+
     em::value_object<TileLayerParser::TileLayerMetadata>("TileLayerMetadata")
         .field("id", &TileLayerParser::TileLayerMetadata::id)
         .field("stringPoolId", &TileLayerParser::TileLayerMetadata::stringPoolId)
@@ -871,7 +877,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("permitsCoverageTile", &TileLayerParser::permitsCoverageTile)
         .function("selectCoverageTileIds", &TileLayerParser::selectCoverageTileIds)
         .function("coverageDisplayBounds", &TileLayerParser::coverageDisplayBounds)
-        .function("coverageInfo", &TileLayerParser::coverageInfo)
+        .function("coverageSummary", &TileLayerParser::coverageSummary)
         .function("coverageRectangles", &TileLayerParser::coverageRectangles)
         .function("coverageRegion", &TileLayerParser::coverageRegion)
         .function("getFieldDictOffsets", &TileLayerParser::getFieldDictOffsets)

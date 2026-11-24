@@ -307,6 +307,8 @@ export interface MapTreeViewNode {
     visible?: boolean[];
     viewConfig?: LayerViewConfig[];
     value?: Array<boolean | number | string>;
+    canFocus?: boolean;
+    hasIncompleteSpatialExtent?: boolean;
 }
 
 /** Returns the source children of a branch node without manufacturing children for leaves. */

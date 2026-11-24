@@ -231,6 +231,28 @@ a late artifact from an older catalog cannot revive it. `setDataSourceInfo` rema
 the full installation API for fresh/private parsers and intentionally resets all
 dictionary state.
 
+Spatial-extent status follows this same metadata generation. At installation,
+`MapDataService` publishes immutable `CoverageSummary` values and a per-map
+incomplete flag; it removes them before retirement notifications. Status getters
+and Maps-panel template evaluation only read this projection. The native summary
+contains `complete`, `valid`, `hasBounds` and `regionCount`, with no exported
+geometry. `hasBounds` comes from normalized usable rectangles, independently of
+completeness or region count: an empty occupancy mask can retain a region with
+no bounds. Native coverage queries survive unrelated catalogue deltas and are
+evicted only for removed/replaced maps, or a full parser reset.
+
+Maps-panel Focus controls request full bounds only on activation. Their cache
+retains the final envelope per logical view/target and latest metadata/level
+signature, including hidden eligible layers for map focus. Compute map envelopes
+from the original intervals together; combining per-layer envelopes can lose the
+correct dateline gap. Retire cached results with their map or view. Extent-overlay
+hover resolves a region identity without exporting bounds and retains only the
+latest tile hit (including misses) per enabled layer. Bounds are fetched when a
+click navigates to that region. Metadata, level and membership changes invalidate
+hit state; viewport geometry remains animation-frame coalesced. Keep these
+work-count invariants covered by the spatial-extent application tests and
+`tests/playwright/tests/spatial-extent-performance.spec.ts`.
+
 Canonical catalog entries carry a small `mapFormat` and an exact `schemaId`.
 `MapDataService` fetches the binary artifact from `/schema` using both `sourceId`
 and `schemaId`, coalesces equal artifacts and limits concurrent downloads to two.

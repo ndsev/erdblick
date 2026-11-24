@@ -39,18 +39,12 @@ NativeJsValue TileLayerParser::coverageDisplayBounds(std::string const& mapId,
     return *result;
 }
 
-NativeJsValue TileLayerParser::coverageInfo(std::string const& mapId, std::string const& layerId) const
+TileLayerParser::CoverageSummary TileLayerParser::coverageSummary(
+    std::string const& mapId, std::string const& layerId) const
 {
     auto query = coverageQuery(mapId, layerId);
-    auto regions = JsValue::List();
-    if (query) for (size_t i = 0; i < query->regionCount(); ++i) {
-        auto bounds = JsValue::List();
-        for (auto const& b : query->bounds(i))
-            bounds.push(JsValue::List({JsValue(b.west_), JsValue(b.south_), JsValue(b.east_), JsValue(b.north_)}));
-        regions.push(bounds);
-    }
-    return *JsValue::Dict({{"complete", JsValue(query && query->complete())},
-        {"valid", JsValue(!query || query->valid())}, {"regions", regions}});
+    return query ? CoverageSummary{query->complete(), query->valid(), query->hasBounds(), query->regionCount()}
+                 : CoverageSummary{};
 }
 
 NativeJsValue TileLayerParser::coverageRectangles(std::string const& mapId, std::string const& layerId,

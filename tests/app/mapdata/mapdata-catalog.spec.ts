@@ -68,6 +68,81 @@ function fixture(messages: InfoMessageService = {showError: vi.fn()} as unknown 
 }
 
 describe("MapDataService incremental catalog startup", () => {
+    it("publishes scalar coverage once per accepted generation and fences retiring metadata", async () => {
+        const {service, reload, dispose} = fixture();
+        const native = vi.spyOn(service.tileLayerParser, "coverageSummary");
+        const first = source("Map", 0);
+        first.layers['Road'].spatialExtent = [{bounds: [10, 40, 11, 41]}];
+        first.layers['Road'].coverageComplete = true;
+        const retired: string[] = [];
+        const subscription = service.dataSourceInfoChanged.subscribe(mapIds => {
+            for (const mapId of mapIds) {
+                retired.push(mapId);
+                // Native removal follows this callback. Reading status must not
+                // resurrect the old parser's summary under the new generation.
+                expect(service.spatialExtentSummary(mapId, "Road")).toBeUndefined();
+                expect(service.hasIncompleteSpatialExtent(mapId)).toBe(false);
+            }
+        });
+        try {
+            await reload([first]);
+            const summary = service.spatialExtentSummary("Map", "Road");
+            expect(summary).toEqual({complete: true, valid: true, hasBounds: true, regionCount: 1});
+            expect(Object.isFrozen(summary)).toBe(true);
+            const generation = service.mapMetadataGeneration("Map");
+            for (let i = 0; i < 100; ++i) expect(service.spatialExtentSummary("Map", "Road")).toBe(summary);
+            await reload([{...first, progress: 1, statusMessage: "Ready"}]);
+            expect(service.mapMetadataGeneration("Map")).toBe(generation);
+            expect(native).toHaveBeenCalledTimes(1);
+            await reload([first, source("Other", 1)]);
+            expect(native).toHaveBeenCalledTimes(2);
+            expect(service.spatialExtentSummary("Map", "Road")).toBe(summary);
+            first.layers['Road'].coverageComplete = false;
+            await reload([first, source("Other", 1)]);
+            expect(native).toHaveBeenCalledTimes(3);
+            expect(service.hasIncompleteSpatialExtent("Map")).toBe(true);
+            expect(service.mapMetadataGeneration("Map")).toBeGreaterThan(generation);
+            for (const status of ["initializing", "failed"]) {
+                await reload([source("Map", 0, status), source("Other", 1)]);
+                expect(service.spatialExtentSummary("Map", "Road")).toBeUndefined();
+                expect(native).toHaveBeenCalledTimes(3);
+            }
+            await reload([first]);
+            expect(native).toHaveBeenCalledTimes(4);
+            expect(service.hasIncompleteSpatialExtent("Map")).toBe(true);
+            expect(retired).toContain("Other");
+            await reload([]);
+            expect(service["spatialExtentMetadata"].size).toBe(0);
+        } finally {subscription.unsubscribe(); native.mockRestore(); dispose();}
+    });
+
+    it("keeps large Classic-shaped coverage out of repeated UI summary reads", async () => {
+        const {service, reload, dispose} = fixture();
+        const native = vi.spyOn(service.tileLayerParser, "coverageSummary");
+        const bounds = vi.spyOn(service.tileLayerParser, "coverageDisplayBounds");
+        const catalog = source("LargeCoverage", 0);
+        const coverage = Array.from({length: 2600}, (_, i) => Number(coreLib.getTileIdFromPosition(i * .05, 20, 13)));
+        catalog.layers = Object.fromEntries(Array.from({length: 43}, (_, i) => [`Layer${i}`, {
+            ...catalog.layers['Road'], layerId: `Layer${i}`, coverage, coverageComplete: true
+        }]));
+        try {
+            await reload([catalog]);
+            expect(native).toHaveBeenCalledTimes(43);
+            for (let read = 0; read < 100; ++read) {
+                expect(service.hasIncompleteSpatialExtent("LargeCoverage")).toBe(false);
+                for (const id of Object.keys(catalog.layers)) {
+                    const summary = service.spatialExtentSummary("LargeCoverage", id)!;
+                    expect(summary.regionCount).toBe(2600);
+                    expect(JSON.stringify(summary).length).toBeLessThan(96);
+                    expect(summary).not.toHaveProperty("regions");
+                }
+            }
+            await reload([{...catalog, statusMessage: "Unchanged coverage"}]);
+            expect(native).toHaveBeenCalledTimes(43);
+            expect(bounds).not.toHaveBeenCalled();
+        } finally {native.mockRestore(); bounds.mockRestore(); dispose();}
+    });
+
     it("retains local catalogs and view preferences through remote refresh and failure", async () => {
         const {service, owners, state, get, reload, dispose} = fixture();
         const runtime = new DrawingRuntime();
@@ -77,15 +152,19 @@ describe("MapDataService incremental catalog startup", () => {
             const local = runtime.execute({type: 'create', mapId: 'drawing-catalog', text: coreLib.drawingCoordinatesToGeoJson('0 0 local\n')});
             service.registerVirtualSource({...local.summary!.metadata, displayName: 'local.txt'},
                 {schemaId: local.summary!.metadata.schemaId!, bytes: local.schema!}, local.dictionary!);
+            const localSummary = service.spatialExtentSummary('drawing-catalog', 'Drawing');
+            expect(localSummary).toBeDefined();
             owners.layerState.setMapLayerConfig('drawing-catalog', 'Drawing', [{visible: false, autoLevel: true, level: 0}]);
             await reload([source('Replacement', 0)]);
             expect(service.mapgetLayer('drawing-catalog', 'Drawing')?.origin).toBe('virtual');
+            expect(service.spatialExtentSummary('drawing-catalog', 'Drawing')).toBe(localSummary);
             expect(owners.layerState.mapLayerConfig('drawing-catalog', 'Drawing')[0].visible).toBe(false);
             get.mockReturnValueOnce(throwError(() => new HttpErrorResponse({status: 503})));
             expect(await service.reloadDataSources()).toBe(false);
             expect(service.maps.maps.has('drawing-catalog')).toBe(true);
             expect(JSON.stringify(state.exportSnapshot())).not.toContain('drawing-catalog');
             service.removeVirtualSource('drawing-catalog');
+            expect(service.spatialExtentSummary('drawing-catalog', 'Drawing')).toBeUndefined();
             expect(service.maps.maps.has('Replacement')).toBe(true);
             expect(service.maps.maps.has('drawing-catalog')).toBe(false);
         } finally {report.mockRestore(); runtime.destroy(); dispose();}

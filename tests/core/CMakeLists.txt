@@ -13,6 +13,7 @@ include(Catch)
 include(CTest)
 
 add_executable(test.erdblick
+  test-coverage-parser.cpp
   test-coverage-selection.cpp
   test-visualization.cpp
   test-map-schema.cpp

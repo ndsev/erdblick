@@ -12,6 +12,14 @@ export interface SpatialExtentLayer {mapId: string; layerId: string; level: numb
 /** Immutable inputs used for one coalesced presentation update. */
 export interface SpatialExtentFrame {viewport: Viewport; layers: SpatialExtentLayer[];}
 
+/** Native queries distinguish a cheap hit identity from geometry requested by navigation. */
+export interface SpatialExtentQueries {
+    rectangles: (layer: SpatialExtentLayer, viewport: Viewport) => SpatialExtentBounds[];
+    tileAt: (longitude: number, latitude: number, level: number) => number;
+    region: (layer: SpatialExtentLayer, tile: number) => number;
+    bounds: (layer: SpatialExtentLayer, region: number) => SpatialExtentBounds[];
+}
+
 /** Own compact coverage quads and their shader grid, independently of payload demand or tile capacity. */
 export class DeckSpatialExtentOverlay {
     private keys = new Set<string>();
@@ -19,12 +27,12 @@ export class DeckSpatialExtentOverlay {
     private frame: SpatialExtentFrame | null = null;
     private signature = "";
     private destroyed = false;
+    private readonly hits = new Map<string, {layer: SpatialExtentLayer; tile: number; region: number}>();
 
     /** Narrow native callbacks retain all spatial interpretation in the shared evaluator. */
     constructor(private readonly registry: DeckLayerRegistry,
         private readonly readFrame: () => SpatialExtentFrame | null,
-        private readonly rectangles: (layer: SpatialExtentLayer, viewport: Viewport) => SpatialExtentBounds[],
-        private readonly clickedBounds: (layer: SpatialExtentLayer, longitude: number, latitude: number) => SpatialExtentBounds[]) {}
+        private readonly queries: SpatialExtentQueries) {}
 
     /** Coalesce camera, catalog and settings updates within one animation frame. */
     scheduleUpdate(): void {
@@ -39,11 +47,16 @@ export class DeckSpatialExtentOverlay {
         if (signature === this.signature) return;
         this.signature = signature;
         this.frame = frame;
+        const layers = new Map((frame?.layers ?? []).map(layer => [JSON.stringify([layer.mapId, layer.layerId]), layer]));
+        for (const [key, hit] of this.hits) {
+            const layer = layers.get(key);
+            if (!layer || layer.level !== hit.layer.level || layer.revision !== hit.layer.revision) this.hits.delete(key);
+        }
         const groups = new Map<string, {level: number; rectangles: SpatialExtentBounds[]}>();
         for (const layer of frame?.layers ?? []) {
             const key = `builtin/spatial-extent/${encodeURIComponent(layer.mapId)}/${layer.level}`;
             const group = groups.get(key) ?? {level: layer.level, rectangles: []};
-            for (const rectangle of this.rectangles(layer, frame!.viewport)) group.rectangles.push(rectangle);
+            for (const rectangle of this.queries.rectangles(layer, frame!.viewport)) group.rectangles.push(rectangle);
             groups.set(key, group);
         }
         for (const key of this.keys) if (!groups.has(key)) this.registry.remove(key);
@@ -71,7 +84,8 @@ export class DeckSpatialExtentOverlay {
 
     /** Hit the displayed tile first, then return its complete original extent rather than the clipped quad. */
     hit(longitude: number, latitude: number): RenderRectangle | null {
-        return this.pick(longitude, latitude)?.rectangle ?? null;
+        const hit = this.pick(longitude, latitude);
+        return hit ? spatialExtentEnvelope(this.queries.bounds(hit.layer, hit.region)) : null;
     }
 
     /** A lightweight label follows the same stable hit order as click navigation. */
@@ -82,12 +96,28 @@ export class DeckSpatialExtentOverlay {
 
     /** Resolve a tile to its originating extent without involving feature picking. */
     private pick(longitude: number, latitude: number) {
-        for (const layer of [...(this.frame?.layers ?? [])].reverse()) {
-            const bounds = this.clickedBounds(layer, longitude, latitude);
-            const rectangle = spatialExtentEnvelope(bounds);
-            if (rectangle) return {layer, rectangle};
+        const layers = this.frame?.layers ?? [];
+        for (let index = layers.length - 1; index >= 0; --index) {
+            const layer = layers[index];
+            const key = JSON.stringify([layer.mapId, layer.layerId]);
+            const tile = this.queries.tileAt(longitude, latitude, layer.level);
+            let hit = this.hits.get(key);
+            if (!hit || hit.tile !== tile || hit.layer.level !== layer.level || hit.layer.revision !== layer.revision) {
+                hit = {layer, tile, region: this.queries.region(layer, tile)};
+                this.hits.set(key, hit);
+            }
+            if (hit.region >= 0) return hit;
         }
         return null;
+    }
+
+    /** Fence removed metadata immediately, including before the next coalesced overlay frame. */
+    invalidateMaps(mapIds: readonly string[]): void {
+        const removed = new Set(mapIds);
+        for (const [key, hit] of this.hits) if (removed.has(hit.layer.mapId)) this.hits.delete(key);
+        if (this.frame) this.frame = {...this.frame, layers: this.frame.layers.filter(layer => !removed.has(layer.mapId))};
+        this.signature = "";
+        this.scheduleUpdate();
     }
 
     /** Remove presentation and cancel pending callbacks before the canvas retires. */
@@ -95,6 +125,6 @@ export class DeckSpatialExtentOverlay {
         this.destroyed = true;
         if (this.pending !== null) cancelAnimationFrame(this.pending);
         for (const key of this.keys) this.registry.remove(key);
-        this.keys.clear(); this.frame = null;
+        this.keys.clear(); this.hits.clear(); this.frame = null;
     }
 }

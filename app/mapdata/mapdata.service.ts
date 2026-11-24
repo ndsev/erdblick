@@ -1,4 +1,4 @@
-import type {SpatialExtentSettings, SpatialExtentInfo, SpatialRequestContext, SpatialExtentPolicy} from "./spatial-extent.model";
+import type {SpatialExtentSettings, SpatialRequestContext, SpatialExtentPolicy} from "./spatial-extent.model";
 import type {InfoMessageRef} from "../diagnostics/info-message.model";
 import { type ConnectionRetryPolicy, connectionRetryPolicySchema } from "./connection-retry-policy.model";
 import { HttpClient, HttpErrorResponse } from "@angular/common/http";
@@ -14,7 +14,7 @@ import {
     takeUntil
 } from "rxjs";
 import { z } from "zod";
-import type { FeatureLayerStyle, TileLayerParser } from "../../build/libs/core/erdblick-core";
+import type { CoverageSummary, FeatureLayerStyle, TileLayerParser } from "../../build/libs/core/erdblick-core";
 import {
     catalogPage,
     ControlReadContext,
@@ -62,6 +62,13 @@ interface SourceCatalogEntryUpdate {
     statusMessage?: string;
     progress?: number | null;
     retrying?: boolean;
+}
+
+/** Published scalar status for one accepted metadata generation, shared by all views. */
+interface SpatialExtentMetadata {
+    generation: number;
+    layers: ReadonlyMap<string, Readonly<CoverageSummary>>;
+    incomplete: boolean;
 }
 
 /** One concrete option/view pair invalidated by an atomic style-option transaction. */
@@ -140,6 +147,7 @@ export class MapDataService implements AppActionContributor {
     /** Per-map model generations exclude progress updates and other maps becoming ready. */
     private readonly mapMetadataGenerations = new Map<string, number>();
     private nextMetadataGeneration = 0;
+    private readonly spatialExtentMetadata = new Map<string, SpatialExtentMetadata>();
 
     /** Map-local parser metadata used only by subset render workers. */
     private readonly renderDataSourceInfoBlobCache = new Map<string, Uint8Array>();
@@ -220,9 +228,29 @@ export class MapDataService implements AppActionContributor {
             this.tileLayerParser.permitsCoverageTile(mapId, layerId, tileId);
     }
 
-    /** Share every original region's validated bounds with focus and overlay owners. */
-    spatialExtentInfo(mapId: string, layerId: string): SpatialExtentInfo {
-        return this.tileLayerParser.coverageInfo(mapId, layerId) as SpatialExtentInfo;
+    /** Read published metadata only; UI evaluation must never populate a native cache. */
+    spatialExtentSummary(mapId: string, layerId: string): Readonly<CoverageSummary> | undefined {
+        const metadata = this.spatialExtentMetadata.get(mapId);
+        return metadata?.generation === this.mapMetadataGeneration(mapId) ? metadata.layers.get(layerId) : undefined;
+    }
+
+    /** Include hidden spatial layers, independently of display and request preferences. */
+    hasIncompleteSpatialExtent(mapId: string): boolean {
+        const metadata = this.spatialExtentMetadata.get(mapId);
+        return metadata?.generation === this.mapMetadataGeneration(mapId) && metadata.incomplete;
+    }
+
+    /** Normalize once at installation, before ready rows become visible to subscribers. */
+    private projectSpatialExtentMetadata(source: MapInfoItem, generation: number): SpatialExtentMetadata {
+        const layers = new Map<string, Readonly<CoverageSummary>>();
+        let incomplete = false;
+        for (const [layerId, info] of Object.entries(source.layers)) {
+            if (info.serviceMetadata) continue;
+            const summary = Object.freeze(this.tileLayerParser.coverageSummary(source.mapId, layerId));
+            layers.set(layerId, summary);
+            incomplete ||= !summary.complete;
+        }
+        return {generation, layers, incomplete};
     }
 
     /** Returns the mutable map tree owned by the map info service. */
@@ -644,6 +672,9 @@ export class MapDataService implements AppActionContributor {
                 // Invalidate pending work now, including while the replacement
                 // schema is still downloading. Readiness is published below.
                 this.mapMetadataGenerations.set(mapId, ++this.nextMetadataGeneration);
+                // Notifications may synchronously read status while the old
+                // parser is still installed. Never let them republish it.
+                this.spatialExtentMetadata.delete(mapId);
                 this.renderDataSourceInfoBlobCache.delete(mapId);
             }
             this.dataSourceInfoChanged.next(mapIds);
@@ -672,8 +703,12 @@ export class MapDataService implements AppActionContributor {
                     this.applyNativeCatalogChanges([], [metadata]);
                     const dictionary = this.virtualDictionaries.get(metadata.mapId);
                     if (dictionary) this.installVirtualDictionary(metadata.mapId, dictionary);
+                    const generation = this.nextMetadataGeneration + 1;
+                    const spatial = this.projectSpatialExtentMetadata(metadata, generation);
                     this.readySourceMetadata.set(signature, metadata);
-                    this.mapMetadataGenerations.set(metadata.mapId, ++this.nextMetadataGeneration);
+                    this.nextMetadataGeneration = generation;
+                    this.mapMetadataGenerations.set(metadata.mapId, generation);
+                    this.spatialExtentMetadata.set(metadata.mapId, spatial);
                     this.renderDataSourceInfoBlobCache.delete(metadata.mapId);
                 } catch (error) {
                     return { ...source, schemaStatus: "failed", schemaMessage: String(error) };

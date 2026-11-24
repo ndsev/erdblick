@@ -1537,7 +1537,9 @@ void TileLayerParser::changeDataSources(
     }
 
     info_.swap(nextInfo);
-    coverageQueries_.clear();
+    // Queries own normalized immutable geometry. A delta for another map must
+    // not force its coverage to be normalized again on the next interaction.
+    std::erase_if(coverageQueries_, [&](auto const& entry) { return removed.contains(entry.first.first); });
     featureJumpTargets_.swap(nextTargets);
     for (auto const& mapId : removed) {
         stringPoolsByMap_.erase(mapId);

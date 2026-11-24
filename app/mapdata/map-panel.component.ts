@@ -1,5 +1,5 @@
-import {spatialExtentEnvelope} from "../mapview/spatial-extent-bounds.util";
 import type {SpatialExtentBounds} from "./spatial-extent.model";
+import {SpatialExtentFocus} from "./spatial-extent-focus.presentation";
 import {DrawingDocumentsService} from "../drawing/drawing-documents.service";
 import {stylePickerColor} from "../mapstyle/style-color.util";
 import { Component, ViewChild } from "@angular/core";
@@ -469,11 +469,11 @@ const MAP_FILTER_DELAY_MS = 300;
                                                               [disabled]="dataSourceStatus(node.info) !== 'ready'"
                                                               [attr.aria-label]="'Map preset for ' + node.id"/>
                                                 }
-                                                <p-button onEnterClick (click)="focus($event, index, mapCoverage(node.id, index))"
+                                                <p-button onEnterClick (click)="focusMap($event, index, node.id)"
                                                           label="" pTooltip="Focus on map" tooltipPosition="bottom"
                                                           [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                           tabindex="0"
-                                                          *ngIf="mapCoverage(node.id, index).length">
+                                                          *ngIf="node.canFocus">
                                                     <span class="material-symbols-outlined"
                                                           style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
                                                         </p-button>
@@ -495,7 +495,7 @@ const MAP_FILTER_DELAY_MS = 300;
                                                                 ariaLabel="Show Spatial Extent"/>Show Spatial Extent
                                                         </label>
                                                         <small *ngIf="node.info.origin === 'virtual'">Spatial extent settings do not apply to local drawings.</small>
-                                                        <small *ngIf="node.info.origin !== 'virtual' && hasIncompleteSpatialExtent(node.id)">Some layers have unknown or incomplete coverage. Their requests remain unrestricted; any displayed extent may be partial.</small>
+                                                        <small *ngIf="node.info.origin !== 'virtual' && node.hasIncompleteSpatialExtent">Some layers have unknown or incomplete coverage. Their requests remain unrestricted; any displayed extent may be partial.</small>
                                                     </div>
                                                 </p-popover>
                                                         <p-button onEnterClick (click)="metadataPopover.toggle($event)" label=""
@@ -530,8 +530,8 @@ const MAP_FILTER_DELAY_MS = 300;
                                                 </span>
                                             </div>
                                             <div class="tree-node-controls">
-                                                <p-button onEnterClick *ngIf="layerCoverage(node.mapId, node.id, index).length"
-                                                          (click)="focus($event, index, layerCoverage(node.mapId, node.id, index))"
+                                                <p-button onEnterClick *ngIf="node.canFocus"
+                                                          (click)="focusLayer($event, index, node.mapId, node.id)"
                                                           label="" pTooltip="Focus on layer" tooltipPosition="bottom"
                                                           [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                           tabindex="0">
@@ -697,6 +697,8 @@ export class MapPanelComponent {
     );
     private readonly originExpansion: Record<string, boolean> = {};
     private readonly stylePresetProjectionChanges = new BehaviorSubject(0);
+    private readonly spatialFocus = new SpatialExtentFocus((mapId, layerId, level) =>
+        this.mapService.tileLayerParser.coverageDisplayBounds(mapId, layerId, -1, level) as SpatialExtentBounds[]);
     readonly mapTreeView$: Observable<MapPanelTreeView> = combineLatest([
         // A catalog refresh replaces the tree after this panel may already be
         // open. Observe the replacement's completed option updates, rather than
@@ -711,6 +713,8 @@ export class MapPanelComponent {
             ids: this.viewSettings.viewIds,
             layerPresets: this.layerState.layerPresetSelectionState.appState.value,
             mapPresets: this.layerState.mapPresetSelectionState.appState.value,
+            levels: this.layerState.layerZoomLevelState.appState.value,
+            autoLevels: this.layerState.layerAutoZoomLevelState.appState.value,
             groupSources: this.layerState.groupLocalRemoteSources.value
         }), deepEquals),
         this.stylePresetProjectionChanges,
@@ -723,7 +727,8 @@ export class MapPanelComponent {
             size: mapTree.size,
             nodesByView: Array.from(
                 { length: numViews },
-                (_, viewIndex) => filterMapTreeNodes(mapTree.nodes, filterText, viewIndex, groupSources, this.originExpansion))
+                (_, viewIndex) => this.projectSpatialExtentNodes(
+                    filterMapTreeNodes(mapTree.nodes, filterText, viewIndex, groupSources, this.originExpansion), viewIndex))
         }))
     );
 
@@ -773,6 +778,11 @@ export class MapPanelComponent {
         public readonly inspectionState: InspectionPanelService,
         public readonly viewSettings: MapViewState) {
         this.keyboardService.registerShortcut('m', this.toggleLayerDialog.bind(this), true);
+
+        this.subscriptions.push(
+            this.mapService.dataSourceInfoChanged.subscribe(mapIds => this.spatialFocus.invalidateMaps(mapIds)),
+            this.viewSettings.viewIdsState.subscribe(viewIds => this.spatialFocus.retainViews(viewIds))
+        );
 
         this.subscriptions.push(
             // Replace metadata menus from the current catalog so removed maps disappear.
@@ -1089,38 +1099,62 @@ export class MapPanelComponent {
         this.setMapsPanelVisible(!this.layerDialogVisible);
     }
 
-    /**
-     * Moves the target view camera to the coverage bounds represented by one tree node.
-     * Fits nonempty coverage using individual tile boxes and each range's two endpoint boxes.
-     */
-    focus(event: Event, viewIndex: number, coverage: SpatialExtentBounds[]): void {
+    /** Publish scalar controls without geometry reads, including layers hidden by the tree filter. */
+    private projectSpatialExtentNodes(nodes: MapTreeViewNode[], viewIndex: number, mapId = ""): MapTreeViewNode[] {
+        for (const node of nodes) {
+            const owner = node.type === "Map" ? node.id : mapId;
+            if (node.type === "Map") {
+                node.hasIncompleteSpatialExtent = this.mapService.hasIncompleteSpatialExtent(owner);
+                const source = this.mapService.maps.maps.get(owner);
+                node.canFocus = !!source && Object.keys(source.info.layers).some(layerId =>
+                    this.focusLayerLevel(owner, layerId, viewIndex) !== null);
+            } else if (node.type === "Features") {
+                node.canFocus = this.focusLayerLevel(owner, node.id, viewIndex) !== null;
+            }
+            if (node.children) this.projectSpatialExtentNodes(node.children, viewIndex, owner);
+        }
+        return nodes;
+    }
+
+    /** Resolve an eligible layer using accepted scalar metadata and the current display level. */
+    private focusLayerLevel(mapId: string, layerId: string, viewIndex: number): number | null {
+        const layer = this.mapService.mapgetLayer(mapId, layerId);
+        if (!layer || layer.info.serviceMetadata || !this.mapService.spatialExtentSummary(mapId, layerId)?.hasBounds) return null;
+        const level = layer.partitionKind === "object" ? layer.tileAssociationLevel :
+            this.viewState.getEffectiveMapLayerLevel(viewIndex, mapId, layerId);
+        return level !== null && Number.isInteger(level) && level >= 0 && level <= 15 ? level : null;
+    }
+
+    /** Map focus includes hidden layers independently of overlay visibility. */
+    focusMap(event: Event, viewIndex: number, mapId: string): void {
+        this.focusSpatialExtent(event, viewIndex, mapId);
+    }
+
+    /** Read full region bounds only when the user activates this layer's Focus control. */
+    focusLayer(event: Event, viewIndex: number, mapId: string, layerId: string): void {
+        this.focusSpatialExtent(event, viewIndex, mapId, layerId);
+    }
+
+    /** Cache the final envelope by logical view, metadata generation and current layer levels. */
+    private focusSpatialExtent(event: Event, viewIndex: number, mapId: string, layerId?: string): void {
         event.stopPropagation();
-        const rectangle = spatialExtentEnvelope(coverage);
+        const source = this.mapService.maps.maps.get(mapId);
+        if (!source || !this.viewSettings.viewIds[viewIndex]) return;
+        const layers = (layerId === undefined ? Object.keys(source.info.layers) : [layerId]).flatMap(id => {
+            const level = this.focusLayerLevel(mapId, id, viewIndex);
+            return level === null ? [] : [{layerId: id, level}];
+        });
+        const rectangle = this.spatialFocus.rectangle({viewId: this.viewSettings.viewIdAt(viewIndex), mapId, layerId,
+            generation: this.mapService.mapMetadataGeneration(mapId), layers});
         if (!rectangle) return;
         this.viewSettings.focusedView = viewIndex;
         this.viewState.moveToRectangleTopic.next({targetView: viewIndex, rectangle});
     }
 
-    /** Complete native bounds retain every region, sparse grid and polygon outline. */
-    layerCoverage(mapId: string, layerId: string, viewIndex: number): SpatialExtentBounds[] {
-        const layer = this.mapService.mapgetLayer(mapId, layerId);
-        if (!layer || layer.info.serviceMetadata) return [];
-        const level = layer.partitionKind === "object" ? layer.tileAssociationLevel :
-            this.viewState.getEffectiveMapLayerLevel(viewIndex, mapId, layerId);
-        return level === null ? [] : this.mapService.tileLayerParser.coverageDisplayBounds(mapId, layerId, -1, level) as SpatialExtentBounds[];
-    }
-
-    /** Map focus includes hidden layers independently of overlay visibility. */
-    mapCoverage(mapId: string, viewIndex: number): SpatialExtentBounds[] {
-        const map = this.mapService.maps.maps.get(mapId);
-        return map ? Object.keys(map.info.layers).flatMap(layerId => this.layerCoverage(mapId, layerId, viewIndex)) : [];
-    }
-
-    /** Explain fail-open behavior without disabling preferences for future catalog updates. */
-    hasIncompleteSpatialExtent(mapId: string): boolean {
-        const map = this.mapService.maps.maps.get(mapId);
-        return !!map && Object.entries(map.info.layers).some(([layerId, info]) =>
-            !info.serviceMetadata && !this.mapService.spatialExtentInfo(mapId, layerId).complete);
+    /** Retire subscriptions and small focus results with the Maps panel. */
+    ngOnDestroy(): void {
+        this.subscriptions.forEach(subscription => subscription.unsubscribe());
+        this.spatialFocus.clear();
     }
 
     /** Writes the current background-layer selection and opacity for one view back into app state. */
