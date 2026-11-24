@@ -1,3 +1,4 @@
+import type {SpatialExtentSettings, SpatialExtentInfo, SpatialRequestContext, SpatialExtentPolicy} from "./spatial-extent.model";
 import type {InfoMessageRef} from "../diagnostics/info-message.model";
 import { type ConnectionRetryPolicy, connectionRetryPolicySchema } from "./connection-retry-policy.model";
 import { HttpClient, HttpErrorResponse } from "@angular/common/http";
@@ -181,6 +182,47 @@ export class MapDataService implements AppActionContributor {
             this.configureTreeParameters();
             this.layerStateChanged.next("external-state");
         });
+    }
+
+    /** Read one map's effective view preference without changing persisted state. */
+    spatialExtentSettings(viewIndex: number, mapId: string): SpatialExtentSettings {
+        return this.state.spatialExtentSettings(viewIndex, mapId);
+    }
+
+    /** Publish policy changes through the same reconciliation signal as layer settings. */
+    setSpatialExtentSettings(viewIndex: number, mapId: string, patch: Partial<SpatialExtentSettings>): void {
+        const before = this.spatialExtentSettings(viewIndex, mapId);
+        const after = {...before, ...patch};
+        this.state.setSpatialExtentSettings(viewIndex, mapId, after);
+        this.syncViewsIfEnabled(viewIndex);
+        this.layerStateChanged.next(before.limitToSpatialExtent !== after.limitToSpatialExtent ? "spatial-extent-policy" : "spatial-extent-display");
+    }
+
+    /** Capture all destination-map preferences for one asynchronous request owner. */
+    spatialRequestContext(viewIndex: number): SpatialRequestContext {
+        const maps: Record<string, boolean> = {};
+        for (const mapId of [...this.maps.maps.keys()].sort())
+            if (!this.spatialExtentSettings(viewIndex, mapId).limitToSpatialExtent) maps[mapId] = false;
+        const policy: SpatialExtentPolicy = {defaultLimit: true, maps};
+        return {viewId: this.viewSettings.viewIdAt(viewIndex), policy,
+            revision: JSON.stringify([policy, this.nextMetadataGeneration])};
+    }
+
+    /** Resolve a persisted owner through the same surviving-view fallback as panel state. */
+    spatialRequestContextForViewId(viewId?: string): SpatialRequestContext {
+        const index = viewId ? this.viewSettings.viewIds.indexOf(viewId) : -1;
+        return this.spatialRequestContext(index >= 0 ? index : this.viewSettings.focusedView);
+    }
+
+    /** Native metadata is the only authority for proven spatial exclusions. */
+    permitsSpatialTile(mapId: string, layerId: string, tileId: number, policy: SpatialExtentPolicy): boolean {
+        return !(policy.maps[mapId] ?? policy.defaultLimit) ||
+            this.tileLayerParser.permitsCoverageTile(mapId, layerId, tileId);
+    }
+
+    /** Share every original region's validated bounds with focus and overlay owners. */
+    spatialExtentInfo(mapId: string, layerId: string): SpatialExtentInfo {
+        return this.tileLayerParser.coverageInfo(mapId, layerId) as SpatialExtentInfo;
     }
 
     /** Returns the mutable map tree owned by the map info service. */
@@ -1245,17 +1287,19 @@ export class MapDataService implements AppActionContributor {
     }
 
     /** Returns every map that could expose source-data for a tile id at the matching level. */
-    findSourceDataMapsForTileId(tileId: number): Array<{ id: string, name: string }> {
+    findSourceDataMapsForTileId(tileId: number, viewId?: string): Array<{ id: string, name: string }> {
         const level = coreLib.getTileLevel(tileId);
+        const policy = this.spatialRequestContextForViewId(viewId).policy;
         const result: Array<{ id: string, name: string }> = [];
         for (const mapInfo of this.maps.maps.values()) {
             for (const layerInfo of mapInfo.layers.values()) {
-                if (layerInfo.type != "SourceData") {
+                if (layerInfo.type != "SourceData" || layerInfo.info.serviceMetadata) {
                     continue;
                 }
                 if (layerInfo.info.zoomLevels.length && !layerInfo.info.zoomLevels.includes(level)) {
                     continue;
                 }
+                if (!this.permitsSpatialTile(mapInfo.id, layerInfo.id, tileId, policy)) continue;
                 result.push({ id: mapInfo.id, name: mapInfo.id });
                 break;
             }

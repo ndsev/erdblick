@@ -1,3 +1,4 @@
+import {spatialPolicyHarness} from "../../support/spatial-policy";
 import {Subject} from "rxjs";
 import {
     describe,
@@ -19,6 +20,10 @@ describe("StyledMapgetLayer presentation refs", () => {
             "map", "layer", tilePartition(42), "map/layer/42", 1
         );
         layer.disposed = false;
+        layer.mapInfo = spatialPolicyHarness();
+        layer.identity = {viewIndex: 0};
+        layer.requestContext = spatialPolicyHarness().spatialRequestContext();
+        layer.mapgetLayer = {mapId: "map", layerId: "layer"};
         layer.coverage = {
             partitions: [tilePartition(41), tilePartition(42)]
         };
@@ -28,6 +33,7 @@ describe("StyledMapgetLayer presentation refs", () => {
             [partitionKey(second.partition), second]
         ]);
         layer.retiredTileStates = new Map();
+        layer.obsoleteTileStates = new Set();
         layer.tileStatePresentationRefs = new Map();
         layer.events = new Subject();
         layer.filterRef = {
@@ -54,6 +60,7 @@ describe("StyledMapgetLayer presentation refs", () => {
         const layer = Object.create(StyledMapgetLayer.prototype) as any;
         layer.disposed = false;
         layer.retiredTileStates = new Map();
+        layer.obsoleteTileStates = new Set();
         layer.tileStatePresentationRefs = new Map();
 
         const state = new FilterTileState(
@@ -76,6 +83,29 @@ describe("StyledMapgetLayer presentation refs", () => {
         layer.releaseTileState(state);
         expect(state.subsetBlob).toBeNull();
         expect(layer.retiredTileStates.size).toBe(0);
+    });
+
+    it("never restores an old-policy subset even while its presentation still pins it", () => {
+        const context = spatialPolicyHarness().spatialRequestContext();
+        const old = new FilterTileState("map", "layer", tilePartition(131073), "Features:map:layer:131073", 1);
+        old.subsetBlob = new Uint8Array([1]);
+        const layer = Object.assign(Object.create(StyledMapgetLayer.prototype), {
+            disposed: false, explicitRequestContext: true, requestContext: context,
+            mapInfo: spatialPolicyHarness(), mapgetLayer: {mapId: "map", layerId: "layer"},
+            filterPlan: {channels: []}, options: {}, events: new Subject(),
+            coverage: {partitions: [tilePartition(131073)]}, coverageVersionValue: 0,
+            tileStates: new Map([[old.partitionKey, old]]), retiredTileStates: new Map(),
+            obsoleteTileStates: new Set(), tileStatePresentationRefs: new Map(),
+            filterRef: {generation: 2, replace: vi.fn(), setCoverage: vi.fn(), isPending: () => true}
+        }) as StyledMapgetLayer;
+        layer.retainTileState(old);
+        layer.setSpatialRequestContext({...context, revision: "changed"});
+        layer.setPartitionCoverage([tilePartition(131073)]);
+        expect(layer.tileStates.get(old.partitionKey)).not.toBe(old);
+        expect(layer.tileStates.get(old.partitionKey)?.subsetBlob).toBeNull();
+        expect(old.subsetBlob).not.toBeNull();
+        layer.releaseTileState(old);
+        expect(old.subsetBlob).toBeNull();
     });
 
     it("gives overlapping presentations independently releasable attachment refs", () => {

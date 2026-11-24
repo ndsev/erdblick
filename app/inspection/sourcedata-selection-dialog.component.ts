@@ -96,6 +96,7 @@ export class SourceDataLayerSelectionDialogComponent {
     customTileId: string = "";
     customMapId: string = "";
     showCustomTileIdInput: boolean = false;
+    private requestViewId?: string;
 
     /**
      * Populate the picker from right-click tile candidates or an explicit tile/map
@@ -104,11 +105,13 @@ export class SourceDataLayerSelectionDialogComponent {
     constructor(private mapService: MapDataService,
         public menuService: RightClickMenuService) {
         this.menuService.tileIdsForSourceData.subscribe(data => {
+            this.requestViewId = this.menuService.sourceDataRequestViewId;
             this.tileIds = data;
             this.loading = !data.length;
             this.load();
         });
         this.menuService.customTileAndMapId.subscribe(([tileId, mapId]: [string, string]) => {
+            this.requestViewId = this.menuService.sourceDataRequestViewId;
             this.load(tileId, mapId);
             this.dialogVisible = true;
         });
@@ -151,7 +154,7 @@ export class SourceDataLayerSelectionDialogComponent {
         // Fill map IDs per tile ID.
         for (let i = 0; i < this.tileIds.length; i++) {
             const id = Number(this.tileIds[i].id);
-            const maps = this.mapService.findSourceDataMapsForTileId(id);
+            const maps = this.mapService.findSourceDataMapsForTileId(id, this.requestViewId);
             this.tileIds[i]["disabled"] = !maps.length;
             this.mapIdsPerTileId.set(id, maps);
         }
@@ -178,7 +181,7 @@ export class SourceDataLayerSelectionDialogComponent {
             this.menuService.tileOutline.next(null);
             return;
         }
-        const maps = this.mapService.findSourceDataMapsForTileId(tileId);
+        const maps = this.mapService.findSourceDataMapsForTileId(tileId, this.requestViewId);
         this.mapIdsPerTileId.set(tileId, maps);
         this.setCurrentTileId({ id: tileId, name: tileIdString });
     }
@@ -214,7 +217,9 @@ export class SourceDataLayerSelectionDialogComponent {
             this.mapIds = mapIds.sort((a, b) => a.name.localeCompare(b.name));
             for (let i = 0; i < this.mapIds.length; i++) {
                 const id = this.mapIds[i].id as string;
-                const layers = this.mapService.findLayersForMapId(id);
+                const policy = this.mapService.spatialRequestContextForViewId(this.requestViewId).policy;
+                const layers = this.mapService.findLayersForMapId(id).filter(layer =>
+                    this.mapService.permitsSpatialTile(id, layer.id, Number(tileId.id), policy));
                 this.mapIds[i]["disabled"] = !layers.length;
                 this.sourceDataLayersPerMapId.set(id, layers);
             }
@@ -240,11 +245,11 @@ export class SourceDataLayerSelectionDialogComponent {
             this.selectedSourceDataLayer === undefined) {
             return;
         }
-        this.menuService.lastInspectedTileSourceDataOption.next({
+        this.menuService.inspectTileSourceData({
             tileId: Number(this.selectedTileId.id),
             mapId: String(this.selectedMapId.id),
             layerId: String(this.selectedSourceDataLayer.id)
-        });
+        }, this.requestViewId);
         this.close();
     }
 

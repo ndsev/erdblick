@@ -85,6 +85,7 @@ describe("URL state v2 codec", () => {
         const panels = [
             {
                 id: 0,
+                requestViewId: "view A",
                 features: [{
                     mapTileKey: "Features:MapA:Lane:606830446",
                     featureId: "Lane.545379780.24:attribute#1,validity#0",
@@ -96,6 +97,7 @@ describe("URL state v2 codec", () => {
             },
             {
                 id: 3,
+                requestViewId: "view B",
                 features: [],
                 sourceData: {
                     mapTileKey: "SourceData:MapB:SourceData-LaneGeometryLayer-1:606830446",
@@ -124,6 +126,7 @@ describe("URL state v2 codec", () => {
         expect(decoded).toEqual([
             {
                 id: 0,
+                requestViewId: "view A",
                 features: [{
                     mapTileKey: "Features:MapA:Lane:606830446",
                     featureId: "Lane.545379780.24:attribute#1,validity#0",
@@ -135,6 +138,7 @@ describe("URL state v2 codec", () => {
             },
             {
                 id: 3,
+                requestViewId: "view B",
                 features: [],
                 sourceData: {
                     mapTileKey: "SourceData:MapB:SourceData-LaneGeometryLayer-1:606830446",

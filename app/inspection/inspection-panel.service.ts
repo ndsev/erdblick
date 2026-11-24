@@ -81,11 +81,12 @@ export class InspectionPanelService implements AppActionContributor {
         newSelection: TileFeatureId[] | SelectedSourceData,
         id?: number,
         forceNewPanel = false,
-        createUndockedFeaturePanel = false
+        createUndockedFeaturePanel = false,
+        requestViewId?: string
     ): number | undefined {
         let panelId: number | undefined;
         this.persistence.transaction(() => {
-            panelId = this.updateSelection(newSelection, id, forceNewPanel, createUndockedFeaturePanel);
+            panelId = this.updateSelection(newSelection, id, forceNewPanel, createUndockedFeaturePanel, requestViewId);
         });
         return panelId;
     }
@@ -95,11 +96,13 @@ export class InspectionPanelService implements AppActionContributor {
         newSelection: TileFeatureId[] | SelectedSourceData,
         id: number | undefined,
         forceNewPanel: boolean,
-        createUndockedFeaturePanel: boolean
+        createUndockedFeaturePanel: boolean,
+        requestViewId?: string
     ): number | undefined {
         this.persistence.requestHistoryEntry();
         let allPanels = structuredClone(this.state.selectionState.getValue());
         const originPanel = id !== undefined ? allPanels.find((panel) => panel.id === id) : undefined;
+        requestViewId ??= originPanel?.requestViewId ?? this.state.viewSettings.viewIdAt(this.state.viewSettings.focusedView);
         const sourceDataSelection = !Array.isArray(newSelection)
             ? (newSelection as SelectedSourceData)
             : undefined;
@@ -107,7 +110,7 @@ export class InspectionPanelService implements AppActionContributor {
         let featureSelection = Array.isArray(newSelection) ? (newSelection as TileFeatureId[]) : [];
         const duplicateFeaturePanelId =
             !isSourceDataSelection && featureSelection.length
-                ? this.findPanelIdContainingFeatureSelection(allPanels, featureSelection)
+                ? this.findPanelIdContainingFeatureSelection(allPanels.filter(panel => panel.requestViewId === requestViewId), featureSelection)
                 : undefined;
         if (
             !isSourceDataSelection &&
@@ -132,7 +135,7 @@ export class InspectionPanelService implements AppActionContributor {
                 (feature) =>
                     !allPanels.some(
                         (panel) =>
-                            isFeaturePanel(panel) &&
+                            isFeaturePanel(panel) && panel.requestViewId === requestViewId &&
                             panel.features.some(
                                 (otherFeature) =>
                                     feature.featureId === otherFeature.featureId &&
@@ -248,6 +251,7 @@ export class InspectionPanelService implements AppActionContributor {
             const newPanelUndocked = isSourceDataSelection || createUndockedFeaturePanel;
             allPanels.push({
                 id: newId,
+                requestViewId,
                 features: isSourceDataSelection ? [] : featureSelection,
                 sourceData: sourceDataSelection,
                 locked: false,
@@ -271,6 +275,7 @@ export class InspectionPanelService implements AppActionContributor {
                 this.persistence.replaceHistoryEntry();
                 return;
             }
+            allPanels[panelIndex].requestViewId = requestViewId;
             if (sourceDataSelection !== undefined) {
                 allPanels[panelIndex].features = [];
                 allPanels[panelIndex].sourceData = sourceDataSelection;

@@ -11,6 +11,7 @@ import {
     StyledMapgetLayerEvent
 } from "./styled-mapget-layer.model";
 import {Subject} from "rxjs";
+import type {SpatialRequestContext} from "./spatial-extent.model";
 import type {
     FeatureLayerStyle,
     HighlightMode
@@ -37,6 +38,7 @@ import {
 } from "./filter-tile-state.model";
 import type { MapTileStreamFilterStatusPayload } from "./map-tile-stream.protocol";
 import {
+    parsePartition,
     partitionKey,
     partitionKeySuffix,
     tilePartition,
@@ -58,11 +60,14 @@ export class StyledMapgetLayer {
     readonly filterRef: FilterSubscriptionRef;
     latestStatus: MapTileStreamFilterStatusPayload | null = null;
     styleOrder = 0;
+    private requestContext: SpatialRequestContext;
+    private readonly explicitRequestContext: boolean;
     private coverage: FilterSubscriptionCoverage = {partitions: []};
     private coverageVersionValue = 0;
     private disposed = false;
     private options: Record<string, boolean | number | string>;
     private readonly retiredTileStates = new Map<string, FilterTileState>();
+    private readonly obsoleteTileStates = new Set<FilterTileState>();
     private readonly tileStatePresentationRefs =
         new Map<FilterTileState, number>();
 
@@ -76,8 +81,11 @@ export class StyledMapgetLayer {
         private readonly tileStream: MapTileStreamService,
         readonly highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
         readonly plannedLod: number = MAX_STYLE_LOD,
-        filterPlan?: StyleFilterPlan
+        filterPlan?: StyleFilterPlan,
+        requestContext?: SpatialRequestContext
     ) {
+        this.explicitRequestContext = !!requestContext;
+        this.requestContext = requestContext ?? mapInfo.spatialRequestContext(identity.viewIndex);
         this.ownerId = [
             identity.viewIndex,
             identity.mapId,
@@ -160,18 +168,25 @@ export class StyledMapgetLayer {
     setPartitionCoverage(
         partitions: readonly PartitionId[],
         priorityPartitions: readonly PartitionId[] = [],
-        roots: FilterSubscriptionCoverage["roots"] = undefined
+        roots: FilterSubscriptionCoverage["roots"] = undefined,
+        drawingViewport?: FilterSubscriptionCoverage['drawingViewport']
     ): void {
         this.assertLive();
-        const orderedPartitions = partitions.map(partition => ({...partition}));
+        if (!this.explicitRequestContext)
+            this.setSpatialRequestContext(this.mapInfo.spatialRequestContext(this.identity.viewIndex));
+        const orderedPartitions = partitions.filter(partition => partition.kind !== "tile" ||
+            this.mapInfo.permitsSpatialTile(this.mapgetLayer.mapId, this.mapgetLayer.layerId, partition.id,
+                this.requestContext.policy)).map(partition => ({...partition}));
+        const admitted = new Set(orderedPartitions.map(partitionKey));
         const nextCoverage: FilterSubscriptionCoverage = {
+            ...(drawingViewport && this.mapgetLayer.origin === 'virtual' ? {drawingViewport} : {}),
             partitions: orderedPartitions,
             ...(priorityPartitions.length ? {
-                priorityPartitions: priorityPartitions.map(partition => ({
+                priorityPartitions: priorityPartitions.filter(partition => admitted.has(partitionKey(partition))).map(partition => ({
                     ...partition
                 }))
             } : {}),
-            ...(roots?.length ? {roots: structuredClone(roots)} : {})
+            ...(roots?.length ? {roots: structuredClone(roots.filter(root => admitted.has(partitionKey(root.partition))))} : {})
         };
         if (filterSubscriptionCoverageEqual(
             nextCoverage,
@@ -242,6 +257,24 @@ export class StyledMapgetLayer {
         }
     }
 
+    /** Retire policy-dependent values immediately, preserving raw shared tile identities. */
+    setSpatialRequestContext(context: SpatialRequestContext): void {
+        if (this.requestContext.revision === context.revision) return;
+        this.requestContext = context;
+        const removed = [...this.tileStates.values()];
+        for (const state of [...removed, ...this.retiredTileStates.values()]) this.obsoleteTileStates.add(state);
+        this.tileStates.clear();
+        this.retiredTileStates.clear();
+        if (removed.length) this.events.next({type: "tiles-removed", states: removed});
+        this.disposeRetiredTileStates();
+        this.coverage = {partitions: []};
+        this.filterRef.replace(this.filterDefinition(), this.coverage);
+        this.events.next({type: "generation", generation: this.generation});
+    }
+
+    /** Identify derived values that must not survive a spatial policy or catalog change. */
+    get spatialRequestRevision(): string { return this.requestContext.revision; }
+
     /** Restart filtering only when resolved style bindings materially change. */
     setOptions(options: Record<string, boolean | number | string>): void {
         this.assertLive();
@@ -291,7 +324,8 @@ export class StyledMapgetLayer {
             layerId: this.mapgetLayer.layerId,
             partition: state.partition,
             name,
-            incarnation: state.valueVersion
+            incarnation: state.valueVersion,
+            context: this.requestContext
         });
     }
 
@@ -313,6 +347,7 @@ export class StyledMapgetLayer {
         const count = this.tileStatePresentationRefs.get(state) ?? 0;
         if (count <= 1) {
             this.tileStatePresentationRefs.delete(state);
+            if (this.obsoleteTileStates.delete(state)) state.dispose();
             if (this.retiredTileStates.get(state.partitionKey) === state) {
                 this.retiredTileStates.delete(state.partitionKey);
                 state.dispose();
@@ -341,6 +376,8 @@ export class StyledMapgetLayer {
             state.dispose();
         }
         this.retiredTileStates.clear();
+        for (const state of this.obsoleteTileStates) state.dispose();
+        this.obsoleteTileStates.clear();
         this.tileStatePresentationRefs.clear();
         this.events.complete();
     }
@@ -369,6 +406,7 @@ export class StyledMapgetLayer {
                 ? {sourceId: this.mapgetLayer.sourceId}
                 : {}),
             channels: this.filterPlan.channels,
+            spatialExtentPolicy: this.requestContext.policy,
             bindings: {...this.options}
         };
     }
@@ -423,6 +461,11 @@ export class StyledMapgetLayer {
     /** Forward backend completion and convert status errors into tile failures. */
     private acceptStatus(status: MapTileStreamFilterStatusPayload): void {
         this.latestStatus = status;
+        for (const value of status.excludedPartitions ?? []) {
+            const partition = parsePartition(value);
+            const state = this.tileStates.get(partitionKey(partition));
+            if (state) state.fail(this.generation, "Outside spatial extent");
+        }
         this.events.next({type: "status", status});
         if (status.error) {
             this.acceptError(status.error);
@@ -439,6 +482,11 @@ export class StyledMapgetLayer {
 
     /** Releases values removed from presentation coverage once transport state agrees. */
     private disposeRetiredTileStates(): void {
+        for (const state of this.obsoleteTileStates) {
+            if (this.tileStatePresentationRefs.has(state)) continue;
+            state.dispose();
+            this.obsoleteTileStates.delete(state);
+        }
         for (const [key, state] of [...this.retiredTileStates]) {
             if (this.tileStatePresentationRefs.has(state)) {
                 continue;

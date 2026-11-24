@@ -445,3 +445,30 @@ style target migrate once. No draft source is serialized in `editorDocuments`.
 `LayoutService` tracks live per-tab counts so stale layout records cannot keep an
 empty dock open. Read-only changes reconfigure CodeMirror without recreating its
 history. Completion owners include the editor identity as well as the YAML path.
+
+### Spatial request ownership
+
+`viewer_inspect` and `viewer_open_source_data` accept an optional `viewId`. Without
+one they capture the focused view; an existing target panel keeps its owner.
+A conflicting explicit owner is rejected. Spatial requests use that view's map
+extent preferences, including related feature resolution and later renewal.
+
+### Drawing documents and view scale
+
+`DrawingDocumentsService` contributes `viewer_drawing_list`, `objects`, `branch`, `read`,
+`edit`, `workspace`, `history` and `transfer` (each with the `viewer_drawing_`
+prefix). `DrawingToolsService` contributes `viewer_drawing_tool` and
+`viewer_drawing_presentation`. Browser, relay and document adapters dispatch the
+same domain handlers. Registration is side-effect free; headless catalog creation
+supplies `EditorService` without starting a drawing worker. Reads and transfers
+are bounded; native revisions gate edits. Workspace commands capture workspace
+identity, membership and accepted/raw member revisions. Native prepare/commit
+keeps cancelled or stale edits unpublished. Transfers use UTF-8 byte budgets and
+Unicode-safe UTF-16 offsets; branch leaves retain exact numeric text. See
+[drawing actions](erdblick-drawing.md#actions-and-integration).
+
+`view.mapScale` is a per-view boolean control, persisted in local state and URL
+`scale`, with no cross-view synchronization. Drawing toolbar placement and tray
+size are local-only. `EditorService` retains CodeMirror state/history for drawing
+sessions even before an Editor view mounts; attaching/detaching the view preserves
+that same history.

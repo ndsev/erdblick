@@ -66,6 +66,19 @@ function acceptedInstall(valueVersion = 1) {
 describe("FilterSubscriptionRef", () => {
     afterEach(() => vi.restoreAllMocks());
 
+    it("refreshes viewport-dependent local decorations without changing object coverage", () => {
+        const owner={updateFilterSubscription:vi.fn(),releaseFilterSubscription:vi.fn()};
+        const partitions=[objectPartition('0')];
+        const drawingViewport={west:0,south:0,width:1,height:1,metersPerPixel:10};
+        const ref=new FilterSubscriptionRef(owner,'local',definition(),{partitions,drawingViewport},{onTile:acceptedInstall()});
+        ref.setCoverage({partitions,drawingViewport:{...drawingViewport}});
+        expect(ref.generation).toBe(1);expect(owner.updateFilterSubscription).not.toHaveBeenCalled();
+        ref.setCoverage({partitions,drawingViewport:{...drawingViewport,west:40,metersPerPixel:1}});
+        expect(ref.generation).toBe(2);
+        expect(ref.requestJson()).toMatchObject({partitions,drawingViewport:{west:40,metersPerPixel:1}});
+        expect(owner.updateFilterSubscription).toHaveBeenCalledWith(ref,true);
+    });
+
     it("projects only pending outputs while keeping priorities and roots aligned", () => {
         const updateFilterSubscription = vi.fn();
         const onTile = acceptedInstall();
@@ -473,5 +486,20 @@ describe("FilterSubscriptionRef", () => {
                 "Features:Map:Layer:object/18446744073709551615"
         })).toBe("accepted");
         expect(ref.pendingPartitionCount).toBe(0);
+    });
+});
+
+describe("spatial exclusion status", () => {
+    it("settles exclusions without a payload or TTL and ignores predecessor generations", () => {
+        const cancelFilterPartitionExpiries = vi.fn();
+        const ref = new FilterSubscriptionRef({updateFilterSubscription: vi.fn(), releaseFilterSubscription: vi.fn(),
+            cancelFilterPartitionExpiries}, "extent", {...definition(), spatialExtentPolicy: {defaultLimit: true, maps: {}}},
+            {partitions: [tile(1), tile(2)]}, {onTile: acceptedInstall()});
+        ref.acceptStatus({type:"mapget.filter.status",mapId:"Map",layerId:"Layer",filterId:"extent",generation:0,state:"Success",excludedPartitions:[{kind:"tile",id:1}]});
+        expect(ref.isPending(tile(1))).toBe(true);
+        ref.acceptStatus({type:"mapget.filter.status",mapId:"Map",layerId:"Layer",filterId:"extent",generation:1,state:"Success",excludedPartitions:[{kind:"tile",id:1}]});
+        expect(ref.isPending(tile(1))).toBe(false); expect(ref.isPending(tile(2))).toBe(true);
+        expect(cancelFilterPartitionExpiries).toHaveBeenCalled();
+        ref.release();
     });
 });

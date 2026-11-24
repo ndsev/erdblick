@@ -1,3 +1,5 @@
+import type {SpatialRequestContext} from "../mapdata/spatial-extent.model";
+import type {Viewport} from "../../build/libs/core/erdblick-core";
 import type {SearchPreparation, SearchInterpretation} from "./search-preparation.model";
 import {combinePreparedSearchAutoStyles, preparedSearchAutoStyleRules} from "./feature-search-auto-style.util";
 import { Injectable } from "@angular/core";
@@ -201,13 +203,14 @@ export class SearchService implements AppActionContributor {
         this.viewState.viewStateChanged.subscribe(() => {
             this.searchRenderDecisionCache.clear();
             for (const session of this.searchSessions) {
-                if (session.definition.autoUpdate) {
+                if (session.definition.autoUpdate && !session.definition.paused) {
                     this.pendingCoverageRefreshIds.add(session.id);
                 }
             }
             this.scheduleSearchPresentationReconcile();
         });
         this.mapInfo.layerStateChanged.subscribe((reason) => {
+            if (reason !== "spatial-extent-display") this.scheduleSearchPresentationReconcile();
             if (reason === "datasources" && this.stateService.ready.getValue()) {
                 if (this.invalidateChangedSchemaAnalysis()) {
                     this.reconcilePersistedFeatureSearchState(this.state.featureSearches);
@@ -412,7 +415,7 @@ export class SearchService implements AppActionContributor {
     }
 
     /** Returns map-overlay search descriptors without materializing every per-result point. */
-    getSearchResultOverlayLayers(): FeatureSearchOverlayLayer[] {
+    getSearchResultOverlayLayers(viewIndex?: number): FeatureSearchOverlayLayer[] {
         return this.searchSessions
             .filter(session => session.definition.showResultsOnMap)
             .map(session => ({
@@ -423,10 +426,20 @@ export class SearchService implements AppActionContributor {
                 selectedViewIndices: [...session.definition.selectedViewIndices],
                 renderStrategy: session.definition.renderStrategy,
                 styleRuleCount: session.definition.searchStyleRules.length,
-                pointBuckets: session.results.getSessionSearchResultPointBuckets(),
+                pointBuckets: session.results.getSessionSearchResultPointBuckets().filter(bucket =>
+                    viewIndex === undefined || this.sourceContributionInView(bucket.sourceTileKey, viewIndex)),
                 densityIndex: session.results.searchResultDensityIndex
             }))
             .filter(layer => layer.pointBuckets.length > 0);
+    }
+
+    /** Route point and density ownership through the same policy group as detailed subsets. */
+    private sourceContributionInView(sourceTileKey: string, viewIndex: number): boolean {
+        for (const presentation of this.searchPresentations.values()) {
+            if (sourceTileKey.startsWith(presentation.key + "\n"))
+                return presentation.viewIds.includes(this.viewSettings.viewIdAt(viewIndex));
+        }
+        return false;
     }
 
     /** Reconciles persisted feature-search definitions with runtime sessions. */
@@ -1243,6 +1256,12 @@ export class SearchService implements AppActionContributor {
     } = {}): void {
         const forceGenerationIds = new Set(options.forceGenerationIds ?? []);
         const updateCoverageIds = new Set(options.updateCoverageIds ?? []);
+        // Only an explicit area refresh replaces a frozen geographic scope.
+        for (const key of this.spatialSearchScopes.keys()) {
+            const [sessionId, viewId] = JSON.parse(key) as string[];
+            if (updateCoverageIds.has(sessionId) || !this.getInternalSession(sessionId) ||
+                !this.viewSettings.viewIds.includes(viewId)) this.spatialSearchScopes.delete(key);
+        }
         for (const id of this.pendingForcedGenerationIds) {
             forceGenerationIds.add(id);
         }
@@ -1280,7 +1299,8 @@ export class SearchService implements AppActionContributor {
             if (!session ||
                 !session.definition.enabled ||
                 !session.definition.showResultsOnMap ||
-                !session.definition.selectedViewIndices.includes(viewIndex)) {
+                !session.definition.selectedViewIndices.includes(viewIndex) ||
+                !presentation.viewIds.includes(this.viewSettings.viewIdAt(viewIndex))) {
                 continue;
             }
             result.push(presentation.styledLayer);
@@ -1314,6 +1334,7 @@ export class SearchService implements AppActionContributor {
             !session.definition.enabled ||
             !session.definition.showResultsOnMap ||
             !session.definition.selectedViewIndices.includes(viewIndex) ||
+            !presentation?.viewIds.includes(this.viewSettings.viewIdAt(viewIndex)) ||
             !session.definition.renderStrategy.showHighFiGeometry ||
             session.definition.searchStyleRules.length === 0) {
             this.searchRenderDecisionCache.set(cacheKey, false);
@@ -1364,7 +1385,19 @@ export class SearchService implements AppActionContributor {
                 : branch.featureTypes,
             resultFields: featureSearchResultFields(definition, branch.scope)
         })) ?? [definition]);
-        for (const definition of prepared) {
+        const scoped = prepared.flatMap(definition => {
+            const groups = new Map<string, {context: SpatialRequestContext; views: number[]}>();
+            for (const viewIndex of definition.selectedViewIndices) {
+                const context = this.mapInfo.spatialRequestContext(viewIndex);
+                const key = JSON.stringify(context.policy);
+                const group = groups.get(key) ?? {context, views: []};
+                group.views.push(viewIndex);
+                groups.set(key, group);
+            }
+            return [...groups].map(([policyKey, group]) => ({...definition, selectedViewIndices: group.views,
+                policyKey, requestContext: group.context}));
+        });
+        for (const definition of scoped) {
             for (const ref of definition.selectedMapLayers) {
                 const mapgetLayer = this.mapInfo.mapgetLayer(ref.mapId, ref.layerId);
                 if (!mapgetLayer) {
@@ -1377,9 +1410,11 @@ export class SearchService implements AppActionContributor {
                 if (featureTypes === null) {
                     continue;
                 }
-                const key = this.searchPresentationKey(definition.id, mapgetLayer) + "\n" + (definition.branchKey ?? "");
+                const key = this.searchPresentationKey(definition.id, mapgetLayer) + "\n" + (definition.branchKey ?? "") + "\n" + definition.policyKey;
                 desiredKeys.add(key);
                 const definitionSignature = JSON.stringify({
+                    spatialRevision: definition.requestContext.revision,
+                    viewIds: definition.selectedViewIndices.map(index => this.viewSettings.viewIdAt(index)),
                     query: definition.backendQuery,
                     scope: definition.concreteScope,
                     featureTypes,
@@ -1397,7 +1432,7 @@ export class SearchService implements AppActionContributor {
                             definition,
                             mapgetLayer,
                             featureTypes,
-                            definitionSignature
+                            definitionSignature, definition.requestContext
                         );
                     } catch (error) {
                         const session = this.getInternalSession(definition.id);
@@ -1418,10 +1453,12 @@ export class SearchService implements AppActionContributor {
                     presentation.styledLayer.refresh();
                 }
 
-                presentation.styledLayer.setSuspended(definition.paused);
+                const resuming = presentation.styledLayer.filterRef.suspended && !definition.paused;
+                presentation.setSuspended(definition.paused);
                 const shouldUpdateCoverage =
                     !presentation.coverage ||
-                    definition.autoUpdate ||
+                    resuming ||
+                    (definition.autoUpdate && !definition.paused) ||
                     updateCoverageIds.has(definition.id);
                 if (shouldUpdateCoverage) {
                     if (presentation.setCoverage(this.searchCoverageRequest(definition, presentation))) {
@@ -1445,10 +1482,11 @@ export class SearchService implements AppActionContributor {
     /** Creates one resource owner and routes its events into the current search run. */
     private createSearchPresentation(
         key: string, definition: FeatureSearchResolvedDefinition, mapgetLayer: MapgetLayer,
-        featureTypes: string[], definitionSignature: string
+        featureTypes: string[], definitionSignature: string, requestContext: SpatialRequestContext
     ): SearchPresentation {
         const presentation = new SearchPresentation({
-            key, definition, mapgetLayer, featureTypes, definitionSignature,
+            key, definition, mapgetLayer, featureTypes, definitionSignature, requestContext,
+            viewIds: definition.selectedViewIndices.map(index => this.viewSettings.viewIdAt(index)),
             instanceId: `${definition.id}:${++this.searchPresentationRevision}`
         }, this.mapInfo, this.tileStream,
             (owner, event) => this.handleSearchStyledLayerEvent(owner, event),
@@ -1494,42 +1532,40 @@ export class SearchService implements AppActionContributor {
         }
     }
 
-    /** Stable union of selected-view coverage; request order remains significant. */
+    /** Captured geographic scopes are independent of policy-group subscription lifetimes. */
+    private readonly spatialSearchScopes = new Map<string, {viewport: Viewport; levels: number[]}>();
+
+    /** Reapply each owner's policy to its captured area before unioning eligible roots. */
     private searchCoverageRequest(
         definition: FeatureSearchResolvedDefinition,
         presentation: SearchPresentation
     ): SearchCoverageRequest {
         const layer = presentation.mapgetLayer;
-        if (layer.partitionKind === "object") {
-            const level = layer.tileAssociationLevel;
-            const discoveryTileIds = level === null ? [] : [...new Set(definition.selectedViewIndices.flatMap(
-                viewIndex => this.viewState.visibleSearchTileIdsForLevel(viewIndex, level)))];
-            return {kind: "object", discoveryTileIds};
-        }
-        const tileIds: number[] = [];
-        const seen = new Set<number>();
-        for (const viewIndex of definition.selectedViewIndices) {
-            const levels = definition.selectedTileLevels.length
-                ? definition.selectedTileLevels
-                : [this.viewState.autoSearchTileLevel(
-                    viewIndex,
-                    layer.mapId,
-                    layer.layerId
-                )].filter((level): level is number => level !== null);
-            for (const level of levels) {
-                for (const tileId of this.viewState.visibleSearchTileIdsForLevel(
-                    viewIndex,
-                    level
-                )) {
-                    if (seen.has(tileId)) {
-                        continue;
-                    }
-                    seen.add(tileId);
-                    tileIds.push(tileId);
-                }
+        const tileIds = new Set<number>();
+        for (const viewId of presentation.viewIds) {
+            const viewIndex = this.viewSettings.viewIds.indexOf(viewId);
+            const view = this.viewState.viewVisualizationState[viewIndex];
+            if (!view) continue;
+            const key = JSON.stringify([definition.id, viewId, layer.mapId, layer.layerId]);
+            let scope = this.spatialSearchScopes.get(key);
+            if (!scope || (definition.autoUpdate && !definition.paused)) {
+                const levels = layer.partitionKind === "object" ?
+                    (layer.tileAssociationLevel === null ? [] : [layer.tileAssociationLevel]) :
+                    definition.selectedTileLevels.length ? definition.selectedTileLevels :
+                    [this.viewState.autoSearchTileLevel(viewIndex, layer.mapId, layer.layerId)]
+                        .filter((level): level is number => level !== null);
+                scope = {viewport: {...view.viewport}, levels: [...levels]};
+                this.spatialSearchScopes.set(key, scope);
+            }
+            for (const level of scope.levels) {
+                const policy = presentation.requestContext.policy;
+                const selected = this.mapInfo.tileLayerParser.selectCoverageTileIds(layer.mapId, layer.layerId,
+                    scope.viewport, level, 1 << 20, policy.maps[layer.mapId] ?? policy.defaultLimit) as number[];
+                for (const tile of selected) tileIds.add(tile);
             }
         }
-        return {kind: "tile", tileIds};
+        return layer.partitionKind === "object" ? {kind: "object", discoveryTileIds: [...tileIds]} :
+            {kind: "tile", tileIds: [...tileIds]};
     }
     private searchPresentationKey(searchId: string, layer: MapgetLayer): string {
         return `${searchId}\n${layer.mapId}\n${layer.layerId}`;
@@ -1597,6 +1633,8 @@ export class SearchService implements AppActionContributor {
 
     /** Clears one session and installs a fresh search group for the supplied query. */
     private resetSessionSearch(session: RuntimeSearchSession, definition: FeatureSearchStateEntry): void {
+        for (const key of this.spatialSearchScopes.keys())
+            if ((JSON.parse(key) as string[])[0] === session.id) this.spatialSearchScopes.delete(key);
         session.definition = definition;
         session.schemaAnalysis = this.initialSchemaAnalysis(definition);
         session.preparation = undefined;
@@ -2387,10 +2425,8 @@ export class SearchService implements AppActionContributor {
             session.paused ||
             (progressEntries.length > 0 &&
                 progressEntries.every(item => item.terminal));
-        session.results.totalFeatureCount = progressEntries.reduce(
-            (sum, item) => sum + item.matches,
-            0
-        );
+        // Global rows may be shared by presentations with different view policies.
+        session.results.totalFeatureCount = session.results.searchResults.length;
         this.updateSearchResultIngressProgress(session);
         const becameComplete = this.updateSessionCompletion(session);
         if (becameComplete) {

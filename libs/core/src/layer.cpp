@@ -1117,6 +1117,30 @@ NativeJsValue TileSubsetLayer::valueSummaries(
     });
 }
 
+std::string TileSubsetLayer::snapGeometry(uint32_t channelOrdinal, uint32_t entryOrdinal) const
+{
+    nlohmann::json result = nlohmann::json::array();
+    auto channel = model_->at(channelOrdinal);
+    if (!channel || channel->scope() != mapget::Scope::Feature) return result.dump();
+    uint32_t index = 0; size_t count = 0;
+    channel->forEachFeatureEntry([&](auto const& entry) {
+        if (index++ != entryOrdinal) return true;
+        auto collection = entry->geometry();
+        if (collection) collection->forEachGeometry([&](auto const& geometry) {
+            auto kind = geometry->geomType();
+            if (kind != mapget::GeomType::Points && kind != mapget::GeomType::Line && kind != mapget::GeomType::Polygon) return true;
+            count += geometry->numPoints();
+            if (count > 20000) { result = nullptr; return false; }
+            nlohmann::json points = nlohmann::json::array();
+            geometry->forEachPoint([&](auto const& p) { points.push_back({p.x,p.y,p.z}); return true; });
+            result.push_back({{"points", points}, {"line", kind != mapget::GeomType::Points}, {"closed", kind == mapget::GeomType::Polygon}});
+            return true;
+        });
+        return false;
+    });
+    return result.dump();
+}
+
 NativeJsValue TileSubsetLayer::resolvePick(
     uint32_t channelOrdinal,
     uint32_t entryOrdinal,

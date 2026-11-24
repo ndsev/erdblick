@@ -1,3 +1,4 @@
+import {spatialPolicyHarness} from "../../support/spatial-policy";
 import "@angular/compiler";
 import {
     beforeAll,
@@ -53,7 +54,7 @@ class ConfigServiceStub {
 }
 
 const createService = (config: any = {}, initialize = true) => {
-    const mapService = new MapInfoServiceStub();
+    const mapService = Object.assign(new MapInfoServiceStub(), spatialPolicyHarness());
     const inspectionSelection = new InspectionSelectionServiceStub();
     const infoService = new InfoMessageServiceStub();
     const menuService = new RightClickMenuServiceStub();
@@ -84,7 +85,7 @@ describe('JumpTargetService', () => {
         const targets = [{mapTileKey: "remote-partition", featureId: "Road.9007199254740993"}];
         h.tileStream.locateFeatureReference.mockResolvedValue(targets);
         await h.service.highlightFeatureReference(reference);
-        expect(h.stateService.setSelection).toHaveBeenCalledWith(targets);
+        expect(h.stateService.setSelection).toHaveBeenCalledWith(targets, undefined, false, false, "0");
         h.stateService.setSelection.mockClear();
         let finish!: (value: typeof targets) => void;
         h.tileStream.locateFeatureReference.mockReturnValue(new Promise(resolve => { finish = resolve; }));
@@ -375,6 +376,7 @@ describe('JumpTargetService', () => {
             actions[1],
             'm1',
             coreLib.HighlightMode.SELECTION_HIGHLIGHT,
+            undefined,
             undefined,
         );
     });

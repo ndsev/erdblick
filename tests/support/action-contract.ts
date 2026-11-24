@@ -5,6 +5,7 @@
  * this fixture contains no independent list of actions or controls.
  */
 import "@angular/compiler";
+import {EditorService} from "../../app/editor/editor.service";
 import { APP_BASE_HREF } from "@angular/common";
 import { provideHttpClient } from "@angular/common/http";
 import { provideZonelessChangeDetection } from "@angular/core";
@@ -32,7 +33,7 @@ let catalog: ReturnType<AppActionRegistry["catalog"]>;
 
 beforeAll(async () => {
     const application = await createApplication({ providers: [
-        provideZonelessChangeDetection(), provideHttpClient(), provideRouter([]),
+        EditorService, provideZonelessChangeDetection(), provideHttpClient(), provideRouter([]),
         { provide: APP_BASE_HREF, useValue: "/" }
     ] });
     try {

@@ -760,6 +760,8 @@ void FeatureStyleRule::parse(const YAML::Node& yaml)
     if (yaml["label-font-weight"].IsDefined()) {
         labelFontWeight_ = yaml["label-font-weight"].as<uint32_t>();
     }
+    if (yaml["label-size-expression"].IsDefined()) labelSizeExpression_ = yaml["label-size-expression"].as<std::string>();
+    if (yaml["label-color-expression"].IsDefined()) labelColorExpression_ = yaml["label-color-expression"].as<std::string>();
     if (yaml["label-size"].IsDefined()) {
         labelSize_ = yaml["label-size"].as<float>();
     }
@@ -1155,8 +1157,30 @@ FeatureStyleRule::expressionUses() const
     append("z-index-expression", zIndexExpression_);
     append("z-index-group-expression", zIndexGroupExpression_);
     append("icon-url-expression", iconUrlExpression_);
+    append("label-size-expression", labelSizeExpression_);
+    append("label-color-expression", labelColorExpression_);
     append("label-text-expression", labelTextExpression_);
     return result;
+}
+
+static std::optional<glm::fvec4> expressionColor(simfil::Value const& value, float alpha)
+{
+    if (value.isa(simfil::ValueType::Int)) {
+            auto colorInt = value.as<simfil::ValueType::Int>();
+            auto a = static_cast<float>(colorInt & 0xff) / 255.;
+            colorInt >>= 8;
+            auto b = static_cast<float>(colorInt & 0xff) / 255.;
+            colorInt >>= 8;
+            auto g = static_cast<float>(colorInt & 0xff) / 255.;
+            colorInt >>= 8;
+            auto r = static_cast<float>(colorInt & 0xff) / 255.;
+            return glm::fvec4{r, g, b, a};
+        }
+    else if (value.isa(simfil::ValueType::String)) {
+            auto colorStr = value.as<simfil::ValueType::String>();
+            return Color(colorStr.c_str()).toFVec4(alpha);
+        }
+    return std::nullopt;
 }
 
 std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) const
@@ -1295,21 +1319,7 @@ std::optional<glm::fvec4> FeatureStyleRule::color(BoundEvalFun const& evalFun) c
     }
     if (!colorExpression_.empty()) {
         auto colorVal = evalFun.evaluate(colorExpression_);
-        if (colorVal.isa(simfil::ValueType::Int)) {
-            auto colorInt = colorVal.as<simfil::ValueType::Int>();
-            auto a = static_cast<float>(colorInt & 0xff) / 255.;
-            colorInt >>= 8;
-            auto b = static_cast<float>(colorInt & 0xff) / 255.;
-            colorInt >>= 8;
-            auto g = static_cast<float>(colorInt & 0xff) / 255.;
-            colorInt >>= 8;
-            auto r = static_cast<float>(colorInt & 0xff) / 255.;
-            return glm::fvec4{r, g, b, a};
-        }
-        else if (colorVal.isa(simfil::ValueType::String)) {
-            auto colorStr = colorVal.as<simfil::ValueType::String>();
-            return Color(colorStr.c_str()).toFVec4(color_.a);
-        }
+        if (auto color = expressionColor(colorVal, color_.a)) return color;
         else
         {
             if (evalFun.hasIssueReporter()) {
@@ -1750,6 +1760,20 @@ std::string const& FeatureStyleRule::labelFontFamily() const
 uint32_t FeatureStyleRule::labelFontWeight() const
 {
     return labelFontWeight_;
+}
+
+float FeatureStyleRule::labelSize(BoundEvalFun const& evalFun) const
+{
+    if(labelSizeExpression_.empty()) return labelSize_;
+    auto value=evalFun.evaluate(labelSizeExpression_);
+    std::optional<double> number;
+    if(value.isa(simfil::ValueType::Int))number=static_cast<double>(value.as<simfil::ValueType::Int>());
+    if(value.isa(simfil::ValueType::Float))number=value.as<simfil::ValueType::Float>();
+    return number && std::isfinite(*number) && *number>0 && *number<10000 ? static_cast<float>(*number) : labelSize_;
+}
+glm::fvec4 FeatureStyleRule::labelColor(BoundEvalFun const& evalFun) const
+{
+    return labelColorExpression_.empty() ? labelColor_ : expressionColor(evalFun.evaluate(labelColorExpression_),labelColor_.a).value_or(labelColor_);
 }
 
 float FeatureStyleRule::labelSize() const

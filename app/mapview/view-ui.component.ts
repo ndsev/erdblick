@@ -1,3 +1,6 @@
+import {DrawingState} from '../drawing/drawing.state';
+import {ChangeDetectorRef} from '@angular/core';
+import {MapViewService} from './mapview.service';
 import {
     AfterViewInit,
     Component,
@@ -23,6 +26,11 @@ import { IRenderView } from "./render-view.model";
     selector: 'erdblick-view-ui',
     template: `
         @if (!appModeService.isVisualizationOnly) {
+            <button type="button" class="map-scale-toggle" [class.mirrored]="isPrimary()" [attr.aria-pressed]="scaleEnabled" (click)="toggleScale()">Map scale</button>
+            @if (scaleEnabled && scale; as bar) { <div data-testid="map-scale" class="map-scale-bar" [class.mirrored]="isPrimary()" title="Local ground distance at this bar; varies with position and pitch">
+                <span>{{bar.label}}</span>
+                <div [style.width.px]="bar.width" style="height:5px;border:1px solid currentColor;border-top:0"></div>
+            </div> }
             <div class="view-ui-container" [ngClass]="{'mirrored': isPrimary()}" [attr.data-testid]="viewUiTestId()">
                 @if (!mapView()?.isFirstPersonViewActive()) {
                     <div class="navigation-controls">
@@ -99,10 +107,23 @@ export class ErdblickViewUIComponent implements AfterViewInit, OnDestroy {
         public stateService: AppStateService,
         private keyboardService: KeyboardService,
         private ngZone: NgZone,
-        public readonly viewSettings: MapViewState) {
+        public readonly viewSettings: MapViewState, private readonly views: MapViewService, cdr: ChangeDetectorRef, private readonly drawingState: DrawingState) {
         this.numViews = toSignal(this.viewSettings.numViewsState, { initialValue: this.viewSettings.numViewsState.getValue() });
         this.mapView$ = toObservable(this.mapView);
+        this.mapViewSubscription.add(drawingState.unit.subscribe(() => cdr.markForCheck()));
+        this.mapViewSubscription.add(views.scaleChanged.subscribe(() => cdr.markForCheck()));
     }
+
+    get scaleEnabled(): boolean { return this.viewSettings.viewScaleState.getValue(this.mapView()?.viewIndex ?? 0); }
+    get scale() {
+        const bar = this.views.mapScales.get(this.viewSettings.viewIdAt(this.mapView()?.viewIndex ?? 0));
+        if (!bar) return undefined;
+        if (this.drawingState.unit.value === 'meters') return {...bar,label:bar.meters >= 1000 ? bar.meters/1000+' km' : bar.meters+' m'};
+        const miles = bar.meters/1609.344, power = 10**Math.floor(Math.log10(miles)), ratio = miles/power;
+        const rounded = (ratio>=5?5:ratio>=2?2:1)*power;
+        return {width:bar.width*rounded/miles,label:Number(rounded.toPrecision(5))+' mi'};
+    }
+    toggleScale(): void { this.viewSettings.viewScaleState.next(this.mapView()?.viewIndex ?? 0, !this.scaleEnabled); }
 
     /** Hooks the compass needle to the renderer tick loop and registers the projection-toggle shortcut. */
     ngAfterViewInit(): void {

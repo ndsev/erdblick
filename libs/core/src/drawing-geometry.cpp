@@ -103,7 +103,7 @@ Json lineGeometry(Json const& path)
 }
 
 /** Clip unwrapped polygon rings at longitude bands so date-line polygons retain their short extent. */
-Json polygonGeometry(Json ring)
+Json polygonGeometry(Json ring, bool preservePolar = false)
 {
     for (size_t i = 1; i < ring.size(); ++i) {
         auto lon = ring[i][0].get<double>(), previous = ring[i - 1][0].get<double>();
@@ -113,7 +113,14 @@ Json polygonGeometry(Json ring)
     }
     double low = ring.front()[0], high = low;
     for (auto const& p : ring) { low = std::min(low, p[0].get<double>()); high = std::max(high, p[0].get<double>()); }
-    if (high - low >= 360) throw std::invalid_argument("Drawing: polygons enclosing a pole are not supported");
+    if (high - low >= 360 - 1e-10) {
+        if (!preservePolar) throw std::invalid_argument("Drawing: polygons enclosing a pole are not supported");
+        // Close the unwrapped polar cap along the geographic pole before cutting
+        // longitude bands. This preserves valid standard GeoJSON on export.
+        double latitude = 0; for (auto const& p : ring) latitude += p[1].get<double>();
+        auto last = ring.back(), first = ring.front(); last[1] = first[1] = latitude >= 0 ? 90 : -90;
+        ring.push_back(last); ring.push_back(first); ring.push_back(ring.front());
+    }
     auto clip = [](Json input, double edge, bool keepAbove) {
         Json output = Json::array();
         if (input.empty()) return output;
@@ -122,7 +129,9 @@ Json polygonGeometry(Json ring)
         for (auto const& p : input) {
             if (inside(previous) != inside(p)) {
                 auto fraction = (edge - previous[0].get<double>()) / (p[0].get<double>() - previous[0].get<double>());
-                output.push_back({edge, previous[1].get<double>() + fraction * (p[1].get<double>() - previous[1].get<double>())});
+                auto boundary = Json::array({edge, previous[1].get<double>() + fraction * (p[1].get<double>() - previous[1].get<double>())});
+                if (p.size() == 3 && previous.size() == 3) boundary.push_back(previous[2].get<double>() + fraction * (p[2].get<double>() - previous[2].get<double>()));
+                output.push_back(boundary);
             }
             if (inside(p)) output.push_back(p);
             previous = p;
@@ -141,6 +150,8 @@ Json polygonGeometry(Json ring)
         Json{{"type", "MultiPolygon"}, {"coordinates", std::move(polygons)}};
 }
 }
+
+nlohmann::json drawingPolygonGeometry(nlohmann::json ring) { return polygonGeometry(std::move(ring), true); }
 
 double drawingDistance(double lon1, double lat1, double lon2, double lat2)
 {

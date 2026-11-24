@@ -1,3 +1,6 @@
+import {DrawingTrayComponent} from './drawing/drawing-tray.component';
+import {DrawingQuickComponent} from './drawing/drawing-quick.component';
+import {DrawingValueComponent} from './drawing/drawing-value.component';
 import {DrawingEditorComponent} from "./drawing/drawing-editor.component";
 import {DrawingToolbarComponent} from './drawing/drawing-toolbar.component';
 import {DrawingWorkspaceComponent} from "./drawing/drawing-workspace.component";
@@ -252,6 +255,7 @@ export const initializeServices = () => {
 
 @NgModule({
     declarations: [
+        DrawingQuickComponent, DrawingValueComponent, DrawingTrayComponent,
         DrawingEditorComponent, DrawingWorkspaceComponent, DrawingToolbarComponent,
         EditorWorkspaceComponent,
         EditorSurfaceComponent,

@@ -122,8 +122,9 @@ describe("viewer action shared contract fixtures", () => {
         expect(catalog.actions.every(action => action.permission === (action.mutation ? "viewer-control" : "viewer-read"))).toBe(true);
         expect(catalog.channels.filter(channel => channel.writable).map(channel => channel.name))
             .toEqual(Object.entries(applicationControls).filter(([, channel]) => channel.writable).map(([name]) => name));
-        expect(catalog.actions).toHaveLength(33);
-        expect(catalog.channels).toHaveLength(21);
+        expect(catalog.actions).toHaveLength(43);
+        expect(catalog.actions.find(action=>action.name==='viewer_drawing_branch')).toMatchObject({mutation:false,permission:'viewer-read'});
+        expect(catalog.channels).toHaveLength(22);
         expect(catalog.actions.some(action => String(action.name) === "viewer_list_sessions")).toBe(false);
     });
 

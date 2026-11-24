@@ -26,17 +26,37 @@ function createRightClickMenuService() {
     const inspectionSelection = {
         inspectFeatureIds: vi.fn()
     };
+    const inspectionState = {setSelection: vi.fn(), state: {viewSettings: {viewIds: ["original"]}}};
     const service = new RightClickMenuService(
         {} as AppStateService,
         {} as SearchService,
         {showInfo: vi.fn()} as unknown as InfoMessageService,
         {openPerformanceDialog: vi.fn()} as unknown as DiagnosticsFacadeService,
         externalViewerService as unknown as ExternalViewerService,
-        inspectionSelection as unknown as InspectionSelectionService, {} as AppStateService as never);
-    return {service, externalViewerService, inspectionSelection};
+        inspectionSelection as unknown as InspectionSelectionService, inspectionState as never);
+    return {service, externalViewerService, inspectionSelection, inspectionState};
 }
 
 describe("RightClickMenuService", () => {
+    it("preserves the picker and prepared shortcut's originating view", () => {
+        const {service, inspectionState} = createRightClickMenuService();
+        const tileId = coreLib.getTileIdFromPosition(11, 48, 13);
+        service.inspectTileSourceData({tileId, mapId: "Map", layerId: "SourceData-Road"}, "original");
+        expect(inspectionState.setSelection).toHaveBeenLastCalledWith({
+            mapTileKey: coreLib.getSourceDataLayerKey("Map", "SourceData-Road", tileId)
+        }, undefined, false, false, "original");
+        service.sourceDataRequestViewId = "original";
+        service.tileIdsForSourceData.next([{id: tileId, name: String(tileId)}]);
+        const shortcut = service.menuItems.value.find(item => item.label === "Inspect Source Data with Last Layer")!;
+        service.sourceDataRequestViewId = "new-focus";
+        shortcut.command?.({} as never);
+        expect(inspectionState.setSelection.mock.calls.at(-1)?.[4]).toBe("original");
+        inspectionState.state.viewSettings.viewIds = ["surviving"];
+        inspectionState.setSelection.mockClear();
+        service.inspectTileSourceData({tileId, mapId: "Map", layerId: "SourceData-Road"}, "original");
+        expect(inspectionState.setSelection).not.toHaveBeenCalled();
+    });
+
     it("broadcasts map context-menu close requests", () => {
         const {service} = createRightClickMenuService();
         let closeRequests = 0;

@@ -1,3 +1,4 @@
+import {MapViewState} from "../../../app/mapview/mapview.state";
 import "@angular/compiler";
 import { describe, expect, it, vi } from "vitest";
 import { AppModule } from "../../../app/app.module";
@@ -75,7 +76,7 @@ describe("Feature Search result-tree completion", () => {
 function inspectionSelectionFixture() {
     const persistence = testPersistence();
     const layout = new LayoutService(persistence, new LayoutState(persistence));
-    const inspectionState = new InspectionPanelService(persistence, layout, {} as never, new InspectionState(persistence));
+    const inspectionState = new InspectionPanelService(persistence, layout, {} as never, new InspectionState(persistence, new MapViewState(persistence)));
     const focusOnFeature = vi.fn().mockResolvedValue(undefined);
     const showError = vi.fn();
     const component = Object.create(SearchResultsComponent.prototype) as SearchResultsComponent;

@@ -313,12 +313,13 @@ export class OmnibarComponent implements AfterViewInit, OnDestroy {
         this.subscriptions.add(this.menuService.lastInspectedTileSourceDataOption.subscribe(lastInspectedData => {
             if (lastInspectedData && lastInspectedData.tileId && lastInspectedData.mapId && lastInspectedData.layerId) {
                 const value = `${lastInspectedData?.tileId} "${lastInspectedData?.mapId}" "${lastInspectedData?.layerId}"`;
-                this.executeAndRemember({
+                this.state.remember({
                     version: 2,
                     actionId: "source-data",
                     input: value,
                     actionName: "Inspect Tile Layer Source Data"
                 });
+                this.reloadHistory();
             }
         }));
 

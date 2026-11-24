@@ -1,3 +1,10 @@
+import {ScatterplotLayer, PathLayer} from '@deck.gl/layers';
+import {drawingPlanePosition, drawingSnapCandidate, type DrawingSnapCandidate, type DrawingSnapPart} from './deck-drawing.util';
+import {pickNavigationAnchor} from './navigation/erdblick-navigation-anchor.util';
+import type {DrawingPosition} from '../../drawing/drawing.model';
+import {coreLib} from "../../integrations/wasm.adapter";
+import {DeckSpatialExtentOverlay, type SpatialExtentFrame} from "./deck-spatial-extent.presentation";
+import type {SpatialExtentBounds} from "../../mapdata/spatial-extent.model";
 /**
  * The current Deck implementation behind one map view component.
  * ViewComponent supplies this controller and switches its 2D/3D variant. The
@@ -176,6 +183,14 @@ export abstract class DeckMapView implements IRenderView {
     protected readonly layerRegistry = new DeckLayerRegistry();
     private readonly background = new DeckBackground(this.layerRegistry);
     private readonly searchOverlay = new DeckSearchOverlay(this.layerRegistry, () => this.searchOverlayFrame());
+    private readonly extentOverlay = new DeckSpatialExtentOverlay(this.layerRegistry,
+        () => this.spatialExtentFrame(),
+        (layer, viewport) => this.mapInfo.tileLayerParser.coverageRectangles(layer.mapId, layer.layerId, viewport, layer.level) as SpatialExtentBounds[],
+        (layer, longitude, latitude) => {
+            const tile = coreLib.getTileIdFromPosition(longitude, latitude, layer.level);
+            const region = this.mapInfo.tileLayerParser.coverageRegion(layer.mapId, layer.layerId, tile);
+            return region < 0 ? [] : this.mapInfo.tileLayerParser.coverageDisplayBounds(layer.mapId, layer.layerId, region, layer.level) as SpatialExtentBounds[];
+        });
     private readonly tileOverlay = new DeckTileOverlay(this.layerRegistry,
         () => this.tileOverlayFrame(),
         (tileId, layers) => this.layerController.occupancyForTile(tileId, layers));
@@ -213,8 +228,8 @@ export abstract class DeckMapView implements IRenderView {
             deck: () => this.deck,
             scene: () => this.gpuScene,
             viewport: () => this.createWebMercatorViewport() ?? null,
-            cachedFeaturePicks: targets => this.tileStream.cachedFeaturePicks(targets),
-            resolveFeaturePicks: targets => this.tileStream.resolveFeaturePicks(targets)
+            cachedFeaturePicks: targets => this.tileStream.cachedFeaturePicks(targets, this.mapInfo.spatialRequestContext(this._viewIndex)),
+            resolveFeaturePicks: targets => this.tileStream.resolveFeaturePicks(targets, undefined, this.mapInfo.spatialRequestContext(this._viewIndex))
         },
         () => ({
             radius: this.inspectionState.state.drillPickRadius,
@@ -272,12 +287,23 @@ export abstract class DeckMapView implements IRenderView {
         this.onCanvasPointerMove(event);
         if (this.drawingPointer === event.pointerId) { event.preventDefault(); event.stopImmediatePropagation(); }
     };
+    private drawingClickStart?: {id:number;x:number;y:number};
+    private drawingClickConsumed = false;
     private readonly deckCanvasPointerDown = (event: PointerEvent) => {
-        const point = environment.visualizationOnly ? undefined : this.pickCartographic({x: event.offsetX, y: event.offsetY});
+        this.drawingClickConsumed = false;
+        this.drawingClickStart = event.button === 0 ? {id:event.pointerId,x:event.offsetX,y:event.offsetY} : undefined;
+        const point = environment.visualizationOnly ? undefined : this.drawingPosition(event.offsetX, event.offsetY);
         if (event.button === 0 && !event.ctrlKey && point &&
-            this.mapViewState.drawingInput?.down(this.viewId, [point.lon, point.lat], event.shiftKey)) {
+            this.mapViewState.drawingInput?.down(this.viewId, point, event.shiftKey, this.drawingHandle(event.offsetX, event.offsetY))) {
             this.drawingPointer = event.pointerId;
+            (event.currentTarget as HTMLCanvasElement).focus({preventScroll: true});
             (event.currentTarget as HTMLCanvasElement).setPointerCapture(event.pointerId);
+            event.preventDefault(); event.stopImmediatePropagation(); return;
+        }
+        // Drawing owns both ends of a click. Letting navigation see only pointerdown
+        // leaves its pan gesture alive when drawing consumes pointerup.
+        if (event.button === 0 && !event.ctrlKey && this.mapViewState.drawingInput?.configuration(this.viewId)?.placing) {
+            (event.currentTarget as HTMLCanvasElement).focus({preventScroll: true});
             event.preventDefault(); event.stopImmediatePropagation(); return;
         }
         this.picking.pointerDown();
@@ -289,18 +315,30 @@ export abstract class DeckMapView implements IRenderView {
         }
     };
     private readonly deckCanvasPointerUp = (event: PointerEvent) => {
-        if (event.pointerId !== this.drawingPointer) return;
-        const point = this.pickCartographic({x: event.offsetX, y: event.offsetY});
-        this.mapViewState.drawingInput?.up(this.viewId, point ? [point.lon, point.lat] : undefined);
+        if (event.pointerId !== this.drawingPointer) {
+            const start=this.drawingClickStart; this.drawingClickStart=undefined;
+            if(start?.id===event.pointerId && !event.ctrlKey && Math.hypot(event.offsetX-start.x,event.offsetY-start.y)<4) {
+                const position=this.drawingPosition(event.offsetX,event.offsetY);
+                if(position && this.mapViewState.drawingInput?.click(this.viewId,position,event.shiftKey)) {
+                    this.drawingClickConsumed=true;event.preventDefault();event.stopImmediatePropagation();
+                }
+            }
+            return;
+        }
+        this.drawingClickConsumed = true; this.drawingClickStart = undefined;
+        const point = this.drawingPosition(event.offsetX, event.offsetY);
+        this.mapViewState.drawingInput?.up(this.viewId, point);
         this.drawingPointer = undefined;
         (event.currentTarget as HTMLCanvasElement).releasePointerCapture(event.pointerId);
         event.preventDefault(); event.stopImmediatePropagation();
     };
     private readonly deckCanvasPointerCancel = () => {
+        this.drawingClickStart = undefined;
         if (this.drawingPointer !== undefined) this.mapViewState.drawingInput?.cancel();
         this.drawingPointer = undefined;
     };
     private readonly deckCanvasPointerLeave = (event: PointerEvent) => {
+        if (event.currentTarget instanceof HTMLCanvasElement) event.currentTarget.title = "";
         if (this.drawingPointer !== undefined) return;
         const preserveInspectionHover = event.relatedTarget instanceof Element
             && event.relatedTarget.closest("inspection-container") !== null;
@@ -447,6 +485,7 @@ export abstract class DeckMapView implements IRenderView {
         }
         this.deckContainer = container;
         container.innerHTML = "";
+        this.mapViewState.drawingViewBounds.set(this.viewId, () => container.getBoundingClientRect());
         const canvas = this.createDeckCanvas(container);
         canvas.addEventListener("pointerenter", this.deckCanvasPointerEnter);
         canvas.addEventListener("pointermove", this.deckCanvasPointerMove, true);
@@ -501,6 +540,7 @@ export abstract class DeckMapView implements IRenderView {
                 this.lastCanvasCssSize = this.normalizedCanvasCssSize(width, height);
                 this.scheduleViewportUpdate();
                 this.tileOverlay.scheduleUpdate();
+                this.extentOverlay.scheduleUpdate();
                 this.searchOverlay.scheduleUpdate();
                 this.scheduleCanvasResize(width, height);
             },
@@ -683,6 +723,7 @@ export abstract class DeckMapView implements IRenderView {
     async destroy(): Promise<void> {
         this.flushPendingViewStatePush();
         this.layerController.setCameraInteracting(false);
+        this.mapViewState.drawingViewBounds.delete(this.viewId);
         this.subscriptions.forEach(sub => sub.unsubscribe());
         this.subscriptions.length = 0;
         this.stopTickLoop();
@@ -695,6 +736,7 @@ export abstract class DeckMapView implements IRenderView {
         this.firstPersonViewActive.next(false);
         this.background.destroy();
         this.tileOverlay.destroy();
+        this.extentOverlay.destroy();
         this.searchOverlay.destroy();
         this.locationOverlay.destroy();
         this.tickCallbacks.clear();
@@ -1297,6 +1339,7 @@ export abstract class DeckMapView implements IRenderView {
         this.cancelViewportUpdateScheduling();
         this.updateViewport();
         this.tileOverlay.scheduleUpdate();
+        this.extentOverlay.scheduleUpdate();
         this.searchOverlay.scheduleUpdate();
         this.requestRender("Enter first-person view");
     }
@@ -1314,6 +1357,7 @@ export abstract class DeckMapView implements IRenderView {
         this.updateViewport();
         this.updateBackgroundLayer();
         this.tileOverlay.scheduleUpdate();
+        this.extentOverlay.scheduleUpdate();
         this.searchOverlay.scheduleUpdate();
         this.requestRender("Exit first-person view");
     }
@@ -1419,6 +1463,7 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Coalesces camera-driven native tile-footprint updates to one operation per frame. */
     private scheduleViewportUpdate(): void {
+        this.updateMapScale();
         if (this.viewportUpdateRaf !== null) {
             return;
         }
@@ -1455,6 +1500,8 @@ export abstract class DeckMapView implements IRenderView {
      * Most subscriptions only schedule overlay work so rapid bursts collapse into one frame.
      */
     private setupSubscriptions(): void {
+        this.subscriptions.push(this.viewSettings.viewScaleState.subscribe(this.viewId, () => this.updateMapScale()));
+        this.subscriptions.push(this.mapViewState.drawingChanged.subscribe(() => this.updateDrawingHandles()));
         this.subscriptions.push(this.mapViewState.clearLocationHighlightTopic.subscribe(index => {
             if (index === this._viewIndex) {
                 this.locationOverlay.stopLocationAreaHighlight();
@@ -1576,6 +1623,7 @@ export abstract class DeckMapView implements IRenderView {
                 this.viewSettings.viewTileGridOpacityState.getValue(this.viewId)
             ] as const, deepEquals).subscribe(([color, opacity]) => {
                 this.tileOverlay.scheduleUpdate();
+                this.extentOverlay.scheduleUpdate();
             })
         );
         this.subscriptions.push(
@@ -1587,6 +1635,11 @@ export abstract class DeckMapView implements IRenderView {
             this.layerState.layerZoomLevelState
                 .pipe(this._viewIndex)
                 .subscribe(() => this.tileOverlay.scheduleUpdate())
+        );
+        this.subscriptions.push(
+            this.mapInfo.layerStateChanged.subscribe(() => this.extentOverlay.scheduleUpdate()),
+            this.mapViewState.viewStateChanged.subscribe(() => this.extentOverlay.scheduleUpdate()),
+            this.mapInfo.maps$.subscribe(() => this.extentOverlay.scheduleUpdate())
         );
         this.subscriptions.push(
             this.mapInfo.maps$.subscribe(() => this.tileOverlay.scheduleUpdate())
@@ -1635,19 +1688,12 @@ export abstract class DeckMapView implements IRenderView {
                 this.locationOverlay.stopLocationLabel();
                 this.prepareForNavigation();
                 this.exitFirstPersonView();
-                const centerLon = (value.rectangle.west + value.rectangle.east) / 2;
-                const centerLat = (value.rectangle.south + value.rectangle.north) / 2;
-                const maxSpan = Math.max(
-                    Math.abs(value.rectangle.east - value.rectangle.west),
-                    Math.abs(value.rectangle.north - value.rectangle.south)
-                );
-                const zoom = Math.max(0, Math.min(22, 8 - Math.log2(Math.max(1e-6, maxSpan))));
-                this.updateViewState({
-                    ...this.viewState,
-                    longitude: centerLon,
-                    latitude: centerLat,
-                    zoom
-                }, true, true);
+                const rect = this.getCanvasClientRect();
+                const fitted = fitLocationArea(value.rectangle, this.viewState, rect.width, rect.height, this.useOrthographicProjection);
+                if (!fitted) return;
+                this.clearNavigationPivots();
+                this.updateViewState({...this.viewState, ...fitted}, true, true);
+                this.pushViewStateToAppState();
                 this.locationOverlay.startJumpAreaHighlight(value.rectangle);
             })
         );
@@ -1660,6 +1706,7 @@ export abstract class DeckMapView implements IRenderView {
 
         this.updateLocationMarkerOverlay();
         this.tileOverlay.scheduleUpdate();
+        this.extentOverlay.scheduleUpdate();
         this.searchOverlay.scheduleUpdate();
     }
 
@@ -1695,6 +1742,7 @@ export abstract class DeckMapView implements IRenderView {
             this.flushPendingViewStatePush();
             this.scheduleViewportUpdate();
             this.tileOverlay.scheduleUpdate();
+            this.extentOverlay.scheduleUpdate();
             this.searchOverlay.scheduleUpdate();
         }
     }
@@ -1818,7 +1866,13 @@ export abstract class DeckMapView implements IRenderView {
             const cartographic = this.firstPersonSession
                 ? undefined
                 : this.pickCartographic(position);
-            this.mapViewState.drawingInput?.move(this.viewId, cartographic ? [cartographic.lon, cartographic.lat] : undefined, event.shiftKey);
+            // This viewer owns hover scheduling and disables Deck's built-in tooltip path.
+            // A native canvas title identifies coverage without another GPU readback.
+            if (event.currentTarget instanceof HTMLCanvasElement) {
+                event.currentTarget.title = cartographic && !event.buttons && !this.hoveredFeatureIds.value.length
+                    ? this.extentOverlay.label(cartographic.lon, cartographic.lat) ?? "" : "";
+            }
+            this.mapViewState.drawingInput?.move(this.viewId, this.drawingPosition(position.x, position.y), event.shiftKey);
             if (cartographic) {
                 this.coordinatesService.mouseMoveCoordinates.next(
                     Cartographic.fromDegrees(cartographic.lon, cartographic.lat, cartographic.alt)
@@ -1830,6 +1884,7 @@ export abstract class DeckMapView implements IRenderView {
 
     /** Handles primary-click drill inspection, marker placement, and background deselection. */
     private async onClick(info: PickingInfo, event: DeckGestureEventLike): Promise<void> {
+        if (this.drawingClickConsumed) return;
         if (environment.visualizationOnly) {
             return;
         }
@@ -1847,9 +1902,9 @@ export abstract class DeckMapView implements IRenderView {
         }
 
         const screenPosition = { x: info.x, y: info.y };
-        const toolPoint = this.pickCartographic(screenPosition);
+        const toolPoint = this.drawingPosition(screenPosition.x, screenPosition.y);
         if (toolPoint && !srcEvent?.ctrlKey &&
-            this.mapViewState.drawingInput?.click(this.viewId, [toolPoint.lon, toolPoint.lat], srcEvent?.shiftKey)) return;
+            this.mapViewState.drawingInput?.click(this.viewId, toolPoint, srcEvent?.shiftKey)) return;
         const deck = this.deck;
         // Selection arrays can change in place while foreign identity is being
         // resolved. Observe publication rather than comparing array identities.
@@ -1866,6 +1921,7 @@ export abstract class DeckMapView implements IRenderView {
         }
         if (deck !== this.deck || pickSerial !== this.clickPickSerial || selectionChanged) return;
         const {featureIds, markerPosition: featurePosition} = picked;
+        if(!srcEvent?.ctrlKey && await this.mapViewState.drawingInput?.select?.(this.viewId,featureIds,featurePosition ? featurePosition as DrawingPosition : undefined)) return;
         const markerPosition = this.coordinatesService.state.marker ? featurePosition : null;
         const cartographic = markerPosition
             ? { lon: markerPosition[0], lat: markerPosition[1], alt: markerPosition[2] }
@@ -1877,12 +1933,17 @@ export abstract class DeckMapView implements IRenderView {
         }
 
         if (!featureIds.length) {
+            const extent = cartographic ? this.extentOverlay.hit(cartographic.lon, cartographic.lat) : null;
+            if (extent) {
+                this.mapViewState.moveToRectangleTopic.next({targetView: this._viewIndex, rectangle: extent});
+                return;
+            }
             this.inspectionState.unsetUnlockedSelections();
             this.menuService.tileOutline.next(null);
             return;
         }
 
-        this.inspectionSelection.inspectFeatureIds(featureIds, !!srcEvent?.ctrlKey);
+        this.inspectionSelection.inspectFeatureIds(featureIds, !!srcEvent?.ctrlKey, this.viewId);
     }
 
     /** Applies a sanitized camera state to deck and optionally refreshes viewport-dependent overlays. */
@@ -1913,6 +1974,7 @@ export abstract class DeckMapView implements IRenderView {
             this.updateBackgroundLayer();
             this.scheduleViewportUpdate();
             this.tileOverlay.scheduleUpdate();
+            this.extentOverlay.scheduleUpdate();
             this.searchOverlay.scheduleUpdate();
         }
     }
@@ -2184,7 +2246,7 @@ export abstract class DeckMapView implements IRenderView {
         if (!this.deck) return null;
         const viewIndex = this._viewIndex;
         return {
-            layers: this.featureSearchService.getSearchResultOverlayLayers()
+            layers: this.featureSearchService.getSearchResultOverlayLayers(viewIndex)
                 .filter(layer => featureSearchVisibleInView(layer, viewIndex)),
             markerAtlas: () => this.featureSearchService.markerGraphics(),
             showsTile: (mapId, layerId, tileId) =>
@@ -2194,6 +2256,138 @@ export abstract class DeckMapView implements IRenderView {
             densityTargetLevel: (maxVisibleLevel, maxVisibleTiles) =>
                 this.mapViewState.searchResultDensityTargetLevel(viewIndex, maxVisibleLevel, maxVisibleTiles)
         };
+    }
+
+    /** Resolve enabled readable layers at their effective display/discovery levels. */
+    private spatialExtentFrame(): SpatialExtentFrame | null {
+        const viewport = this.deck ? this.computeViewport() : null;
+        if (!viewport) return null;
+        const layers: SpatialExtentFrame["layers"] = [];
+        for (const layer of this.mapInfo.mapgetLayers()) {
+            if (layer.origin === "virtual" || !layer.info.canRead || !this.mapInfo.spatialExtentSettings(this._viewIndex, layer.mapId).showSpatialExtent ||
+                !this.mapInfo.maps.getMapLayerVisibility(this._viewIndex, layer.mapId, layer.layerId)) continue;
+            const level = layer.partitionKind === "object" ? layer.tileAssociationLevel :
+                this.mapViewState.getEffectiveMapLayerLevel(this._viewIndex, layer.mapId, layer.layerId);
+            if (level !== null && Number.isFinite(level)) layers.push({mapId: layer.mapId, layerId: layer.layerId,
+                level, revision: this.mapInfo.mapMetadataGeneration(layer.mapId)});
+        }
+        return {viewport, layers};
+    }
+
+    /** Sample ground distance at the scale bar, clear of the mirrored navigation column. */
+    private updateMapScale(): void {
+        const viewport = this.deck?.getViewports()[0];
+        if (!viewport || !this.viewSettings.viewScaleState.getValue(this.viewId) || this.firstPersonSession) {
+            this.mapViewState.mapScales.delete(this.viewId); this.mapViewState.scaleChanged.next(); return;
+        }
+        const mirrored = this.viewSettings.viewIds.length > 1 && this.viewSettings.viewIds[0] === this.viewId;
+        const x = (mirrored ? parseFloat(getComputedStyle(document.documentElement).fontSize) * 4 + 16 : 24) + 7;
+        const y = viewport.height - 30, start = viewport.unproject([x, y], {targetZ: 0}), end = viewport.unproject([x + 100, y], {targetZ: 0});
+        if ([...start, ...end].some(value => !Number.isFinite(value)) || Math.abs(start[1]) > 85.05113 || Math.abs(end[1]) > 85.05113) { this.mapViewState.mapScales.delete(this.viewId); this.mapViewState.scaleChanged.next(); return; }
+        const length = coreLib.drawingDistance(start[0], start[1], end[0], end[1]);
+        if (!(length > 0)) return;
+        const power = 10 ** Math.floor(Math.log10(length)), ratio = length / power;
+        const meters = (ratio >= 5 ? 5 : ratio >= 2 ? 2 : 1) * power;
+        this.mapViewState.mapScales.set(this.viewId, {width: 100 * meters / length, meters}); this.mapViewState.scaleChanged.next();
+    }
+
+    private drawingHandle(x: number, y: number): string | undefined {
+        const viewport = this.deck?.getViewports()[0]; if (!viewport) return;
+        const handles = this.mapViewState.drawingInput?.configuration(this.viewId)?.handles ?? [];
+        let best: string | undefined, distance = 10;
+        for (const handle of handles) {
+            const pixel = viewport.project(handle.position as number[]), d = Math.hypot(pixel[0]-x, pixel[1]-y);
+            if (d < distance) { best = handle.path; distance = d; }
+        }
+        return best;
+    }
+    private snappedDrawing?: DrawingSnapCandidate;
+    private projectedSnapOrigin?: DrawingPosition;
+    private snapCacheRevision = -1;
+    private readonly snapGeometryCache = new Map<string, DrawingSnapPart[] | null>();
+    private drawingPosition(x: number, y: number): DrawingPosition | undefined {
+        this.projectedSnapOrigin=undefined;
+        const config = this.mapViewState.drawingInput?.configuration(this.viewId), deck = this.deck;
+        if (!config?.active || !deck) return undefined;
+        const viewport = deck.getViewports()[0]; if (!viewport) return undefined;
+        let point: DrawingPosition | undefined;
+        if (config.snap && this.gpuScene) {
+            let best: DrawingSnapCandidate | undefined, vertices = 0, limited = false;
+            if (this.snapCacheRevision !== this.gpuScene.revision) { this.snapGeometryCache.clear(); this.snapCacheRevision = this.gpuScene.revision; }
+            const seen = new Set<string>();
+            const hits = deck.pickMultipleObjects({x,y,radius: Math.min(30,Math.max(2,config.tolerance)),depth:32,unproject3D:true});
+            for (const hit of hits) {
+                if (!(hit.layer instanceof DrawingLayer || hit.layer instanceof ErdblickVectorLayer || hit.sourceLayer instanceof ErdblickVectorLayer)) continue;
+                const index = Number(hit.object?.globalPickIndex ?? hit.index);
+                const identities = this.gpuScene.resolvePick(index);
+                if (!identities.length || identities.some(target => {
+                    const mapId = coreLib.parseMapPartitionKey(target.mapTileKey)[0];
+                    return mapId === config.previewMapId;
+                })) continue;
+                const key = identities.map(target => target.mapTileKey+':'+target.featureId).join('|');
+                if (seen.has(key)) continue; seen.add(key);
+                if (!this.snapGeometryCache.has(key)) {
+                    if (this.snapGeometryCache.size >= 32) this.snapGeometryCache.delete(this.snapGeometryCache.keys().next().value!);
+                    this.snapGeometryCache.set(key, JSON.parse(this.gpuScene.snapGeometry(index)));
+                }
+                const parts = this.snapGeometryCache.get(key);
+                if (!parts) { limited = true; continue; }
+                vertices += parts.reduce((sum,part) => sum+part.points.length,0);
+                if (vertices > 40000) { limited = true; break; }
+                const editing=identities.some(target=>coreLib.parseMapPartitionKey(target.mapTileKey)[0]===config.excludeMapId && target.featureId===config.excludeFeatureId);
+                const eligible=parts.map(part=>({...part,points:part.points}));
+                const candidate = drawingSnapCandidate(viewport,[x,y],eligible,key,{...config,excluded:editing?config.editedPosition:undefined},this.snappedDrawing?.key);
+                if(candidate && config.plane && !config.projectSnapToPlane){const local=JSON.parse(coreLib.drawingPlane(JSON.stringify({action:'local',plane:config.plane,position:candidate.position})));if(Math.abs(local[2])>.01)continue;}
+                if (candidate && (!best || candidate.score < best.score)) best = candidate;
+            }
+            this.mapViewState.drawingInput?.diagnostic?.(limited ? 'Geometry snapping reached its local candidate limit. Zoom closer or use Quick to edit a dense object.' : '');
+            this.snappedDrawing = best; point = best?.position; this.updateDrawingHandles();
+            this.mapViewState.drawingInput?.snapTarget?.(best ? best.key.match(/:v\d+$/) ? 'Point snap' : 'Segment snap' : '');
+        } else {this.snappedDrawing = undefined;this.mapViewState.drawingInput?.snapTarget?.('');}
+        // A geometry-snap miss must not turn a physical 3D surface pick into height zero.
+        if (!point && this.allowPitchAndBearing && !config.plane) {
+            const picked = pickNavigationAnchor(deck,[x,y],info => (info.layer && isDeckTextOverlayLayer(info.layer)) ? null : true);
+            if (picked) point = picked.position;
+        }
+        if (config.plane) {
+            if (point && config.snap && config.projectSnapToPlane) {
+                const local=JSON.parse(coreLib.drawingPlane(JSON.stringify({action:'local',plane:config.plane,position:point})));
+                const projected=JSON.parse(coreLib.drawingPlane(JSON.stringify({action:'project',plane:config.plane,position:point})));
+                if(Math.abs(local[2])>.01){this.projectedSnapOrigin=point;this.mapViewState.drawingInput?.snapTarget?.(`Projected to plane · ${Math.abs(local[2]).toLocaleString(undefined,{maximumFractionDigits:2})} m displacement`);}
+                if(this.snappedDrawing)this.snappedDrawing.position=projected;
+                this.updateDrawingHandles();return projected;
+            }
+            if(point && config.snap)return point;
+            return drawingPlanePosition(viewport, [x, y], config.plane);
+        }
+        if (point) return this.allowPitchAndBearing ? point : [point[0], point[1]];
+        const unprojected = viewport.unproject([x, y], {targetZ: this.allowPitchAndBearing ? config.elevation : 0});
+        if (unprojected.some(value => !Number.isFinite(value))) return undefined;
+        return [unprojected[0], unprojected[1], this.allowPitchAndBearing ? config.elevation : 0];
+    }
+    private updateDrawingHandles(): void {
+        const config = this.mapViewState.drawingInput?.configuration(this.viewId);
+        const viewport = this.deck?.getViewports()[0];
+        const data = (config?.handles ?? []).filter(handle => { const p = viewport?.project(handle.position as number[]); return p && p[0]>=0 && p[0]<=viewport!.width && p[1]>=0 && p[1]<=viewport!.height; }).slice(0,10000);
+        if (this.snappedDrawing) data.push({path:'snap',position:this.snappedDrawing.position});
+        const guides: {path: DrawingPosition[]}[] = [];
+        if(this.projectedSnapOrigin&&this.snappedDrawing){data.push({path:'snap-origin',position:this.projectedSnapOrigin});guides.push({path:[this.projectedSnapOrigin,this.snappedDrawing.position]});}
+        const plane = config?.plane;
+        if (plane && viewport) {
+            const extent = Math.max(1,this.zoomToAltitude(this.viewState.zoom,0) * .05);
+            const point = (x: number,y: number): DrawingPosition => JSON.parse(coreLib.drawingPlane(JSON.stringify({action:'global',plane,position:[x,y]})));
+            for (const axis of [-1,0,1]) { guides.push({path:[point(-extent,axis*extent),point(extent,axis*extent)]}); guides.push({path:[point(axis*extent,-extent),point(axis*extent,extent)]}); }
+        }
+        for (const handle of config?.handles ?? []) {
+            const match = handle.path.match(/curves\/(\d+)\/(\d+)$/); if (!match) continue;
+            const endpoint = config?.handles.find(item => item.path === '/erdblick:drawing/points/'+(Number(match[1])+Number(match[2])));
+            if (endpoint) guides.push({path:[endpoint.position,handle.position]});
+        }
+        this.layerRegistry.upsert('drawing-guides', new PathLayer({id:'drawing-guides',data:guides,getPath:item=>item.path,getColor:[100,150,230,140],getWidth:1,widthUnits:'pixels',pickable:false}),4499);
+        this.layerRegistry.upsert('drawing-handles', new ScatterplotLayer({id: 'drawing-handles', data,
+            getPosition: (item: {position: DrawingPosition}) => item.position as [number, number, number],
+            getRadius: 5, radiusUnits: 'pixels', getFillColor: [255,255,255,255], getLineColor: [30,100,230,255],
+            stroked: true, getLineWidth: 2, lineWidthUnits: 'pixels', pickable: false, parameters: {depthWriteEnabled: false}}), 4500);
     }
 
     /** Resolve visibility and configuration once at the renderer's application boundary. */

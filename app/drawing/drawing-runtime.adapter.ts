@@ -4,10 +4,11 @@ import type {DrawingOperation, DrawingReply, DrawingSummary} from "./drawing.mod
 
 /** One WASM heap's document owners; shared by the worker and bounded live-preview lane. */
 export class DrawingRuntime {
-    private readonly sources = new Map<string, {native: DrawingSource; revision: number; bom: boolean}>();
+    private readonly sources = new Map<string, {native: DrawingSource; revision: number; bom: boolean; preparedBom?: boolean}>();
 
     /** Execute an ordered operation; native import failure retains the previous accepted model. */
     execute(operation: DrawingOperation): DrawingReply {
+        if (operation.type === "compose") return {sources: JSON.parse(coreLib.drawingCompose(JSON.stringify(operation.collection || operation.ordinary ? {sources: operation.sources, collection: operation.collection, ordinary: operation.ordinary} : operation.sources), operation.separate))};
         if (operation.type === "convert-coordinates") return {text: coreLib.drawingCoordinatesToGeoJson(operation.text)};
         const mapId = operation.mapId;
         if (operation.type === "remove") {
@@ -35,6 +36,14 @@ export class DrawingRuntime {
         const entry = this.sources.get(mapId);
         if (!entry) throw new Error("This local document is no longer available.");
         const native = entry.native;
+        if (operation.type === "prepare") {
+            native.stage(JSON.stringify(operation.operation));
+            entry.preparedBom = operation.operation.type === 'replace' ? operation.operation.text.startsWith('\ufeff') : entry.bom;
+            return {revision: entry.revision};
+        }
+        if (operation.type === "cancel") { native.cancelStage(); entry.preparedBom = undefined; return {revision: entry.revision}; }
+        if (operation.type === "object") return {object: JSON.parse(native.object(operation.id)), revision: entry.revision};
+        if (operation.type === "branch") return {branch: JSON.parse(native.branch(JSON.stringify(operation.request))), revision: entry.revision};
         if (operation.type === "rows") return {rows: JSON.parse(native.rows(operation.offset, operation.count)), revision: entry.revision};
         if (operation.type === "filter" || operation.type === "snapshot") {
             const bytes = uint8ArrayFromWasm(out => operation.type === "filter"
@@ -43,7 +52,7 @@ export class DrawingRuntime {
             if (!bytes) throw new Error("Could not serialize the local model.");
             return {bytes, dictionary: uint8ArrayFromWasm(out => native.dictionary(out))!, revision: entry.revision};
         }
-        const serialized = operation.type === "tool" ? native.replace(coreLib.drawingToolGeoJson(operation.text, operation.preview)) :
+        const serialized = operation.type === "commit" ? native.commitStage() : operation.type === "objects" ? native.editObjects(JSON.stringify(operation.request)) : operation.type === "tool" ? native.replace(coreLib.drawingToolGeoJson(operation.text, operation.preview)) :
             operation.type === "replace" ? native.replace(operation.text) :
             operation.type === "description" ? native.editDescription(operation.id, operation.description) :
             operation.type === "append" ? native.append(operation.longitude, operation.latitude, operation.description) :
@@ -51,6 +60,7 @@ export class DrawingRuntime {
         const summary: DrawingSummary = JSON.parse(serialized);
         entry.revision = summary.revision;
         if (operation.type === 'replace') entry.bom = operation.text.startsWith('\ufeff');
+        if (operation.type === 'commit') { entry.bom = entry.preparedBom ?? entry.bom; entry.preparedBom = undefined; }
         let text = operation.type === 'replace' ? operation.text : native.source();
         // Embind's UTF-8 decoder consumes a leading BOM. Structured native edits preserve it,
         // so restore that known source prefix at the JS string boundary, without reformatting text.

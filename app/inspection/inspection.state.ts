@@ -1,3 +1,4 @@
+import {MapViewState} from "../mapview/mapview.state";
 import {coreLib} from "../integrations/wasm.adapter";
 import {parseMapPartitionKey} from "../mapdata/partition.model";
 /**
@@ -43,7 +44,21 @@ export class InspectionState {
         })).filter((state, index) => state.features.length || state.sourceData ||
             (!value[index].features.length && !value[index].sourceData));
     }
-    constructor(private readonly persistence: AppStateService) {}
+    constructor(private readonly persistence: AppStateService, readonly viewSettings: MapViewState) {
+        viewSettings.registerMembershipOwner({
+            seed: () => {},
+            retain: indices => {
+                const ids = indices.map(index => viewSettings.viewIdAt(index));
+                this.selectionState.next(this.selectionState.getValue().map(panel => ({...panel,
+                    requestViewId: panel.requestViewId && ids.includes(panel.requestViewId) ? panel.requestViewId : ids[0]})));
+            },
+            import: (previous, ids) => {
+                this.selectionState.next(this.selectionState.getValue().map(panel => ({...panel,
+                    requestViewId: panel.requestViewId && ids.includes(panel.requestViewId) ? panel.requestViewId :
+                        ids[Math.max(0, previous.indexOf(panel.requestViewId ?? ""))]})));
+            }
+        });
+    }
 
     /** Returns the default inspection panel size. */
     get defaultInspectionPanelSize(): [number, number] {
@@ -56,7 +71,8 @@ export class InspectionState {
     readonly selectionState = this.persistence.registerState<InspectionPanelModel<TileFeatureId>[]>({
         name: "selected",
         normalize: (panels) => {
-            const next = structuredClone(panels);
+            const next = structuredClone(panels).map(panel => ({...panel,
+                requestViewId: panel.requestViewId ?? this.viewSettings.viewIdAt(this.viewSettings.focusedView)}));
             this.sanitizeFocusedInspectionPanel(next);
             return next;
         },
@@ -73,6 +89,7 @@ export class InspectionState {
                 // Remove # character from hex color
                 const color = state.color.startsWith("#") ? state.color.slice(1) : state.color;
                 s += `${state.size[0]}:${state.size[1]}~${color}~${state.undocked ? 1 : 0}`;
+                if (state.requestViewId) s += `~v:${encodeURIComponent(state.requestViewId)}`;
                 return s;
             });
         },
@@ -86,6 +103,8 @@ export class InspectionState {
                 if (parts.length < 7) {
                     continue;
                 }
+                const ownerToken = parts.at(-1)?.startsWith("v:") ? parts.pop()!.slice(2) : undefined;
+                const requestViewId = ownerToken ? decodeURIComponent(ownerToken) : undefined;
                 const id = Number(parts.shift()!);
                 const panelFlags = parts.shift()!;
                 const lockState = panelFlags.startsWith("1");
@@ -103,6 +122,7 @@ export class InspectionState {
 
                 const newPanelState: InspectionPanelModel<TileFeatureId> = {
                     id: id,
+                    requestViewId,
                     features: [],
                     locked: lockState || !undocked,
                     focused: focused || undefined,

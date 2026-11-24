@@ -399,7 +399,7 @@ interface HomogeneousProjectedPoint {
  * to avoid the enormous false projections produced when one source vertex is
  * behind the camera. This is not full viewport/near/far-frustum clipping.
  */
-function closestVisibleProjectedSegmentPoint(
+export function closestVisibleProjectedSegmentPoint(
     pixelProjectionMatrix: number[],
     first: number[],
     second: number[],

@@ -3,6 +3,7 @@
  * Inspection retains response bytes and opens native wrappers only while they
  * are needed; incoming-context requests use the ordinary tile-stream client.
  */
+import type {SpatialRequestContext} from "./spatial-extent.model";
 import type {
     TileFeatureLayer,
     TileLayerParser
@@ -68,7 +69,8 @@ export class InspectionFeatureTile {
         private readonly parser: TileLayerParser,
         readonly blob: Uint8Array,
         readonly origin: "remote" | "virtual" = "remote",
-        private readonly includeStringPool?: (id: string) => boolean
+        private readonly includeStringPool?: (id: string) => boolean,
+        readonly requestContext?: SpatialRequestContext
     ) {
         const metadata = uint8ArrayToWasm(
             data => parser.readTileLayerMetadata(data),
@@ -168,7 +170,7 @@ export class InspectionFeatureTile {
             bytes += blob.byteLength;
             if (snapshots.length >= 64 || bytes > 64 * 1024 * 1024)
                 throw new Error("Incoming inspection exceeds its snapshot limit.");
-            snapshots.push(new InspectionFeatureTile(this.parser, blob, "remote", this.includeStringPool));
+            snapshots.push(new InspectionFeatureTile(this.parser, blob, "remote", this.includeStringPool, this.requestContext));
         };
         client.onSubsets = () => { throw new Error("Backend does not support incoming inspection."); };
         client.onFrame = (frame, type) => {
@@ -179,6 +181,7 @@ export class InspectionFeatureTile {
                 if (manifests.length) throw new Error("Duplicate incoming inspection manifest.");
                 manifests.push(value);
             } else if (value.type === "mapget.filter.status") {
+                if (value.excludedPartitions?.length) failure = "Outside spatial extent";
                 if (value.state === "Success") successful = true;
                 if (value.state === "Failed" || value.state === "Aborted")
                     failure = value.error ?? "Incoming inspection failed.";
@@ -187,6 +190,7 @@ export class InspectionFeatureTile {
         try {
             await client.request([{
                 mapId: this.mapName, layerId: this.layerName, partitions: [this.partition],
+                spatialExtentPolicy: this.requestContext?.policy,
                 roots: [{ partition: this.partition, featureId: canonicalId }]
             }], { channels: [{ channelId: "incoming", scope: "relation", relation: { traversal: "incoming" } }] });
             signal.throwIfAborted();

@@ -1,3 +1,6 @@
+import {applySourceChanges} from './editor-source.util';
+import {EditorState, Extension, StateEffect} from '@codemirror/state';
+import {history, isolateHistory, undo, redo, undoDepth, redoDepth} from '@codemirror/commands';
 import {Injectable} from '@angular/core';
 import {BehaviorSubject, Observable, Subject} from 'rxjs';
 
@@ -45,6 +48,7 @@ export interface EditorSession {
  */
 export class EditorService {
 
+    private readonly states = new Map<string, EditorState>();
     private readonly sessions = new Map<string, EditorSession>();
     private readonly pendingRevealRequests = new Map<string, EditorRevealRequest>();
     private nextRevealRequestId = 0;
@@ -69,6 +73,7 @@ export class EditorService {
             readOnly: config.readOnly ?? false
         };
         this.sessions.set(session.id, session);
+        this.states.set(session.id, EditorState.create({doc: config.source, extensions: [history()]}));
         this.sessionChanged$.next(session.id);
         return session;
     }
@@ -105,7 +110,42 @@ export class EditorService {
         if (session.source$.getValue() === source) {
             return;
         }
+        const state = this.states.get(id);
+        if (state && !state.doc.eq(state.toText(source))) {
+            const before = state.doc.toString(), after = state.toText(source).toString();
+            let from = 0, suffix = 0;
+            while (from < before.length && from < after.length && before[from] === after[from]) ++from;
+            while (suffix < before.length-from && suffix < after.length-from && before[before.length-suffix-1] === after[after.length-suffix-1]) ++suffix;
+            this.states.set(id, state.update({changes: {from, to: before.length-suffix, insert: after.slice(from, after.length-suffix)}, annotations: isolateHistory.of('full')}).state);
+        }
         session.source$.next(source);
+    }
+
+    /** Retain the same CodeMirror history while a document moves between Quick, tray and raw editor. */
+    attachState(id: string, extensions: Extension[]): EditorState {
+        const state = this.states.get(id) ?? EditorState.create();
+        const configured = state.update({effects: StateEffect.reconfigure.of(extensions)}).state;
+        this.states.set(id, configured); return configured;
+    }
+    detachState(id: string): void {
+        const state = this.states.get(id);
+        if (state) this.states.set(id, state.update({effects: StateEffect.reconfigure.of([history()])}).state);
+    }
+    /** Report history availability from the retained editor state for non-editor surfaces. */
+    canHistory(id: string, direction: 'undo' | 'redo'): boolean {
+        const state = this.states.get(id);
+        return !!state && (direction === 'undo' ? undoDepth(state) : redoDepth(state)) > 0;
+    }
+    editorState(id: string): EditorState | undefined { return this.states.get(id); }
+    acceptState(id: string, state: EditorState, source: string): void {
+        this.states.set(id, state); this.updateSessionSource(id, source);
+    }
+    history(id: string, direction: 'undo' | 'redo'): boolean {
+        const state = this.states.get(id), session = this.sessions.get(id);
+        if (!state || !session || session.readOnly) return false;
+        return (direction === 'undo' ? undo : redo)({state, dispatch: transaction => {
+            this.states.set(id, transaction.state); session.source$.next(session.preserveLineEndings ? applySourceChanges(session.source$.value, transaction.changes) : transaction.state.doc.toString());
+        }});
     }
 
     /** Emits a save request for the given editor session. */
@@ -163,7 +203,7 @@ export class EditorService {
             return;
         }
         this.disposeSession(session);
-        this.sessions.delete(id);
+        this.sessions.delete(id); this.states.delete(id);
         this.pendingRevealRequests.delete(id);
         this.sessionChanged$.next(id);
     }

@@ -162,6 +162,7 @@ export class MapViewState {
             this.mode2dState,
             this.backgroundState,
             this.viewTileBordersState,
+            this.viewScaleState,
             this.viewTileGridModeState,
             this.viewTileGridLevelState,
             this.viewTileGridAutoLevelState,
@@ -314,6 +315,10 @@ export class MapViewState {
         },
         () => this.viewIds
     );
+
+    readonly viewScaleState = this.persistence.registerPerViewState<boolean>({
+        name: 'mapScale', defaultValue: false, schema: Boolish, urlParamName: 'scale'
+    }, () => this.viewIds);
 
     readonly viewTileBordersState = this.persistence.registerPerViewState<boolean>(
         {

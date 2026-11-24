@@ -243,6 +243,9 @@ struct TileSubsetLayer
      * A missing channel returns undefined. An absent entry leaves only the
      * picking tuple and channel ID in the result, without a feature identity.
      */
+    /** Bounded original feature geometry for snapping; attribute decorations are ineligible. */
+    std::string snapGeometry(uint32_t channelOrdinal, uint32_t entryOrdinal) const;
+
     NativeJsValue resolvePick(
         uint32_t channelOrdinal,
         uint32_t entryOrdinal,

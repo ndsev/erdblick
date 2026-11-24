@@ -16,6 +16,10 @@ export async function openMainMenu(page: Page, rootLabel: string): Promise<Locat
     const rootItem = page.locator('.main-bar').first().getByRole('menuitem', {
         name: menuItemNamePattern(rootLabel)
     }).first();
+    if(!await rootItem.isVisible()) {
+        const navigation=page.locator('.main-bar').first().getByRole('button',{name:'Navigation',exact:true});
+        if(await navigation.isVisible())await navigation.click();
+    }
     await expect(rootItem).toBeVisible();
     await rootItem.hover();
 
@@ -181,8 +185,7 @@ export async function openOmnibar(page: Page, query: string): Promise<Locator> {
 
 export async function enableMapLayer(page: Page, mapLabel: string, layerLabel: string): Promise<void> {
     // Open the layer dialog through the toolbar button.
-    const mapsButton = page.getByTestId('maps-toggle');
-    await mapsButton.click({ force: true });
+    await openLayerDialog(page);
 
     const dialog = page.getByTestId('map-layer-dialog').locator('.p-dialog-content');
     await expect(dialog).toBeVisible();
@@ -227,8 +230,11 @@ export async function openLayerDialog(page: Page): Promise<void> {
         return;
     }
 
-    const mapsButton = page.getByTestId('maps-toggle');
-    await mapsButton.click({ force: true });
+    const navigation=page.locator('.main-bar').first().getByRole('button',{name:'Navigation',exact:true});
+    if(await navigation.isVisible()){
+        if(await navigation.getAttribute('aria-expanded')!=='true')await navigation.click();
+        await page.locator('.main-bar').first().getByRole('menuitem',{name:/Maps$/}).click();
+    }else await page.getByTestId('maps-toggle').click();
     await expect(dialog).toBeVisible();
 }
 
@@ -238,8 +244,7 @@ export async function closeLayerDialog(page: Page): Promise<void> {
         return;
     }
 
-    const mapsButton = page.getByTestId('maps-toggle');
-    await mapsButton.click({ force: true });
+    await dialog.locator('.close-maps-button button').click();
     await expect(dialog).toBeHidden();
 }
 

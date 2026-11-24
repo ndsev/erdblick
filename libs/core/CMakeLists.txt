@@ -27,6 +27,7 @@ set(ERDBLICK_SOURCE_FILES
 
   src/drawing.cpp
   src/drawing-geometry.cpp
+  src/drawing-shape.cpp
   src/subset-renderer.cpp
   src/gpu-render-packet.cpp
   src/gpu-render-records.cpp
@@ -38,6 +39,8 @@ set(ERDBLICK_SOURCE_FILES
   src/color.cpp
   src/buffer.cpp
   src/aabb.cpp
+    src/coverage-selection.cpp
+    src/coverage-parser.cpp
   src/parser.cpp
   src/geometry.cpp
   src/inspection.cpp

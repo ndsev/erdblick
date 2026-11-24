@@ -86,13 +86,15 @@ function setup() {
     const stream = {
         actionClientId$: new BehaviorSubject<string | null>(null), actionControlReceived: new Subject<{ payload: unknown; receivedAt: number }>(),
         sendActionControl: vi.fn(() => true),
+        permitsFeatureKey: vi.fn(() => true),
+        captureSpatialRequestContext: (viewId?: string) => maps.spatialRequestContextForViewId(viewId),
         parseMapPartitionKeySafe: vi.fn((key: string) => key.startsWith('Features:') || key.startsWith('SourceData:') ? ['map', 'layer', { kind: 'tile', id: 1 }] : null),
         locateFeature: vi.fn<() => Promise<Array<{ mapTileKey: string; featureId: string }>>>(() => Promise.resolve([])),
         loadFeatures: vi.fn(() => Promise.resolve([])), isTileStreamConnected: vi.fn(() => true), tilePipelinePaused: false,
         getPendingFrameQueueSize: vi.fn(() => 0), getDownstreamBytesPerSecond: vi.fn(() => 100), getTileStreamTransportCompressionStats: vi.fn(() => ({})),
         resolveFeatureIdentities: MapTileStreamService.prototype.resolveFeatureIdentities
     };
-    const inspections = Object.assign(new InspectionSelectionService(state, stream as never, views,
+    const inspections = Object.assign(new InspectionSelectionService(state, maps, stream as never, views,
         { registerShortcut() { } } as never, { showError() { } } as never, zone as never, owners.inspectionState, owners.viewSettings), {
         inspectFeatureIds: vi.fn((features, lock) => {
             const panelId = owners.inspectionState.setSelection(features);
@@ -832,7 +834,7 @@ describe("McpActionService", () => {
         const result = read(service);
         expect(result.values).toHaveLength(32);
         const omission = result.omissions.find(item => item.omittedCount);
-        expect(omission?.omittedCount).toBe(35);
+        expect(omission?.omittedCount).toBe(67);
         expect(result.values.some(item => JSON.stringify(item.target) === JSON.stringify(omission?.target))).toBe(false);
         expect(result.complete).toBe(false);
     });

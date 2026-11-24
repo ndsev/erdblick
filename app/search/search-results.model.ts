@@ -117,6 +117,7 @@ export class SearchResults {
     complete = false;
     totalFeatureCount = 0;
     searchResults: FeatureSearchResultEntry[] = [];
+    private resultIdentities = new Set<string>();
     diagnostics: DiagnosticsMessage[] = [];
     diagnosticsBlobs: Uint8Array[] = [];
     valueSummaries = this.emptyValueSummariesState("idle", 0);
@@ -165,6 +166,7 @@ export class SearchResults {
         this.searchResultTilesBySourceKey.clear();
         this.clearSessionSearchResultPoints();
         this.searchResults = [];
+        this.resultIdentities.clear();
         this.diagnostics = [];
         this.diagnosticsBlobs = [];
         this.markValueSummariesDirty();
@@ -272,16 +274,15 @@ export class SearchResults {
     rebuildSessionResultData(): void {
         this.rebuildPending = false;
         const nextResults: FeatureSearchResultEntry[] = [];
+        this.resultIdentities.clear();
         const nextDiagnosticsBlobs: Uint8Array[] = [];
         const nextPoints = new Map<string, SearchResultPoint>();
         const nextBuckets: SearchResultPointBucket[] = [];
-        let totalFeatureCount = 0;
 
         const contributions = Array.from(this.searchResultTilesBySourceKey.values())
             .sort((lhs, rhs) => this.compareSearchResultTileContributions(lhs, rhs));
         for (const contribution of contributions) {
-            totalFeatureCount += contribution.resultCount;
-            this.appendArray(nextResults, contribution.results);
+            this.appendUniqueResults(nextResults, contribution.results);
             if (contribution.diagnostics) {
                 nextDiagnosticsBlobs.push(contribution.diagnostics);
             }
@@ -298,7 +299,7 @@ export class SearchResults {
 
         this.searchResults = nextResults;
         this.diagnosticsBlobs = nextDiagnosticsBlobs;
-        this.totalFeatureCount = totalFeatureCount;
+        this.totalFeatureCount = nextResults.length;
         this.searchResultPointsByFeatureKey = nextPoints;
         this.searchResultPointBucketsCache = nextBuckets;
         this.searchResultPointBucketIndexBySourceKey = this.searchResultPointBucketIndex(nextBuckets);
@@ -319,7 +320,8 @@ export class SearchResults {
         contribution.valueSummary = null;
         this.appendArray(contribution.results, batch.results);
         this.appendArray(contribution.points, batch.points);
-        this.appendArray(this.searchResults, batch.results);
+        this.appendUniqueResults(this.searchResults, batch.results);
+        this.totalFeatureCount = this.searchResults.length;
 
         let pointsChanged = false;
         for (const point of batch.points) {
@@ -370,11 +372,11 @@ export class SearchResults {
     private appendSessionResultContribution(
         contribution: SearchResultTileContribution
     ): void {
-        this.appendArray(this.searchResults, contribution.results);
+        this.appendUniqueResults(this.searchResults, contribution.results);
         if (contribution.diagnostics) {
             this.diagnosticsBlobs.push(contribution.diagnostics);
         }
-        this.totalFeatureCount += contribution.resultCount;
+        this.totalFeatureCount = this.searchResults.length;
         const densityChanged = contribution.points.length > 0;
         if (densityChanged) {
             this.searchResultDensityIndex.addContribution(contribution.sourceTileKey, contribution.points);
@@ -397,6 +399,17 @@ export class SearchResults {
         if (pointsChanged || densityChanged) {
             this.searchResultPointsCacheDirty = this.searchResultPointsCacheDirty || pointsChanged;
             this.searchResultPointsVersion += 1;
+        }
+    }
+
+    /** Keep global rows unique while contribution ownership remains available for removal and view routing. */
+    private appendUniqueResults(target: FeatureSearchResultEntry[], values: readonly FeatureSearchResultEntry[]): void {
+        for (const value of values) {
+            const key = JSON.stringify([value.mapTileKey, value.featureId, value.hoverFeatureId,
+                value.attributeIndex, value.validityIndex, value.label]);
+            if (this.resultIdentities.has(key)) continue;
+            this.resultIdentities.add(key);
+            target.push(value);
         }
     }
 

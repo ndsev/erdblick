@@ -58,6 +58,8 @@ export class ViewVisualizationState {
     searchVisibleTileIdSetsPerLevel = new Map<number, Set<number>>();
     canonicalVisibleTileCountPerLevel = new Map<number, number>();
     tileOrder = new Map<number, number>();
+    /** Layer-specific eligibility caches include camera, metadata and owner policy. */
+    layerTileSelections = new Map<string, {signature: string; tiles: number[]; membership: Set<number>}>();
     coverageVersion = 0;
 
     /**

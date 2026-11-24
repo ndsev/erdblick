@@ -20,7 +20,7 @@ const disposers: Array<() => void> = [];
 afterEach(() => {
     for (const dispose of disposers.splice(0).reverse()) dispose();
     vi.restoreAllMocks();
-    for (const key of Object.keys(localStorage)) if (key.startsWith('drawingDocumentData:')) localStorage.removeItem(key);
+    for (const key of Object.keys(localStorage)) if ((key.startsWith('drawingDocumentData:') || key.startsWith('drawingCollectionData:'))) localStorage.removeItem(key);
 });
 
 /** Exercise real WASM documents and parser, substituting only the asynchronous Worker transport. */
@@ -137,10 +137,11 @@ describe('Drawing editor transactions', () => {
 function documentFixture() {
     const {service, maps} = fixture();
     const persistence = testPersistence(), owners = stateOwners(persistence), editors = new EditorService();
+    owners.viewSettings.mode2dState.next(0, true);
     const workspace = {open: vi.fn(), entries: [] as Array<{descriptor: {target: string}}>, requestClose: vi.fn()};
     const docs = new DrawingDocumentsService(service, editors, workspace as never, {} as never, owners.viewSettings);
     disposers.push(() => { docs.ngOnDestroy(); persistence.ngOnDestroy(); });
-    return {docs, editors, service, workspace, owners};
+    return {docs, editors, service, workspace, owners, persistence};
 }
 
 describe('Drawing browser persistence', () => {
@@ -173,7 +174,7 @@ describe('Drawing browser persistence', () => {
         expect(second.service.sources.get(points.mapId)?.summary.joined).toBe(true);
         expect(second.workspace.open).not.toHaveBeenCalled();
         expect(await second.docs.discard(restored)).toBe(true);
-        expect(second.service.sources.get(points.mapId)?.text).toBe(geo(coordinates));
+        expect(second.service.sources.has(points.mapId)).toBe(false);
         expect(second.docs.unloadUnsafe).toBe(false);
     });
 
@@ -191,6 +192,8 @@ describe('Drawing browser persistence', () => {
         await second.docs.restore();
         const restored = second.docs.documents.get(original.mapId)!;
         expect(restored.draft).toBe('unfinished draft');
+        expect(second.docs.trayVisible).toBe(true);
+        expect(second.docs.workingIds).toContain(original.mapId);
         expect(restored.baseline).toBe(geo('0 0 baseline\n'));
         expect(restored.error).not.toBe('');
         expect((await second.service.rows(restored.mapId, 0, 1))[0].description).toBe('accepted');
@@ -218,12 +221,12 @@ describe('Drawing browser persistence', () => {
         const first = documentFixture();
         await first.docs.create('coordinates', 'remove.txt', '0 0 original\n', true);
         const doc = [...first.docs.documents.values()][0];
-        vi.spyOn(window, 'confirm').mockReturnValue(true);
+        // The UI uses a managed confirmation; false below represents its confirmed command.
         const remove = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => { throw new Error('Storage unavailable'); });
-        await first.docs.remove(doc.mapId);
+        await first.docs.remove(doc.mapId,false);
         expect(first.docs.documents.has(doc.mapId)).toBe(true);
         expect(doc.storageError).toContain('Could not remove');
-        remove.mockRestore(); await first.docs.remove(doc.mapId);
+        remove.mockRestore(); await first.docs.remove(doc.mapId,false);
         expect(first.docs.documents.size).toBe(0);
         const second = documentFixture(); await second.docs.restore();
         expect(second.docs.documents.size).toBe(0);
@@ -268,7 +271,7 @@ describe('Drawing browser persistence', () => {
         const doc = [...docs.documents.values()][0], change = service.change.bind(service);
         let release!: () => void;
         const wait = new Promise<void>(resolve => { release = resolve; });
-        vi.spyOn(service, 'change').mockImplementationOnce(async operation => { await wait; return change(operation); });
+        vi.spyOn(service, 'change').mockImplementationOnce(async (...args) => { await wait; return change(...args); });
         const edit = docs.edit(doc, {type: 'description', mapId: doc.mapId, id: (await service.rows(doc.mapId, 0, 1))[0].id, description: 'pending edit'});
         docs.flushPersistence();
         expect(docs.unloadUnsafe).toBe(true);
@@ -284,10 +287,10 @@ describe('Drawing browser persistence', () => {
             const doc = [...docs.documents.values()][0], change = service.change.bind(service);
             let release!: () => void;
             const wait = new Promise<void>(resolve => { release = resolve; });
-            vi.spyOn(service, 'change').mockImplementationOnce(async operation => { await wait; return change(operation); });
+            vi.spyOn(service, 'change').mockImplementationOnce(async (...args) => { await wait; return change(...args); });
             const edit = docs.edit(doc, {type: 'description', mapId: doc.mapId, id: (await service.rows(doc.mapId, 0, 1))[0].id, description: 'structured edit'});
             editors.updateSessionSource(doc.sessionId, draft);
-            release(); await edit;
+            release(); await expect(edit).rejects.toThrow(/changed during editing|newer raw draft/);
             expect(doc.draft).toBe(draft);
             expect(editors.getSessionSource(doc.sessionId)).toBe(draft);
             const stored = new DrawingStorageService().load().documents[0];
@@ -303,37 +306,37 @@ describe('Drawing browser persistence', () => {
 describe('Measurement GeoJSON documents', () => {
     it('retains and restores completed geometry, stops input before editing, and deletes stored results', async () => {
         const first = documentFixture();
-        const views = {viewStateChanged: new Subject(), setMapLayerVisibility: vi.fn()} as unknown as MapViewService;
+        const views = {drawingChanged: new Subject(), drawingViewBounds: new Map(), viewStateChanged: new Subject(), setMapLayerVisibility: vi.fn()} as unknown as MapViewService;
         const tools = new DrawingToolsService(first.owners.drawing, first.service, first.docs, views, first.owners.viewSettings);
         disposers.push(() => tools.ngOnDestroy());
-        tools.start();
+        await tools.select('distance');
         const view = first.owners.viewSettings.viewIdAt(0);
         views.drawingInput!.click(view, [179, 0]); views.drawingInput!.click(view, [-179, 0]);
         await tools.close(); // Includes the latest queued click before detaching the producer.
         expect(first.docs.documents.size).toBe(1);
         const doc = [...first.docs.documents.values()][0];
-        expect(doc.name).toBe('Measurement.geojson'); expect(doc.stopInput).toBeUndefined();
+        expect(doc.name).toBe('Untitled drawing'); expect(first.docs.closeDialog).toBe(true);
         const geojson = JSON.parse(doc.draft);
         expect(geojson.type).toBe('FeatureCollection');
-        expect(geojson.features.map((f: {properties: {role: string}}) => f.properties.role)).toEqual([
-            'measurement-point', 'measurement-point', 'measurement-label', 'measurement-path', 'measurement-label']);
-        expect(geojson.features[3].geometry.type).toBe('MultiLineString');
+        expect(geojson.features).toHaveLength(1);
+        expect(geojson.features[0]['erdblick:drawing'].measurements.distances).toBe(true);
+        expect(geojson.features[0].geometry.type).toBe('MultiLineString');
         expect(first.service.sources.has(doc.mapId)).toBe(true);
         const second = documentFixture(); await second.docs.restore();
         expect(second.docs.documents.get(doc.mapId)?.draft).toBe(doc.draft);
         // A new active measurement relinquishes its producer before the same Editor opens.
         const secondTools = new DrawingToolsService(second.owners.drawing, second.service, second.docs, views, second.owners.viewSettings);
         disposers.push(() => secondTools.ngOnDestroy());
-        secondTools.start(); views.drawingInput!.click(view, [0, 0]);
+        second.docs.openTray([]); await secondTools.select('point'); views.drawingInput!.click(view, [0, 0]); await secondTools.pause();
         await vi.waitFor(() => expect(second.docs.documents.size).toBe(2));
         const active = [...second.docs.documents.values()].find(item => item.mapId !== doc.mapId)!;
         await second.docs.open(active.mapId);
-        expect(secondTools.active).toBe(false); expect(secondTools.visible).toBe(false);
+        expect(secondTools.active).toBe(false); expect(secondTools.visible).toBe(true);
         expect(active.stopInput).toBeUndefined(); expect((await second.service.rows(active.mapId, 0, 10))).toHaveLength(1);
         await second.docs.edit(active, {type: 'description', mapId: active.mapId, id: (await second.service.rows(active.mapId, 0, 1))[0].id, description: 'measured point'});
         expect(JSON.parse(active.draft).features[0].properties.description).toBe('measured point');
-        vi.spyOn(window, 'confirm').mockReturnValue(true);
-        await second.docs.remove(doc.mapId);
+        // The UI uses a managed confirmation; false below represents its confirmed command.
+        await second.docs.remove(doc.mapId,false);
         expect(localStorage.getItem('drawingDocumentData:' + doc.mapId)).toBeNull();
         expect(second.service.sources.has(doc.mapId)).toBe(false);
     });
@@ -347,10 +350,10 @@ describe('Local document deletion ownership', () => {
         const change = service.change.bind(service);
         let release!: () => void;
         const wait = new Promise<void>(resolve => { release = resolve; });
-        vi.spyOn(service, 'change').mockImplementationOnce(async operation => { await wait; return change(operation); });
+        vi.spyOn(service, 'change').mockImplementationOnce(async (...args) => { await wait; return change(...args); });
         const edit = docs.edit(doc, {type: 'description', mapId: doc.mapId, id: (await service.rows(doc.mapId, 0, 1))[0].id, description: 'updated'});
-        vi.spyOn(window, 'confirm').mockReturnValue(true);
-        const remove = docs.remove(doc.mapId);
+        // The UI uses a managed confirmation; false below represents its confirmed command.
+        const remove = docs.remove(doc.mapId,false);
         expect(docs.documents.has(doc.mapId)).toBe(true);
         release(); await edit; await remove;
         expect(docs.documents.has(doc.mapId)).toBe(false);
@@ -360,10 +363,10 @@ describe('Local document deletion ownership', () => {
 
     it('drains a pending Clear before opening the active measurement document', async () => {
         const {docs, service, owners} = documentFixture();
-        const views = {viewStateChanged: new Subject(), setMapLayerVisibility: vi.fn()} as unknown as MapViewService;
+        const views = {drawingChanged: new Subject(), drawingViewBounds: new Map(), viewStateChanged: new Subject(), setMapLayerVisibility: vi.fn()} as unknown as MapViewService;
         const tools = new DrawingToolsService(owners.drawing, service, docs, views, owners.viewSettings);
         disposers.push(() => tools.ngOnDestroy());
-        tools.start(); views.drawingInput!.click(owners.viewSettings.viewIdAt(0), [0, 0]);
+        await tools.select('point'); views.drawingInput!.click(owners.viewSettings.viewIdAt(0), [0, 0]);
         await vi.waitFor(() => expect(JSON.parse([...docs.documents.values()][0]?.draft ?? '{}').features).toHaveLength(1));
         const doc = [...docs.documents.values()][0];
         const edit = docs.edit.bind(docs);
@@ -399,8 +402,8 @@ describe('Deletion while raw validation advances', () => {
         editors.updateSessionSource(doc.sessionId, geo('1 1 first\n'));
         const firstValidation = docs.validate(doc);
         await Promise.resolve();
-        vi.spyOn(window, 'confirm').mockReturnValue(true);
-        const removal = docs.remove(doc.mapId);
+        // The UI uses a managed confirmation; false below represents its confirmed command.
+        const removal = docs.remove(doc.mapId,false);
         await Promise.resolve();
         editors.updateSessionSource(doc.sessionId, geo('2 2 second\n'));
         const secondValidation = docs.validate(doc);
@@ -416,10 +419,10 @@ describe('Deletion while raw validation advances', () => {
 describe('Drawing tool geometry', () => {
     it('snaps the live cursor and committed endpoint identically, and retains segment/total labels and color', async () => {
         const {docs, service, owners} = documentFixture();
-        const views = {viewStateChanged: new Subject(), setMapLayerVisibility: vi.fn()} as unknown as MapViewService;
+        const views = {drawingChanged: new Subject(), drawingViewBounds: new Map(), viewStateChanged: new Subject(), setMapLayerVisibility: vi.fn()} as unknown as MapViewService;
         const tools = new DrawingToolsService(owners.drawing, service, docs, views, owners.viewSettings);
         disposers.push(() => tools.ngOnDestroy());
-        tools.start(); tools.setColor('#123abc');
+        await tools.select('distance'); tools.setColor('#123abc');
         const view = owners.viewSettings.viewIdAt(0);
         views.drawingInput!.click(view, [0, 0]);
         views.drawingInput!.move(view, [1, .8], true);
@@ -431,12 +434,13 @@ describe('Drawing tool geometry', () => {
         await tools.close();
         const features = JSON.parse([...docs.documents.values()][0].draft).features;
         expect(features.every((f: {properties: {color: string}}) => f.properties.color === '#123abc')).toBe(true);
-        expect(features.filter((f: {properties: {role: string}}) => f.properties.role === 'measurement-label')).toHaveLength(2);
+        expect(features).toHaveLength(1); expect(features[0]['erdblick:drawing'].measurements.distances).toBe(true);
+        const evaluated = JSON.parse(coreLib.drawingEvaluate(JSON.stringify({authoring: features[0]['erdblick:drawing']}))); expect(evaluated.decorations).toHaveLength(2);
     });
 
     it('measures area and angles, then captures a freehand stroke without taking clicks in another view', async () => {
         const {docs, service, owners} = documentFixture();
-        const views = {viewStateChanged: new Subject(), setMapLayerVisibility: vi.fn()} as unknown as MapViewService;
+        const views = {drawingChanged: new Subject(), drawingViewBounds: new Map(), viewStateChanged: new Subject(), setMapLayerVisibility: vi.fn()} as unknown as MapViewService;
         const tools = new DrawingToolsService(owners.drawing, service, docs, views, owners.viewSettings);
         disposers.push(() => tools.ngOnDestroy());
         const view = owners.viewSettings.viewIdAt(0);
@@ -455,15 +459,16 @@ describe('Drawing tool geometry', () => {
         views.drawingInput!.up(view, [2, 1]);
         expect(tools.points).toHaveLength(3); expect(tools.active).toBe(false);
         await tools.close();
-        expect(docs.documents.size).toBe(3);
-        const pen = [...docs.documents.values()].find(doc => doc.name === 'Pen.geojson')!;
-        expect(JSON.parse(pen.draft).features[0].geometry.type).toBe('LineString');
+        expect(docs.documents.size).toBe(1);
+        const pen = [...docs.documents.values()][0];
+        expect(JSON.parse(pen.draft).features).toHaveLength(3);
+        expect(JSON.parse(pen.draft).features[2].geometry.type).toBe('LineString');
     });
 });
 
 it('does not clear a failed committed shape diagnostic when its cursor preview succeeds', async () => {
     const {docs, service, owners} = documentFixture();
-    const views = {viewStateChanged: new Subject(), setMapLayerVisibility: vi.fn()} as unknown as MapViewService;
+    const views = {drawingChanged: new Subject(), drawingViewBounds: new Map(), viewStateChanged: new Subject(), setMapLayerVisibility: vi.fn()} as unknown as MapViewService;
     const tools = new DrawingToolsService(owners.drawing, service, docs, views, owners.viewSettings);
     disposers.push(() => tools.ngOnDestroy());
     const view = owners.viewSettings.viewIdAt(0);
@@ -482,7 +487,7 @@ it('does not clear a failed committed shape diagnostic when its cursor preview s
 
 it('keeps completed angle and ellipse input stopped when reopening the palette', async () => {
     const {docs, service, owners} = documentFixture();
-    const views = {viewStateChanged: new Subject(), setMapLayerVisibility: vi.fn()} as unknown as MapViewService;
+    const views = {drawingChanged: new Subject(), drawingViewBounds: new Map(), viewStateChanged: new Subject(), setMapLayerVisibility: vi.fn()} as unknown as MapViewService;
     const tools = new DrawingToolsService(owners.drawing, service, docs, views, owners.viewSettings);
     disposers.push(() => tools.ngOnDestroy());
     const view = owners.viewSettings.viewIdAt(0);
@@ -495,7 +500,204 @@ it('keeps completed angle and ellipse input stopped when reopening the palette',
         expect(tools.visible).toBe(true); expect(tools.active).toBe(false);
         expect(views.drawingInput!.click(view, [2, 2])).toBe(false);
         expect(tools.points).toHaveLength(count);
-        tools.backspace(); tools.start(); expect(tools.active).toBe(true);
+        tools.backspace(); tools.start(); expect(tools.active).toBe(true); await tools.clear();
     }
     await tools.close();
+});
+
+describe('Phase 0+ working sets and domain dispatch', () => {
+    it('recovers an incomplete draft separately from valid GeoJSON and discards it without a saved copy', async () => {
+        const first = documentFixture();
+        const views = {drawingChanged:new Subject(),drawingViewBounds:new Map(),viewStateChanged:new Subject(),setMapLayerVisibility:vi.fn()} as unknown as MapViewService;
+        const tools = new DrawingToolsService(first.owners.drawing,first.service,first.docs,views,first.owners.viewSettings);
+        disposers.push(()=>tools.ngOnDestroy()); tools.start(); views.drawingInput!.click(first.owners.viewSettings.viewIdAt(0),[10,20]);
+        await tools.pause(); first.docs.flushPersistence();
+        const doc = first.docs.workingDocuments[0]; expect(JSON.parse(doc.draft).features).toEqual([]);
+        expect(doc.pendingObject?.authoring.points).toEqual([[10,20]]);
+        const restored = documentFixture(); await restored.docs.restore();
+        const resumed = new DrawingToolsService(restored.owners.drawing,restored.service,restored.docs,views,restored.owners.viewSettings);
+        disposers.push(()=>resumed.ngOnDestroy()); resumed.start();
+        await vi.waitFor(()=>expect(resumed.points).toEqual([[10,20]]));
+        expect(await restored.docs.saveWorkingSet('Incomplete','one')).toBe(false);
+        await restored.docs.discardWorkingSet(); expect(new DrawingStorageService().load().documents).toEqual([]);
+    });
+    it('atomically saves separate objects, reopens the collection and repacks to one document', async () => {
+        const first = documentFixture(); const doc = await first.docs.create('geojson','Draft',geo('1 1 a\n2 2 b\n'),false,{openEditor:false}); first.docs.openTray([doc.mapId]);
+        const originalSet = Storage.prototype.setItem;
+        const write = vi.spyOn(Storage.prototype,'setItem').mockImplementation(function(this: Storage,key,value){if(key.startsWith('drawingCollectionData:'))throw new DOMException('Full','QuotaExceededError');originalSet.call(this,key,value);});
+        expect(await first.docs.saveWorkingSet('Collection','separate')).toBe(false); expect(first.docs.documents.has(doc.mapId)).toBe(true);
+        expect(new DrawingStorageService().load().documents).toHaveLength(1); write.mockRestore();
+        expect(await first.docs.saveWorkingSet('Collection','separate')).toBe(true);
+        expect(first.docs.workingDocuments).toHaveLength(2);
+        const members = first.docs.workingIds.slice();
+        expect(members.every(id=>localStorage.getItem('drawingDocumentData:'+id)===null)).toBe(true);
+        const second = documentFixture(); await second.docs.restore(); second.docs.openTray([members[1]]);
+        expect(second.docs.workingIds).toEqual(members);
+        expect(await second.docs.saveWorkingSet('Unified','one')).toBe(true);
+        expect(second.docs.workingDocuments).toHaveLength(1); expect(JSON.parse(second.docs.workingDocuments[0].draft).features).toHaveLength(2);
+        const stored = new DrawingStorageService().load(); expect(stored.errors).toEqual([]); expect(stored.documents).toHaveLength(1);
+        const stale = first.docs.workingDocuments[0]; expect(first.docs.persist(stale)).toBe(false); expect(stale.storageError).toContain('another tab');
+    });
+    it('uses actual registry and MCP dispatch for revisions, edits, undo, staged transfer and cancellation', async () => {
+        const {AppActionRegistry} = await import('../../../app/action/action-registry.service');
+        const {McpActionService} = await import('../../../app/action/mcp-action.service');
+        const f = documentFixture(), registry = new AppActionRegistry(f.persistence); registry.registerContributors([f.docs]);
+        const zone = {run:(fn:()=>unknown)=>fn(),runOutsideAngular:(fn:()=>unknown)=>fn()};
+        const mcp = new McpActionService(f.persistence,registry,zone as never,{} as never,{clear:vi.fn()} as never,{snapshot:{mcpEnabled:true}} as never);
+        const call = (name:string,args:Record<string,unknown>)=>mcp.invokeLocal(name,args,new AbortController().signal) as Promise<any>;
+        const workspace = await call('viewer_drawing_workspace',{action:'new'}), mapId=workspace.activeId;
+        const first = await call('viewer_drawing_objects',{mapId});
+        await call('viewer_drawing_edit',{mapId,revision:first.revision,operations:[{type:'insert',feature:{type:'Feature',geometry:null,properties:{name:'Label'},'erdblick:object':'stable','erdblick:drawing':{version:1,kind:'annotation',space:'2d',points:[[0,0]],text:'Plain <b>text</b>'}}}]});
+        const rows = await call('viewer_drawing_objects',{mapId}); expect(rows.total).toBe(1);
+        await expect(call('viewer_drawing_edit',{mapId,revision:first.revision,operations:[{type:'delete',id:rows.rows[0].id}]})).rejects.toThrow();
+        await call('viewer_drawing_edit',{mapId,revision:rows.revision,operations:[{type:'delete',id:rows.rows[0].id}]});
+        await call('viewer_drawing_history',{mapId,revision:(await call('viewer_drawing_objects',{mapId})).revision,direction:'undo'}); expect((await call('viewer_drawing_objects',{mapId})).rows[0].id).toBe(rows.rows[0].id);
+        const text=geo('10 10 imported\n'), staged=await call('viewer_drawing_transfer',{action:'begin',name:'Import',total:text.length});
+        await call('viewer_drawing_transfer',{action:'append',transferId:staged.transferId,offset:0,text});
+        const imported=await call('viewer_drawing_transfer',{action:'commit',transferId:staged.transferId});
+        expect((await call('viewer_drawing_read',{mapId:imported.mapId})).text).toBe(text);
+        const abort = new AbortController(); abort.abort(); expect(()=>registry.execute('viewer_drawing_workspace',{action:'new'},abort.signal)).toThrow();
+        mcp.ngOnDestroy();
+    });
+    it('repartitions a separate collection after objects are added to a member', async () => {
+        const f = documentFixture();
+        const doc = await f.docs.create('geojson','Draft',geo('1 1 a\n2 2 b\n'),false,{openEditor:false});
+        f.docs.openTray([doc.mapId]);
+        expect(await f.docs.saveWorkingSet('Collection','separate')).toBe(true);
+        const member = f.docs.workingDocuments[0];
+        await f.docs.objectEdit(member, [{type:'insert',feature:{type:'Feature',geometry:{type:'Point',coordinates:[3,3]},properties:{name:'Third'}}}]);
+        expect(await f.docs.saveWorkingSet('Collection','separate')).toBe(true);
+        expect(f.docs.workingDocuments).toHaveLength(3);
+        for (const output of f.docs.workingDocuments) expect(JSON.parse(output.draft).features).toHaveLength(1);
+        const restored = documentFixture(); await restored.docs.restore();
+        restored.docs.openTray([f.docs.workingIds[1]]);
+        expect(restored.docs.workingDocuments).toHaveLength(3);
+    });
+    it('does not append the committed ellipse handle again to its cursor preview', async () => {
+        const f = documentFixture();
+        const views = {drawingChanged:new Subject(),drawingViewBounds:new Map(),viewStateChanged:new Subject(),setMapLayerVisibility:vi.fn()} as unknown as MapViewService;
+        const tools = new DrawingToolsService(f.owners.drawing,f.service,f.docs,views,f.owners.viewSettings);
+        disposers.push(()=>tools.ngOnDestroy());
+        const notice = vi.spyOn(f.docs, 'notify');
+        await tools.select('ellipse');
+        const view = f.owners.viewSettings.viewIdAt(0);
+        views.drawingInput!.click(view,[0,0]); await tools.pause(); tools.start();
+        views.drawingInput!.move(view,[1,1]);
+        await vi.waitFor(()=>expect([...f.service.sources.values()].some(source=>source.preview&&source.text.includes('Polygon'))).toBe(true));
+        views.drawingInput!.click(view,[1,1]); await tools.pause();
+        expect(tools.error).toBe('');
+        expect(notice.mock.calls.filter(([scope,text])=>scope==='preview'&&!!text)).toEqual([]);
+    });
+});
+
+
+it('preserves imported altitude during a 2D drag and removes stale handles after deletion', async () => {
+    const f = documentFixture();
+    const views = {drawingChanged:new Subject(),drawingViewBounds:new Map(),viewStateChanged:new Subject(),setMapLayerVisibility:vi.fn()} as unknown as MapViewService;
+    const tools = new DrawingToolsService(f.owners.drawing,f.service,f.docs,views,f.owners.viewSettings);
+    disposers.push(()=>tools.ngOnDestroy());
+    const doc = await f.docs.create('geojson','Height',JSON.stringify({type:'Feature',geometry:{type:'Point',coordinates:[1,2,123]},properties:{}}));
+    f.docs.openTray([doc.mapId]);
+    const row = (await f.service.rows(doc.mapId,0,1))[0];
+    await f.docs.objectEdit(doc,[{type:'author',id:row.id,value:{space:'2d'}}]);
+    await tools.editObject(doc.mapId,await f.service.object(doc.mapId,row.id));
+    const view = f.owners.viewSettings.viewIdAt(0), path=tools.handles[0].path;
+    expect(views.drawingInput!.down(view,[1,2,0],false,path)).toBe(true);
+    views.drawingInput!.move(view,[3,4,0]);views.drawingInput!.up(view,[3,4,0]);
+    await vi.waitFor(()=>expect(JSON.parse(doc.draft).features[0].geometry.coordinates).toEqual([3,4,123]));
+    await f.docs.history('undo');
+    expect(JSON.parse(doc.draft).features[0].geometry.coordinates).toEqual([1,2,123]);
+    await f.docs.objectEdit(doc,[{type:'delete',id:row.id}]);
+    await vi.waitFor(()=>expect(tools.handles).toEqual([]));
+    expect(tools.editing).toBeUndefined();
+});
+
+it('cancels prepared native edits before publication without consuming identities', async () => {
+    const f=fixture();await f.service.create('drawing-test',geo('0 0 retained\n'),'Retained');
+    const original=f.service.sources.get('drawing-test')!.text,controller=new AbortController();
+    let release!:()=>void,prepared!:()=>void;
+    const waiting=new Promise<void>(resolve=>prepared=resolve),gate=new Promise<void>(resolve=>release=resolve);
+    f.request.mockImplementation(async operation=>{const reply=f.run(operation);if(operation.type==='prepare'){prepared();await gate;}return reply;});
+    const mutation=f.service.change({type:'append',mapId:'drawing-test',longitude:1,latitude:1,description:'Cancelled'},controller.signal);
+    await waiting;controller.abort();release();
+    await expect(mutation).rejects.toMatchObject({name:'AbortError'});
+    expect(f.service.sources.get('drawing-test')!.text).toBe(original);
+    expect(await f.service.rows('drawing-test',0,5)).toHaveLength(1);
+    await f.service.change({type:'append',mapId:'drawing-test',longitude:2,latitude:2,description:'Committed'});
+    expect((await f.service.rows('drawing-test',0,5))[1].id).toBe('2');
+});
+
+it('rejects a stale workspace save without saving newly selected members',async()=>{
+    const f=documentFixture();
+    const first=await f.docs.create('geojson','First',geo('0 0 a\n'),false,{openEditor:false});
+    const second=await f.docs.create('geojson','Second',geo('1 1 b\n'),false,{openEditor:false});
+    f.docs.openTray([first.mapId]);const captured=f.docs.captureWorkspace();
+    f.docs.openTray([second.mapId]);
+    await expect(f.docs.saveWorkingSet('Wrong target','one',captured)).rejects.toThrow('Stale workspace');
+    expect(first.saved).toBe(false);expect(second.saved).toBe(false);
+    await f.docs.selectObject(second.mapId,(await f.service.rows(second.mapId,0,1))[0].id);
+    await f.docs.objectEdit(second,[{type:'delete',id:f.docs.selectedObjectId}]);
+    expect(f.docs.activeId).toBe(second.mapId);expect(f.docs.canHistory('undo')).toBe(true);
+    await f.docs.history('undo');expect(await f.service.rows(second.mapId,0,5)).toHaveLength(1);
+});
+
+it('does not publish staged collection members on quota failure',async()=>{
+    const f=documentFixture();const doc=await f.docs.create('geojson','Draft',geo('0 0 a\n1 1 b\n'),false,{openEditor:false});
+    f.docs.openTray([doc.mapId]);
+    const publish=vi.spyOn(f.service,'publishSource');publish.mockClear();
+    const write=vi.spyOn(Storage.prototype,'setItem').mockImplementation(()=>{throw new DOMException('Full','QuotaExceededError');});
+    expect(await f.docs.saveWorkingSet('Collection','separate')).toBe(false);
+    expect(publish).not.toHaveBeenCalled();expect([...f.service.sources.keys()]).toEqual([doc.mapId]);expect(doc.saved).toBe(false);
+    write.mockRestore();
+});
+
+it('enforces transfer Unicode, encoded-frame and cumulative UTF-8 limits without changing selection',async()=>{
+    const {AppActionRegistry}=await import('../../../app/action/action-registry.service');
+    const f=documentFixture(),registry=new AppActionRegistry(f.persistence);registry.registerContributors([f.docs]);
+    const call=(input:Record<string,unknown>)=>registry.execute('viewer_drawing_transfer',input) as Promise<any>;
+    const begun=await call({action:'begin',total:12_000_000});
+    await expect(call({action:'append',transferId:begun.transferId,offset:0,text:'\ud800'})).rejects.toThrow('Unicode');
+    await expect(call({action:'append',transferId:begun.transferId,offset:0,text:'\u0000'.repeat(16000)})).rejects.toThrow('byte budget');
+    const chunk='界'.repeat(15000);let offset=0;
+    while((offset+chunk.length)*3<=32*1024*1024){const next=await call({action:'append',transferId:begun.transferId,offset,text:chunk});offset=next.offset;}
+    await expect(call({action:'append',transferId:begun.transferId,offset,text:chunk})).rejects.toThrow('byte budget');
+    const status=await call({action:'status',transferId:begun.transferId});expect(status.bytes).toBe(offset*3);expect(status.offset).toBeLessThan(12_000_000);
+    expect((await call({action:'cancel',transferId:begun.transferId})).outcome).toBe('not_applied');
+    expect(f.docs.activeId).toBe('');expect(f.docs.documents.size).toBe(0);
+});
+
+it('moves a selected vertex by destination click, preserves height, cancels and deletes through shared history',async()=>{
+    const f=documentFixture();
+    const views={drawingChanged:new Subject(),drawingViewBounds:new Map(),viewStateChanged:new Subject(),setMapLayerVisibility:vi.fn()} as unknown as MapViewService;
+    const tools=new DrawingToolsService(f.owners.drawing,f.service,f.docs,views,f.owners.viewSettings);
+    disposers.push(()=>tools.ngOnDestroy());
+    const doc=await f.docs.create('geojson','Click placement',JSON.stringify({type:'Feature',geometry:{type:'Point',coordinates:[1,2,123]},properties:{}}));
+    f.docs.openTray([doc.mapId]);const row=(await f.service.rows(doc.mapId,0,1))[0];
+    await f.docs.objectEdit(doc,[{type:'author',id:row.id,value:{space:'2d'}}]);await tools.editTarget(doc.mapId,row.id);
+    const view=f.owners.viewSettings.viewIdAt(0),path=tools.handles[0].path;
+    await f.docs.selectObject(doc.mapId,row.id,path);tools.placeSelectedVertex();expect(tools.placingVertex).toBe(true);
+    expect(tools.canDeleteFocusedVertex).toBe(false);
+    views.drawingInput!.move(view,[3,4,0]);tools.cancelGesture();expect(JSON.parse(doc.draft).features[0].geometry.coordinates).toEqual([1,2,123]);
+    tools.placeSelectedVertex();expect(views.drawingInput!.down(view,[3,4,0])).toBe(true);views.drawingInput!.up(view,[3,4,0]);
+    await vi.waitFor(()=>expect(JSON.parse(doc.draft).features[0].geometry.coordinates).toEqual([3,4,123]));
+    await vi.waitFor(()=>expect(tools.editing?.object.revision).toBe(f.service.sources.get(doc.mapId)!.summary.revision));
+    views.drawingInput!.down(view,[3,4,123],false,path);views.drawingInput!.up(view,[3,4,123]);
+    await vi.waitFor(()=>expect(tools.canDeleteFocusedVertex).toBe(true));await tools.deleteSelectedVertex();
+    expect((await f.service.rows(doc.mapId,0,5))).toEqual([]);await f.docs.history('undo');expect((await f.service.rows(doc.mapId,0,5))).toHaveLength(1);
+});
+
+it('stores a three-anchor plane on an imported 3D polygon without moving its coordinates',async()=>{
+    const f=documentFixture();f.owners.viewSettings.mode2dState.next(0,false);
+    const views={drawingChanged:new Subject(),drawingViewBounds:new Map(),viewStateChanged:new Subject(),setMapLayerVisibility:vi.fn()} as unknown as MapViewService;
+    const tools=new DrawingToolsService(f.owners.drawing,f.service,f.docs,views,f.owners.viewSettings);disposers.push(()=>tools.ngOnDestroy());
+    const coordinates=[[0,0,0],[.001,0,10],[0,.001,20],[0,0,0]];
+    const doc=await f.docs.create('geojson','Tilted import',JSON.stringify({type:'Feature',geometry:{type:'Polygon',coordinates:[coordinates]},properties:{}}));
+    f.docs.openTray([doc.mapId]);const row=(await f.service.rows(doc.mapId,0,1))[0];
+    await f.docs.objectEdit(doc,[{type:'author',id:row.id,value:{space:'3d'}}]);await tools.editTarget(doc.mapId,row.id);
+    tools.beginPlane('through');const view=f.owners.viewSettings.viewIdAt(0);
+    for(const point of coordinates.slice(0,3))views.drawingInput!.click(view,point as [number,number,number]);
+    await vi.waitFor(()=>expect(JSON.parse(doc.draft).features[0]['erdblick:drawing'].plane).toBeDefined());
+    expect(JSON.parse(doc.draft).features[0].geometry.coordinates).toEqual([coordinates]);
+    expect((await f.service.object(doc.mapId,row.id)).metrics?.areaSquareMeters).toBeGreaterThan(0);
+    await f.docs.save(doc);expect(JSON.parse(doc.baseline).features[0]['erdblick:drawing'].plane).toBeDefined();
 });

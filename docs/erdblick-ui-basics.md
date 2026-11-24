@@ -359,3 +359,29 @@ Enable **Hover Labels** and choose projected fields. This Island example shows a
 
 The resulting HUD identifies the hovered feature and shows the configured
 field labels beside the coordinate readout:
+
+## Spatial extent settings
+
+Each map row has a settings button between **Focus on map** and **Request service
+metadata**. Its popover offers **Limit Data to Spatial Extent** (on by default)
+and **Show Spatial Extent** (off by default). Settings belong to the map and logical
+view, persist in saved/shared state, and follow layer synchronization.
+
+The limit intersects the complete viewport with usable coverage before choosing
+priority tiles and applying tile capacity. It also applies to search, inspection,
+spatial SourceData and tile metadata. Service-wide metadata stays available.
+Unknown, invalid or incomplete coverage cannot safely exclude data. Turning the
+limit off restores unrestricted spatial requests for that map in that view.
+
+Show draws covered tile areas with borders and translucent crosshatching at each
+enabled feature layer's effective level (the association level for object layers).
+It does not require feature payloads or an active stylesheet. Disabling a map or
+its last layer hides its extents while keeping the Show preference. Click an extent
+to fit that originating area; **Focus on map** fits all regions, including hidden
+layers. Features and drawing tools retain priority over coverage background clicks.
+
+Frozen searches keep their captured geographic area when the limit changes;
+paused searches remain paused. Inspections retain the view that opened them even
+when another view receives focus. A now-excluded inspection retains its identity
+and shows an outside-extent message until its owner's setting permits it again.
+View removal reassigns its panels to a surviving view.

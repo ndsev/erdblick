@@ -1,6 +1,7 @@
 #pragma once
 
 #include "buffer.h"
+#include "coverage-selection.h"
 #include "interop/js-object.h"
 #include "layer.h"
 #include "mapget/model/featureidentity.h"
@@ -56,6 +57,23 @@ public:
      * their layer-info, schema and dictionary owners, including add-on pools.
      */
     void applyDataSourceChanges(SharedUint8Array const& changesJson);
+
+    /** Cached immutable coverage for the exact current catalog generation. */
+    mapget::CoverageQuery const* coverageQuery(std::string const& mapId, std::string const& layerId) const;
+    /** Admit a spatial tile only when the complete layer extent permits it. */
+    bool permitsCoverageTile(std::string const& mapId, std::string const& layerId, int32_t tile) const;
+    /** Select coverage before capacity, using the same evaluator as the service guard. */
+    NativeJsValue selectCoverageTileIds(std::string const& mapId, std::string const& layerId,
+        Viewport const& viewport, int level, int limit, bool restrict) const;
+    /** Project complete region bounds and their stable original indices for focus and clicks. */
+    /** Complete originating region bounds expanded to the displayed tile area. */
+    NativeJsValue coverageDisplayBounds(std::string const& mapId, std::string const& layerId, int region, int level) const;
+    NativeJsValue coverageInfo(std::string const& mapId, std::string const& layerId) const;
+    /** Compact display rectangles cover every intersecting tile without sampling. */
+    NativeJsValue coverageRectangles(std::string const& mapId, std::string const& layerId,
+        Viewport const& viewport, int level) const;
+    /** Return the original region of a displayed tile, or -1 when there is none. */
+    int coverageRegion(std::string const& mapId, std::string const& layerId, int32_t tile) const;
 
     /**
      * Get the data source info JSON that was set earlier.
@@ -253,6 +271,7 @@ public:
     std::vector<FilteredFeatureJumpTarget> filterFeatureJumpTargets(std::string const& queryString) const;
 
     std::map<std::string, mapget::DataSourceInfo> info_;
+    mutable std::map<std::pair<std::string, std::string>, mapget::CoverageQuery> coverageQueries_;
     /** Exact owners retained for metadata and already captured inspection/subset snapshots. */
     std::map<std::string, std::shared_ptr<mapget::MapSchema const>, std::less<>> schemas_;
     /** Backend-derived capability hints retained when the shared parser omits full schemas. */

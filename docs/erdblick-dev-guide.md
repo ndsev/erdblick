@@ -1493,3 +1493,18 @@ MAPGET_BIN=/path/to/current/mapget EB_MAPGET_CONFIG=tests/playwright/fixtures/ma
 This test enables Chrome's WebMCP feature and uses real `getTools`/`executeTool`
 calls. Its erdblick-owned GridDataSource fixture needs no Python datasource or
 external map service. Run it separately from other integration pipelines.
+
+## Local drawing ownership
+
+Drawing and measurement authoring share `drawing-shape.cpp` and `DrawingSource`.
+One logical object remains one native feature; labels/ticks are derived attributes
+with their parent identity. `DrawingDocumentsService` owns source revisions,
+CodeMirror history, recovery, Save and atomic collection envelopes. UI, Quick,
+viewport handles and public drawing actions call these owners; see
+[the drawing contract](erdblick-drawing.md#implementation-and-limits).
+
+The action catalog is generated through headless contributor registration. Keep
+registration free of native calls, worker startup or canvas access. Geometry
+snapping consumes existing immutable subset geometry and a scene-revision cache;
+never introduce pointer-driven network fetches. Numeric editing and preservation
+of polar data are separate from the current Web Mercator viewing limitation.

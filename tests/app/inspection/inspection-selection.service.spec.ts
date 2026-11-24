@@ -34,6 +34,7 @@ function createHarness(
     };
     const service = new InspectionSelectionService(
         persistence,
+        owners.data,
         tileStream as never,
         {} as never,
         { registerShortcut: vi.fn() } as never,

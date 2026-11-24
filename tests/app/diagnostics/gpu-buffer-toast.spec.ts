@@ -3,6 +3,7 @@ import {Component, NO_ERRORS_SCHEMA} from '@angular/core';
 import {TestBed} from '@angular/core/testing';
 import {HttpClient} from '@angular/common/http';
 import {By} from '@angular/platform-browser';
+import {DrawingDocumentsService} from '../../../app/drawing/drawing-documents.service';
 import {InfoMessageComponent} from '../../../app/diagnostics/info-message.component';
 import {GPU_BUFFER_EXHAUSTED_NOTICE} from '../../../app/mapview/gpu-buffer-notice.model';
 import {EMPTY} from 'rxjs';
@@ -40,6 +41,7 @@ describe('GPU warning toast', () => {
                 ...[AppActionRegistry, AppStateService, DiagnosticsFacadeService, DiagnosticsState,
                     DialogStackService, MapDataService, MapTileStreamService, MapStyleService,
                     TileSubsetLayerRenderService].map(provide => ({provide, useValue: {}})),
+                {provide: DrawingDocumentsService, useValue: {messageActions:{}}},
                 {provide: HttpClient, useValue: {get: () => EMPTY}},
                 {provide: KeyboardService, useValue: {registerShortcut: vi.fn()}},
                 {provide: LayoutService, useValue: {isDialogOpen: () => false}},

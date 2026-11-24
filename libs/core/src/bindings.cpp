@@ -1,3 +1,4 @@
+#include "erdblick/coverage-selection.h"
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 #include <emscripten/em_asm.h>
@@ -122,23 +123,8 @@ std::string tileFeatureLayerGlbAttachmentName(TileFeatureLayer const& tile)
     return tile.glbAttachmentName();
 }
 
-/**
- * WGS84 Viewport Descriptor, which may be used with the
- * `getTileIds` function below.
- */
-struct Viewport {
-    double south = .0;       // The southern boundary of the viewport (degrees).
-    double west = .0;        // The western boundary of the viewport (degrees).
-    double width = .0;       // The width of the viewport (degrees).
-    double height = .0;      // The height of the viewport (degrees).
-    double camPosLon = .0;   // The longitude of the camera position (degrees).
-    double camPosLat = .0;   // The latitude of the camera position (degrees).
-    double orientation = .0; // The compass orientation of the camera (radians).
-};
-
 namespace {
 
-constexpr int MAX_TILE_RESULT_LIMIT = 1 << 20;
 constexpr double PI = 3.14159265358979323846;
 constexpr double RADIANS_TO_DEGREES = 180.0 / PI;
 constexpr double DECK_DEFAULT_CAMERA_ALTITUDE = 1.5;
@@ -202,66 +188,13 @@ Viewport canonicalViewportForAltitude(double altitudeMeters)
 
 }
 
-/**
- * Gets the prioritized list of tile IDs for a given viewport, zoom level, and tile limit.
- *
- * This function takes a viewport, a zoom level, and a tile limit, and returns an array of tile IDs
- * that are visible in the viewport, prioritized by radial distance from the camera position.
- *
- * The function first extracts the viewport properties and creates an Axis-Aligned Bounding Box (AABB)
- * from the viewport boundaries. If the number of tile IDs in the AABB at the given zoom level exceeds
- * the specified limit, a new AABB is created from the camera position and tile limit.
- *
- * The function then populates a vector of prioritized tile IDs by calculating the radial distance
- * from the camera position to the center of each tile in the AABB. The tile IDs are then sorted by
- * their radial distance, and the sorted array is converted to an emscripten value to be returned.
- * Duplicate tile IDs are removed from the array before it is returned.
- *
- * @param viewport The viewport descriptor for which tile ids are needed.
- * @param level The zoom level for which to get the tile IDs.
- * @param limit The maximum number of tile IDs to return.
- *
- * @return An emscripten value representing an array of prioritized tile IDs.
- */
+/** Select viewport tiles before applying capacity, sharing the coverage-aware native path. */
 em::val getTileIds(Viewport const& vp, int level, int limit)
 {
-    if (!isFiniteViewport(vp) || level < 0 || level > 62 || limit <= 0 || limit > MAX_TILE_RESULT_LIMIT)
-        return em::val::array();
-
-    auto west = normalizeLongitude(vp.west);
-    auto camPosLon = normalizeLongitude(vp.camPosLon);
-    Wgs84AABB aabb(Wgs84Point{west, vp.south, .0}, {vp.width, vp.height});
-    if (aabb.numTileIds(level) > limit)
-        // Create a size-limited AABB from the tile limit.
-        aabb = Wgs84AABB::fromCenterAndTileLimit(Wgs84Point{camPosLon, vp.camPosLat, .0}, limit, level);
-
-    std::vector<std::pair<mapget::TileId, float>> prioritizedTileIds;
-    prioritizedTileIds.reserve(limit);
-    aabb.tileIdsWithPriority(
-        level,
-        prioritizedTileIds,
-        Wgs84AABB::radialDistancePrioFn({camPosLon, vp.camPosLat}, vp.orientation));
-
-    std::sort(
-        prioritizedTileIds.begin(),
-        prioritizedTileIds.end(),
-        [](auto const& l, auto const& r)
-        {
-            if (l.second != r.second)
-                return l.second < r.second;
-            return l.first.value() < r.first.value();
-        });
-
-    em::val resultArray = em::val::array();
-    std::optional<int32_t> prevTileId;
-    for (const auto& tileId : prioritizedTileIds) {
-        if (prevTileId && tileId.first.value() == *prevTileId)
-            continue;
-        resultArray.call<void>("push", tileId.first.value());
-        prevTileId = tileId.first.value();
-    }
-
-    return resultArray;
+    auto result = em::val::array();
+    for (auto const& tile : selectCoverageTiles(vp, level, limit))
+        result.call<void>("push", tile.value());
+    return result;
 }
 
 /** Count visible tiles for the provided viewport without materializing the prioritized id list. */
@@ -643,6 +576,12 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("checkpoint", &DrawingSource::checkpoint)
         .function("restore", &DrawingSource::restore)
         .function("editDescription", &DrawingSource::editDescription)
+        .function("editObjects", &DrawingSource::editObjects)
+        .function("stage", &DrawingSource::stage)
+        .function("commitStage", &DrawingSource::commitStage)
+        .function("cancelStage", &DrawingSource::cancelStage)
+        .function("object", &DrawingSource::object)
+        .function("branch", &DrawingSource::branch)
         .function("append", &DrawingSource::append)
         .function("join", &DrawingSource::join)
         .function("schema", &DrawingSource::schema)
@@ -651,6 +590,9 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("snapshot", &DrawingSource::snapshot);
     em::function("drawingDistance", &drawingDistance);
     em::function("drawingCoordinatesToGeoJson", &drawingCoordinatesToGeoJson);
+    em::function("drawingCompose", &drawingCompose);
+    em::function("drawingEvaluate", &drawingEvaluate);
+    em::function("drawingPlane", &drawingPlane);
     em::function("drawingToolGeoJson", &drawingToolGeoJson);
     em::function("drawingMetrics", &drawingMetrics);
     em::function("drawingSnap", &drawingSnap);
@@ -820,6 +762,7 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("channelSchema", &TileSubsetLayer::channelSchema)
         .function("entryRange", &TileSubsetLayer::entryRange)
         .function("valueSummaries", &TileSubsetLayer::valueSummaries)
+        .function("snapGeometry", &TileSubsetLayer::snapGeometry)
         .function("resolvePick", &TileSubsetLayer::resolvePick)
         .function("findPickReferences", &TileSubsetLayer::findPickReferences)
         .function("toJson", &TileSubsetLayer::toJson)
@@ -925,6 +868,12 @@ EMSCRIPTEN_BINDINGS(erdblick)
         .function("setDataSourceInfo", &TileLayerParser::setDataSourceInfo)
         .function("applyDataSourceChanges", &TileLayerParser::applyDataSourceChanges)
         .function("getDataSourceInfo", &TileLayerParser::getDataSourceInfo)
+        .function("permitsCoverageTile", &TileLayerParser::permitsCoverageTile)
+        .function("selectCoverageTileIds", &TileLayerParser::selectCoverageTileIds)
+        .function("coverageDisplayBounds", &TileLayerParser::coverageDisplayBounds)
+        .function("coverageInfo", &TileLayerParser::coverageInfo)
+        .function("coverageRectangles", &TileLayerParser::coverageRectangles)
+        .function("coverageRegion", &TileLayerParser::coverageRegion)
         .function("getFieldDictOffsets", &TileLayerParser::getFieldDictOffsets)
         .function("getFieldDict", &TileLayerParser::getFieldDict)
         .function("addFieldDict", &TileLayerParser::addFieldDict)

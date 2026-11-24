@@ -1,3 +1,4 @@
+import {spatialPolicyHarness} from "../../support/spatial-policy";
 import { MapTileStreamService } from "../../../app/mapdata/map-tile-stream.service";
 import { CoordinatesState } from "../../../app/coordinates/coordinates.state";
 import '@angular/compiler';
@@ -55,7 +56,8 @@ function fixture() {
             owners.viewSettings.viewIds.includes(target.viewId) && target.generation === views.generation ? {} : undefined
     };
     const parser = { filterFeatureJumpTargets: vi.fn(() => []) };
-    const maps = { tileLayerParser: parser, maps: { maps: new Map() }, sourceDataLayerIdForLayerName: vi.fn() };
+    const maps = {
+        ...spatialPolicyHarness(), tileLayerParser: parser, maps: { maps: new Map() }, sourceDataLayerIdForLayerName: vi.fn() };
     const menu = { customTileAndMapId: new Subject<[string, string]>() };
     const jumps = new JumpTargetService(maps as never, {} as never, { showError: vi.fn() } as never,
         menu as never, owners.configService, owners.coordinates, owners.inspectionState, owners.viewSettings, views as never, {} as never);

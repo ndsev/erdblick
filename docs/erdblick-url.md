@@ -213,3 +213,12 @@ If a copied URL does not restore the expected state, a few common issues are wor
 - If a link no longer opens correctly, verify that the map IDs and style IDs referenced in the URL still exist.
 - Clear the browser history or use an incognito window if a link without explicit parameters keeps loading older local state. Explicit URL parameters take precedence over local storage, but values not present in the URL may still come from stored viewer state.
 - If a URL looks correct but loads an unexpected state, use the Preferences dialog to clear stored viewer properties and search history, then reload the link.
+
+### Spatial extent preferences
+
+`spatialExtentSettings` uses the ordinary per-view JSON state codec under the `extent` URL parameter. Each map entry
+contains `limitToSpatialExtent` (default `true`) and `showSpatialExtent` (default
+`false`). Default map entries are omitted. Logical view cloning, reordering and
+layer synchronization preserve the same ownership as other layer preferences.
+Inspection selection entries optionally append `~v:<viewId>` to retain their
+request owner. Legacy entries bind to the focused view during hydration.

@@ -414,6 +414,7 @@ public:
 
     /** Return the label size consumed by Deck's `getSize` accessor. */
     [[nodiscard]] float labelSize() const;
+    [[nodiscard]] float labelSize(BoundEvalFun const& evalFun) const;
 
     /** Return the layer-wide Deck text-size multiplier. */
     [[nodiscard]] float labelSizeScale() const;
@@ -432,6 +433,7 @@ public:
 
     /** Return the label fill color. */
     [[nodiscard]] glm::fvec4 const& labelColor() const;
+    [[nodiscard]] glm::fvec4 labelColor(BoundEvalFun const& evalFun) const;
 
     /** Return the opacity multiplier applied to every label material color. */
     [[nodiscard]] float labelOpacity() const;
@@ -611,6 +613,7 @@ private:
     // the GPU packet; layer-wide values participate in browser-side buckets.
     std::string labelFontFamily_ = "Monaco, monospace";
     uint32_t labelFontWeight_ = 400U;
+    std::string labelSizeExpression_, labelColorExpression_;
     float labelSize_ = 32.0F;
     float labelSizeScale_ = 1.0F;
     LabelSizeUnit labelSizeUnit_ = LabelSizeUnit::Pixel;

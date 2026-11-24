@@ -1,3 +1,4 @@
+import type {SpatialRequestContext} from "../mapdata/spatial-extent.model";
 import { Subscription } from "rxjs";
 import { coreLib } from "../integrations/wasm.adapter";
 import { filterSubscriptionCoverageEqual, type FilterSubscriptionCoverage } from "../mapdata/filter-subscription.model";
@@ -24,11 +25,15 @@ export interface SearchPresentationOptions {
     featureTypes: string[];
     definitionSignature: string;
     instanceId: string;
+    requestContext: SpatialRequestContext;
+    viewIds: string[];
 }
 
 /** Owns one search/layer subscription, coverage discovery, and compiled rendering resource. */
 export class SearchPresentation {
     readonly key: string;
+    readonly requestContext: SpatialRequestContext;
+    readonly viewIds: readonly string[];
     readonly sessionId: string;
     readonly mapgetLayer: MapgetLayer;
     readonly definitionSignature: string;
@@ -55,6 +60,8 @@ export class SearchPresentation {
     ) {
         const {key, definition, mapgetLayer, featureTypes, definitionSignature, instanceId} = options;
         this.key = key;
+        this.requestContext = options.requestContext;
+        this.viewIds = options.viewIds;
         this.sessionId = definition.id;
         this.mapgetLayer = mapgetLayer;
         this.definitionSignature = definitionSignature;
@@ -70,7 +77,7 @@ export class SearchPresentation {
                     presentationInstanceId: instanceId
                 },
                 mapgetLayer, this.compiled.style, {}, mapInfo, tileStream,
-                coreLib.HighlightMode.NO_HIGHLIGHT, MAX_STYLE_LOD, this.compiled.filterPlan
+                coreLib.HighlightMode.NO_HIGHLIGHT, MAX_STYLE_LOD, this.compiled.filterPlan, this.requestContext
             );
         } catch (error) {
             this.compiled.style.featureLayerStyle.delete?.();
@@ -79,11 +86,29 @@ export class SearchPresentation {
         this.subscription = this.styledLayer.events.subscribe(event => onEvent(this, event));
     }
 
+    /** Suspend discovery and filtering together, invalidating late object associations. */
+    setSuspended(suspended: boolean): void {
+        if (suspended && !this.styledLayer.filterRef.suspended) {
+            this.objectDiscoveryVersion++;
+            this.objectDiscoverySignature = "";
+            if (this.objectDiscoveryTimer !== null) clearTimeout(this.objectDiscoveryTimer);
+            this.objectDiscoveryTimer = null;
+        }
+        this.styledLayer.setSuspended(suspended);
+    }
+
     /** Applies a view-derived request and returns whether transport coverage changed. */
     setCoverage(request: SearchCoverageRequest): boolean {
         if (this.destroyed) return false;
         let coverage: FilterSubscriptionCoverage;
         if (request.kind === "object") {
+            if (this.styledLayer.filterRef.suspended) {
+                this.objectDiscoveryVersion++;
+                this.objectDiscoverySignature = "";
+                if (this.objectDiscoveryTimer !== null) clearTimeout(this.objectDiscoveryTimer);
+                this.objectDiscoveryTimer = null;
+                return false;
+            }
             coverage = this.objectSearchCoverage(request.discoveryTileIds);
         } else {
             const partitions = request.tileIds.map(tilePartition);
@@ -127,9 +152,14 @@ export class SearchPresentation {
                 clearTimeout(this.objectDiscoveryTimer);
                 this.objectDiscoveryTimer = null;
             }
+            if (!discoveryTileIds.length) {
+                this.objectCoverage = {partitions: []};
+                this.spatialTileByPartition.clear();
+                return this.objectCoverage;
+            }
             void this.tileStream.discoverObjectPartitions(
                 layer,
-                discoveryTileIds
+                discoveryTileIds, this.requestContext
             ).then(result => {
                 if (this.objectDiscoveryVersion !== version ||
                     this.objectDiscoverySignature !== signature ||

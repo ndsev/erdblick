@@ -1,3 +1,4 @@
+import {spatialPolicyHarness} from "../../support/spatial-policy";
 import {afterEach, describe, expect, it, vi} from "vitest";
 import {Subject} from "rxjs";
 import {TreeTableNode} from "primeng/api";
@@ -17,6 +18,7 @@ describe("source-data inspection schema readiness", () => {
         const component = Object.create(SourceDataPanelComponent.prototype) as any;
         component.loadController = new AbortController();
         component.loadRevision = 0;
+        component.panel = () => ({requestViewId: "0"});
         const finishLoading = vi.fn();
         component.tileStream = {
             beginInspectionLoad: () => finishLoading,
@@ -29,7 +31,7 @@ describe("source-data inspection schema readiness", () => {
     it("installs the ready map's schema in its private parser before decoding source data", async () => {
         const {component, mapTileKey} = fixture();
         let ready!: () => void;
-        component.mapService = {
+        component.mapService = {...spatialPolicyHarness(),
             dataSourceInfoChanged: new Subject<readonly string[]>(),
             waitForMapLayersReady: () => new Promise<void>(resolve => {ready = resolve;}),
             getSchemaArtifacts: () => [{schemaId: "source-schema", bytes: new Uint8Array([1])}],
@@ -63,7 +65,7 @@ describe("source-data inspection schema readiness", () => {
 
     it("releases the inspection loading indicator when the panel closes during schema loading", async () => {
         const {component, mapTileKey, finishLoading} = fixture();
-        component.mapService = {
+        component.mapService = {...spatialPolicyHarness(),
             dataSourceInfoChanged: new Subject<readonly string[]>(),
             waitForMapLayersReady: (_layers: unknown, signal: AbortSignal) => new Promise<void>((_, reject) => {
                 signal.addEventListener("abort", () => reject(signal.reason), {once: true});
@@ -80,7 +82,7 @@ describe("source-data inspection schema readiness", () => {
     it("aborts a pending source-data body when its datasource retires", async () => {
         const {component, mapTileKey} = fixture();
         const changes = new Subject<readonly string[]>();
-        component.mapService = {
+        component.mapService = {...spatialPolicyHarness(),
             dataSourceInfoChanged: changes,
             waitForMapLayersReady: async () => {},
             getSchemaArtifacts: () => [],

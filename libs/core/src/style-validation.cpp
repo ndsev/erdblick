@@ -1939,6 +1939,8 @@ bool validateStyleRuleYamlImpl(
     markInvalid(validateExpression(ruleYaml, "z-index-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "z-index-group-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "icon-url-expression", false, rulePath, source, report, sourceRuleIndex));
+    markInvalid(validateExpression(ruleYaml, "label-size-expression", false, rulePath, source, report, sourceRuleIndex));
+    markInvalid(validateExpression(ruleYaml, "label-color-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "label-text-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateColorScale(ruleYaml, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateWidthScale(ruleYaml, rulePath, source, report, sourceRuleIndex));

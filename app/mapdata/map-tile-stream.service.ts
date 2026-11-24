@@ -1,3 +1,5 @@
+import {MAP_TILE_STREAM_TYPE_STATUS, MAP_TILE_STREAM_HEADER_SIZE} from "./map-tile-stream.protocol";
+import {OutsideSpatialExtentError, type SpatialRequestContext} from "./spatial-extent.model";
 import type {InfoMessageRef} from "../diagnostics/info-message.model";
 import type {ConnectionDiagnostics} from "../diagnostics/diagnostics.model";
 import { Injectable, NgZone, OnDestroy } from "@angular/core";
@@ -85,6 +87,7 @@ export interface ObjectDiscoveryCoverage {
 }
 
 interface ObjectDiscoveryTileValue {
+    readonly excluded?: boolean;
     readonly objects: ReadonlyArray<{
         partition: ObjectPartitionId;
         bounds?: readonly [number, number, number, number];
@@ -93,6 +96,7 @@ interface ObjectDiscoveryTileValue {
 }
 
 interface ObjectDiscoveryCacheEntry {
+    policyRevision?: string;
     value?: ObjectDiscoveryTileValue;
     pending?: Promise<ObjectDiscoveryTileValue>;
 }
@@ -438,7 +442,8 @@ export class MapTileStreamService implements OnDestroy {
      */
     async discoverObjectPartitions(
         layer: MapgetLayer,
-        discoveryTileIds: readonly number[]
+        discoveryTileIds: readonly number[],
+        context?: SpatialRequestContext
     ): Promise<ObjectDiscoveryCoverage> {
         if (layer.origin === "virtual") {
             return {
@@ -452,7 +457,8 @@ export class MapTileStreamService implements OnDestroy {
                 `Layer '${layer.key}' does not advertise object discovery.`
             );
         }
-        const uniqueTiles = [...new Set(discoveryTileIds.map(Number))];
+        const uniqueTiles = [...new Set(discoveryTileIds.map(Number))].filter(tile => !context ||
+            this.mapInfo.permitsSpatialTile(layer.mapId, layer.layerId, tile, context.policy));
         if (!uniqueTiles.length) {
             return { associations: [], expiresAtMs: null };
         }
@@ -464,20 +470,21 @@ export class MapTileStreamService implements OnDestroy {
         const now = Date.now();
         const missing = uniqueTiles.filter(tileId => {
             const entry = cache!.get(tileId);
-            return !entry?.pending && (!entry?.value ||
+            return entry?.policyRevision !== context?.revision || (!entry?.pending && (!entry?.value ||
                 (entry.value.expiresAtMs !== null &&
-                    now >= entry.value.expiresAtMs));
+                    now >= entry.value.expiresAtMs)));
         });
         for (let offset = 0; offset < missing.length; offset += 256) {
             const tileIds = missing.slice(offset, offset + 256);
-            const batch = this.fetchObjectDiscoveryBatch(layer, tileIds);
+            const batch = this.fetchObjectDiscoveryBatch(layer, tileIds, context);
             tileIds.forEach((tileId, index) => {
                 const pending = batch.then(values => values[index]);
-                const entry: ObjectDiscoveryCacheEntry = { pending };
+                const entry: ObjectDiscoveryCacheEntry = { pending, policyRevision: context?.revision };
                 cache!.set(tileId, entry);
                 pending.then(value => {
                     if (cache!.get(tileId) === entry) {
-                        cache!.set(tileId, { value });
+                        if (value.excluded) cache!.delete(tileId);
+                        else cache!.set(tileId, { value, policyRevision: context?.revision });
                     }
                 }).catch(() => {
                     if (cache!.get(tileId) === entry) {
@@ -545,7 +552,8 @@ export class MapTileStreamService implements OnDestroy {
     /** Load one server-limited discovery batch and validate every response slot. */
     private async fetchObjectDiscoveryBatch(
         layer: MapgetLayer,
-        tileIds: readonly number[]
+        tileIds: readonly number[],
+        context?: SpatialRequestContext
     ): Promise<ObjectDiscoveryTileValue[]> {
         const response = await fetch("/objects/discover", {
             method: "POST",
@@ -555,7 +563,8 @@ export class MapTileStreamService implements OnDestroy {
                     mapId: layer.mapId,
                     layerId: layer.layerId,
                     ...(layer.sourceId ? { sourceId: layer.sourceId } : {}),
-                    tileIds
+                    tileIds,
+                    ...(context ? {spatialExtentPolicy: context.policy} : {})
                 }]
             })
         });
@@ -596,6 +605,10 @@ export class MapTileStreamService implements OnDestroy {
                     `Object discovery for '${layer.key}' returned an ` +
                     "unexpected identity."
                 );
+            }
+            if (item.status === "outsideSpatialExtent") {
+                byTile.set(tileId, {objects: [], expiresAtMs: null, excluded: true});
+                continue;
             }
             if (item.status === "failed") {
                 throw new Error(
@@ -764,8 +777,11 @@ export class MapTileStreamService implements OnDestroy {
         name: string;
         sourceId?: string;
         incarnation?: number;
+        context?: SpatialRequestContext;
     }): TileAttachmentRef {
+        request.context ??= this.mapInfo.spatialRequestContextForViewId();
         const key = [
+            request.context.revision,
             request.mapId,
             request.layerId,
             partitionKey(request.partition),
@@ -834,16 +850,19 @@ export class MapTileStreamService implements OnDestroy {
      */
     async loadFeatures(
         tileFeatureIds: (TileFeatureId | null)[],
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        context = this.mapInfo.spatialRequestContextForViewId()
     ): Promise<FeatureWrapper[]> {
         const finishLoading = this.beginInspectionLoad();
         try {
             const requested = tileFeatureIds.filter((value): value is TileFeatureId => !!value);
+            if (requested.some(feature => !this.permitsFeatureKey(feature.mapTileKey, context)))
+                throw new OutsideSpatialExtentError();
             const local = requested.filter(value => this.virtualSources?.ownsKey(value.mapTileKey));
             const remote = requested.filter(value => !this.virtualSources?.ownsKey(value.mapTileKey));
             const [localResults, remoteResults] = await Promise.all([
                 local.length ? this.virtualSources!.loadFeatures(local, signal) : [],
-                remote.length ? this.loadFeaturesOnce(remote, signal) : []
+                remote.length ? this.loadFeaturesOnce(remote, signal, context) : []
             ]);
             const resolved = new Map([...localResults, ...remoteResults].map(feature =>
                 [this.featureIdentityKey(feature), feature]));
@@ -857,7 +876,7 @@ export class MapTileStreamService implements OnDestroy {
     }
 
     private async loadFeaturesOnce(
-        tileFeatureIds: (TileFeatureId | null)[], signal?: AbortSignal
+        tileFeatureIds: (TileFeatureId | null)[], signal: AbortSignal | undefined, context: SpatialRequestContext
     ): Promise<FeatureWrapper[]> {
         signal?.throwIfAborted();
         const requested = tileFeatureIds.filter(
@@ -866,7 +885,7 @@ export class MapTileStreamService implements OnDestroy {
         if (!requested.length) {
             return [];
         }
-        const direct = await this.loadFeaturesFromDeclaredTiles(requested, signal);
+        const direct = await this.loadFeaturesFromDeclaredTiles(requested, signal, context);
         const directByKey = new Map(direct.map(feature => [
             this.featureIdentityKey(feature),
             feature
@@ -881,11 +900,11 @@ export class MapTileStreamService implements OnDestroy {
             });
         }
 
-        const relocated = await this.locateCanonicalFeatures(missing, signal);
+        const relocated = await this.locateCanonicalFeatures(missing, signal, context);
         const relocatedRequests = relocated
             .filter((value): value is TileFeatureId => !!value);
         const relocatedFeatures = relocatedRequests.length
-            ? await this.loadFeaturesFromDeclaredTiles(relocatedRequests, signal)
+            ? await this.loadFeaturesFromDeclaredTiles(relocatedRequests, signal, context)
             : [];
         const relocatedByKey = new Map(relocatedFeatures.map(feature => [
             this.featureIdentityKey(feature),
@@ -911,9 +930,11 @@ export class MapTileStreamService implements OnDestroy {
 
     private async loadFeaturesFromDeclaredTiles(
         requested: TileFeatureId[],
-        signal?: AbortSignal
+        signal: AbortSignal | undefined, context: SpatialRequestContext
     ): Promise<FeatureWrapper[]> {
         signal?.throwIfAborted();
+        if (requested.some(feature => !this.permitsFeatureKey(feature.mapTileKey, context)))
+            throw new OutsideSpatialExtentError();
         if (this.tilePipelinePaused) {
             this.showInfo(
                 "Tile pipeline is paused; cannot load inspection features."
@@ -971,11 +992,17 @@ export class MapTileStreamService implements OnDestroy {
         );
         transport.onFields = () =>
             this.mapInfo.invalidateFieldDictBlobCache();
+        transport.onFrame = (frame, type) => {
+            if (type !== MAP_TILE_STREAM_TYPE_STATUS) return;
+            const status = JSON.parse(new TextDecoder().decode(frame.subarray(MAP_TILE_STREAM_HEADER_SIZE)));
+            if (status.type === "mapget.spatialExtent.status" && status.excludedPartitions?.length)
+                throw new OutsideSpatialExtentError();
+        };
         const tiles = new Map<string, InspectionFeatureTile>();
         transport.onFeatures = blob => {
             const tile = new InspectionFeatureTile(
                 this.mapInfo.tileLayerParser,
-                blob, "remote", stringPoolId => !this.virtualSources?.owns(stringPoolId)
+                blob, "remote", stringPoolId => !this.virtualSources?.owns(stringPoolId), context
             );
             tiles.set(tile.mapTileKey, tile);
             for (const warning of tile.warnings) console.warn(`Tile warning (${tile.mapTileKey}): ${warning}`);
@@ -984,6 +1011,7 @@ export class MapTileStreamService implements OnDestroy {
             }
         };
         const requests = [...groups.values()].map(group => ({
+            spatialExtentPolicy: context.policy,
             mapId: group.mapId,
             layerId: group.layerId,
             partitions: [...group.partitions.values()].map(entry =>
@@ -1056,12 +1084,13 @@ export class MapTileStreamService implements OnDestroy {
      */
     private async locateCanonicalFeatures(
         requested: TileFeatureId[],
-        signal?: AbortSignal
+        signal: AbortSignal | undefined, context: SpatialRequestContext
     ): Promise<Array<TileFeatureId | null>> {
         const requests = requested.map(feature => {
             const parsed = this.parseMapPartitionKeySafe(feature.mapTileKey);
             return parsed && !this.virtualSources?.owns(parsed[0])
                 ? {
+                    spatialExtentPolicy: context.policy,
                     mapId: parsed[0],
                     layerId: parsed[1],
                     partition: partitionJson(parsed[2]),
@@ -1069,14 +1098,7 @@ export class MapTileStreamService implements OnDestroy {
                 }
                 : null;
         });
-        const validRequests = requests.filter(
-            (request): request is {
-                mapId: string;
-                layerId: string;
-                partition: PartitionId;
-                featureId: string;
-            } => !!request
-        );
+        const validRequests = requests.filter((value): value is NonNullable<typeof value> => value !== null);
         if (!validRequests.length) {
             return requested.map(() => null);
         }
@@ -1093,6 +1115,7 @@ export class MapTileStreamService implements OnDestroy {
                 );
             }
             const payload = await response.json() as {
+                spatialExtentExclusions?: string[][];
                 responses?: Array<Array<{
                     tileId?: string;
                     partitionKey?: string;
@@ -1104,13 +1127,16 @@ export class MapTileStreamService implements OnDestroy {
                 if (!request) {
                     return null;
                 }
-                const candidates = [...(payload.responses?.[validIndex++] ?? [])]
+                const index = validIndex++;
+                if (!payload.responses?.[index]?.length && payload.spatialExtentExclusions?.[index]?.length)
+                    throw new OutsideSpatialExtentError();
+                const candidates = [...(payload.responses?.[index] ?? [])]
                     .filter(candidate =>
                         typeof (candidate.partitionKey ?? candidate.tileId) ===
                         "string" &&
                         this.parseMapPartitionKeySafe(
                             candidate.partitionKey ?? candidate.tileId!
-                        ) !== null
+                        ) !== null && this.permitsFeatureKey(candidate.partitionKey ?? candidate.tileId!, context)
                     )
                     .sort((left, right) =>
                         String(left.partitionKey ?? left.tileId).localeCompare(
@@ -1132,30 +1158,33 @@ export class MapTileStreamService implements OnDestroy {
             });
         } catch (error) {
             signal?.throwIfAborted();
+            if (error instanceof OutsideSpatialExtentError) throw error;
             console.warn("Canonical feature locate failed.", error);
             return requested.map(() => null);
         }
     }
 
     /** Resolves a canonical feature string using the backend schema, preserving ambiguous matches for callers. */
-    async locateFeature(mapId: string, featureId: string, layerId?: string, signal?: AbortSignal): Promise<TileFeatureId[]> {
+    async locateFeature(mapId: string, featureId: string, layerId?: string, signal?: AbortSignal,
+        context = this.mapInfo.spatialRequestContextForViewId()): Promise<TileFeatureId[]> {
         if (this.virtualSources?.owns(mapId)) return [];
         const canonicalId = stripFeatureInspectionTarget(featureId);
         return this.locateFeatureRequest(JSON.stringify({ requests: [{
-            mapId, ...(layerId ? {layerId} : {}), featureId: canonicalId
-        }] }), canonicalId, signal);
+            mapId, ...(layerId ? {layerId} : {}), featureId: canonicalId, spatialExtentPolicy: context.policy
+        }] }), canonicalId, signal, context);
     }
 
     /** Resolve named foreign parts only against the target map, without importing its schema into the source. */
-    async locateFeatureReference(reference: NamedFeatureReference, signal?: AbortSignal): Promise<TileFeatureId[]> {
+    async locateFeatureReference(reference: NamedFeatureReference, signal?: AbortSignal,
+        context = this.mapInfo.spatialRequestContextForViewId()): Promise<TileFeatureId[]> {
         signal?.throwIfAborted();
         if (this.virtualSources?.owns(reference.mapId)) return [];
         const referenceJson = namedFeatureReferenceJson(reference);
-        const key = this.mapInfo.schemaScopeSignature([reference.mapId]) + "\n" + referenceJson;
+        const key = context.revision + "\n" + this.mapInfo.schemaScopeSignature([reference.mapId]) + "\n" + referenceJson;
         const cached = this.locatedFeatureReferences.get(key);
-        if (cached) return cached;
-        const located = await this.locateFeatureRequest(`{"requests":[${referenceJson}]}`, undefined, signal);
-        if (key !== this.mapInfo.schemaScopeSignature([reference.mapId]) + "\n" + referenceJson)
+        if (cached) return cached.filter(target => this.permitsFeatureKey(target.mapTileKey, context));
+        const located = await this.locateFeatureRequest(`{"requests":[${referenceJson.slice(0, -1)},"spatialExtentPolicy":${JSON.stringify(context.policy)}}]}`, undefined, signal, context);
+        if (key !== context.revision + "\n" + this.mapInfo.schemaScopeSignature([reference.mapId]) + "\n" + referenceJson)
             throw new Error("Target datasource changed while locating the reference. Please retry.");
         if (located.length) {
             this.locatedFeatureReferences.set(key, located);
@@ -1166,15 +1195,16 @@ export class MapTileStreamService implements OnDestroy {
     }
 
     /** Convert render picks to persistent canonical identities before inspection or hover publication. */
-    async resolveFeaturePicks(picks: FeaturePickTarget[], signal?: AbortSignal): Promise<TileFeatureId[]> {
+    async resolveFeaturePicks(picks: FeaturePickTarget[], signal?: AbortSignal,
+        context = this.mapInfo.spatialRequestContextForViewId()): Promise<TileFeatureId[]> {
         const sourceMaps = [...new Set(picks.flatMap(pick => {
             const source = this.parseMapPartitionKeySafe(pick.mapTileKey);
             return source ? [source[0]] : [];
         }))];
         const sourceGeneration = this.mapInfo.schemaScopeSignature(sourceMaps);
         const groups = await Promise.all(picks.map(async pick => {
-            if (!pick.featureReference) return [pick];
-            const located = await this.locateFeatureReference(pick.featureReference, signal);
+            if (!pick.featureReference) return this.permitsFeatureKey(pick.mapTileKey, context) ? [pick] : [];
+            const located = await this.locateFeatureReference(pick.featureReference, signal, context);
             if (!located.length)
                 throw new Error(`Referenced ${pick.featureReference.typeId} is unavailable in ${pick.featureReference.mapId}.`);
             return located.map(target => this.applyPickedFeatureSelectors(target, pick));
@@ -1188,12 +1218,13 @@ export class MapTileStreamService implements OnDestroy {
     }
 
     /** Synchronous navigation/mask checks may use resolved references, never guess unresolved IDs. */
-    cachedFeaturePicks(picks: FeaturePickTarget[]): TileFeatureId[] {
+    cachedFeaturePicks(picks: FeaturePickTarget[], context = this.mapInfo.spatialRequestContextForViewId()): TileFeatureId[] {
         return picks.flatMap(pick => {
-            if (!pick.featureReference) return [pick];
-            const key = this.mapInfo.schemaScopeSignature([pick.featureReference.mapId]) + "\n"
+            if (!pick.featureReference) return this.permitsFeatureKey(pick.mapTileKey, context) ? [pick] : [];
+            const key = context.revision + "\n" + this.mapInfo.schemaScopeSignature([pick.featureReference.mapId]) + "\n"
                 + namedFeatureReferenceJson(pick.featureReference);
             return (this.locatedFeatureReferences.get(key) ?? [])
+                .filter(target => this.permitsFeatureKey(target.mapTileKey, context))
                 .map(target => this.applyPickedFeatureSelectors(target, pick));
         });
     }
@@ -1213,7 +1244,7 @@ export class MapTileStreamService implements OnDestroy {
     }
 
     /** Shared bounded locate response path; a foreign request has no canonical fallback string. */
-    private async locateFeatureRequest(body: string, fallbackId?: string, signal?: AbortSignal): Promise<TileFeatureId[]> {
+    private async locateFeatureRequest(body: string, fallbackId: string | undefined, signal: AbortSignal | undefined, context: SpatialRequestContext): Promise<TileFeatureId[]> {
         signal?.throwIfAborted();
         const response = await fetch("/locate", {
             method: "POST", headers: { "Content-Type": "application/json" }, signal,
@@ -1223,15 +1254,23 @@ export class MapTileStreamService implements OnDestroy {
         const content = await response.text();
         signal?.throwIfAborted();
         if (content.length > 256 * 1024) throw new Error("Feature locate response exceeds the bound");
-        const payload: { responses?: Array<Array<{ partitionKey?: string; tileId?: string; canonicalFeatureId?: string }>> } = JSON.parse(content);
+        const payload: { spatialExtentExclusions?: string[][]; responses?: Array<Array<{ partitionKey?: string; tileId?: string; canonicalFeatureId?: string }>> } = JSON.parse(content);
         const candidates = payload.responses?.[0] ?? [];
+        if (!candidates.length && payload.spatialExtentExclusions?.[0]?.length) throw new OutsideSpatialExtentError();
         if (candidates.length > 100) throw new Error("Feature locate is ambiguous; provide a layer or partition");
         return candidates.flatMap(candidate => {
             const mapTileKey = candidate.partitionKey ?? candidate.tileId;
             const featureId = candidate.canonicalFeatureId ?? fallbackId;
-            return mapTileKey && typeof featureId === "string" && featureId && this.parseMapPartitionKeySafe(mapTileKey)
+            return mapTileKey && typeof featureId === "string" && featureId && this.parseMapPartitionKeySafe(mapTileKey) && this.permitsFeatureKey(mapTileKey, context)
                 ? [{ mapTileKey, featureId }] : [];
         });
+    }
+
+    /** Apply the captured policy on both cached identities and outgoing payload requests. */
+    permitsFeatureKey(key: string, context: SpatialRequestContext): boolean {
+        const parsed = this.parseMapPartitionKeySafe(key);
+        return !parsed || parsed[2].kind !== "tile" ||
+            this.mapInfo.permitsSpatialTile(parsed[0], parsed[1], parsed[2].id, context.policy);
     }
 
     private featureIdentityKey(feature: TileFeatureId): string {
@@ -1752,11 +1791,16 @@ export class MapTileStreamService implements OnDestroy {
             name: string;
             sourceId?: string;
             incarnation?: number;
+            context?: SpatialRequestContext;
         },
         signal: AbortSignal
     ): Promise<TileAttachmentValue | null> {
         if (this.virtualSources?.owns(request.mapId)) return null;
+        const context = request.context ?? this.mapInfo.spatialRequestContextForViewId();
+        if (request.partition.kind === "tile" && !this.mapInfo.permitsSpatialTile(request.mapId, request.layerId, request.partition.id, context.policy))
+            throw new OutsideSpatialExtentError();
         const query = new URLSearchParams({
+            spatialExtentPolicy: JSON.stringify(context.policy),
             mapId: request.mapId,
             layerId: request.layerId,
             partition: JSON.stringify(partitionJson(request.partition)),
@@ -1963,8 +2007,14 @@ export class MapTileStreamService implements OnDestroy {
         });
     }
 
+    /** Capture a logical view's policy once for a multi-step spatial action. */
+    captureSpatialRequestContext(viewId?: string): SpatialRequestContext {
+        return this.mapInfo.spatialRequestContextForViewId(viewId);
+    }
+
     /** Resolves only explicitly requested identities; never guesses between ambiguous backend matches. */
-    async resolveFeatureIdentities(features: Array<z.infer<typeof featureIdentitySchema>>, signal?: AbortSignal): Promise<TileFeatureId[]> {
+    async resolveFeatureIdentities(features: Array<z.infer<typeof featureIdentitySchema>>, signal?: AbortSignal,
+        context = this.mapInfo.spatialRequestContextForViewId()): Promise<TileFeatureId[]> {
         const result: TileFeatureId[] = [];
         for (const feature of features) {
             signal?.throwIfAborted();
@@ -1980,9 +2030,10 @@ export class MapTileStreamService implements OnDestroy {
             }
             if ("mapTileKey" in feature) {
                 if (!this.parseMapPartitionKeySafe(feature.mapTileKey) || !feature.mapTileKey.startsWith("Features:")) rejectAction("Invalid feature partition key", "invalid_arguments");
+                if (!this.permitsFeatureKey(feature.mapTileKey, context)) throw new OutsideSpatialExtentError();
                 result.push({ mapTileKey: feature.mapTileKey, featureId });
             } else {
-                const matches = await this.locateFeature(feature.mapId, featureId, feature.layerId, signal);
+                const matches = await this.locateFeature(feature.mapId, featureId, feature.layerId, signal, context);
                 signal?.throwIfAborted();
                 if (matches.length !== 1) rejectAction(matches.length ? "Feature identity is ambiguous; supply its partition" :
                     "Feature was not found. For a relation target, use viewer_list_layers to find a layer whose " +

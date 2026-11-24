@@ -1,3 +1,4 @@
+import type {SpatialRequestContext} from "../mapdata/spatial-extent.model";
 import { Injectable } from "@angular/core";
 import { HighlightMode } from "build/libs/core/erdblick-core";
 import { BehaviorSubject, Subject } from "rxjs";
@@ -35,6 +36,7 @@ export const FEATURE_SEARCH_TARGET_ID = "features";
  * Response shape returned by the backend /locate endpoint for jump-target resolution.
  */
 interface LocateResponse {
+    spatialExtentExclusions?: string[][];
     responses: Array<Array<{
         tileId: string;
         typeId: string;
@@ -291,6 +293,7 @@ export class JumpTargetService implements AppActionContributor {
             bubbles,
             enabled: false,
             execute: (value: string) => {
+                this.menuService.sourceDataRequestViewId = this.viewSettings.viewIdAt(this.viewSettings.focusedView);
                 const matches = matchSourceDataElements(value);
                 if (matches) {
                     let [tileId, mapId, sourceLayerId] = matches;
@@ -359,22 +362,24 @@ export class JumpTargetService implements AppActionContributor {
     /**
      * Resolves a raw feature id expression to the first valid jump action and executes it.
      */
-    async highlightByJumpTargetFilter(mapId: string, featureId: string, mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT, cameraMoveViewIndex?: number) {
+    async highlightByJumpTargetFilter(mapId: string, featureId: string, mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT, cameraMoveViewIndex?: number, requestContext?: SpatialRequestContext) {
         let featureJumpTargets = this.mapService.tileLayerParser.filterFeatureJumpTargets(featureId) as Array<FeatureJumpAction>;
         const validIndex = featureJumpTargets.findIndex(action => !action.error);
         if (validIndex == -1) {
             console.error(`Error highlighting ${featureId}!`);
             return;
         }
-        await this.highlightByJumpTarget(featureJumpTargets[validIndex], mapId, mode, cameraMoveViewIndex);
+        await this.highlightByJumpTarget(featureJumpTargets[validIndex], mapId, mode, cameraMoveViewIndex, requestContext);
     }
 
     /** Resolve a schema-independent reference before it enters canonical inspection state. */
     async highlightFeatureReference(
         reference: NamedFeatureReference,
         mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        requestContext?: SpatialRequestContext
     ): Promise<void> {
+        const context = requestContext ?? this.mapService.spatialRequestContextForViewId();
         // A locate may outlive an inspection edit. Observe state notifications
         // because callers can mutate the existing selection array in place.
         let selectionChanged: boolean;
@@ -383,14 +388,14 @@ export class JumpTargetService implements AppActionContributor {
             : undefined;
         selectionChanged = false;
         try {
-            const targets = await this.tileStream.locateFeatureReference(reference, signal);
+            const targets = await this.tileStream.locateFeatureReference(reference, signal, context);
             signal?.throwIfAborted();
-            if (selectionChanged) return;
+            if (selectionChanged || this.mapService.spatialRequestContextForViewId(context.viewId).revision !== context.revision) return;
             if (!targets.length) {
                 throw new Error(`Referenced ${reference.typeId} is unavailable in ${reference.mapId}.`);
             }
             if (mode === coreLib.HighlightMode.SELECTION_HIGHLIGHT) {
-                this.inspectionState.setSelection(targets);
+                this.inspectionState.setSelection(targets, undefined, false, false, context.viewId);
             } else {
                 this.inspectionSelection.setHoveredFeatures(targets, true);
             }
@@ -408,10 +413,12 @@ export class JumpTargetService implements AppActionContributor {
         action: FeatureJumpAction,
         mapId?: string | null,
         mode: HighlightMode = coreLib.HighlightMode.SELECTION_HIGHLIGHT,
-        cameraMoveViewIndex?: number) {
+        cameraMoveViewIndex?: number, requestContext?: SpatialRequestContext) {
+        const context = requestContext ?? this.mapService.spatialRequestContext(cameraMoveViewIndex ?? this.viewSettings.focusedView);
         const cameraTarget = cameraMoveViewIndex === undefined ? undefined : this.views.captureView(cameraMoveViewIndex);
         if (cameraMoveViewIndex !== undefined && !cameraTarget) return;
-        const targetIsCurrent = () => !cameraTarget || !!this.views.resolveCapturedView(cameraTarget);
+        const targetIsCurrent = () => (!cameraTarget || !!this.views.resolveCapturedView(cameraTarget)) &&
+            this.mapService.spatialRequestContextForViewId(context.viewId).revision === context.revision;
         // Select the map.
         if (!mapId) {
             if (action.maps.length > 1) {
@@ -430,6 +437,7 @@ export class JumpTargetService implements AppActionContributor {
         // Locate the feature.
         let resolveMe = {
             requests: [{
+                spatialExtentPolicy: context.policy,
                 typeId: action.name,
                 mapId: mapId,
                 featureId: action.idParts.map((kv) => [kv.key, kv.value]).flat()
@@ -445,10 +453,12 @@ export class JumpTargetService implements AppActionContributor {
         let extRefsResolved = await response.json() as LocateResponse;
         if (!targetIsCurrent()) return;
         if (extRefsResolved.responses[0].length < 1) {
-            this.messageService.showError("Could not locate feature!")
+            this.messageService.showError(extRefsResolved.spatialExtentExclusions?.[0]?.length
+                ? "Outside spatial extent" : "Could not locate feature!")
             return;
         }
-        let selectThisFeature = extRefsResolved.responses[0][0];
+        const selectThisFeature = extRefsResolved.responses[0].find(candidate => this.tileStream.permitsFeatureKey(candidate.tileId, context));
+        if (!selectThisFeature) { this.messageService.showError("Outside spatial extent"); return; }
 
         // Set feature-to-select on MapService.
         const featureId = `${selectThisFeature.typeId}.${selectThisFeature.featureId.filter((_, index) => index % 2 === 1).join('.')}`;
@@ -456,7 +466,7 @@ export class JumpTargetService implements AppActionContributor {
             this.inspectionState.setSelection([{
                 mapTileKey: selectThisFeature.tileId,
                 featureId: featureId
-            } as TileFeatureId]);
+            } as TileFeatureId], undefined, false, false, context.viewId);
         } else {
             this.inspectionSelection.setHoveredFeatures([{
                 mapTileKey: selectThisFeature.tileId,

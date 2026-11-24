@@ -5,7 +5,7 @@ import { DiagnosticsFacadeService } from "../diagnostics/diagnostics-facade.serv
 import { PerformanceDiagnosticsScope } from "../diagnostics/diagnostics.model";
 import { InspectionPanelService } from "../inspection/inspection-panel.service";
 import { InspectionSelectionService } from "../inspection/inspection-selection.service";
-import { SelectedSourceData, type TileFeatureId } from "../inspection/inspection.model";
+import { type TileFeatureId } from "../inspection/inspection.model";
 import { Color, HeightReference, Rectangle } from "../integrations/geo.adapter";
 import { coreLib } from "../integrations/wasm.adapter";
 import { parseMapPartitionKey } from "../mapdata/partition.model";
@@ -76,6 +76,7 @@ export class RightClickMenuService {
 
     menuItems: BehaviorSubject<MenuItem[]> = new BehaviorSubject<MenuItem[]>([]);
     preferredTileIdForSourceData: number | null = null;
+    sourceDataRequestViewId?: string;
     lastInspectedTileSourceDataOption: BehaviorSubject<{ tileId: number, mapId: string, layerId: string } | null> =
         new BehaviorSubject<{ tileId: number, mapId: string, layerId: string } | null>(null);
     closeContextMenus: Subject<void> = new Subject<void>();
@@ -135,6 +136,18 @@ export class RightClickMenuService {
     /** Closes the source-data picker dialog. */
     closeTileSourceDataDialog(): void {
         this.sourceDataDialogVisible = false;
+    }
+
+    /** Opens a picker result with its original view policy and remembers the chosen layer. */
+    inspectTileSourceData(selection: {tileId: number, mapId: string, layerId: string}, requestViewId?: string): void {
+        if (requestViewId && !this.inspectionState.state.viewSettings.viewIds.includes(requestViewId)) {
+            this.infoMessageService.showInfo("The source view is no longer available.");
+            return;
+        }
+        this.inspectionState.setSelection({
+            mapTileKey: coreLib.getSourceDataLayerKey(selection.mapId, selection.layerId, selection.tileId)
+        }, undefined, false, false, requestViewId);
+        this.lastInspectedTileSourceDataOption.next(selection);
     }
 
     /** Updates the context-menu action that starts a view-scoped feature search. */
@@ -350,13 +363,12 @@ export class RightClickMenuService {
 
     /** Builds a shortcut that reuses the last inspected source-data layer for the current tile. */
     private buildLastInspectedSourceDataMenuItem(sourceDataParams: { tileId: number, mapId: string, layerId: string }): MenuItem {
+        const requestViewId = this.sourceDataRequestViewId;
         return {
             label: 'Inspect Source Data with Last Layer',
             icon: 'pi pi-database',
             command: () => {
-                this.inspectionState.setSelection({
-                    mapTileKey: coreLib.getSourceDataLayerKey(sourceDataParams.mapId, sourceDataParams.layerId, sourceDataParams.tileId)
-                } as SelectedSourceData);
+                this.inspectTileSourceData(sourceDataParams, requestViewId);
             }
         };
     }

@@ -568,7 +568,7 @@ describe('AppStateService', () => {
         expect(stateOwners(service).layerState.stylesState.positionalValues().get('MapB/Road/T93C/showCenterLines')).toEqual(['1', '0']);
         expect(stateOwners(service).inspectionState.state.selection).toEqual([
             {
-                id: 0,
+                id: 0, requestViewId: "0",
                 features: [{
                     mapTileKey: 'Features:MapA:Lane:545379780',
                     featureId: 'Lane.1:attribute#1'
@@ -579,7 +579,7 @@ describe('AppStateService', () => {
                 undocked: false
             },
             {
-                id: 1,
+                id: 1, requestViewId: "0",
                 features: [],
                 sourceData: {
                     mapTileKey: 'SourceData:MapB:SourceData-LaneGeometryLayer-1:1451349444',
@@ -813,7 +813,7 @@ describe('AppStateService', () => {
             v: '1,0',
             z: '12,13',
             az: '0,1',
-            sel: '0~0~F:1:21~Road.1~30,20~n0',
+            sel: '0~0~F:1:21~Road.1~30,20~n0~v:0',
         });
 
         service.ngOnDestroy();
@@ -1181,7 +1181,7 @@ describe('AppStateService', () => {
             expect(Object.keys(slot.appState.value)).toEqual([...stateOwners(service).viewSettings.viewIds]);
         });
         expect(stateOwners(service).layerState.styles.get('m1/layerA/overlay/opacity')).toEqual([survivor ? 0.8 : 0.2]);
-        expect(stateOwners(service).inspectionState.state.selectionState.getValue()).toBe(selection);
+        expect(stateOwners(service).inspectionState.state.selectionState.getValue()).toEqual(selection.map(panel => ({...panel, requestViewId: String(survivor)})));
         expect(stateOwners(service).searchService.state.featureSearches).toEqual(searches.map(search => ({
             ...search, selectedViewIndices: search.selectedViewIndices.includes(survivor) ? [0] : []
         })));

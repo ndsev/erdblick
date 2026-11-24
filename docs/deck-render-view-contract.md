@@ -124,3 +124,31 @@ Erdblick passes deck.gl only `[longitude, latitude, altitude]` and view-local sc
 - search marker parity
 - zoom-to-rectangle animation parity
 - right-click tile outline parity
+
+## Drawing and measurement presentation
+
+Each drawing session captures a stable view ID and 2D/3D space. A projection
+change or view removal pauses incompatible input. `DrawingToolsService` owns
+objects/gestures; Deck receives narrow semantic hooks, projected handles and
+working-plane configuration. Pointer placement consumes both pointerdown and
+pointerup so navigation cannot retain half a gesture. Handles capture the pointer;
+a completed drag commits one native edit, while previews coalesce independently.
+
+`deck-drawing.util.ts` inverts the actual Mercator camera on the physical ECEF
+plane and shares projected segment picking with navigation. Snapping reads
+original geometry through an installed subset's `snapGeometry`; scene revision
+invalidates the bounded cache. It never asks for datasource geometry on pointer
+motion. First-person pointer drawing is unavailable. Polar data remains native;
+Mercator presentation omissions and fit limits are explicit.
+
+Geometry candidates must satisfy the active Shift constraint. Exclude the edited
+vertex and incident segments, retaining other self-geometry. Off-plane projection
+requires an explicit option and displays both targets and their displacement.
+Local filter subscriptions include the viewport for marker selection: native
+filtering reuses cached evaluated paths to distribute at most 1,000 markers over
+the visible path. It does not change accepted source, physical metrics or save
+state. Remote coverage-only subscription behavior remains unchanged.
+
+Map scale uses the current viewport's projected ground reference, updates on
+camera/resize changes and has one owner per view. It makes no data requests and
+is hidden when a meaningful ground projection is unavailable.

@@ -1,3 +1,4 @@
+import {DrawingDocumentsService} from './drawing/drawing-documents.service';
 import { DiagnosticsState } from "./diagnostics/diagnostics.state";
 import { HttpClient } from "@angular/common/http";
 import {
@@ -94,12 +95,13 @@ export class AppComponent implements AfterViewInit, OnDestroy {
     protected readonly featureSearchExportDialogLayoutId = FEATURE_SEARCH_EXPORT_DIALOG_LAYOUT_ID;
 
     @ViewChild('preferences') private preferences?: Pick<PreferencesComponent, 'openRendering'>;
-    protected readonly notificationActions: InfoMessageActions = {
+    protected get notificationActions(): InfoMessageActions { return {
+        ...this.drawingDocuments.messageActions,
         [GPU_BUFFER_RENDERING_ACTION]: () => {
             if (!this.preferences) throw new Error('Rendering preferences are unavailable.');
             this.preferences.openRendering();
         }
-    };
+    }; }
     private readonly configurationNotices: InfoMessageRef[] = [];
     private readonly releaseAlertContainer: () => void;
     private destroyed = false;
@@ -116,7 +118,7 @@ export class AppComponent implements AfterViewInit, OnDestroy {
      * Install application-wide dialog behavior, diagnostics and debug access on
      * the root component; domain startup remains in the app initializer.
      */
-    constructor(public stateService: AppStateService,
+    constructor(private readonly drawingDocuments: DrawingDocumentsService, public stateService: AppStateService,
         private httpClient: HttpClient,
         private mapInfo: MapDataService,
         private tileStream: MapTileStreamService,

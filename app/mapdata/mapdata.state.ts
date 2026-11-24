@@ -1,3 +1,4 @@
+import type {SpatialExtentSettings} from "./spatial-extent.model";
 import {
     type ConnectionRetryPolicy,
     connectionRetryPolicySchema,
@@ -33,6 +34,8 @@ export class MapDataState {
     /** Seeds all persisted layer settings and option values before a new view becomes observable. */
     private seedViews(previous: number, count: number, sourceIndex: number): void {
         for (let target = previous; target < count; target++) {
+            this.virtualSpatialExtentSettings.set(this.viewSettings.viewIdAt(target), structuredClone(
+                this.virtualSpatialExtentSettings.get(this.viewSettings.viewIdAt(sourceIndex)) ?? {}));
             for (const state of this.viewValues)
                 state.next(target, structuredClone(state.getValue(sourceIndex)));
         }
@@ -50,6 +53,8 @@ export class MapDataState {
     /** Retains all layer and preset associations in the supplied logical view order. */
     private retainViews(indices: readonly number[]): void {
         const ids = indices.map((index) => this.viewSettings.viewIdAt(index));
+        for (const id of this.virtualSpatialExtentSettings.keys())
+            if (!ids.includes(id)) this.virtualSpatialExtentSettings.delete(id);
         for (const state of this.viewValues) state.retain(ids);
         this.stylesState.retain(ids);
     }
@@ -61,7 +66,8 @@ export class MapDataState {
             this.layerZoomLevelState,
             this.layerAutoZoomLevelState,
             this.layerPresetSelectionState,
-            this.mapPresetSelectionState
+            this.mapPresetSelectionState,
+            this.spatialExtentSettingsState
         ] as Array<PerViewState<unknown>>;
     }
 
@@ -79,6 +85,11 @@ export class MapDataState {
             import: (previous, ids) => {
                 for (const state of this.viewValues) state.rekey(previous, ids);
                 this.stylesState.rekey(previous, ids);
+                const virtual = previous.map(id => this.virtualSpatialExtentSettings.get(id));
+                this.virtualSpatialExtentSettings.clear();
+                ids.forEach((id, index) => {
+                    if (virtual[index]) this.virtualSpatialExtentSettings.set(id, virtual[index]!);
+                });
             }
         });
     }
@@ -93,6 +104,7 @@ export class MapDataState {
     /** Release session state after the local source leaves the catalog. */
     removeVirtualMap(mapId: string): void {
         this.virtualMaps.delete(mapId);
+        for (const values of this.virtualSpatialExtentSettings.values()) delete values[mapId];
         for (const key of this.virtualLayers.keys()) if (key.startsWith(mapId + '/')) this.virtualLayers.delete(key);
         for (const key of this.virtualOptions.keys()) if (key.startsWith(mapId + '/')) this.virtualOptions.delete(key);
     }
@@ -113,6 +125,35 @@ export class MapDataState {
         },
         () => this.viewSettings.viewIds
     );
+
+    /** Sparse per-map overrides use the generic JSON URL/state codec. */
+    readonly spatialExtentSettingsState = this.persistence.registerPerViewState<Record<string, SpatialExtentSettings>>(
+        {name: "spatialExtentSettings", urlParamName: "extent", defaultValue: {},
+            schema: z.record(z.string(), z.object({limitToSpatialExtent: Boolish, showSpatialExtent: Boolish}))},
+        () => this.viewSettings.viewIds
+    );
+
+    /** Local-source preferences follow their existing session-only ownership. */
+    private readonly virtualSpatialExtentSettings = new Map<string, Record<string, SpatialExtentSettings>>();
+
+    /** Read defaults without materializing catalog-dependent entries in saved state. */
+    spatialExtentSettings(viewIndex: number, mapId: string): SpatialExtentSettings {
+        const settings = this.virtualMaps.has(mapId)
+            ? this.virtualSpatialExtentSettings.get(this.viewSettings.viewIdAt(viewIndex))
+            : this.spatialExtentSettingsState.getValue(viewIndex);
+        return settings?.[mapId] ?? {limitToSpatialExtent: true, showSpatialExtent: false};
+    }
+
+    /** Store non-default preferences while leaving unknown/reloading map identities intact. */
+    setSpatialExtentSettings(viewIndex: number, mapId: string, value: SpatialExtentSettings): void {
+        const virtual = this.virtualMaps.has(mapId);
+        const viewId = this.viewSettings.viewIdAt(viewIndex);
+        const values = {...(virtual ? this.virtualSpatialExtentSettings.get(viewId) : this.spatialExtentSettingsState.getValue(viewIndex))};
+        if (value.limitToSpatialExtent && !value.showSpatialExtent) delete values[mapId];
+        else values[mapId] = {...value};
+        if (virtual) this.virtualSpatialExtentSettings.set(viewId, values);
+        else this.spatialExtentSettingsState.next(viewIndex, values);
+    }
 
     readonly layerNamesState = this.persistence.registerState<Array<string>>({
         name: "layerNames",

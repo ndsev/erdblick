@@ -1305,6 +1305,18 @@ export class MapLayerTree {
 
         const styleOptionChanges: Array<[StyleOptionNode, number]> = [];
         let viewConfigChanged = false;
+        for (const mapId of this.maps.keys()) {
+            const source = this.layerState.spatialExtentSettings(viewIndex, mapId);
+            for (let target = 0; target < numViews; ++target) {
+                if (target === viewIndex) continue;
+                const previous = this.layerState.spatialExtentSettings(target, mapId);
+                if (previous.limitToSpatialExtent !== source.limitToSpatialExtent || previous.showSpatialExtent !== source.showSpatialExtent) {
+                    this.layerState.setSpatialExtentSettings(target, mapId, source);
+                    viewConfigChanged = true;
+                }
+            }
+        }
+
 
         for (const layer of this.allFeatureLayers()) {
             if (layer.viewConfig.length <= viewIndex) {

@@ -70,6 +70,19 @@ describe("SearchResults ownership", () => {
         expect(indexed.get("a")?.map(point => point.featureId)).toEqual(["first", "second"]);
     });
 
+    it("counts shared results once across policy presentations and retains surviving owners", () => {
+        const {results} = fixture();
+        const first = contribution("tile", 0, ["same"]);
+        results.add("run-1", {...first, sourceTileKey: "policy-a\ntile"}, false, true);
+        results.add("run-1", {...first, sourceTileKey: "policy-b\ntile"}, false, true);
+        expect(results.searchResults).toHaveLength(1);
+        expect(results.totalFeatureCount).toBe(1);
+        results.remove("run-1", "policy-a\ntile");
+        results.rebuildSessionResultData();
+        expect(results.searchResults).toHaveLength(1);
+        expect(results.totalFeatureCount).toBe(1);
+    });
+
     it("rejects retired runs and releases retained arrays and density when closed", () => {
         const {results, indexed} = fixture();
         results.add("run-1", contribution("a"), false, true);

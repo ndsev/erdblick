@@ -1,3 +1,4 @@
+import {spatialPolicyHarness} from "../../support/spatial-policy";
 import "@angular/compiler";
 import { BehaviorSubject } from "rxjs";
 import {
@@ -56,7 +57,7 @@ function createHarness(
         ]),
         retainTileAttachment: vi.fn()
     };
-    const mapInfo = {
+    const mapInfo = {...spatialPolicyHarness(),
         mapgetLayer: vi.fn(),
         tileLayerParser: { readTileSubsetLayer: vi.fn() }
     };

@@ -4,6 +4,8 @@
 #include "mapget/model/featurelayer.h"
 #include "mapget/model/featurelayer-filter.h"
 #include <nlohmann/json.hpp>
+#include <map>
+#include <optional>
 
 namespace erdblick
 {
@@ -32,6 +34,18 @@ public:
     std::string append(double longitude, double latitude, std::string const& description);
     /** Replace the joined polygon feature using selected point IDs in file order, or clear it. */
     std::string join(std::string const& ids);
+    /** Apply one revision-checked atomic object batch, shared by UI and automation. */
+    std::string editObjects(std::string const& request);
+    /** Validate/materialize an edit without publishing it; cancellation can discard this candidate. */
+    void stage(std::string const& request);
+    /** Publish the prepared candidate only if the accepted revision is still its input revision. */
+    std::string commitStage();
+    /** Release a prepared candidate without changing accepted geometry or identities. */
+    void cancelStage();
+    /** Read one exact logical feature and its derived metrics without copying the document. */
+    std::string object(std::string const& id) const;
+    /** Page one semantic JSON branch, retaining exact leaf lexemes and bounded response size. */
+    std::string branch(std::string const& request) const;
     /** Export the exact immutable schema used by the model. */
     void schema(SharedUint8Array& out) const;
     /** Export the current append-only field dictionary before dependent model bytes. */
@@ -50,15 +64,31 @@ private:
         bool generatedJoin = false;
         nlohmann::json value;
         nlohmann::json geometry;
+        nlohmann::json feature;
         nlohmann::json properties;
+        nlohmann::json decorations;
+        nlohmann::json metrics;
+        nlohmann::json markerPaths;
         std::string identity;
     };
+    /** Unpublished native transaction; accepted filters/reads keep using the previous model. */
+    struct Prepared {
+        uint32_t revision;
+        uint64_t nextId;
+        std::string text;
+        std::vector<Row> rows;
+        mapget::PartitionFeatureLayer::Ptr model;
+        std::map<std::string, uint64_t> objects;
+        std::map<std::string, std::vector<uint64_t>> previous;
+    };
+    /** Move a validated transaction into the accepted owner at its single commit point. */
+    std::string publish(Prepared candidate);
     /** Adapt standard GeoJSON into inert properties and mapget-supported geometry components. */
     std::vector<Row> parseGeoJson(std::string const& text) const;
     /** Build and commit a candidate, with optional known row identities for structured edits. */
-    std::string install(std::string const& text, std::vector<uint64_t> const& identities = {});
+    std::string install(std::string const& text, std::vector<uint64_t> const& identities = {}, bool preservePreviousIds = false);
     /** Materialize sanitized geometry and ordinary property trees in a fresh destination model. */
-    mapget::PartitionFeatureLayer::Ptr materialize(std::vector<Row> const& rows) const;
+    mapget::PartitionFeatureLayer::Ptr materialize(std::vector<Row> const& rows, nlohmann::json const& viewport = nullptr) const;
     mapget::DataSourceInfo metadata_;
     std::shared_ptr<mapget::StringPool> strings_;
     mapget::PartitionFeatureLayer::Ptr model_;
@@ -66,7 +96,21 @@ private:
     std::string source_;
     uint32_t revision_ = 0;
     uint64_t nextId_ = 1;
+    std::map<std::string, uint64_t> objectIdentities_;
+    std::map<std::string, std::vector<uint64_t>> legacyIdentities_;
+    std::optional<Prepared> prepared_;
+    bool staging_ = false;
 };
+
+nlohmann::json drawingPolygonGeometry(nlohmann::json ring);
+/** Rebuild visible interval markers from cached evaluated samples, without parsing or resampling source. */
+nlohmann::json drawingMarkerDecorations(nlohmann::json const& paths, nlohmann::json const& author, nlohmann::json const& viewport = nullptr);
+nlohmann::json evaluateDrawingShape(nlohmann::json author, nlohmann::json const& ordinary = nullptr);
+/** Edit control vertices/curves using the same physical/geodesic interpolation as evaluation. */
+nlohmann::json editDrawingControls(nlohmann::json author, nlohmann::json const& operation);
+std::string drawingCompose(std::string const& text, bool separate);
+std::string drawingEvaluate(std::string const& text);
+std::string drawingPlane(std::string const& text);
 
 /** Horizontal WGS84 ellipsoidal distance in meters; boundary arguments are longitude/latitude. */
 double drawingDistance(double lon1, double lat1, double lon2, double lat2);

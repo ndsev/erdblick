@@ -258,11 +258,18 @@ export class LocationNavigationService implements OnDestroy, AppActionContributo
         for (const view of renderers) guards.add(view.rendererInvalidated.subscribe(abort));
         try {
             const target = input.target;
-            const features =
-                "features" in target
-                    ? await this.stream.resolveFeatureIdentities(target.features, controller.signal)
-                    : undefined;
-            const loaded = features ? await this.stream.loadFeatures(features, controller.signal) : undefined;
+            const contexts = "features" in target ? ids.map(id => this.stream.captureSpatialRequestContext(id)) : [];
+            // Every target view must admit feature navigation under its own policy.
+            const resolved = "features" in target ? await Promise.all(contexts.map(async context => {
+                const features = await this.stream.resolveFeatureIdentities(target.features, controller.signal, context);
+                controller.signal.throwIfAborted();
+                const loaded = await this.stream.loadFeatures(features, controller.signal, context);
+                if (context.revision !== this.stream.captureSpatialRequestContext(context.viewId).revision)
+                    rejectAction("Spatial extent settings changed during navigation", "cancelled");
+                return {features, loaded};
+            })) : undefined;
+            const features = resolved?.[0]?.features;
+            const loaded = resolved?.[0]?.loaded;
             controller.signal.throwIfAborted();
             if (!stillCurrent()) rejectAction("The target view was replaced", "cancelled");
             if (features && loaded?.length !== features.length)

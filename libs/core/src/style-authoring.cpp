@@ -75,6 +75,8 @@ nlohmann::ordered_json const& styleAuthoringSchema()
           "label-opacity": {"kind":"number","group":"Labels","seed":1},
           "label-font-family": {"kind":"string","group":"Labels","seed":"sans-serif"},
           "label-font-weight": {"kind":"number","group":"Labels","seed":400},
+          "label-size-expression": {"kind":"expression","group":"Labels"},
+          "label-color-expression": {"kind":"expression","group":"Labels"},
           "label-size": {"kind":"number","group":"Labels","seed":24},
           "label-size-scale": {"kind":"number","group":"Labels","seed":1},
           "label-size-units": {"kind":"enum","values":["meters","common","pixels"],"group":"Labels"},

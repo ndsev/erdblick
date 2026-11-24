@@ -293,3 +293,15 @@
 
   @include value-bubble.variants;
 }
+
+// Local ground scale follows each view and its display units.
+.map-scale-toggle, .map-scale-bar {
+  position: absolute; left: 24px; z-index: 10;
+  color: var(--p-text-color); background: var(--p-content-background);
+  border: 1px solid var(--p-content-border-color); border-radius: 4px;
+  font-size: 11px; padding: 4px 6px;
+}
+.map-scale-toggle { bottom: 60px; cursor: pointer; }
+.map-scale-toggle[aria-pressed=true] { color: var(--p-primary-color); }
+.map-scale-bar { bottom: 22px; pointer-events: none; font-variant-numeric: tabular-nums; }
+.map-scale-toggle.mirrored, .map-scale-bar.mirrored { left: calc(4rem + 16px); }

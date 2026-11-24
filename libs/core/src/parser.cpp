@@ -1459,6 +1459,7 @@ void TileLayerParser::setDataSourceInfo(const erdblick::SharedUint8Array& dataSo
     for (auto const& [_, source] : replacement.info_)
         replacement.schemas_.emplace(source.schemaId_, source.mapSchema_);
     info_.swap(replacement.info_);
+    coverageQueries_.clear();
     incomingRelationTargets_.swap(replacement.incomingRelationTargets_);
     incomingRelationCoverageUnknown_.swap(replacement.incomingRelationCoverageUnknown_);
     featureJumpTargets_.swap(replacement.featureJumpTargets_);
@@ -1536,6 +1537,7 @@ void TileLayerParser::changeDataSources(
     }
 
     info_.swap(nextInfo);
+    coverageQueries_.clear();
     featureJumpTargets_.swap(nextTargets);
     for (auto const& mapId : removed) {
         stringPoolsByMap_.erase(mapId);

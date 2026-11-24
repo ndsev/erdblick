@@ -3,7 +3,6 @@ version: 2
 layer: '^Drawing$'
 options:
   - {id: drawingColor, label: Drawing color, type: color, default: '#20a6d2'}
-  - {id: measurementColor, label: Measurement color, type: color, default: '#ff8a24'}
 interaction-effects:
   hover: {tint: yellow, tint-mix: 0.65, edge-width: 2}
   selection: {tint: white, tint-mix: 0.7, edge-width: 3}
@@ -13,7 +12,7 @@ rules:
     color-expression: "attributes.user.color or drawingColor"
     width: 10
   - geometry: [line]
-    filter: "not attributes.user.preview"
+    filter: "not any(attributes.user.preview == true)"
     color-expression: "attributes.user.color or drawingColor"
     width: 3
   - geometry: [polygon]
@@ -21,7 +20,7 @@ rules:
     opacity: 0.2
   - geometry: [line]
     filter: "attributes.user.preview"
-    color-expression: "attributes.user.color or measurementColor"
+    color-expression: "attributes.user.color or drawingColor"
     opacity: 0.45
     width: 3
   - geometry: [point]
@@ -37,3 +36,33 @@ rules:
     label-background-color: '#17212e'
     label-background-padding: [5, 3]
     label-background-border-radius: [4, 4, 4, 4]
+  - scope: attribute
+    attribute-layer-type: DrawingDecorations
+    attribute-type: Decoration
+    geometry: [point]
+    color-expression: "$feature.attributes.user.color or drawingColor"
+    width: 0
+    width-scale:
+      mode: categorical
+      expression: role
+      fallback: 0
+      stops: [[point, 5]]
+    label-text-expression: text
+    label-size-expression: fontSize
+    label-color-expression: "$feature.attributes.user.color or drawingColor"
+    label-size: 13
+    label-font-weight: 600
+    label-pixel-offset: [0, -14]
+    label-background: true
+    label-background-color: '#17212e'
+    label-background-padding: [5, 3]
+  - scope: attribute
+    attribute-layer-type: DrawingDecorations
+    attribute-type: Decoration
+    geometry: [line]
+    color-expression: "$feature.attributes.user.color or drawingColor"
+    width: 1.5
+    label-text-expression: text
+    label-color-expression: "$feature.attributes.user.color or drawingColor"
+    label-size: 12
+    label-pixel-offset: [0, -12]

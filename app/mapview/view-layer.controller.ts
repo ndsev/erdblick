@@ -469,6 +469,8 @@ export class ViewLayerController {
     private viewportPresentationSignature(): string {
         const viewState = this.viewState.viewStateFor(this.viewIndex);
         const parts = [String(viewState?.coverageVersion ?? -1)];
+        if ([...this.mapInfo.mapgetLayers()].some(layer => layer.origin === 'virtual'))
+            parts.push(JSON.stringify(viewState?.viewport), String(viewState?.metersPerPixel));
         const orderedStyles = [...this.styleService.styles.values()]
             .filter(style => style.visible);
         for (const mapgetLayer of this.mapInfo.mapgetLayers()) {
@@ -539,6 +541,12 @@ export class ViewLayerController {
 
     /** Reconcile desired regular/search/interaction owners without rebuilding the view. */
     private reconcile(): void {
+        const policyRevision = this.mapInfo.spatialRequestContext(this.viewIndex).revision;
+        for (const [slot, fallback] of this.retiringRegularLayers) {
+            if (fallback.owned.layer.spatialRequestRevision === policyRevision) continue;
+            this.retiringRegularLayers.delete(slot);
+            this.destroyOwnedLayer(fallback.owned);
+        }
         const desired = new Map<string, {
             mapgetLayer: MapgetLayer;
             style: ErdblickStyle;
@@ -571,7 +579,7 @@ export class ViewLayerController {
                 mapgetLayer.mapId,
                 mapgetLayer.layerId
             );
-            const visibleTileIds = this.viewState.visibleTileIdsForLevel(this.viewIndex, level);
+            const visibleTileIds = this.viewState.visibleLayerTileIds(this.viewIndex, mapgetLayer.mapId, mapgetLayer.layerId, level);
             const partitions = mapgetLayer.partitionKind === "object"
                 ? this.objectPartitionsForViewport(mapgetLayer)
                 : this.tilePartitionsForCoverage(visibleTileIds);
@@ -681,7 +689,8 @@ export class ViewLayerController {
                     replacement[1].plan.channels[index]?.pointCloudMaxPoints
             );
             if (replacementSlot && replacement &&
-                replacement[0] !== key && !samplingChanged) {
+                replacement[0] !== key && !samplingChanged &&
+                owned.layer.spatialRequestRevision === policyRevision) {
                 this.retainAsRegularFallback(
                     replacementSlot,
                     key,
@@ -1523,6 +1532,8 @@ export class ViewLayerController {
             return null;
         }
         const { mapId, layerId, partition } = parsed;
+        if (partition.kind === "tile" && !this.mapInfo.permitsSpatialTile(mapId, layerId, partition.id,
+                this.mapInfo.spatialRequestContext(this.viewIndex).policy)) return null;
         const mapgetLayer = this.mapInfo.mapgetLayer(mapId, layerId);
         if (!mapgetLayer) {
             return null;
@@ -2141,11 +2152,12 @@ export class ViewLayerController {
         if (level === null) {
             return [];
         }
-        const discoveryTileIds = this.viewState.visibleTileIdsForLevel(
-            this.viewIndex,
+        const discoveryTileIds = this.viewState.visibleLayerTileIds(
+            this.viewIndex, layer.mapId, layer.layerId,
             level
         );
-        const signature = discoveryTileIds.join(",");
+        const context = this.mapInfo.spatialRequestContext(this.viewIndex);
+        const signature = context.revision + ":" + discoveryTileIds.join(",");
         let state = this.objectCoverageByLayer.get(layer);
         if (!state) {
             state = {
@@ -2165,7 +2177,11 @@ export class ViewLayerController {
             clearTimeout(state.timer);
             state.timer = null;
         }
-        void this.tileStream.discoverObjectPartitions(layer, discoveryTileIds)
+        if (!discoveryTileIds.length) {
+            state.partitions = [];
+            return [];
+        }
+        void this.tileStream.discoverObjectPartitions(layer, discoveryTileIds, context)
             .then(coverage => {
                 if (this.disposed || state!.requestVersion !== requestVersion ||
                     state!.discoverySignature !== signature) {
@@ -2238,11 +2254,13 @@ export class ViewLayerController {
         priorityPartitions: readonly PartitionId[]
     ): void {
         const previous = this.regularCoverageByLayer.get(layer);
-        if (previous?.partitions === partitions &&
+        if (layer.mapgetLayer.origin !== 'virtual' && previous?.partitions === partitions &&
             previous.priorityPartitions === priorityPartitions) {
             return;
         }
-        layer.setPartitionCoverage(partitions, priorityPartitions);
+        const state=this.viewState.viewStateFor(this.viewIndex),view=state?.viewport;
+        layer.setPartitionCoverage(partitions, priorityPartitions,undefined,
+            layer.mapgetLayer.origin === 'virtual' && view ? {west:view.west,south:view.south,width:view.width,height:view.height,metersPerPixel:state?.metersPerPixel ?? 1} : undefined);
         this.regularCoverageByLayer.set(layer, {
             partitions,
             priorityPartitions

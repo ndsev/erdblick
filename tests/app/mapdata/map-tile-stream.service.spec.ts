@@ -1,3 +1,4 @@
+import {spatialPolicyHarness} from "../../support/spatial-policy";
 import "@angular/compiler";
 import { BehaviorSubject, Subject } from "rxjs";
 import {
@@ -41,6 +42,7 @@ function serviceHarness(mapInfo: object = {}): MapTileStreamService {
     return new MapTileStreamService(
         { ...retryStateHarness(), tilePullCompressionEnabledState: new Subject<boolean>() } as any,
         {
+            ...spatialPolicyHarness(),
             sourceCatalogLoaded: new Subject<number | null>(),
             dataSourceInfoChanged: new Subject<readonly string[]>(),
             waitForMapLayersReady: vi.fn().mockResolvedValue(undefined),
@@ -136,7 +138,7 @@ describe("MapTileStreamService request failures", () => {
             const matches = await service.locateFeature("Map", "Road.1:attribute#2", "Layer", controller.signal);
             expect(matches).toHaveLength(2);
             expect(matches[0]).toEqual({ mapTileKey: "Features:Map:Layer:object/18446744073709551615", featureId: "Road.9" });
-            expect(JSON.parse(fetchSpy.mock.calls[0][1]!.body as string)).toEqual({ requests: [{ mapId: "Map", layerId: "Layer", featureId: "Road.1" }] });
+            expect(JSON.parse(fetchSpy.mock.calls[0][1]!.body as string)).toEqual({ requests: [{ mapId: "Map", layerId: "Layer", featureId: "Road.1", spatialExtentPolicy: {defaultLimit: true, maps: {}} }] });
             controller.abort(new Error("cancelled"));
             await expect(service.locateFeature("Map", "Road.1", undefined, controller.signal)).rejects.toThrow("cancelled");
             expect(fetchSpy).toHaveBeenCalledOnce();

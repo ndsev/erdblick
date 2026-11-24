@@ -1,3 +1,4 @@
+import {EditorService} from '../app/editor/editor.service';
 /**
  * Catalog flavor of the application: construct Angular controllers and stores,
  * register their public surface, and serialize it. The ordinary async initializer
@@ -27,6 +28,7 @@ const application = await createApplication({
         provideHttpClient(),
         provideRouter([]),
         { provide: APP_BASE_HREF, useValue: "/" },
+        EditorService,
         MessageService
     ]
 });

@@ -1,3 +1,5 @@
+import {MAP_TILE_STREAM_TYPE_STATUS, MAP_TILE_STREAM_HEADER_SIZE} from "../mapdata/map-tile-stream.protocol";
+import {OutsideSpatialExtentError} from "../mapdata/spatial-extent.model";
 import {
     ChangeDetectorRef,
     Component,
@@ -246,17 +248,27 @@ export class SourceDataPanelComponent implements OnDestroy, RetainedTileExpiryOw
             coreLib,
             mapTileKey
         );
+        const context = this.mapService.spatialRequestContextForViewId(this.panel().requestViewId);
+        if (partition.kind === "tile" && !this.mapService.permitsSpatialTile(mapId, layerId, partition.id, context.policy))
+            throw new OutsideSpatialExtentError();
         await this.mapService.waitForMapLayersReady([{mapId, layerId}], signal);
         signal?.throwIfAborted();
         const requests = [{
             mapId: mapId,
             layerId: layerId,
-            partitions: [partitionJson(partition)]
+            partitions: [partitionJson(partition)],
+            spatialExtentPolicy: context.policy
         }];
 
         let layer: TileSourceDataLayer | null = null;
         let expiresAtMs: number | null = null;
         const transport = new MapTileStreamClientTiles("/tiles");
+        transport.onFrame = (frame, type) => {
+            if (type !== MAP_TILE_STREAM_TYPE_STATUS) return;
+            const status = JSON.parse(new TextDecoder().decode(frame.subarray(MAP_TILE_STREAM_HEADER_SIZE)));
+            if (status.type === "mapget.spatialExtent.status" && status.excludedPartitions?.length)
+                throw new OutsideSpatialExtentError();
+        };
 
         transport.withSourceDataCallback((payload) => {
             const metadata = uint8ArrayToWasm((wasmBlob) =>

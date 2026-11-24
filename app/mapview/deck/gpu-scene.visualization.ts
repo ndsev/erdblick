@@ -242,6 +242,7 @@ interface InstalledContribution {
   labels: GpuSceneLabel[];
   pickTables: GpuRetainedPickTable[];
   resolvedPickIndices: number[];
+  snapGeometry?: (reference: GpuScenePickReference) => string;
   resolvePick: GpuScenePickResolver;
   findPickReferences: GpuScenePickFinder;
 }
@@ -273,6 +274,7 @@ interface ReservedContribution {
   revision: number;
   mapTileKey: string;
   styleOrder: number;
+  snapGeometry?: (reference: GpuScenePickReference) => string;
   resolvePick: GpuScenePickResolver;
   findPickReferences: GpuScenePickFinder;
   installed: boolean;
@@ -299,6 +301,7 @@ export interface GpuSceneContributionInput {
   mapTileKey: string;
   styleOrder: number;
   lod: number;
+  snapGeometry?: (reference: GpuScenePickReference) => string;
   resolvePick?: GpuScenePickResolver;
   findPickReferences?: GpuScenePickFinder;
 }
@@ -870,6 +873,7 @@ export class GpuScene {
           mapTileKey: input.mapTileKey,
           styleOrder: input.styleOrder,
           presentationDomain: input.presentationDomain ?? "map",
+          snapGeometry: input.snapGeometry,
           resolvePick: input.resolvePick ?? NO_RESOLVED_PICK,
           findPickReferences: input.findPickReferences ?? NO_PICK_REFERENCES,
           installed: false,
@@ -1041,6 +1045,7 @@ export class GpuScene {
               labels: [],
               pickTables: [],
               resolvedPickIndices: [],
+              snapGeometry: reserved.snapGeometry,
               resolvePick: reserved.resolvePick,
               findPickReferences: reserved.findPickReferences,
             },
@@ -1353,6 +1358,12 @@ export class GpuScene {
       for (const target of targets)
         this.addPickIndex(target.mapTileKey, target.featureId, index);
     }
+  }
+
+  /** Original subset geometry from the still-installed owner; no requests or stylized offsets. */
+  snapGeometry(globalPickIndex: number): string {
+    const owned = this.ownedPackedPick(globalPickIndex);
+    return owned?.installed.snapGeometry?.(owned.record) ?? '[]';
   }
 
   /** Return the representative physical altitude of one rendered pick. */

@@ -960,6 +960,8 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
             return;
         }
         const { featureIds, cartographic } = contextPosition;
+        const requestViewId = this.viewSettings.viewIdAt(this.viewIndex());
+        this.menuService.sourceDataRequestViewId = requestViewId;
 
         const tileIds = Array.from({ length: MapViewComponent.SOURCE_DATA_TILE_LEVEL_COUNT }, (_, level) => {
             const tileId = coreLib.getTileIdFromPosition(cartographic.lon, cartographic.lat, level);
@@ -967,7 +969,7 @@ export class MapViewComponent implements AfterViewInit, OnDestroy, OnInit {
                 id: tileId,
                 name: `${tileId} (level ${level})`,
                 tileLevel: level,
-                disabled: this.mapService.findSourceDataMapsForTileId(tileId).length === 0
+                disabled: this.mapService.findSourceDataMapsForTileId(tileId, requestViewId).length === 0
             };
         });
         const preferredPickedTileId = this.preferredPickedTileId(featureIds, tileIds);

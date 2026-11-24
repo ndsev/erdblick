@@ -15,7 +15,8 @@ function fixture() {
     const presentation = new SearchPresentation({
         key: "s/map/layer", definition: {...createFeatureSearchStateEntry({id: "s", query: "true"}),
             concreteScope: "feature", backendQuery: "true", resultFields: []},
-        mapgetLayer, featureTypes: [], definitionSignature: "definition", instanceId: "s:1"
+        requestContext: {viewId: "v1", policy: {defaultLimit: true, maps: {}}, revision: "r1"},
+        viewIds: ["v1"], mapgetLayer, featureTypes: [], definitionSignature: "definition", instanceId: "s:1"
     }, {planStyleFilter: () => ({valid: true, channels: [], issues: []})} as never,
     {
         discoverObjectPartitions: () => discovery,

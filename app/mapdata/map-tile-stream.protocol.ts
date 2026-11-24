@@ -64,6 +64,8 @@ export interface MapTileStreamFilterStatusPayload {
     layerId?: string;
     sourceId?: string;
     state: string;
+    excludedPartitions?: unknown[];
+    spatialExtentRestricted?: boolean;
     outputTilesRequested?: number;
     sourceTilesQueued?: number;
     sourceTilesLoaded?: number;

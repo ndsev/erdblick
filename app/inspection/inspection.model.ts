@@ -60,6 +60,11 @@ export interface SelectedSourceData {
 /** Runtime model for one inspection panel, docked or floating. */
 export interface InspectionPanelModel<FeatureRepresentation> {
     id: number;
+    /** Logical request owner, separate from canonical feature identity. */
+    requestViewId?: string;
+    /** Runtime policy generation and terminal loading diagnostics. */
+    requestRevision?: string;
+    loadError?: string;
     features: FeatureRepresentation[];
     locked: boolean;
     focused?: boolean;

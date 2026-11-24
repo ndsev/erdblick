@@ -1,70 +1,33 @@
-.drawing-toolbar {
-    position: fixed;
-    // Above map controls; below PrimeNG menus, popovers and dialogs.
-    z-index: 500;
-    left: 50%;
-    bottom: 3.5rem;
-    transform: translateX(-50%);
-    width: max-content;
-    max-width: calc(100vw - 16px);
-    color: var(--p-text-color);
-    background: var(--p-content-background);
-    border: 1px solid var(--p-content-border-color);
-    border-radius: 6px;
-    box-shadow: 0 2px 10px #0003;
-
-    &.positioned { bottom: auto; transform: none; }
-}
-.tool-strip, .tool-group { display: flex; align-items: center; }
-.tool-strip { flex-wrap: wrap; padding: 4px; gap: 4px; }
-.tool-group { gap: 2px; border-left: 1px solid var(--p-content-border-color); padding-left: 4px; }
-.tool-strip button, .color-control {
-    display: grid;
-    place-items: center;
-    flex: none;
-    width: 30px;
-    height: 30px;
-    padding: 4px;
-    border: 0;
-    border-radius: 4px;
-    color: var(--p-text-color);
-    background: transparent;
-    cursor: pointer;
-
+.drawing-dock { position: fixed; z-index: 180; right: 8px; top: 48px; width: max-content; color: var(--p-text-color); }
+.drawing-toolbar { width: max-content; max-width: 100%; border: 1px solid var(--p-content-border-color); border-radius: 7px; background: var(--p-content-background); box-shadow: 0 2px 10px #0003; }
+drawing-tray { margin-top: 8px; }
+.tool-strip { display: flex; align-items: center; flex-wrap: wrap; padding: 4px; gap: 2px; }
+.compact .tool-strip { gap: 1px; }
+.compact .separator { display: none; }
+.tool-strip button, .color-control, .measure-readout button {
+    display: grid; place-items: center; flex: none; width: var(--drawing-control-size,32px); height: var(--drawing-control-size,32px); padding: 3px; border: 0; border-radius: 4px; color: var(--p-text-color); background: transparent; cursor: pointer;
     &:hover { background: var(--p-content-hover-background); }
-    &:focus-visible { outline: 2px solid var(--p-primary-color); outline-offset: 1px; }
+    &:focus-visible { outline: 2px solid var(--p-primary-color); outline-offset: -1px; }
     &:disabled { opacity: .4; cursor: default; }
     &.selected { color: var(--p-highlight-color); background: var(--p-highlight-background); }
-    &.finish { color: var(--p-primary-color); }
 }
-.tool-strip .grip { width: 16px; padding: 0; cursor: grab; touch-action: none; color: var(--p-text-muted-color); }
+.tool-strip .grip { width: 24px; cursor: grab; touch-action: none; color: var(--p-text-muted-color); }
 .grip:active { cursor: grabbing; }
-.grip span { font-size: 18px; }
-svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.measure-readout {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 4px 12px;
-    padding: 5px 9px;
-    border-top: 1px solid var(--p-content-border-color);
-    color: var(--p-text-muted-color);
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
-    line-height: 16px;
+.material-symbols-outlined { font-size: 20px; }
+.separator { height: 22px; border-left: 1px solid var(--p-content-border-color); margin: 0 2px; }
+.measure-readout { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 3px 8px; border-top: 1px solid var(--p-content-border-color); color: var(--p-text-muted-color); font-size: 11px; font-variant-numeric: tabular-nums; line-height: 16px; }
+.measure-readout strong { color: var(--p-text-color); font-weight: 600; }
+.measure-readout button { width: 28px; height: 28px; }
+.spacer { flex: 1; }
+.snap-indicator { color: var(--p-primary-color); }
+.annotation-input { display: flex; gap: .4rem; align-items: center; padding: .4rem; }
+.annotation-input input { min-width: 0; flex: 1; }
+.context-notice { padding: .4rem; font-size: .8rem; }
+.tool-options { width: min(320px,calc(100vw - 48px)); max-height: 75vh; overflow: auto; font-size: .85rem; }
+.tool-options p { color: var(--p-text-muted-color); line-height: 1.5; margin: .5rem 0; }
+.tool-options label { display: flex; align-items: center; gap: .4rem; justify-content: space-between; margin: .5rem 0; }
+.tool-options input { width: 6rem; }
+.tool-options fieldset { border: 1px solid var(--p-content-border-color); border-radius: 5px; margin: .75rem 0; padding: .5rem; }
+.preset-actions, .workspace-actions { display: flex; flex-wrap: wrap; gap: .25rem; }
 
-    span { white-space: nowrap; }
-    strong { color: var(--p-text-color); font-weight: 600; margin-left: 3px; }
-}
-.mode-status { color: var(--p-text-color); }
-.position-count { margin-left: auto; }
-.snap-indicator.enabled { color: var(--p-primary-color); font-weight: bold; }
-.tool-error { margin: 0; padding: 6px 9px; max-width: 29rem; color: var(--p-message-error-color); font-size: .8rem; }
-.tool-options {
-    width: min(240px, calc(100vw - 48px));
-    font-size: .85rem;
-
-    p { color: var(--p-text-muted-color); line-height: 1.5; margin: .5rem 0 .8rem; }
-    label { display: flex; align-items: center; justify-content: space-between; margin-bottom: .5rem; }
-    select { background: var(--p-content-background); color: var(--p-text-color); padding: .35rem; border: 1px solid var(--p-content-border-color); border-radius: 4px; }
-}
+.drawing-dock.docking { outline: 2px dashed var(--p-primary-color); outline-offset: 4px; border-radius: 7px; }

@@ -40,6 +40,7 @@ function createDock(bridgeFirst: boolean) {
     });
     const bridge = new InspectionSelectionService(
         persistence,
+        owners.data,
         { loadFeatures: () => loaded } as never,
         {} as never,
         { registerShortcut: vi.fn() } as never,

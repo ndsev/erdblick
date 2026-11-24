@@ -1,3 +1,4 @@
+import type {DrawingPosition, DrawingPlane} from '../drawing/drawing.model';
 import { type PointCloudPolicy, pointCloudPolicySchema } from "./point-cloud-policy.model";
 import { Injectable } from "@angular/core";
 import {
@@ -117,11 +118,19 @@ export class MapViewService implements AppActionContributor {
     private static readonly SEARCH_COVERAGE_TILE_LIMIT = 1 << 20;
 
     /** Optional full-UI drawing input owner, keyed by stable view identity. */
+    readonly mapScales = new Map<string, {width: number; meters: number}>();
+    readonly scaleChanged = new Subject<void>();
+    readonly drawingChanged = new Subject<void>();
+    readonly drawingViewBounds = new Map<string, () => DOMRect>();
     drawingInput?: {
-        click(viewId: string, point: [number, number], shift?: boolean): boolean;
-        move(viewId: string, point?: [number, number], shift?: boolean): void;
-        down(viewId: string, point: [number, number], shift?: boolean): boolean;
-        up(viewId: string, point?: [number, number]): void;
+        configuration(viewId: string): {active: boolean; placing?: boolean; snap: boolean; snapPoints: boolean; snapSegments: boolean; tolerance: number; projectSnapToPlane?: boolean; editedPosition?: DrawingPosition; constrain?: (point:DrawingPosition)=>DrawingPosition; excludeFeatureId?: string; excludeMapId?: string; previewMapId?: string; elevation: number; plane?: DrawingPlane; handles: {path: string; position: DrawingPosition}[]} | undefined;
+        diagnostic?(message: string): void;
+        snapTarget?(target: string): void;
+        select?(viewId:string, targets: {mapTileKey:string;featureId:string}[], position?:DrawingPosition): Promise<boolean>;
+        click(viewId: string, point: DrawingPosition, shift?: boolean): boolean;
+        move(viewId: string, point?: DrawingPosition, shift?: boolean): void;
+        down(viewId: string, point: DrawingPosition, shift?: boolean, handle?: string): boolean;
+        up(viewId: string, point?: DrawingPosition): void;
         cancel(): void;
         leave(viewId: string): void;
     };
@@ -436,6 +445,23 @@ export class MapViewService implements AppActionContributor {
         return this.ensureVisibleSearchTileIdsForLevel(viewIndex, level);
     }
 
+    /** Intersect full view coverage before applying the layer's request capacity. */
+    visibleLayerTileIds(viewIndex: number, mapId: string, layerId: string, level: number, search = false): number[] {
+        const state = this.viewVisualizationState[viewIndex];
+        if (!state) return [];
+        const limit = search ? MapViewService.SEARCH_COVERAGE_TILE_LIMIT :
+            Math.floor(this.state.tilesLoadLimit / Math.max(1, this.state.numViews));
+        const context = this.mapInfo.spatialRequestContext(viewIndex);
+        const key = JSON.stringify([mapId, layerId, level, search]);
+        const signature = JSON.stringify([state.viewport, limit, context.revision]);
+        const cached = state.layerTileSelections.get(key);
+        if (cached?.signature === signature) return cached.tiles;
+        const tiles = this.mapInfo.tileLayerParser.selectCoverageTileIds(mapId, layerId, state.viewport,
+            level, limit, context.policy.maps[mapId] ?? context.policy.defaultLimit) as number[];
+        state.layerTileSelections.set(key, {signature, tiles, membership: new Set(tiles)});
+        return tiles;
+    }
+
     /** Chooses the automatic source level used by searches without an explicit level selection. */
     autoSearchTileLevel(viewIndex: number, mapId: string, layerId: string): number | null {
         return this.autoSelectedMapLayerLevel(viewIndex, mapId, layerId, null);
@@ -485,10 +511,19 @@ export class MapViewService implements AppActionContributor {
         return Math.min(normalizedLevel, coarsenedLevel + (preferOneLevelFiner ? 1 : 0));
     }
 
+    /** Reuse a hashed footprint for per-feature presentation and search checks. */
+    private containsLayerTile(viewIndex: number, mapId: string, layerId: string, level: number,
+                              tileId: number, search: boolean): boolean {
+        this.visibleLayerTileIds(viewIndex, mapId, layerId, level, search);
+        return this.viewVisualizationState[viewIndex]?.layerTileSelections
+            .get(JSON.stringify([mapId, layerId, level, search]))?.membership.has(tileId) ?? false;
+    }
+
     /** Returns whether a feature tile id is currently inside one view's visible tile set and layer state. */
     showsFeatureTileInView(viewIndex: number, mapId: string, layerId: string, tileId: number): boolean {
         const viewState = this.viewVisualizationState[viewIndex];
-        if (!viewState || !viewState.visibleTileIds.has(tileId)) {
+        if (!viewState || !this.containsLayerTile(viewIndex, mapId, layerId,
+                this.getEffectiveMapLayerLevel(viewIndex, mapId, layerId), tileId, false)) {
             return false;
         }
         return this.mapInfo.maps.getMapLayerVisibility(viewIndex, mapId, layerId)
@@ -496,9 +531,9 @@ export class MapViewService implements AppActionContributor {
     }
 
     /** Returns whether a search-result source tile is in view, without consulting Map Panel visibility. */
-    showsFeatureSearchTileInView(viewIndex: number, _mapId: string, _layerId: string, tileId: number): boolean {
+    showsFeatureSearchTileInView(viewIndex: number, mapId: string, layerId: string, tileId: number): boolean {
         const level = Number(coreLib.getTileLevel(tileId));
-        return this.visibleSearchTileIdSetForLevel(viewIndex, level).has(tileId);
+        return this.containsLayerTile(viewIndex, mapId, layerId, level, tileId, true);
     }
 
     /** Materializes and caches viewport tile ids for one level when regular feature rendering did not need it yet. */
@@ -824,6 +859,9 @@ export class MapViewService implements AppActionContributor {
 
     /** Registers typed state readers and writers without exposing persistence keys. */
     registerControls(actions: AppActionRegistration): void {
+        actions.registerControl({name:'view.mapScale',description:'Show a local ground-distance scale using this view’s actual latitude, altitude and pitch.',
+            selectorSchema:z.strictObject({viewId:viewIdSchema}),valueSchema:z.boolean(),readable:true,writable:true,persistence:'url-and-local-storage',synchronization:'none'},
+            {read:selector=>this.state.viewScaleState.getValue(selector.viewId),write:(selector,value)=>this.state.viewScaleState.next(selector.viewId,value),defaultTargets:()=>this.state.viewIds.map(viewId=>({viewId}))});
         actions.registerControl(
             {
                 name: "app.preferences.rendering",

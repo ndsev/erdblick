@@ -3,8 +3,10 @@
  * These contracts describe a presentation subscription independently of its
  * network client; the transport service supplies delivery and release callbacks.
  */
+import type {SpatialExtentPolicy} from "./spatial-extent.model";
 import type { MapTileStreamFilterStatusPayload } from "./map-tile-stream.protocol";
 import {
+    parsePartition,
     partitionJson,
     partitionKey,
     partitionsEqual,
@@ -48,10 +50,13 @@ export interface FilterSubscriptionDefinition {
     sourceId?: string;
     channels: FilterChannelDefinition[];
     bindings?: Record<string, FilterBindingValue>;
+    spatialExtentPolicy?: SpatialExtentPolicy;
 }
 
 /** Mutable output demand for one filter definition. Order is significant. */
 export interface FilterSubscriptionCoverage {
+    /** Client-only derived drawing demand; never changes accepted GeoJSON or remote filters. */
+    drawingViewport?: {west:number;south:number;width:number;height:number;metersPerPixel:number};
     partitions: PartitionId[];
     priorityPartitions?: PartitionId[];
     roots?: Array<{
@@ -142,12 +147,14 @@ function cloneDefinition(definition: FilterSubscriptionDefinition): FilterSubscr
         layerId: definition.layerId,
         ...(definition.sourceId ? {sourceId: definition.sourceId} : {}),
         channels: structuredClone(definition.channels),
+        ...(definition.spatialExtentPolicy ? {spatialExtentPolicy: structuredClone(definition.spatialExtentPolicy)} : {}),
         bindings: {...(definition.bindings ?? {})}
     };
 }
 
 function cloneCoverage(coverage: FilterSubscriptionCoverage): FilterSubscriptionCoverage {
     return {
+        ...(coverage.drawingViewport ? {drawingViewport:{...coverage.drawingViewport}} : {}),
         partitions: coverage.partitions.map(partitionJson),
         ...(coverage.priorityPartitions ? {
             priorityPartitions: coverage.priorityPartitions.map(partitionJson)
@@ -213,7 +220,7 @@ export function filterSubscriptionCoverageEqual(
     left: FilterSubscriptionCoverage,
     right: FilterSubscriptionCoverage
 ): boolean {
-    return orderedPartitionsEqual(left.partitions, right.partitions) &&
+    return JSON.stringify(left.drawingViewport) === JSON.stringify(right.drawingViewport) && orderedPartitionsEqual(left.partitions, right.partitions) &&
         orderedPartitionsEqual(
             left.priorityPartitions,
             right.priorityPartitions
@@ -313,7 +320,7 @@ export class FilterSubscriptionRef {
         const rootsChanged = !rootsEqual(
             nextCoverage.roots,
             this.coverageValue.roots
-        );
+        ) || JSON.stringify(nextCoverage.drawingViewport) !== JSON.stringify(this.coverageValue.drawingViewport);
         const previousPartitions = new Map(
             this.coverageValue.partitions.map(partition => [
                 partitionKey(partition),
@@ -424,6 +431,7 @@ export class FilterSubscriptionRef {
             .filter(root => pending.has(partitionKey(root.partition)));
         return {
             ...cloneDefinition(this.definitionValue),
+            ...(this.coverageValue.drawingViewport ? {drawingViewport:{...this.coverageValue.drawingViewport}} : {}),
             partitions: partitions.map(partitionJson),
             ...(priorityPartitions.length ? {
                 priorityPartitions: priorityPartitions.map(partitionJson)
@@ -547,7 +555,16 @@ export class FilterSubscriptionRef {
             status.generation !== this.generationValue) {
             return;
         }
+        const excluded = (status.excludedPartitions ?? []).map(parsePartition);
+        for (const partition of excluded) {
+            const key = partitionKey(partition);
+            this.pendingPartitionKeys.delete(key);
+            this.acceptedValueVersionsByPartition.delete(key);
+            this.expiredWhileSuspended.delete(key);
+        }
+        if (excluded.length) this.owner.cancelFilterPartitionExpiries?.(this, excluded);
         this.callbacks.onStatus?.(status);
+        if (excluded.length) this.owner.updateFilterSubscription(this, false);
     }
 
     /** Internal transport error boundary for malformed or failed deliveries. */

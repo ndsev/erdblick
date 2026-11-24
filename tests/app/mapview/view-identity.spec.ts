@@ -335,7 +335,7 @@ describe('logical view identity', () => {
         const id = owners.viewSettings.viewIdAt(0);
         owners.viewSettings.viewIds.forEach(viewId => views.registerRenderView({ viewId, isAvailable: () => true } as never));
         let finish!: (features: FeatureWrapper[]) => void;
-        const inspection = new InspectionSelectionService(registry, { loadFeatures: () => new Promise(resolve => finish = resolve) } as never,
+        const inspection = new InspectionSelectionService(registry, owners.data, { loadFeatures: () => new Promise(resolve => finish = resolve) } as never,
             views, { registerShortcut() { } } as never, messages as never, { run: (callback: () => void) => callback() } as never,
             owners.inspectionState, owners.viewSettings);
         vi.spyOn(inspection, 'featureSetZoomTarget').mockReturnValue({ x: 1, y: 2, z: 300 });
@@ -364,7 +364,7 @@ describe('logical view identity', () => {
         owners.viewSettings.viewIds.forEach(viewId => views.registerRenderView({ viewId, isAvailable: () => true } as never));
         vi.spyOn(views, 'showsFeatureSearchTileInView').mockImplementation(index => matches && index !== 1);
         const wrapper = { featureTile: { tileId: 1, mapName: 'Map', layerName: 'Lane' } } as FeatureWrapper;
-        const inspection = new InspectionSelectionService(registry, { loadFeatures: async () => [wrapper] } as never,
+        const inspection = new InspectionSelectionService(registry, owners.data, { loadFeatures: async () => [wrapper] } as never,
             views, { registerShortcut() { } } as never, messages as never, { run: (callback: () => void) => callback() } as never,
             owners.inspectionState, owners.viewSettings);
         vi.spyOn(inspection, 'featureSetZoomTarget').mockReturnValue({ x: 1, y: 2, z: 300 });

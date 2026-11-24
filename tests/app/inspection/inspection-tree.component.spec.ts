@@ -1,3 +1,5 @@
+import {coreLib} from "../../../app/integrations/wasm.adapter";
+import {spatialPolicyHarness} from "../../support/spatial-policy";
 import {
     describe,
     expect,
@@ -63,6 +65,8 @@ describe("inspection map-hover ownership", () => {
     it("routes named references separately from display text and aborts superseded requests", () => {
         const component = Object.create(InspectionTreeComponent.prototype) as any;
         const reference = {mapId: "Remote", typeId: "Road", id: {id: 9007199254740993n}};
+        component.panelId = () => 0;
+        component.mapService = {requestContextForPanel: spatialPolicyHarness().spatialRequestContext};
         component.jumpService = {
             highlightFeatureReference: vi.fn(() => Promise.resolve()),
             highlightByJumpTargetFilter: vi.fn(() => Promise.resolve())
@@ -73,7 +77,7 @@ describe("inspection map-hover ownership", () => {
         expect(first[2].aborted).toBe(false);
         component.onValueClick({stopPropagation: vi.fn()}, {mapId: "Local", value: "Road.1"});
         expect(first[2].aborted).toBe(true);
-        expect(component.jumpService.highlightByJumpTargetFilter).toHaveBeenCalledWith("Local", "Road.1");
+        expect(component.jumpService.highlightByJumpTargetFilter).toHaveBeenCalledWith("Local", "Road.1", coreLib.HighlightMode.SELECTION_HIGHLIGHT, undefined, spatialPolicyHarness().spatialRequestContext());
 
         component.highlightVisibleFeatureReference({featureReference: reference});
         const hover = component.jumpService.highlightFeatureReference.mock.calls[1];

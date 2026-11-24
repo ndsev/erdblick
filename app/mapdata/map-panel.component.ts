@@ -1,3 +1,5 @@
+import {spatialExtentEnvelope} from "../mapview/spatial-extent-bounds.util";
+import type {SpatialExtentBounds} from "./spatial-extent.model";
 import {DrawingDocumentsService} from "../drawing/drawing-documents.service";
 import {stylePickerColor} from "../mapstyle/style-color.util";
 import { Component, ViewChild } from "@angular/core";
@@ -387,7 +389,7 @@ const MAP_FILTER_DELAY_MS = 300;
                                                             [binary]="true"
                                                             [inputId]="index + '_' + node.id"
                                                             [name]="index + '_' + node.id" tabindex="0"/>
-                                                <label [for]="index + '_' + node.id">{{ node.info?.displayName || removeGroupPrefix(node.id) }} @if (node.info?.origin === "virtual") { <p-tag value="local" severity="info"/> }</label>
+                                                <label [for]="index + '_' + node.id">{{ node.info?.displayName || removeGroupPrefix(node.id) }} @if (drawingDocuments.activeId === node.id) { <p-tag value="Editing" severity="warn"/> } @if (node.info?.origin === "virtual") { <p-tag value="local" severity="info"/> }</label>
                                             </span>
                                         </div>
                                     </ng-template>
@@ -407,7 +409,7 @@ const MAP_FILTER_DELAY_MS = 300;
                                                        emptyFilterMessage="No matching metadata"
                                                        scrollHeight="min(24rem, calc(100vh - 10rem))"
                                                        [ngModel]="null"
-                                                       (onChange)="inspectMetadataLayer($event.value, metadataPopover)">
+                                                       (onChange)="inspectMetadataLayer($event.value, metadataPopover, index)">
                                                 <ng-template let-option pTemplate="item">
                                                     <span class="metadata-layer-option"
                                                           [title]="option.label">{{ option.label }}</span>
@@ -440,7 +442,7 @@ const MAP_FILTER_DELAY_MS = 300;
                                                             [name]="index + '_' + node.id" tabindex="0"/>
                                                 <label [for]="index + '_' + node.id"
                                                        [ngClass]="{'disabled-label': dataSourceStatus(node.info) !== 'ready'}">
-                                                    {{ node.info?.displayName || removeGroupPrefix(node.id) }} @if (node.info?.origin === "virtual") { <p-tag value="local" severity="info"/> }
+                                                    {{ node.info?.displayName || removeGroupPrefix(node.id) }} @if (drawingDocuments.activeId === node.id) { <p-tag value="Editing" severity="warn"/> } @if (node.info?.origin === "virtual") { <p-tag value="local" severity="info"/> }
                                                 </label>
                                             </span>
                                             <div class="map-controls">
@@ -467,14 +469,35 @@ const MAP_FILTER_DELAY_MS = 300;
                                                               [disabled]="dataSourceStatus(node.info) !== 'ready'"
                                                               [attr.aria-label]="'Map preset for ' + node.id"/>
                                                 }
-                                                <p-button onEnterClick (click)="focus($event, index, mapCoverage(node.id))"
+                                                <p-button onEnterClick (click)="focus($event, index, mapCoverage(node.id, index))"
                                                           label="" pTooltip="Focus on map" tooltipPosition="bottom"
                                                           [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                           tabindex="0"
-                                                          *ngIf="mapCoverage(node.id).length">
+                                                          *ngIf="mapCoverage(node.id, index).length">
                                                     <span class="material-symbols-outlined"
                                                           style="font-size: 1.2em; margin: 0 auto;">center_focus_strong</span>
                                                         </p-button>
+                                                <p-button data-testid="map-spatial-settings" onEnterClick (click)="$event.stopPropagation(); extentSettings.toggle($event)"
+                                                          pTooltip="Map configuration" tooltipPosition="bottom" [ariaLabel]="'Map configuration for ' + node.id"
+                                                          [style]="{'padding-left': '0', 'padding-right': '0'}">
+                                                    <span class="material-symbols-outlined" style="font-size: 1.2em; margin: 0 auto;">settings</span>
+                                                </p-button>
+                                                <p-popover #extentSettings [baseZIndex]="30000">
+                                                    <div data-testid="map-spatial-options" style="display: flex; flex-direction: column; gap: 0.75rem; max-width: 22rem" (click)="$event.stopPropagation()">
+                                                        <label style="display: flex; align-items: center; gap: 0.5rem">
+                                                            <p-checkbox [binary]="true" [disabled]="node.info.origin === 'virtual'" [ngModel]="mapService.spatialExtentSettings(index, node.id).limitToSpatialExtent"
+                                                                (ngModelChange)="mapService.setSpatialExtentSettings(index, node.id, {limitToSpatialExtent: $event})"
+                                                                ariaLabel="Limit Data to Spatial Extent"/>Limit Data to Spatial Extent
+                                                        </label>
+                                                        <label style="display: flex; align-items: center; gap: 0.5rem">
+                                                            <p-checkbox [binary]="true" [disabled]="node.info.origin === 'virtual'" [ngModel]="mapService.spatialExtentSettings(index, node.id).showSpatialExtent"
+                                                                (ngModelChange)="mapService.setSpatialExtentSettings(index, node.id, {showSpatialExtent: $event})"
+                                                                ariaLabel="Show Spatial Extent"/>Show Spatial Extent
+                                                        </label>
+                                                        <small *ngIf="node.info.origin === 'virtual'">Spatial extent settings do not apply to local drawings.</small>
+                                                        <small *ngIf="node.info.origin !== 'virtual' && hasIncompleteSpatialExtent(node.id)">Some layers have unknown or incomplete coverage. Their requests remain unrestricted; any displayed extent may be partial.</small>
+                                                    </div>
+                                                </p-popover>
                                                         <p-button onEnterClick (click)="metadataPopover.toggle($event)" label=""
                                                                   pTooltip="{{!metadataLayerOptions.get(node.id)?.length ? 'No metadata available' : 'Request service metadata'}}"
                                                                   tooltipPosition="bottom"
@@ -507,8 +530,8 @@ const MAP_FILTER_DELAY_MS = 300;
                                                 </span>
                                             </div>
                                             <div class="tree-node-controls">
-                                                <p-button onEnterClick *ngIf="node.info.coverage.length"
-                                                          (click)="focus($event, index, node.info.coverage)"
+                                                <p-button onEnterClick *ngIf="layerCoverage(node.mapId, node.id, index).length"
+                                                          (click)="focus($event, index, layerCoverage(node.mapId, node.id, index))"
                                                           label="" pTooltip="Focus on layer" tooltipPosition="bottom"
                                                           [style]="{'padding-left': '0', 'padding-right': '0'}"
                                                           tabindex="0">
@@ -968,6 +991,7 @@ export class MapPanelComponent {
         this.toggleMenuItems = [
             ...(this.drawingDocuments.documents.has(mapId) ? [
                 {label: 'Open in Editor', command: () => this.drawingDocuments.open(mapId)},
+                {label: 'Open objects tray', command: () => this.drawingDocuments.openTray([mapId])},
                 {label: 'Remove local map', command: () => { void this.drawingDocuments.remove(mapId); }},
                 {separator: true}
             ] : []),
@@ -1069,47 +1093,34 @@ export class MapPanelComponent {
      * Moves the target view camera to the coverage bounds represented by one tree node.
      * Fits nonempty coverage using individual tile boxes and each range's two endpoint boxes.
      */
-    focus(event: any, viewIndex: number, coverages: (number | CoverageRectItem)[]) {
+    focus(event: Event, viewIndex: number, coverage: SpatialExtentBounds[]): void {
         event.stopPropagation();
-        let tileIds = coverages.map(coverage => {
-            return coverage.hasOwnProperty("min") && coverage.hasOwnProperty("max") ?
-                [Number((coverage as CoverageRectItem).min), Number((coverage as CoverageRectItem).max)] :
-                [Number(coverage as number)]
-        }).flat();
-        let targetRect: Rectangle | null = null;
-        for (const tileId of tileIds) {
-            const tileIdRect = Rectangle.fromDegrees(...coreLib.getTileBox(tileId));
-            if (targetRect) {
-                Rectangle.union(tileIdRect, targetRect, targetRect);
-            } else {
-                targetRect = tileIdRect;
-            }
-        }
+        const rectangle = spatialExtentEnvelope(coverage);
+        if (!rectangle) return;
         this.viewSettings.focusedView = viewIndex;
-        this.viewState.moveToRectangleTopic.next(
-            {
-                targetView: viewIndex,
-                rectangle: {
-                    west: GeoMath.toDegrees(targetRect!.west),
-                    south: GeoMath.toDegrees(targetRect!.south),
-                    east: GeoMath.toDegrees(targetRect!.east),
-                    north: GeoMath.toDegrees(targetRect!.north),
-                }
-            }
-        );
+        this.viewState.moveToRectangleTopic.next({targetView: viewIndex, rectangle});
     }
 
-    /** Collects full map coverage from the canonical tree, independent of the filtered presentation. */
-    mapCoverage(mapId: string): (number | CoverageRectItem)[] {
-        const mapNode = this.mapService.maps.maps.get(mapId);
-        if (!mapNode) {
-            return [];
-        }
-        const coverage: (number | CoverageRectItem)[] = [];
-        for (const child of mapNode.children) {
-            coverage.push(...child.info.coverage);
-        }
-        return coverage;
+    /** Complete native bounds retain every region, sparse grid and polygon outline. */
+    layerCoverage(mapId: string, layerId: string, viewIndex: number): SpatialExtentBounds[] {
+        const layer = this.mapService.mapgetLayer(mapId, layerId);
+        if (!layer || layer.info.serviceMetadata) return [];
+        const level = layer.partitionKind === "object" ? layer.tileAssociationLevel :
+            this.viewState.getEffectiveMapLayerLevel(viewIndex, mapId, layerId);
+        return level === null ? [] : this.mapService.tileLayerParser.coverageDisplayBounds(mapId, layerId, -1, level) as SpatialExtentBounds[];
+    }
+
+    /** Map focus includes hidden layers independently of overlay visibility. */
+    mapCoverage(mapId: string, viewIndex: number): SpatialExtentBounds[] {
+        const map = this.mapService.maps.maps.get(mapId);
+        return map ? Object.keys(map.info.layers).flatMap(layerId => this.layerCoverage(mapId, layerId, viewIndex)) : [];
+    }
+
+    /** Explain fail-open behavior without disabling preferences for future catalog updates. */
+    hasIncompleteSpatialExtent(mapId: string): boolean {
+        const map = this.mapService.maps.maps.get(mapId);
+        return !!map && Object.entries(map.info.layers).some(([layerId, info]) =>
+            !info.serviceMetadata && !this.mapService.spatialExtentInfo(mapId, layerId).complete);
     }
 
     /** Writes the current background-layer selection and opacity for one view back into app state. */
@@ -1158,13 +1169,13 @@ export class MapPanelComponent {
     }
 
     /** Opens the selected tile-zero metadata layer and closes its picker. */
-    inspectMetadataLayer(option: MetadataLayerOption | null, popover: Popover): void {
+    inspectMetadataLayer(option: MetadataLayerOption | null, popover: Popover, viewIndex: number): void {
         if (!option) {
             return;
         }
         this.inspectionState.setSelection({
             mapTileKey: option.mapTileKey
-        } as SelectedSourceData);
+        } as SelectedSourceData, undefined, false, false, this.viewSettings.viewIdAt(viewIndex));
         popover.hide();
     }
 

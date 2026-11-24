@@ -79,6 +79,9 @@ interface IncomingSectionState {
                     <p-progressSpinner ariaLabel="loading"/>
                 </div>
             }
+            @if (panel().loadError) {
+                <div role="status" style="padding: .5rem;">{{ panel().loadError }}</div>
+            }
             @for (warning of selectionWarnings; track warning) {
                 <div role="status" data-testid="feature-representation-warning" style="padding: .5rem;">{{ warning }}</div>
             }

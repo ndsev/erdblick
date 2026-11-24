@@ -18,6 +18,7 @@ export interface UrlV2SelectedSourceData {
 }
 
 export interface UrlV2InspectionPanel {
+    requestViewId?: string;
     id: number;
     features: UrlV2TileFeatureId[];
     locked: boolean;
@@ -482,6 +483,7 @@ export function encodeSelectionsV2(
             fields.push(panel.sourceData.address === undefined ? "" : String(panel.sourceData.address));
             fields.push(encodeLayout(panel.size));
             fields.push(encodeColor(panel.color, defaultColors));
+            if (panel.requestViewId !== undefined) fields.push(`v:${encodeToken(panel.requestViewId)}`);
             encodedPanels.push(fields.join("~"));
             continue;
         }
@@ -505,6 +507,7 @@ export function encodeSelectionsV2(
         }
         fields.push(encodeLayout(panel.size));
         fields.push(encodeColor(panel.color, defaultColors));
+        if (panel.requestViewId !== undefined) fields.push(`v:${encodeToken(panel.requestViewId)}`);
         encodedPanels.push(fields.join("~"));
     }
     return encodedPanels.length ? encodedPanels.join(";") : null;
@@ -531,6 +534,7 @@ export function decodeSelectionsV2(
         if (parts.length < 5) {
             continue;
         }
+        const requestViewId = parts.at(-1)?.startsWith("v:") ? decodeToken(parts.pop()!.slice(2)) : undefined;
         const id = Number(parts[0]);
         if (!Number.isFinite(id)) {
             continue;
@@ -540,13 +544,13 @@ export function decodeSelectionsV2(
         if (payload.startsWith("SD:")) {
             const panel = decodeSourceDataPanel(parts, id, undocked, mapNames, defaultColors, mapTileKeyFactory);
             if (panel) {
-                result.push(panel);
+                result.push({...panel, ...(requestViewId !== undefined ? {requestViewId} : {})});
             }
             continue;
         }
         const panel = decodeFeaturePanel(parts, id, undocked, layerNames, defaultColors, mapTileKeyFactory);
         if (panel) {
-            result.push(panel);
+            result.push({...panel, ...(requestViewId !== undefined ? {requestViewId} : {})});
         }
     }
     return result;

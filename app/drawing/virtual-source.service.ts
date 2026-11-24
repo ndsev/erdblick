@@ -1,3 +1,4 @@
+import {ViewerActionFailure} from '../action/viewer-action-relay.contract';
 import {Injectable, OnDestroy} from "@angular/core";
 import {Subject} from "rxjs";
 import {coreLib, normalizeWasmException, uint8ArrayToWasmOrThrow} from "../integrations/wasm.adapter";
@@ -10,7 +11,7 @@ import {FeatureWrapper, InspectionFeatureTile} from "../mapdata/feature-inspecti
 import {parseMapPartitionKey, parsePartition, partitionKey} from "../mapdata/partition.model";
 import type {TileFeatureId} from "../inspection/inspection.model";
 import {stripFeatureInspectionTarget} from "../inspection/feature-identity.model";
-import type {DrawingOperation, DrawingReply, DrawingRow, DrawingSummary} from "./drawing.model";
+import type {DrawingOperation, DrawingMutation, DrawingReply, DrawingRow, DrawingSummary} from "./drawing.model";
 import {DrawingWorkerClient, DrawingWorkerStoppedError} from "./drawing-worker.client";
 import {DrawingRuntime} from "./drawing-runtime.adapter";
 
@@ -22,6 +23,7 @@ export interface VirtualDrawingSource {
     summary: DrawingSummary;
     text: string;
     checkpoint?: string;
+    unpublished?: DrawingReply;
 }
 
 /** Routes browser-owned mapget data through existing delivery and inspection contracts. */
@@ -34,8 +36,9 @@ export class VirtualSourceService implements FilterSubscriptionOwner, OnDestroy 
     private readonly ownedIds = new Set<string>();
     private readonly worker = new DrawingWorkerClient();
     private readonly preview = new DrawingRuntime();
-    private readonly refs = new Map<FilterSubscriptionRef, {mapId: string; token: number}>();
+    private readonly refs = new Map<FilterSubscriptionRef, {mapId: string; token: number; running?: boolean; queued?: boolean}>();
     private serial = 0;
+    private readonly mutations = new Map<string, Promise<unknown>>();
 
     /** Keep catalog and local acquisition ownership separate from the remote transport. */
     constructor(private readonly maps: MapDataService) {}
@@ -49,6 +52,13 @@ export class VirtualSourceService implements FilterSubscriptionOwner, OnDestroy 
         catch { return false; }
     }
 
+    rename(mapId: string, name: string): void {
+        const source = this.sources.get(mapId); if (!source) return;
+        source.displayName = name;
+        this.maps.renameVirtualSource(mapId, name);
+        this.changed.next(mapId);
+    }
+
     /** Convert at the import boundary; coordinate text never enters the source catalog. */
     async convertCoordinates(text: string): Promise<string> {
         const reply = await this.execute({type: 'convert-coordinates', text});
@@ -57,34 +67,56 @@ export class VirtualSourceService implements FilterSubscriptionOwner, OnDestroy 
     }
 
     /** Create a source atomically; failed import creates no map-tree row. */
-    async create(mapId: string, text: string, displayName: string, preview = false): Promise<VirtualDrawingSource> {
+    async create(mapId: string, text: string, displayName: string, preview = false, signal?: AbortSignal, publish = true): Promise<VirtualDrawingSource> {
+        signal?.throwIfAborted();
         this.ownedIds.add(mapId);
         const reply = await this.execute({type: "create", mapId, text}, preview);
+        if (signal?.aborted) { await this.execute({type: 'remove', mapId}, preview); signal.throwIfAborted(); }
         if (!reply.summary || !reply.schema || !reply.dictionary) throw new Error("Incomplete local source initialization.");
-        const source = {mapId, preview, displayName, summary: reply.summary, text: reply.text ?? text,
-            checkpoint: reply.checkpoint};
+        const source: VirtualDrawingSource = {mapId, preview, displayName, summary: reply.summary, text: reply.text ?? text,
+            checkpoint: reply.checkpoint, unpublished: reply};
         this.sources.set(mapId, source);
-        try {
-            this.maps.registerVirtualSource({
-                ...reply.summary.metadata, sourceId: mapId, displayName,
-                renderLane: preview ? "drawing-preview" : undefined,
-                transient: preview
-            }, {schemaId: reply.summary.metadata.schemaId!, bytes: reply.schema}, reply.dictionary);
-        } catch (error) {
-            this.sources.delete(mapId);
-            this.maps.removeVirtualSource(mapId);
-            await this.execute({type: "remove", mapId}, preview);
-            throw error;
-        }
-        this.changed.next(mapId);
+        try { if (publish) this.publishSource(mapId); }
+        catch (error) { this.sources.delete(mapId); this.maps.removeVirtualSource(mapId); await this.execute({type:'remove',mapId},preview); throw error; }
         return source;
     }
 
+    /** Reveal a prepared source only after its collection envelope has committed. */
+    publishSource(mapId: string): void {
+        const source=this.sources.get(mapId),reply=source?.unpublished;
+        if(!source||!reply)return;
+        this.maps.registerVirtualSource({...source.summary.metadata,sourceId:mapId,displayName:source.displayName,
+            renderLane:source.preview?'drawing-preview':undefined,transient:source.preview},
+            {schemaId:source.summary.metadata.schemaId!,bytes:reply.schema!},reply.dictionary!);
+        source.unpublished=undefined;this.changed.next(mapId);
+    }
+
     /** Publish a valid source edit; a rejected candidate leaves the accepted native model intact. */
-    async change(operation: Exclude<DrawingOperation, {type: "create" | "remove" | "filter" | "snapshot" | "rows" | "convert-coordinates"}>): Promise<DrawingReply> {
+    async change(operation: DrawingMutation | Extract<DrawingOperation, {type: 'tool'}>, signal?: AbortSignal, accept?: () => boolean): Promise<DrawingReply> {
+        const previous = this.mutations.get(operation.mapId) ?? Promise.resolve();
+        const pending = previous.catch(() => undefined).then(() => this.publishChange(operation, signal, accept));
+        this.mutations.set(operation.mapId, pending);
+        try { return await pending; }
+        finally { if (this.mutations.get(operation.mapId) === pending) this.mutations.delete(operation.mapId); }
+    }
+
+    /** Cancellation is checked after native preparation and before the single publication point. */
+    private async publishChange(operation: DrawingMutation | Extract<DrawingOperation, {type: 'tool'}>, signal?: AbortSignal, accept?: () => boolean): Promise<DrawingReply> {
+        signal?.throwIfAborted();
         const source = this.sources.get(operation.mapId);
         if (!source) throw new Error("Local document was removed.");
-        const reply = await this.execute(operation, source.preview);
+        let reply: DrawingReply;
+        if (operation.type === 'tool' || source.preview) reply = await this.execute(operation, source.preview);
+        else {
+            await this.execute({type: 'prepare', mapId: operation.mapId, operation});
+            try {
+                signal?.throwIfAborted();
+                if (accept && !accept()) throw new Error('Document changed during editing; the newer raw draft was retained.');
+                if (this.sources.get(operation.mapId) !== source) throw new Error('Local document was removed.');
+            } catch (error) { await this.execute({type: 'cancel', mapId: operation.mapId}).catch(() => undefined); throw error; }
+            // Once commit has been sent, return its actual outcome even if the caller cancels.
+            reply = await this.execute({type: 'commit', mapId: operation.mapId});
+        }
         if (this.sources.get(operation.mapId) !== source) throw new Error("Local document was removed.");
         if (reply.summary) source.summary = reply.summary;
         if (reply.text !== undefined) source.text = reply.text;
@@ -96,6 +128,21 @@ export class VirtualSourceService implements FilterSubscriptionOwner, OnDestroy 
     }
 
     /** Return bounded file-order rows without reparsing source in TypeScript. */
+    async object(mapId: string, id: string) {
+        const source = this.sources.get(mapId);
+        if (!source) throw new Error('Drawing no longer exists.');
+        return (await this.execute({type: 'object', mapId, id}, source.preview)).object!;
+    }
+    /** Read a bounded feature branch and exact leaf lexemes for Quick and MCP. */
+    async branch(mapId: string, request: Extract<DrawingOperation, {type: 'branch'}>['request']) {
+        const source = this.sources.get(mapId);
+        if (!source) throw new Error('Drawing no longer exists.');
+        return (await this.execute({type: 'branch', mapId, request}, source.preview)).branch!;
+    }
+    async compose(sources: string[], separate: boolean, collection?: Extract<DrawingOperation, {type:'compose'}>['collection'], ordinary = false): Promise<string[]> {
+        return (await this.execute({type: 'compose', sources, separate, collection, ordinary})).sources!;
+    }
+
     async rows(mapId: string, offset: number, count: number): Promise<DrawingRow[]> {
         const source = this.sources.get(mapId);
         if (!source) return [];
@@ -131,6 +178,8 @@ export class VirtualSourceService implements FilterSubscriptionOwner, OnDestroy 
             if (state.token !== token || ref.released || ref.suspended || !ref.pendingPartitionCount) return;
             const source = this.sources.get(state.mapId);
             if (!source) { ref.reportError("Local document is no longer available."); return; }
+            if (state.running) { state.queued = true; return; }
+            state.running = true;
             const revision = source.summary.revision, generation = ref.generation;
             void this.execute({type: "filter", mapId: state.mapId, request: ref.requestJson()}, source.preview).then(reply => {
                 if (this.sources.get(state.mapId) !== source || state.token !== token || ref.released ||
@@ -160,6 +209,9 @@ export class VirtualSourceService implements FilterSubscriptionOwner, OnDestroy 
                 ref.notifyRequestSynchronized();
             }).catch(error => {
                 if (!ref.released && state.token === token) ref.reportError(normalizeWasmException(error).message);
+            }).finally(() => {
+                state.running = false;
+                if(state.queued && !ref.released){state.queued=false;this.updateFilterSubscription(ref,true);}
             });
         });
     }
@@ -211,10 +263,10 @@ export class VirtualSourceService implements FilterSubscriptionOwner, OnDestroy 
                 this.recovery = this.restoreWorker().finally(() => { this.recovery = undefined; });
             }
             await this.recovery;
-            if (operation.type === "replace" || operation.type === "create" || operation.type === "rows" || operation.type === "convert-coordinates") {
+            if (operation.type === "replace" || operation.type === "create" || operation.type === "rows" || operation.type === "branch" || operation.type === "object" || operation.type === "prepare" || operation.type === "convert-coordinates") {
                 return this.worker.request(operation);
             }
-            throw new Error("Local drawing data was recovered after a worker restart. Repeat this action.", {cause: error});
+            throw new ViewerActionFailure({code:'busy',reason:'worker_recovered',outcome:'not_applied',message:'The drawing worker restarted. Its last published document was restored; read the revision before retrying.'});
         }
     }
 
@@ -230,6 +282,7 @@ export class VirtualSourceService implements FilterSubscriptionOwner, OnDestroy 
             if (!reply.summary || !reply.schema || !reply.dictionary) throw new Error("Local drawing recovery failed.");
             source.summary = reply.summary;
             source.checkpoint = reply.checkpoint;
+            if(source.unpublished){source.unpublished=reply;continue;}
             this.maps.registerVirtualSource({...reply.summary.metadata, sourceId: source.mapId,
                 displayName: source.displayName},
                 {schemaId: reply.summary.metadata.schemaId!, bytes: reply.schema}, reply.dictionary);

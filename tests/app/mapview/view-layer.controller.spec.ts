@@ -1,3 +1,4 @@
+import {spatialPolicyHarness} from "../../support/spatial-policy";
 import {Subject} from "rxjs";
 import {DEFAULT_POINT_CLOUD_POLICY} from "../../../app/mapview/point-cloud-policy.model";
 import "@angular/compiler";
@@ -38,6 +39,27 @@ describe("ViewLayerController", () => {
         expect(controller.destroyOwnedLayer.mock.calls).toEqual([[changed], [fallback]]);
         expect([...controller.styledLayers.values()]).toEqual([sibling]);
         expect(controller.retiringRegularLayers.size).toBe(0);
+    });
+
+    it("retires old-policy LOD fallbacks before considering a reversal", () => {
+        const fallback = {layer: {spatialRequestRevision: "old-policy"}};
+        const retiring = new Map([["slot", {key: "old", owned: fallback}]]);
+        const destroy = vi.fn();
+        const controller = Object.assign(Object.create(ViewLayerController.prototype), {
+            viewIndex: 0, retiringRegularLayers: retiring, styledLayers: new Map(),
+            mapInfo: {...spatialPolicyHarness(), mapgetLayers: () => {
+                expect(retiring.size).toBe(0);
+                expect(destroy).toHaveBeenCalledWith(fallback);
+                return [];
+            }},
+            destroyOwnedLayer: destroy, styleService: {styles: new Map()},
+            hoverDetails: {reconcileView: vi.fn()}, reconcileSearchLayers: vi.fn(),
+            interactionReconcileRequired: false, lastInteractionViewportSignature: "same",
+            interactionViewportSignature: () => "same", diagnostics: {notifyChanged: vi.fn()},
+            occupancyChanged: {next: vi.fn()}, schedulePendingTiles: vi.fn()
+        }) as ViewLayerController;
+        controller["reconcile"]();
+        expect(destroy).toHaveBeenCalledOnce();
     });
 
     it("advances pending work on worker completion without replanning the view", () => {
@@ -81,7 +103,7 @@ describe("ViewLayerController", () => {
             selectionIdsTopic: {getValue: () => [{id: 1, features}]},
             hoverIdsTopic: {getValue: () => []}
         };
-        controller.mapInfo = {maps: {getLayerStyleOptions: () => ({})}};
+        controller.mapInfo = {...spatialPolicyHarness(),maps: {getLayerStyleOptions: () => ({})}};
         controller.viewState = {styleLod: () => 7};
         controller.resolveInteractionTargetLayer = () => ({
             mapgetLayer, partition
@@ -258,7 +280,7 @@ describe("ViewLayerController", () => {
             replacementSlot: "Map/Road/regular/style",
             replacementPartitionKeys: new Set()
         };
-        controller.mapInfo = {
+        controller.mapInfo = {...spatialPolicyHarness(),
             mapgetLayers: () => [mapgetLayer],
             maps: {
                 getMapLayerVisibility: () => true
@@ -271,7 +293,7 @@ describe("ViewLayerController", () => {
         };
         controller.viewState = {
             getEffectiveMapLayerLevel: () => 13,
-            visibleTileIdsForLevel: () => [7],
+            visibleLayerTileIds: () => [7],
             styleLod: () => 2
         };
         controller.styleService = {styles: new Map([[style.id, style]])};
@@ -766,7 +788,7 @@ describe("ViewLayerController", () => {
             layerId: mapgetLayer.layerId,
             partition: tilePartition(545379780)
         }));
-        controller.mapInfo = {
+        controller.mapInfo = {...spatialPolicyHarness(),
             mapgetLayer: vi.fn(() => mapgetLayer),
             maps: {
                 getMapLayerVisibility: vi.fn(() => false)
@@ -819,7 +841,7 @@ describe("ViewLayerController", () => {
             layerId: "Road"
         };
         const plan = {valid: true, channels: [{}]};
-        controller.mapInfo = {planStyleFilter: vi.fn(() => plan)};
+        controller.mapInfo = {...spatialPolicyHarness(),planStyleFilter: vi.fn(() => plan)};
         const mode = coreLib.HighlightMode.HOVER_HIGHLIGHT;
 
         expect(controller.hasInteractionLayerAffinity(style, "Road")).toBe(true);
@@ -866,7 +888,7 @@ describe("ViewLayerController", () => {
         controller.interactionLayerAffinityCache = new WeakMap();
         controller.interactionFilterPlanCache = new WeakMap();
         controller.interactionEffectCache = new WeakMap();
-        controller.mapInfo = {
+        controller.mapInfo = {...spatialPolicyHarness(),
             planStyleFilter: vi.fn(() => ({valid: true, channels: [{}]}))
         };
 
@@ -889,10 +911,11 @@ describe("ViewLayerController", () => {
         const controller = Object.create(
             ViewLayerController.prototype
         ) as any;
-        const layer = {setPartitionCoverage: vi.fn()};
+        const layer = {mapgetLayer:{origin:'remote'},setPartitionCoverage: vi.fn()};
         const partitions = [1, 2, 3].map(tilePartition);
         const priorityPartitions = [2, 1, 3].map(tilePartition);
         controller.regularCoverageByLayer = new WeakMap();
+        controller.viewState={viewStateFor:vi.fn(()=>undefined)};
 
         controller.setRegularCoverage(layer, partitions, priorityPartitions);
         controller.setRegularCoverage(layer, partitions, priorityPartitions);
@@ -905,7 +928,7 @@ describe("ViewLayerController", () => {
             ViewLayerController.prototype
         ) as any;
         const layer = {
-            key: "SmartMap/Road",
+            mapId: "Map", layerId: "Objects", key: "SmartMap/Road",
             tileAssociationLevel: 13
         };
         const partitions = [
@@ -915,8 +938,9 @@ describe("ViewLayerController", () => {
         controller.disposed = false;
         controller.viewIndex = 3;
         controller.objectCoverageByLayer = new Map();
+        controller.mapInfo = spatialPolicyHarness();
         controller.viewState = {
-            visibleTileIdsForLevel: vi.fn(() => [101, 102])
+            visibleLayerTileIds: vi.fn(() => [101, 102])
         };
         controller.tileStream = {
             discoverObjectPartitions: vi.fn(async () => ({
@@ -934,10 +958,10 @@ describe("ViewLayerController", () => {
             expect(controller.scheduleReconcile).toHaveBeenCalledOnce()
         );
 
-        expect(controller.viewState.visibleTileIdsForLevel)
-            .toHaveBeenCalledWith(3, 13);
+        expect(controller.viewState.visibleLayerTileIds)
+            .toHaveBeenCalledWith(3, "Map", "Objects", 13);
         expect(controller.tileStream.discoverObjectPartitions)
-            .toHaveBeenCalledWith(layer, [101, 102]);
+            .toHaveBeenCalledWith(layer, [101, 102], spatialPolicyHarness().spatialRequestContext());
         expect(controller.objectPartitionsForViewport(layer))
             .toStrictEqual(partitions);
         expect(controller.tileStream.discoverObjectPartitions)

@@ -58,6 +58,7 @@ interface DeckScene {
 }
 
 interface GpuPickSubset {
+    snapGeometry(channelOrdinal: number, entryOrdinal: number): string;
     resolvePick(
         channelOrdinal: number,
         entryOrdinal: number,
@@ -299,6 +300,8 @@ export class TileSubsetLayerVisualization {
                 styleOrder: this.owner.styleOrder,
                 presentationDomain: this.owner.mapgetLayer.origin === "virtual" ? "drawing" : "map",
                 lod: this.lod,
+                snapGeometry: reference => this.state.valueVersion === valueVersion && pointCloudPicks === undefined
+                    ? this.gpuPickSubset()?.snapGeometry(reference.channelOrdinal, reference.entryOrdinal) ?? '[]' : '[]',
                 resolvePick: reference =>
                     this.resolveGpuPick(reference, pointCloudPicks),
                 findPickReferences: targetFeatureId =>

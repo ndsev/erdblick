@@ -11,11 +11,17 @@ async function fileMenu(page: Page, name: string): Promise<void> {
     await menu.getByRole('menuitem', {name: new RegExp(name + '$')}).click();
 }
 
+/** Measurement presets live in the compact toolbar's contextual options. */
+async function selectTool(page:Page, mode:string):Promise<void>{
+    if(['distance','angle','area'].includes(mode))await page.getByTestId('drawing-options-toggle').click();
+    await page.getByTestId('drawing-tool-'+mode).click();
+}
+
 /** Reveal a restored file through its public map-tree menu. */
 async function localMapAction(page: Page, name: string, action: string): Promise<void> {
     if (!(await page.getByTestId('map-tree-0').isVisible())) await page.getByTestId('maps-toggle').click();
-    if (action === 'Remove local map') page.once('dialog', dialog => dialog.accept());
     await page.getByRole('button', {name: (action === 'Open in Editor' ? 'Edit ' : 'Delete ') + name, exact: true}).click();
+    if (action === 'Remove local map') await page.getByRole('dialog',{name:'Delete local document?'}).getByRole('button',{name:'Delete document',exact:true}).click();
     if (await page.getByTestId('map-tree-0').isVisible()) await page.getByTestId('maps-toggle').click();
 }
 
@@ -28,9 +34,33 @@ async function localOnly(page: Page): Promise<string[]> {
     page.on('websocket', socket => socket.on('framesent', event => {
         if (typeof event.payload === 'string' && event.payload.includes('drawing-')) requests.push('websocket:' + event.payload);
     }));
-    await page.route(/\/sources(?:\?.*)?$/, route => route.fulfill({json: []}));
+    await page.route(/\/sources(?:\?.*)?$/, async route => route.fulfill({response:await route.fetch(),json: []}));
     await navigateToStateSnapshotRoot(page);
     return requests;
+}
+
+/** Save through the shared name dialog, preserving the document identity. */
+async function saveEditor(page: Page, editor: import('@playwright/test').Locator, name: string): Promise<void> {
+    const unsaved=await page.evaluate(async()=>{const value=await window.ebDebug.executeAction('viewer_drawing_list',{}) as any;return value.documents.some((doc:any)=>doc.editing&&!doc.saved);});
+    await editor.getByTestId('drawing-save').click();
+    if(unsaved)await saveDialog(page,name);
+    else await expect(editor.getByTestId('drawing-save').getByRole('button')).toBeDisabled();
+}
+async function saveDialog(page: Page, name: string): Promise<void> {
+    const dialog = page.getByRole('dialog', {name: /^Save (document|workspace)$/});
+    await dialog.getByLabel('Name', {exact: true}).fill(name);
+    await dialog.getByTestId('drawing-save-confirm').click();
+    await expect(dialog).toBeHidden();
+}
+async function saveAndCloseToolbar(page: Page, name: string): Promise<void> {
+    await page.getByTestId('drawing-toolbar-close').click();
+    await page.getByRole('dialog', {name: 'Unsaved drawing', exact: true}).getByRole('button', {name: 'Save…', exact: true}).click();
+    await saveDialog(page, name);
+    await expect(page.getByTestId('drawing-toolbar')).toBeHidden();
+}
+async function storedDocuments(page: Page): Promise<any[]> {
+    return page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('drawingCollectionData:') || key.startsWith('drawingDocumentData:'))
+        .flatMap(key => {const record=JSON.parse(localStorage.getItem(key)!);return record.documents??[record];}));
 }
 
 test('imports coordinates, renders native subsets, edits and restores source without local network traffic', async ({page}) => {
@@ -43,6 +73,7 @@ test('imports coordinates, renders native subsets, edits and restores source wit
     const editor = page.locator('editor-surface[data-editor-kind="drawing"]');
     await expect(editor.locator('.cm-content')).toContainText('Start café');
     await expect(editor.getByRole('table')).toHaveCount(0);
+    await editor.getByRole('tab', {name: 'Advanced', exact: true}).click();
     const layout = await editor.evaluate(element => {
         const content = element.querySelector('.editor-document-content')!.getBoundingClientRect();
         const code = element.querySelector('.cm-editor')!.getBoundingClientRect();
@@ -90,25 +121,26 @@ test('measures a live tail, undoes to empty, and finishes without committing the
     const canvas = page.locator('canvas').first();
     const box = (await canvas.boundingBox())!;
     await page.mouse.click(box.x + box.width * 0.15, box.y + box.height * 0.35);
-    await expect(widget.getByRole('button', {name: 'Undo point'})).toBeEnabled();
+    await expect(widget.getByTestId('measurement-points')).toHaveText('1 positions');
     await page.mouse.move(box.x + box.width * 0.25, box.y + box.height * 0.35);
     await expect(widget.getByTestId('measurement-segment')).not.toHaveText('0 m', {timeout: 10000});
     await page.mouse.click(box.x + box.width * 0.25, box.y + box.height * 0.35);
     await expect(widget.getByTestId('measurement-points')).toHaveText('2 positions');
     await page.mouse.move(box.x + box.width * 0.35, box.y + box.height * 0.35);
     await page.keyboard.press('Escape');
-    await expect(widget.getByTestId('drawing-status')).toHaveText('Distance complete');
+    await expect(widget.getByTestId('drawing-status')).toContainText('Ready');
     await expect(widget.getByTestId('measurement-segment')).toHaveText('0 m');
     await expect(widget.getByTestId('measurement-total')).not.toHaveText('0 m', {timeout: 10000});
-    await widget.getByRole('button', {name: 'Resume', exact: true}).click();
+    await widget.getByRole('button', {name: 'Resume drawing', exact: true}).click();
     await canvas.focus();
     await page.keyboard.press('Backspace'); await page.keyboard.press('Backspace'); await page.keyboard.press('Backspace');
     await expect(widget.getByTestId('measurement-total')).toHaveText('0 m');
     await widget.getByTestId('drawing-options-toggle').click();
-    await page.getByTestId('drawing-options').getByLabel('Unit').selectOption('miles');
-    await page.getByTestId('drawing-options').getByLabel('Unit').press('Escape');
+    await page.getByRole('combobox',{name:'New drawing measurement units'}).click();
+    await page.getByRole('option',{name:'Miles',exact:true}).click();
+    await page.getByRole('combobox',{name:'New drawing measurement units'}).press('Escape');
     await expect(page.getByTestId('drawing-options')).toBeHidden();
-    await expect(widget.getByRole('button', {name: 'Finish', exact: true})).toBeVisible();
+    await expect(widget.getByRole('button', {name: 'Finish drawing', exact: true})).toBeVisible();
     await expect(widget.getByTestId('measurement-total')).toHaveText('0 mi');
     expect(requests).toEqual([]);
 });
@@ -125,8 +157,8 @@ test('picks and inspects local coordinates with ordinary hover labels disabled',
     const editor = page.locator('editor-surface[data-editor-kind="drawing"]');
     await expect(editor.locator('.cm-content')).toContainText('FeatureCollection');
     await editor.getByRole('button', {name: 'Center', exact: true}).click();
+    await saveEditor(page, editor, 'hover.geojson');
     await editor.getByTestId('surface-close-button').click();
-    await page.getByRole('dialog', {name: 'Unsaved editor changes'}).getByRole('button', {name: 'Discard', exact: true}).click();
     await expect(editor).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions)).toBeGreaterThan(0);
     const box = (await page.locator('canvas').first().boundingBox())!;
@@ -150,7 +182,7 @@ test('saves converted GeoJSON locally and downloads only through Export', async 
     await expect(editor.locator('.cm-content')).toContainText('FeatureCollection');
     const downloads: string[] = [];
     page.on('download', download => downloads.push(download.suggestedFilename()));
-    await editor.getByTestId('drawing-save').click();
+    await saveEditor(page, editor, 'dropped.geojson');
     await expect(editor.getByTestId('drawing-save').getByRole('button')).toBeDisabled();
     expect(downloads).toEqual([]);
     const downloadPromise = page.waitForEvent('download');
@@ -161,7 +193,7 @@ test('saves converted GeoJSON locally and downloads only through Export', async 
     expect(saved.type).toBe('FeatureCollection');
     expect(saved.features[0].geometry.coordinates).toEqual([0, 0, 0.125]);
     expect(saved.features[0].properties.description).toBe('Dropped café');
-    if (await editor.getByTestId('drawing-save').getByRole('button').isEnabled()) await editor.getByTestId('drawing-save').click();
+    if (await editor.getByTestId('drawing-save').getByRole('button').isEnabled()) await saveEditor(page, editor, 'dropped.geojson');
     await editor.getByTestId('surface-close-button').click();
     await expect(editor).toHaveCount(0);
     expect(requests).toEqual([]);
@@ -173,11 +205,12 @@ test('restores GeoJSON and invalid drafts after reload, then persistently remove
     await fileMenu(page, 'New coordinates');
     await page.getByLabel('Choose drawing file').setInputFiles({name: 'persistent.txt', mimeType: 'text/plain', buffer: Buffer.from(original)});
     let editor = page.locator('editor-surface[data-editor-kind="drawing"]');
+    await editor.getByRole('tab', {name: 'Advanced', exact: true}).click();
+    await saveEditor(page, editor, 'persistent.geojson');
     const source = editor.locator('.cm-content');
     await expect(source).toContainText('Persistent café');
     await source.fill((await source.textContent())!.replace('Persistent café', 'Accepted edit'));
-    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('drawingDocumentData:'))
-        .some(key => JSON.parse(localStorage.getItem(key)!).source.includes('Accepted edit')))).toBe(true);
+    await expect.poll(async () => (await storedDocuments(page)).some(record => record.source.includes('Accepted edit'))).toBe(true);
     await editor.locator('.cm-content').fill('unfinished coordinate draft');
     await expect(editor.getByRole('alert')).toContainText('last valid revision');
     await expect(editor.getByTestId('drawing-persistence')).toContainText('Draft kept in this browser');
@@ -190,8 +223,8 @@ test('restores GeoJSON and invalid drafts after reload, then persistently remove
     await expect(page.getByTestId('measurement-widget')).toBeVisible();
     await page.reload(); await waitForAppReady(page);
     await expect(editor).toHaveCount(0);
-    await expect(page.getByTestId('measurement-widget')).toBeHidden();
-    await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions)).toBeGreaterThanOrEqual(2);
+    await expect(page.getByTestId('drawing-objects-tray')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions)).toBeGreaterThanOrEqual(1);
     await localMapAction(page, 'persistent.geojson', 'Open in Editor');
     editor = page.locator('editor-surface[data-editor-kind="drawing"]');
     await expect(editor.locator('.cm-content')).toHaveText('unfinished coordinate draft');
@@ -206,20 +239,20 @@ test('restores GeoJSON and invalid drafts after reload, then persistently remove
     const coordinates = JSON.parse(await readFile((await (await coordinateDownload).path())!, 'utf8'));
     expect(coordinates.features[0].geometry.coordinates).toEqual([0, 0, 0.25]);
     expect(coordinates.features[0].properties.description).toBe('Persistent café');
-    if (await editor.getByTestId('drawing-save').getByRole('button').isEnabled()) await editor.getByTestId('drawing-save').click();
+    if (await editor.getByTestId('drawing-save').getByRole('button').isEnabled()) await saveEditor(page, editor, 'persistent.geojson');
     await editor.getByTestId('surface-close-button').click();
     await localMapAction(page, 'feature.geojson', 'Open in Editor');
     await expect(editor.locator('.cm-content')).toContainText('9007199254740993');
     const geojsonDownload = page.waitForEvent('download');
     await editor.getByTestId('drawing-export').click();
     expect(await readFile((await (await geojsonDownload).path())!, 'utf8')).toBe(geojson);
-    if (await editor.getByTestId('drawing-save').getByRole('button').isEnabled()) await editor.getByTestId('drawing-save').click();
+    if (await editor.getByTestId('drawing-save').getByRole('button').isEnabled()) await saveEditor(page, editor, 'feature.geojson');
     await editor.getByTestId('surface-close-button').click();
     await localMapAction(page, 'persistent.geojson', 'Remove local map');
     await page.reload(); await waitForAppReady(page);
     await page.getByTestId('maps-toggle').click();
-    await expect(page.getByRole('button', {name: 'Map actions for feature.geojson', exact: true})).toBeVisible();
-    await expect(page.getByRole('button', {name: 'Map actions for persistent.geojson', exact: true})).toHaveCount(0);
+    await expect(page.getByRole('button', {name: 'Edit feature.geojson', exact: true})).toBeVisible();
+    await expect(page.getByRole('button', {name: 'Edit persistent.geojson', exact: true})).toHaveCount(0);
     expect(JSON.stringify(await page.evaluate(() => window.ebDebug!.stateService.exportSnapshot()))).not.toMatch(/drawing-[0-9a-f]{8}-/);
     expect(requests).toEqual([]);
 });
@@ -238,7 +271,7 @@ test('reports unavailable browser storage and restores a drawing after a success
     await page.getByLabel('Choose drawing file').setInputFiles({name: 'retry.txt', mimeType: 'text/plain', buffer: Buffer.from('0 0 "Recoverable"\n')});
     const editor = page.locator('editor-surface[data-editor-kind="drawing"]');
     await expect(editor.locator('.cm-content')).toContainText('FeatureCollection');
-    const status = page.getByTestId('drawing-storage-status');
+    const status = page.getByRole('group').filter({hasText: 'Browser copy not updated'});
     await expect(status).toContainText('Browser copy not updated');
     await expect(editor.getByTestId('drawing-persistence')).toContainText('not updated');
     await restoreStorage.evaluate(restore => restore());
@@ -261,7 +294,7 @@ test('keeps a live measurement responsive during a 100,000-row native import', a
     await expect(widget.getByTestId('measurement-points')).toHaveText('1 positions');
     await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.7);
     await expect(widget.getByTestId('measurement-segment')).not.toHaveText('0 m');
-    await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions)).toBeGreaterThanOrEqual(2);
+    await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions)).toBeGreaterThanOrEqual(1);
     const previous = await widget.getByTestId('measurement-segment').textContent();
     const uploads = await page.evaluate(() => window.ebDebug!.subsetRenderPresentation().uploadCount);
     const text = Array.from({length: 100000}, (_, index) => `${index / 1000} 0 "Record ${index}"\n`).join('');
@@ -278,11 +311,12 @@ test('keeps a live measurement responsive during a 100,000-row native import', a
     const editor = page.locator('editor-surface[data-editor-kind="drawing"]');
     await expect(editor.locator('.cm-content')).toContainText('Record 0', {timeout: 120000});
     // CodeMirror virtualizes this long JSON line. Move left from the final newline to reveal its end.
+    await editor.getByRole('tab', {name: 'Advanced', exact: true}).click();
     await editor.locator('.cm-content').press('ControlOrMeta+End');
     await editor.locator('.cm-content').press('ArrowLeft');
     await expect(editor.locator('.cm-content')).toContainText('Record 99999', {timeout: 10000});
     await expect(editor.locator('.cm-content')).toContainText('FeatureCollection', {timeout: 10000});
-    await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions), {timeout: 30000}).toBeGreaterThan(2);
+    await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions), {timeout: 30000}).toBeGreaterThanOrEqual(2);
     const timing = {rows: 100000, previewMs, importAndRenderMs: Date.now() - start};
     console.info('Drawing capacity qualification:', JSON.stringify(timing));
     await testInfo.attach('drawing-capacity-timing.json', {body: JSON.stringify(timing), contentType: 'application/json'});
@@ -293,7 +327,7 @@ test('keeps a live measurement responsive during a 100,000-row native import', a
 test('groups local and remote maps, hides the Drawing node and retains an editable measurement after closing', async ({page}, testInfo) => {
     const requests = await localOnly(page);
     // Include one ready remote entry to verify presentation grouping without introducing data requests.
-    await page.route(/\/sources(?:\?.*)?$/, route => route.fulfill({json: [{mapId: 'Remote fixture', sourceId: 'remote-fixture',
+    await page.route(/\/sources(?:\?.*)?$/, async route => route.fulfill({response:await route.fetch(),json: [{mapId: 'Remote fixture', sourceId: 'remote-fixture',
         stringPoolId: 'remote-fixture', layers: {}, maxParallelJobs: 0, addOn: false, extraJsonAttachment: {},
         protocolVersion: {major: 1, minor: 0, patch: 0}}]}));
     await page.reload(); await waitForAppReady(page);
@@ -305,10 +339,10 @@ test('groups local and remote maps, hides the Drawing node and retains an editab
     // Wait for the live tail before the next click, including first-use shader setup in WebKit.
     await page.mouse.move(box.x + box.width * 0.25, box.y + box.height * 0.35);
     await expect(widget.getByTestId('measurement-segment')).not.toHaveText('0 m');
-    await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions)).toBeGreaterThanOrEqual(2);
+    await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions)).toBeGreaterThanOrEqual(1);
     await page.mouse.click(box.x + box.width * 0.25, box.y + box.height * 0.35);
     await expect(widget.getByTestId('measurement-points')).toHaveText('2 positions');
-    await widget.getByTestId('drawing-toolbar-close').click();
+    await saveAndCloseToolbar(page, 'Measurement.geojson');
     await expect(widget).toBeHidden();
     await page.getByTestId('maps-toggle').click();
     const tree = page.getByTestId('map-tree-0');
@@ -333,21 +367,20 @@ test('groups local and remote maps, hides the Drawing node and retains an editab
     await tree.getByRole('button', {name: 'Edit Measurement.geojson', exact: true}).click();
     const editor = page.locator('editor-surface[data-editor-kind="drawing"]');
     await expect(editor.getByRole('table')).toHaveCount(0);
-    await expect(editor.locator('.cm-content')).toContainText('measurement-path');
-    const stored = await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('drawingDocumentData:'))
-        .map(key => JSON.parse(localStorage.getItem(key)!)));
+    await expect(editor.locator('.cm-content')).toContainText('erdblick:drawing');
+    const stored = await storedDocuments(page);
     expect(stored).toHaveLength(1); expect(stored[0].schemaVersion).toBe(2); expect(stored[0].kind).toBeUndefined();
     expect(JSON.parse(stored[0].source).type).toBe('FeatureCollection');
     const downloadPromise = page.waitForEvent('download');
     await editor.getByTestId('drawing-export').click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe('Measurement.geojson');
-    expect(JSON.parse(await readFile((await download.path())!, 'utf8')).features).toHaveLength(5);
-    if (await editor.getByTestId('drawing-save').getByRole('button').isEnabled()) await editor.getByTestId('drawing-save').click();
+    expect(JSON.parse(await readFile((await download.path())!, 'utf8')).features).toHaveLength(1);
+    if (await editor.getByTestId('drawing-save').getByRole('button').isEnabled()) await saveEditor(page, editor, 'Measurement.geojson');
     await editor.getByTestId('surface-close-button').click();
     await expect(editor).toHaveCount(0);
-    page.once('dialog', dialog => dialog.accept());
     await tree.getByRole('button', {name: 'Delete Measurement.geojson', exact: true}).click();
+    await page.getByRole('dialog',{name:'Delete local document?'}).getByRole('button',{name:'Delete document',exact:true}).click();
     await expect(editor).toHaveCount(0);
     await expect(tree.getByRole('button', {name: 'Edit Measurement.geojson', exact: true})).toHaveCount(0);
     expect(await page.evaluate(() => Object.keys(localStorage).some(key => key.startsWith('drawingDocumentData:')))).toBe(false);
@@ -360,18 +393,19 @@ test('moves the compact toolbar, snaps measurements, and creates colored area, a
     page.on('console', message => { if (message.type() === 'error') renderErrors.push(message.text()); });
     page.on('pageerror', error => renderErrors.push(error.message));
     const requests = await localOnly(page);
-    await fileMenu(page, 'Drawing tools');
+    await fileMenu(page, 'Measure distance');
     const toolbar = page.getByTestId('drawing-toolbar');
     await expect(toolbar).toBeVisible();
     await expect(page.getByRole('dialog').filter({has: toolbar})).toHaveCount(0);
+    await page.getByRole('button',{name:'Toggle Objects tray',exact:true}).click();
     const before = (await toolbar.boundingBox())!;
-    expect(before.height).toBeLessThan(80);
+    expect(before.height).toBeLessThan(160);
     // Put the toolbar at the right edge, leaving all drawing gestures unobstructed.
     const handle = (await toolbar.getByTestId('drawing-toolbar-grip').boundingBox())!;
     await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
-    await page.mouse.down(); await page.mouse.move(handle.x + handle.width / 2 + 480, handle.y + handle.height / 2 - 100, {steps: 12}); await page.mouse.up();
-    await expect.poll(async () => (await toolbar.boundingBox())!.x).toBeGreaterThan(before.x + 100);
-    const colorPicker = toolbar.getByRole('textbox', {name: 'Drawing color', exact: true});
+    await page.mouse.down(); await page.mouse.move(handle.x + handle.width / 2 - 480, handle.y + handle.height / 2 - 100, {steps: 12}); await page.mouse.up();
+    await expect.poll(async () => (await toolbar.boundingBox())!.x).toBeLessThan(before.x - 100);
+    const colorPicker = toolbar.getByRole('textbox', {name: 'New object color', exact: true});
     const initialColor = await colorPicker.evaluate(element => getComputedStyle(element).backgroundColor);
     await colorPicker.press('Space');
     await expect(page.locator('.p-colorpicker-panel')).toBeInViewport({ratio: 1});
@@ -383,11 +417,15 @@ test('moves the compact toolbar, snaps measurements, and creates colored area, a
     });
     await page.keyboard.press('Escape');
     await expect(page.locator('.p-colorpicker-panel')).toBeHidden();
-    await expect(toolbar.getByRole('button', {name: 'Finish', exact: true})).toBeVisible();
+    await expect(toolbar.getByRole('button', {name: 'Finish drawing', exact: true})).toBeVisible();
     const box = (await page.locator('canvas').first().boundingBox())!;
-    const a = {x: box.x + box.width * .15, y: box.y + box.height * .4};
-    const b = {x: box.x + box.width * .3, y: box.y + box.height * .4};
-    const c = {x: box.x + box.width * .3, y: box.y + box.height * .25};
+    // The floating palette's measured placement differs across browser engines.
+    // Keep gestures in the unobstructed strip to its left, including live tails.
+    const drawingWidth = Math.min(box.width * .3, (await toolbar.boundingBox())!.x - box.x - 24);
+    expect(drawingWidth).toBeGreaterThan(200);
+    const a = {x: box.x + drawingWidth * .35, y: box.y + box.height * .4};
+    const b = {x: box.x + drawingWidth * .85, y: box.y + box.height * .4};
+    const c = {x: b.x, y: box.y + box.height * .25};
     const click = async (point: {x: number; y: number}, count: number) => {
         await page.mouse.move(point.x, point.y);
         await page.mouse.click(point.x, point.y);
@@ -398,13 +436,11 @@ test('moves the compact toolbar, snaps measurements, and creates colored area, a
     await page.mouse.move(b.x, b.y - 25);
     await expect(toolbar.getByTestId('measurement-segment')).not.toHaveText('0 m');
     await page.keyboard.down('Shift');
-    await expect(toolbar.locator('.snap-indicator')).toHaveClass(/enabled/);
+    await expect(toolbar.locator('.snap-indicator')).toContainText('45°');
     await click({x: b.x, y: b.y - 25}, 2);
     await page.keyboard.up('Shift');
-    await expect(toolbar.locator('.snap-indicator')).not.toHaveClass(/enabled/);
-    await toolbar.getByRole('button', {name: 'Finish', exact: true}).click();
-    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('drawingDocumentData:'))
-        .some(key => JSON.parse(localStorage.getItem(key)!).source.includes('measurement-label')))).toBe(true);
+    await expect(toolbar.locator('.snap-indicator')).toHaveCount(0);
+    await toolbar.getByRole('button', {name: 'Finish drawing', exact: true}).click();
     await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().labels)).toBe(2);
     await expect.poll(() => page.evaluate(() => {
         const queue = window.ebDebug!.subsetRenderQueue();
@@ -415,11 +451,11 @@ test('moves the compact toolbar, snaps measurements, and creates colored area, a
     // Real Deck label rendering is visible in this artifact, not an HTML measurement overlay.
     await page.mouse.move(0, 0);
     await page.screenshot({path: testInfo.outputPath('drawing-toolbar-distance-labels.png')});
-    await toolbar.getByTestId('drawing-tool-area').click();
+    await selectTool(page,'area');
     await click(a, 1); await click(b, 2); await page.mouse.move(c.x, c.y);
     await expect(toolbar.getByTestId('measurement-area')).not.toHaveText('0 m²');
-    await click(c, 3); await toolbar.getByRole('button', {name: 'Finish', exact: true}).click();
-    await toolbar.getByTestId('drawing-tool-angle').click();
+    await click(c, 3); await toolbar.getByRole('button', {name: 'Finish drawing', exact: true}).click();
+    await selectTool(page,'angle');
     await click(a, 1); await click(b, 2); await click(c, 3);
     await expect(toolbar.getByTestId('measurement-angle')).toContainText('90.');
     for (const mode of ['polygon', 'ellipse', 'point']) {
@@ -432,51 +468,54 @@ test('moves the compact toolbar, snaps measurements, and creates colored area, a
     const cameraBeforePen = await page.evaluate(() => window.ebDebug!.getCamera(0));
     await page.mouse.move(a.x, a.y); await page.mouse.down();
     await page.mouse.move(b.x, b.y, {steps: 20}); await page.mouse.move(c.x, c.y, {steps: 20}); await page.mouse.up();
-    await expect(toolbar.getByTestId('drawing-status')).toHaveText('Pen complete');
+    await expect(toolbar.getByTestId('drawing-status')).toContainText('Ready');
     expect(await page.evaluate(() => window.ebDebug!.getCamera(0))).toBe(cameraBeforePen);
-    await toolbar.getByTestId('drawing-toolbar-close').click();
+    await saveAndCloseToolbar(page, 'All tools.geojson');
     await expect(toolbar).toBeHidden();
-    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('drawingDocumentData:')).length)).toBe(7);
-    const results = await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith('drawingDocumentData:')).map(key => JSON.parse(localStorage.getItem(key)!)));
+    const results = await storedDocuments(page);
+    expect(results).toHaveLength(1);
+    expect(JSON.parse(results[0].source).features).toHaveLength(7);
     for (const record of results) {
         const collection = JSON.parse(record.source);
         expect(collection.type).toBe('FeatureCollection');
         expect(collection.features.length).toBeGreaterThan(0);
         expect(collection.features.every((feature: {properties: {color: string}}) => feature.properties.color === pickedColor)).toBe(true);
     }
-    for (const name of ['Area.geojson', 'Polygon.geojson', 'Ellipse.geojson'])
-        expect(JSON.parse(results.find(record => record.name === name).source).features.some((f: {geometry: {type: string}}) => f.geometry.type === 'Polygon')).toBe(true);
-    expect(JSON.parse(results.find(record => record.name === 'Pen.geojson').source).features[0].geometry.type).toBe('LineString');
+    const features = JSON.parse(results[0].source).features;
+    expect(features.filter((f: any) => f.geometry.type === 'Polygon')).toHaveLength(3);
+    expect(features.some((f: any) => f['erdblick:drawing'].kind === 'polyline' && f.geometry.type === 'LineString')).toBe(true);
     expect(renderErrors).toEqual([]);
     await page.reload(); await waitForAppReady(page);
-    await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions)).toBeGreaterThanOrEqual(7);
+    await expect.poll(() => page.evaluate(() => window.ebDebug!.subsetRenderPresentation().activeContributions)).toBeGreaterThanOrEqual(1);
     expect(requests).toEqual([]);
 });
 
 
 test('keeps the compact toolbar reachable after dragging, reload and a narrow viewport', async ({page}, testInfo) => {
     await localOnly(page);
-    await fileMenu(page, 'Drawing tools');
+    await fileMenu(page, 'Measure distance');
     const toolbar = page.getByTestId('drawing-toolbar'), grip = toolbar.getByTestId('drawing-toolbar-grip');
+    await page.getByRole('button',{name:'Toggle Objects tray',exact:true}).click();
     const before = (await toolbar.boundingBox())!;
-    expect(before.height).toBeLessThan(80);
+    expect(before.height).toBeLessThan(160);
     const camera = await page.evaluate(() => window.ebDebug!.getCamera(0));
     await grip.focus();
-    await grip.press('ArrowLeft');
+    await grip.press('Alt+ArrowLeft');
     await expect.poll(async () => Math.round((await toolbar.boundingBox())!.x)).toBe(Math.round(before.x - 10));
     const handle = (await grip.boundingBox())!;
     await page.mouse.move(handle.x + handle.width / 2, handle.y + handle.height / 2);
-    await page.mouse.down(); await page.mouse.move(1595, 120, {steps: 8}); await page.mouse.up();
+    await page.mouse.down(); await page.mouse.move(500, 120, {steps: 8}); await page.mouse.up();
     const moved = (await toolbar.boundingBox())!;
-    expect(moved.x).toBeGreaterThan(before.x + 100);
+    expect(moved.x).toBeLessThan(before.x - 100);
     expect(moved.x + moved.width).toBeLessThanOrEqual(1592);
     await expect(toolbar.getByTestId('measurement-points')).toHaveText('0 positions');
     expect(await page.evaluate(() => window.ebDebug!.getCamera(0))).toBe(camera);
     await expect.poll(() => page.evaluate(() => localStorage.getItem('drawingToolbarPosition'))).not.toBeNull();
     expect(JSON.stringify(await page.evaluate(() => window.ebDebug!.stateService.exportSnapshot()))).not.toContain('drawingToolbarPosition');
+    await expect.poll(async()=>(await storedDocuments(page)).length).toBe(1);
     await page.reload(); await waitForAppReady(page);
-    await expect(toolbar).toBeHidden();
-    await fileMenu(page, 'Drawing tools');
+    await expect(toolbar).toBeVisible();
+    await expect(page.getByTestId('drawing-objects-tray')).toHaveClass(/collapsed/);
     await expect.poll(async () => Math.round((await toolbar.boundingBox())!.x)).toBe(Math.round(moved.x));
     await expect.poll(async () => Math.round((await toolbar.boundingBox())!.y)).toBe(Math.round(moved.y));
     await page.setViewportSize({width: 360, height: 640});
@@ -484,7 +523,7 @@ test('keeps the compact toolbar reachable after dragging, reload and a narrow vi
         const box = (await toolbar.boundingBox())!;
         return box.x >= 8 && box.y >= 8 && box.x + box.width <= 352 && box.y + box.height <= 632;
     }).toBe(true);
-    expect((await toolbar.boundingBox())!.height).toBeLessThan(160);
+    expect((await toolbar.boundingBox())!.height).toBeLessThan(240);
     // Exercise the bottom corner too, where the map compass, attribution and coordinates live.
     const narrowGrip = (await grip.boundingBox())!;
     await page.mouse.move(narrowGrip.x + narrowGrip.width / 2, narrowGrip.y + narrowGrip.height / 2);
@@ -494,20 +533,21 @@ test('keeps the compact toolbar reachable after dragging, reload and a narrow vi
         const rect = element.getBoundingClientRect();
         return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
     }))).toBe(true);
-    await toolbar.getByTestId('drawing-tool-area').click();
+    await selectTool(page,'area');
     await expect(toolbar.getByTestId('measurement-area')).toBeVisible();
-    const colorPicker = toolbar.getByRole('textbox', {name: 'Drawing color', exact: true});
+    const colorPicker = toolbar.getByRole('textbox', {name: 'New object color', exact: true});
     await colorPicker.click();
     await expect(page.locator('.p-colorpicker-panel')).toBeInViewport({ratio: 1});
     await page.keyboard.press('Escape');
     await expect(page.locator('.p-colorpicker-panel')).toBeHidden();
     await toolbar.getByTestId('drawing-options-toggle').click();
-    await expect(page.getByTestId('drawing-options').getByLabel('Unit')).toBeInViewport();
-    await page.getByTestId('drawing-options').getByLabel('Unit').press('Escape');
+    await expect(page.getByRole('combobox',{name:'New drawing measurement units'})).toBeInViewport();
+    await page.getByRole('combobox',{name:'New drawing measurement units'}).press('Escape');
     await expect(page.getByTestId('drawing-options')).toBeHidden();
-    await expect(toolbar.getByRole('button', {name: 'Finish', exact: true})).toBeVisible();
+    await expect(toolbar.getByRole('button', {name: 'Finish drawing', exact: true})).toBeVisible();
     await page.mouse.move(0, 0);
     await page.screenshot({path: testInfo.outputPath('drawing-toolbar-narrow.png')});
     await toolbar.getByTestId('drawing-toolbar-close').click();
+    await page.getByRole('dialog', {name: 'Unsaved drawing'}).getByRole('button', {name: 'Discard', exact: true}).click();
     await expect(toolbar).toBeHidden();
 });

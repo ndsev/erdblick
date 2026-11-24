@@ -1389,16 +1389,23 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         return undefined;
     }
 
+    /** Keep relation navigation bound to the inspected panel when focus changes. */
+    private inspectionRequestContext() {
+        return this.mapService.requestContextForPanel(this.panelId());
+    }
+
     /** Jumps or highlights the feature referenced by a FeatureId cell. */
     onValueClick(event: any, rowData: any) {
         event.stopPropagation();
         this.foreignReferenceSelection?.abort();
         const request = new AbortController();
         this.foreignReferenceSelection = request;
+        const context = this.inspectionRequestContext();
         const navigation = rowData["featureReference"]
             ? this.jumpService.highlightFeatureReference(
-                rowData["featureReference"], coreLib.HighlightMode.SELECTION_HIGHLIGHT, request.signal)
-            : this.jumpService.highlightByJumpTargetFilter(rowData["mapId"], rowData["value"]);
+                rowData["featureReference"], coreLib.HighlightMode.SELECTION_HIGHLIGHT, request.signal, context)
+            : this.jumpService.highlightByJumpTargetFilter(rowData["mapId"], rowData["value"],
+                coreLib.HighlightMode.SELECTION_HIGHLIGHT, undefined, context);
         navigation.catch(error => {
             if (!request.signal.aborted) {
                 this.messageService.showError(error instanceof Error ? error.message : String(error));
@@ -1497,7 +1504,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             const request = new AbortController();
             this.foreignReferenceHover = request;
             void this.jumpService.highlightFeatureReference(
-                rowData["featureReference"], coreLib.HighlightMode.HOVER_HIGHLIGHT, request.signal
+                rowData["featureReference"], coreLib.HighlightMode.HOVER_HIGHLIGHT, request.signal, this.inspectionRequestContext()
             ).catch(error => {
                 if (!request.signal.aborted)
                     console.debug("Referenced feature hover is unavailable.", error);
@@ -1641,7 +1648,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.inspectionState.setSelection({
                 mapTileKey: sourceDataRef.mapTileKey,
                 address: sourceDataRef.address
-            } as SelectedSourceData);
+            } as SelectedSourceData, undefined, false, false, this.inspectionRequestContext().viewId);
         } catch (e) {
             this.messageService.showError(`Encountered error: ${e}`);
         }

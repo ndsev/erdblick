@@ -667,8 +667,8 @@ Label presentation maps directly to Deck's `TextLayer` vocabulary, with a
 | Style field | Deck `TextLayer` property |
 |---|---|
 | `label-text`, `label-text-expression` | `getText` |
-| `label-color` | `getColor` |
-| `label-size` | `getSize` |
+| `label-color`, `label-color-expression` | `getColor` |
+| `label-size`, `label-size-expression` | `getSize`; an expression supplies the per-object size with the static value as fallback. |
 | `label-angle` | `getAngle` |
 | `label-text-anchor` | `getTextAnchor` (`start`, `middle`, `end`) |
 | `label-alignment-baseline` | `getAlignmentBaseline` (`top`, `center`, `bottom`) |

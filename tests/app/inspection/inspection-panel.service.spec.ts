@@ -1,3 +1,4 @@
+import {MapViewState} from "../../../app/mapview/mapview.state";
 import { InspectionState } from "../../../app/inspection/inspection.state";
 import { LayoutState } from "../../../app/layout/layout.state";
 import "@angular/compiler";
@@ -11,7 +12,7 @@ const mapTileKey = "Features:map:layer:42";
 function createFixture() {
     const persistence = testPersistence();
     const layout = new LayoutService(persistence, new LayoutState(persistence));
-    const owner = new InspectionPanelService(persistence, layout, {} as never, new InspectionState(persistence));
+    const owner = new InspectionPanelService(persistence, layout, {} as never, new InspectionState(persistence, new MapViewState(persistence)));
     const first = owner.setSelection([{ mapTileKey, featureId: "Road.1" }], undefined, true, true)!;
     const second = owner.setSelection([{ mapTileKey, featureId: "Road.2" }], undefined, true, true)!;
     return { persistence, layout, owner, first, second };

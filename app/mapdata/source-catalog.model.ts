@@ -52,6 +52,9 @@ export interface LayerInfoItem extends Record<string, any> {
     canWrite: boolean;
     defaultVisible?: boolean;
     coverage: Array<number | CoverageRectItem>;
+    coverageComplete?: boolean;
+    serviceMetadata?: boolean;
+    spatialExtent?: Array<{bounds: [number, number, number, number]; exterior?: Array<[number, number]>; holes?: Array<Array<[number, number]>>}>;
 
     /** Legacy input only. Native metadata import moves these definitions into MapSchema. */
     featureTypes?: Array<{ name: string, uniqueIdCompositions: Array<any> }>;

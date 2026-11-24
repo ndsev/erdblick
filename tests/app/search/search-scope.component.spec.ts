@@ -52,7 +52,7 @@ async function fixture() {
     const views = {numViews: 1, numViewsState};
     const catalog = (ids: string[]) => {
         const layers = ids.map(id => ({mapId: "Map", id}));
-        const map = {id: "Map", key: "Map", expanded: true, children: layers,
+        const map = {info: {origin: "remote"}, id: "Map", key: "Map", expanded: true, children: layers,
             layers: new Map(layers.map(layer => [layer.id, layer])), allFeatureLayers: () => layers};
         return {maps: new Map([[map.id, map]]), nodes: [map], allFeatureLayers: () => layers};
     };

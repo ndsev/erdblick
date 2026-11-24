@@ -261,7 +261,7 @@ describe("Deck rendered-feature picking", () => {
         );
 
         expect(view.inspectionSelection.inspectFeatureIds)
-            .toHaveBeenCalledWith([top], false);
+            .toHaveBeenCalledWith([top], false, "0");
     });
 
     it.each(["selection", "background click"])("ignores a late located click after a newer %s", async change => {
@@ -314,7 +314,7 @@ describe("Deck rendered-feature picking", () => {
         );
 
         expect(view.inspectionSelection.inspectFeatureIds)
-            .toHaveBeenCalledWith([first, second], false);
+            .toHaveBeenCalledWith([first, second], false, "0");
     });
 
     it("picks after a touch tap when no pointer-down picking info is available", async () => {
@@ -345,7 +345,7 @@ describe("Deck rendered-feature picking", () => {
 
         expect(view.picking.drillPickFeatures).toHaveBeenCalledWith({ x: 10, y: 20 }, 5, 1);
         expect(view.inspectionSelection.inspectFeatureIds)
-            .toHaveBeenCalledWith([tapped], false);
+            .toHaveBeenCalledWith([tapped], false, "0");
     });
 
     it("preserves merged membership from the direct touch pick", async () => {
@@ -385,7 +385,7 @@ describe("Deck rendered-feature picking", () => {
 
         expect(view.picking.drillPickFeatures).not.toHaveBeenCalled();
         expect(view.inspectionSelection.inspectFeatureIds)
-            .toHaveBeenCalledWith([first, second], false);
+            .toHaveBeenCalledWith([first, second], false, "0");
     });
 
     it("separates the configured-radius anchor and deep hover queries", async () => {

@@ -146,10 +146,14 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
         this.revealRequestedSubscription?.unsubscribe();
         this.readOnlySubscription?.unsubscribe();
         this.editorView?.destroy();
+        this.editorService.detachState(this.sessionId);
     }
 
     /** Recreates the CodeMirror instance for the currently selected editor session. */
+    private attachedSessionId?: string;
     private initializeEditor(): void {
+        if (this.attachedSessionId) this.editorService.detachState(this.attachedSessionId);
+        this.attachedSessionId = this.sessionId;
         const session = this.editorService.getSession(this.sessionId);
         this.sessionSourceSubscription?.unsubscribe();
         this.editorView?.destroy();
@@ -168,20 +172,8 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
             if (!view || view.state.doc.eq(view.state.toText(source))) {
                 return;
             }
-            // Keep structured edits narrow so undo retains untouched source spans and selection.
-            const before = view.state.doc.toString(), after = view.state.toText(source).toString();
-            let from = 0, suffix = 0;
-            while (from < before.length && from < after.length && before[from] === after[from]) ++from;
-            while (suffix < before.length - from && suffix < after.length - from &&
-                before[before.length - suffix - 1] === after[after.length - suffix - 1]) ++suffix;
-            view.dispatch({
-                annotations: externalSourceUpdate.of(true),
-                changes: {
-                    from,
-                    to: before.length - suffix,
-                    insert: after.slice(from, after.length - suffix)
-                }
-            });
+            const state = this.editorService.editorState(this.sessionId);
+            if (state) view.setState(state);
         });
         this.applyPendingRevealRequest();
 
@@ -223,9 +215,7 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
         const lightTheme = EditorView.theme({}, {dark: false});
         const languageExtensions = this.languageExtensions(session.language, session.styleCompletions);
 
-        return EditorState.create({
-            doc: session.source$.getValue(),
-            extensions: [
+        return this.editorService.attachState(this.sessionId, [
                 basicSetup,
                 ...languageExtensions,
                 keymap.of([this.saveCmd()]),
@@ -235,14 +225,13 @@ export class EditorComponent implements AfterViewInit, OnChanges, OnDestroy {
                 highlightedLineField,
                 highlightedLineTheme,
                 EditorView.updateListener.of((update: ViewUpdate) => {
-                    if (!update.docChanged || update.transactions.some(transaction => transaction.annotation(externalSourceUpdate))) return;
+                    if (!update.docChanged) return;
                     const source = session.preserveLineEndings
                         ? applySourceChanges(session.source$.value, update.changes) : update.state.doc.toString();
-                    this.editorService.updateSessionSource(this.sessionId, source);
+                    this.editorService.acceptState(this.sessionId, update.state, source);
                 }),
                 this.themeComp.of(isDark ? oneDark : [lightTheme, syntaxHighlighting(defaultHighlightStyle)])
-            ]
-        });
+            ]);
     }
 
     /** Reflects write capability in both command handling and native content editing. */

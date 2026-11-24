@@ -40,7 +40,7 @@ export class StateOwners {
     readonly configService = new AppConfigService({} as never);
     readonly layout = new LayoutService(this.persistence, new LayoutState(this.persistence));
     readonly viewSettings = new MapViewState(this.persistence);
-    readonly inspectionState = new InspectionPanelService(this.persistence, this.layout, this.messages, new InspectionState(this.persistence));
+    readonly inspectionState = new InspectionPanelService(this.persistence, this.layout, this.messages, new InspectionState(this.persistence, this.viewSettings));
     readonly coordinates = new CoordinatesService(this.persistence, this.configService, new CoordinatesState(this.persistence));
     readonly coordinatePolicy = new CoordinatesPolicyService(this.configService, this.persistence, this.messages, this.coordinates.state);
     readonly styleService = new MapStyleService({} as never, this.persistence, this.messages, this.configService, undefined, new MapStyleState(this.persistence));

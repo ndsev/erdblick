@@ -1,3 +1,8 @@
+import {viewIdSchema} from "../mapview/mapview.model";
+import {OutsideSpatialExtentError} from "../mapdata/spatial-extent.model";
+import {merge, filter as rxFilter, map as rxMap} from "rxjs";
+import {MapDataService} from "../mapdata/mapdata.service";
+import type {SpatialRequestContext} from "../mapdata/spatial-extent.model";
 import { Injectable, NgZone } from "@angular/core";
 import { BehaviorSubject } from "rxjs";
 import { z } from "zod";
@@ -70,6 +75,7 @@ export class InspectionSelectionService implements AppActionContributor {
 
     constructor(
         private readonly stateService: AppStateService,
+        private readonly mapInfo: MapDataService,
         private readonly tileStream: MapTileStreamService,
         private readonly viewState: MapViewService,
         private readonly keyboardService: KeyboardService,
@@ -83,10 +89,12 @@ export class InspectionSelectionService implements AppActionContributor {
 
     /** Call once after tile-stream initialization to subscribe selection projection and expiry ownership. */
     initialize(): void {
-        this.inspectionState.state.selectionState.subscribe((selected) => {
+        merge(this.inspectionState.state.selectionState,
+            this.mapInfo.layerStateChanged.pipe(rxFilter(reason => reason !== "spatial-extent-display"),
+                rxMap(() => this.inspectionState.state.selectionState.getValue()))).subscribe((selected) => {
             this.ngZone.run(() => this.selectionIdsTopic.next(selected));
             const revision = ++this.selectionConversionRevision;
-            const demanded = new Set(selected.map((panel) => this.featureLoadKey(panel.features)));
+            const demanded = new Set(selected.map((panel) => this.featureLoadKey(panel.features, this.mapInfo.spatialRequestContextForViewId(panel.requestViewId))));
             for (const [key, controller] of this.pendingFeatureLoadControllers) {
                 if (!demanded.has(key)) {
                     controller.abort();
@@ -104,12 +112,15 @@ export class InspectionSelectionService implements AppActionContributor {
                 Promise<{
                     selection: InspectionPanelModel<TileFeatureId>;
                     features: FeatureWrapper[];
+                    error?: string;
                 } | null>
             > = [];
             for (const selection of selected) {
                 const existing = existingPanels.get(selection.id);
                 if (
                     existing &&
+                    existing.requestViewId === selection.requestViewId &&
+                    existing.requestRevision === this.mapInfo.spatialRequestContextForViewId(selection.requestViewId).revision &&
                     featureSetsEqual(selection.features, existing.features) &&
                     deepEquals(existing.sourceData, selection.sourceData)
                 ) {
@@ -125,14 +136,14 @@ export class InspectionSelectionService implements AppActionContributor {
 
                 pendingSelections.push(this.runtimePanel(selection, [], true));
                 featureLoads.push(
-                    this.loadFeaturesOnce(selection.features)
+                    this.loadFeaturesOnce(selection.features, this.mapInfo.spatialRequestContextForViewId(selection.requestViewId))
                         .then((features) => ({ selection, features }))
                         .catch((error) => {
                             console.error(
                                 `Failed to resolve inspection selection for panel ${selection.id}.`,
                                 error
                             );
-                            return null;
+                            return {selection, features: [], error: error instanceof OutsideSpatialExtentError ? error.message : undefined};
                         })
                 );
             }
@@ -168,6 +179,8 @@ export class InspectionSelectionService implements AppActionContributor {
                     const existing = existingPanels.get(selection.id);
                     if (
                         existing &&
+                    existing.requestViewId === selection.requestViewId &&
+                    existing.requestRevision === this.mapInfo.spatialRequestContextForViewId(selection.requestViewId).revision &&
                         featureSetsEqual(selection.features, existing.features) &&
                         deepEquals(existing.sourceData, selection.sourceData)
                     ) {
@@ -179,8 +192,10 @@ export class InspectionSelectionService implements AppActionContributor {
                         continue;
                     }
                     const resolved = resolvedByPanelId.get(selection.id);
-                    if (resolved?.features.length) {
-                        convertedSelections.push(this.runtimePanel(selection, resolved.features));
+                    if (resolved && (resolved.features.length || resolved.error)) {
+                        const panel = this.runtimePanel(selection, resolved.features);
+                        panel.loadError = resolved.error;
+                        convertedSelections.push(panel);
                     }
                 }
 
@@ -228,6 +243,8 @@ export class InspectionSelectionService implements AppActionContributor {
     ): InspectionPanelModel<FeatureWrapper> {
         return {
             id: selection.id,
+            requestViewId: selection.requestViewId,
+            requestRevision: this.mapInfo.spatialRequestContextForViewId(selection.requestViewId).revision,
             locked: selection.locked,
             focused: selection.focused,
             size: selection.size,
@@ -252,10 +269,11 @@ export class InspectionSelectionService implements AppActionContributor {
             }
             return [{
                 id: runtime.id,
+                requestViewId: runtime.requestViewId,
                 locked: runtime.locked,
                 focused: runtime.focused,
                 size: runtime.size,
-                features: runtime.loading
+                features: runtime.loading || !!runtime.loadError
                     ? selection.features
                     : runtime.features.map(feature => feature.key()),
                 sourceData: runtime.sourceData,
@@ -265,13 +283,13 @@ export class InspectionSelectionService implements AppActionContributor {
         });
     }
 
-    private featureLoadKey(featureIds: TileFeatureId[]): string {
-        return featureIds.map(feature => `${feature.mapTileKey}\u0000${feature.featureId}`).sort().join("\u0001");
+    private featureLoadKey(featureIds: TileFeatureId[], context?: SpatialRequestContext): string {
+        return (context ? context.viewId + "\n" + context.revision + "\n" : "") + featureIds.map(feature => `${feature.mapTileKey}\u0000${feature.featureId}`).sort().join("\u0001");
     }
 
     /** Shares one in-flight restricted load for the same unordered feature identities across rapid panel-state emissions. */
-    private loadFeaturesOnce(featureIds: TileFeatureId[]): Promise<FeatureWrapper[]> {
-        const key = this.featureLoadKey(featureIds);
+    private loadFeaturesOnce(featureIds: TileFeatureId[], context: SpatialRequestContext): Promise<FeatureWrapper[]> {
+        const key = this.featureLoadKey(featureIds, context);
         const pending = this.pendingFeatureLoads.get(key);
         if (pending) {
             return pending;
@@ -279,7 +297,7 @@ export class InspectionSelectionService implements AppActionContributor {
         this.pendingFeatureLoadControllers.get(key)?.abort();
         const controller = new AbortController();
         this.pendingFeatureLoadControllers.set(key, controller);
-        const request = this.tileStream.loadFeatures(featureIds, controller.signal).finally(() => {
+        const request = this.tileStream.loadFeatures(featureIds, controller.signal, context).finally(() => {
             if (this.pendingFeatureLoads.get(key) === request) {
                 this.pendingFeatureLoads.delete(key);
                 // Keep terminal diagnostics owned by this selection until it
@@ -294,7 +312,7 @@ export class InspectionSelectionService implements AppActionContributor {
      * Opens one inspection per exact rendered-feature hit, bounded by the configured panel limit.
      * The warning reports logical features after merged-object expansion, not raw render objects.
      */
-    inspectFeatureIds(tileFeatureIds: TileFeatureId[], lockNewPanels = false): MultiInspectionResult {
+    inspectFeatureIds(tileFeatureIds: TileFeatureId[], lockNewPanels = false, requestViewId = this.viewSettings.viewIdAt(this.viewSettings.focusedView)): MultiInspectionResult {
         const featureIds = this.uniqueTileFeatureIds(tileFeatureIds);
         const foundFeatureCount = featureIds.length;
         if (!foundFeatureCount) {
@@ -304,7 +322,7 @@ export class InspectionSelectionService implements AppActionContributor {
         this.stateService.transaction(() => {
             if (foundFeatureCount === 1) {
                 const currentPanels = this.inspectionState.state.selection;
-                const featureAlreadyInspected = this.panelsContainFeature(currentPanels, featureIds[0]);
+                const featureAlreadyInspected = this.panelsContainFeature(currentPanels.filter(panel => panel.requestViewId === requestViewId), featureIds[0]);
                 const reusableFeaturePanel = currentPanels.some(
                     (panel) => panel.sourceData === undefined && !panel.locked
                 );
@@ -316,7 +334,7 @@ export class InspectionSelectionService implements AppActionContributor {
                     const panelId = this.inspectionState.setSelection(
                         [featureIds[0]],
                         undefined,
-                        lockNewPanels
+                        lockNewPanels, false, requestViewId
                     );
                     if (lockNewPanels && panelId !== undefined) {
                         this.inspectionState.setInspectionPanelLockedState(panelId, true);
@@ -331,13 +349,13 @@ export class InspectionSelectionService implements AppActionContributor {
                     this.inspectionState.state.inspectionsLimit - this.inspectionState.state.selection.length
                 );
                 for (const featureId of featureIds) {
-                    if (this.panelsContainFeature(this.inspectionState.state.selection, featureId)) {
+                    if (this.panelsContainFeature(this.inspectionState.state.selection.filter(panel => panel.requestViewId === requestViewId), featureId)) {
                         continue;
                     }
                     if (remainingSlots <= 0) {
                         break;
                     }
-                    const panelId = this.inspectionState.setSelection([featureId], undefined, true);
+                    const panelId = this.inspectionState.setSelection([featureId], undefined, true, false, requestViewId);
                     if (panelId !== undefined) {
                         remainingSlots -= 1;
                         if (lockNewPanels) {
@@ -349,7 +367,7 @@ export class InspectionSelectionService implements AppActionContributor {
         });
 
         const inspectedFeatureCount = featureIds.filter((featureId) =>
-            this.panelsContainFeature(this.inspectionState.state.selection, featureId)
+            this.panelsContainFeature(this.inspectionState.state.selection.filter(panel => panel.requestViewId === requestViewId), featureId)
         ).length;
         if (inspectedFeatureCount < foundFeatureCount) {
             this.messageService.showWarning(
@@ -499,7 +517,9 @@ export class InspectionSelectionService implements AppActionContributor {
         }
         let replacements: FeatureWrapper[];
         try {
-            replacements = await this.tileStream.loadFeatures(owner.featureIds);
+            const panel = this.inspectionState.state.selection.find(panel => panel.id === owner.panelId);
+            replacements = await this.tileStream.loadFeatures(owner.featureIds, undefined,
+                this.mapInfo.spatialRequestContextForViewId(panel?.requestViewId));
         } catch (error) {
             if (this.inspectionExpiryOwners.get(owner.key) === owner &&
                 tokens.some(token => token.valueVersion === owner.epoch)) {
@@ -709,6 +729,12 @@ export class InspectionSelectionService implements AppActionContributor {
         return Number.isFinite(height) ? Math.max(0, height as number) : 0;
     }
 
+    /** Capture the originating panel's policy for relation and SourceData navigation. */
+    requestContextForPanel(panelId: number) {
+        return this.mapInfo.spatialRequestContextForViewId(
+            this.inspectionState.state.selection.find(panel => panel.id === panelId)?.requestViewId);
+    }
+
     /** Proxies an error toast. */
     private showErrorMessage(message: string) {
         this.messageService.showError(message);
@@ -732,6 +758,7 @@ export class InspectionSelectionService implements AppActionContributor {
                 mutation: true,
                 inputSchema: z.strictObject({
                     features: z.array(featureIdentitySchema).min(1).max(50),
+                    viewId: viewIdSchema.optional(),
                     lock: z.boolean().optional(),
                     panelId: indexSchema.optional(),
                     newPanel: z.boolean().optional(),
@@ -792,7 +819,8 @@ export class InspectionSelectionService implements AppActionContributor {
                             })
                         })
                     ]),
-                    newPanel: z.boolean().optional()
+                    newPanel: z.boolean().optional(),
+                    viewId: viewIdSchema.optional()
                 }),
                 outputSchema: z.strictObject({
                     status: z.literal("applied"),
@@ -932,7 +960,11 @@ export class InspectionSelectionService implements AppActionContributor {
                   reference: { layerId: string; address: string; qualifier?: string };
               };
         newPanel?: boolean;
+        viewId?: string;
     }) {
+        if (input.viewId !== undefined && !this.viewSettings.viewIds.includes(input.viewId))
+            rejectAction("Unknown view", "invalid_arguments");
+        const context = this.mapInfo.spatialRequestContextForViewId(input.viewId);
         const source = input.source;
         if (
             !("mapTileKey" in source) &&
@@ -959,7 +991,7 @@ export class InspectionSelectionService implements AppActionContributor {
         const panelId = this.inspectionState.setSelection(
             { mapTileKey, ...(address === undefined ? {} : { address: BigInt(address) }) },
             undefined,
-            input.newPanel ?? false
+            input.newPanel ?? false, false, context.viewId
         );
         if (panelId === undefined) rejectAction("An inspection could not be opened");
         return { status: "applied" as const, panelId, mapTileKey };
@@ -973,6 +1005,7 @@ export class InspectionSelectionService implements AppActionContributor {
             panelId?: number;
             newPanel?: boolean;
             color?: string;
+            viewId?: string;
         },
         signal?: AbortSignal
     ) {
@@ -988,6 +1021,12 @@ export class InspectionSelectionService implements AppActionContributor {
             if (!panel || panel.locked || panel.sourceData)
                 rejectAction("An explicit target must be an existing unlocked feature panel");
         }
+        if (input.viewId !== undefined && !this.viewSettings.viewIds.includes(input.viewId))
+            rejectAction("Unknown view", "invalid_arguments");
+        const owner = this.inspectionState.state.selection.find(panel => panel.id === input.panelId)?.requestViewId;
+        if (owner && input.viewId && owner !== input.viewId)
+            rejectAction("The target panel belongs to a different view", "invalid_arguments");
+        const context = this.mapInfo.spatialRequestContextForViewId(owner ?? input.viewId);
         // Reject a stale intent if any selection edit completes while identities are being located.
         let changed: boolean;
         const guard = this.inspectionState.state.selectionState.subscribe(() => {
@@ -996,9 +1035,9 @@ export class InspectionSelectionService implements AppActionContributor {
         changed = false;
         let features: TileFeatureId[];
         try {
-            features = await this.tileStream.resolveFeatureIdentities(input.features, signal);
+            features = await this.tileStream.resolveFeatureIdentities(input.features, signal, context);
             signal?.throwIfAborted();
-            if (changed) rejectAction("Inspections changed while locating the feature", "cancelled");
+            if (changed || this.mapInfo.spatialRequestContextForViewId(context.viewId).revision !== context.revision) rejectAction("Inspections changed while locating the feature", "cancelled");
         } finally {
             guard.unsubscribe();
         }
@@ -1016,12 +1055,12 @@ export class InspectionSelectionService implements AppActionContributor {
                     newPanelId = this.inspectionState.setSelection(
                         features,
                         input.panelId,
-                        input.newPanel ?? false
+                        input.newPanel ?? false, false, context.viewId
                     );
-                } else this.inspectFeatureIds(features, input.lock ?? false);
+                } else this.inspectFeatureIds(features, input.lock ?? false, context.viewId);
                 const panels = this.inspectionState.state.selection.filter(
                     (panel) =>
-                        !panel.sourceData &&
+                        !panel.sourceData && panel.requestViewId === context.viewId &&
                         (!input.newPanel || panel.id === newPanelId) &&
                         panel.features.some((candidate) =>
                             features.some(

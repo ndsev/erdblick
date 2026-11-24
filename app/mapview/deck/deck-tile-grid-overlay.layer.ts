@@ -23,6 +23,7 @@ interface TileGridShaderModuleProps {
     originLatitudeRadians?: number;
     lineColor?: [number, number, number, number];
     lineWidthPx?: number;
+    hatchOpacity?: number;
     gridMode?: number;
 }
 
@@ -161,6 +162,7 @@ uniform tileGridOverlayUniforms {
   float originLatitudeRadians;
   vec4 lineColor;
   float lineWidthPx;
+  float hatchOpacity;
   float gridMode;
 } tileGridOverlay;
 `,
@@ -171,6 +173,7 @@ uniform tileGridOverlayUniforms {
   float originLatitudeRadians;
   vec4 lineColor;
   float lineWidthPx;
+  float hatchOpacity;
   float gridMode;
 } tileGridOverlay;
 `,
@@ -180,6 +183,7 @@ uniform tileGridOverlayUniforms {
         originLatitudeRadians: "f32",
         lineColor: "vec4<f32>",
         lineWidthPx: "f32",
+        hatchOpacity: "f32",
         gridMode: "f32"
     },
     getUniforms: (opts?: TileGridShaderModuleProps) => {
@@ -206,6 +210,7 @@ uniform tileGridOverlayUniforms {
                 clamp(lineColor[3], 0, 1)
             ],
             lineWidthPx: Math.max(0.5, lineWidthPx),
+            hatchOpacity: clamp(opts?.hatchOpacity ?? 0, 0, 1),
             gridMode: opts?.gridMode ?? 0
         };
     }
@@ -306,6 +311,8 @@ export interface TileGridOverlayLayerProps extends SolidPolygonLayerProps<TileGr
     subdivisionY: number;
     lineColor: [number, number, number, number];
     lineWidthPixels: number;
+    /** Optional semitransparent crosshatching; ordinary grid rendering defaults to zero. */
+    hatchOpacity?: number;
 }
 
 /**
@@ -387,6 +394,10 @@ float tile_grid_line_mask(vec2 tileCoords) {
 }`,
                 "fs:DECKGL_FILTER_COLOR": `${existingFilter}
 float mask = tile_grid_line_mask(tile_grid_line_coords());
+vec2 hatchPhase = fract(vec2(gl_FragCoord.x + gl_FragCoord.y, gl_FragCoord.x - gl_FragCoord.y) / 12.0);
+vec2 hatchDistance = min(hatchPhase, 1.0 - hatchPhase) * 12.0;
+float hatch = 1.0 - smoothstep(0.6, 1.4, min(hatchDistance.x, hatchDistance.y));
+mask = max(mask, tileGridOverlay.hatchOpacity * (0.12 + 0.88 * hatch));
 color = vec4(
     tileGridOverlay.lineColor.rgb,
     tileGridOverlay.lineColor.a * mask * layer.opacity
@@ -416,6 +427,7 @@ color = vec4(
                     lineColor[3] / 255
                 ],
                 lineWidthPx: this.props.lineWidthPixels,
+                hatchOpacity: this.props.hatchOpacity ?? 0,
                 gridMode: this.props.gridMode === "nds" ? 1 : 0
             } satisfies TileGridShaderModuleProps
         });

@@ -1,3 +1,5 @@
+import {DrawingDocumentsService} from './drawing/drawing-documents.service';
+import {DrawingToolsService} from './drawing/drawing-tools.service';
 import {DrawingState} from "./drawing/drawing.state";
 import {EditorWorkspaceState} from "./editor/editor-workspace.state";
 import { Injector } from "@angular/core";
@@ -44,6 +46,8 @@ export function registerApplication(injector: Injector): AppActionRegistry {
     injector.get(DrawingState);
     const controllers: AppActionContributor[] = [
         injector.get(UiAutomationService),
+        injector.get(DrawingDocumentsService),
+        injector.get(DrawingToolsService),
         injector.get(CoordinatesService),
         injector.get(DiagnosticsFacadeService),
         injector.get(InspectionSelectionService),
