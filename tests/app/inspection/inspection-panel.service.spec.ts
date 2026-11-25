@@ -18,6 +18,35 @@ function createFixture() {
 }
 
 describe("InspectionPanelService completed edits", () => {
+    it("recolors a docked map pick without locking, resizing or refocusing its panel", () => {
+        const {owner, layout, second} = createFixture();
+        const picked = owner.setSelection([{mapTileKey, featureId: "Road.1:shapepoint#0.2@feed"}], undefined, true)!;
+        owner.setInspectionPanelSize(picked, [36, 21]);
+        owner.setFocusedInspectionPanel(second);
+        layout.state.dockActiveTab = "search";
+        const before = owner.panelPresentation(picked);
+        expect(before).toMatchObject({undocked: false, locked: false, focused: false});
+
+        owner.setPanelPresentation(picked, {...before, color: "#00cfdf"});
+
+        expect(owner.panelPresentation(picked)).toEqual({...before, color: "#00cfdf"});
+        expect(owner.state.selection.find(panel => panel.id === picked)?.size).toEqual([36, 21]);
+        expect(owner.focusedInspectionPanelId).toBe(second);
+        expect(layout.state.dockActiveTab).toBe("search");
+    });
+
+    it("opens the current host for one expired vertex while retaining another vertex on that host", () => {
+        const {owner} = createFixture();
+        const a = {mapTileKey, featureId: "Road.1:shapepoint#1.2@feed"};
+        const b = {mapTileKey, featureId: "Road.1:shapepoint#0.2@feed"};
+        const panelId = owner.setSelection([a, b], undefined, true, true)!;
+        owner.openInspectionTarget(panelId, mapTileKey, a.featureId, "Road.1");
+        expect(owner.state.selection.find(panel => panel.id === panelId)?.features)
+            .toEqual([{mapTileKey, featureId: "Road.1"}, b]);
+        owner.openInspectionTarget(panelId, mapTileKey, "Road.1", b.featureId);
+        expect(owner.state.selection.find(panel => panel.id === panelId)?.features).toEqual([b]);
+    });
+
     it.each(["one panel", "unlocked panels"])("removes %s together with comparison and layout references", removal => {
         const { persistence, layout, owner, first, second } = createFixture();
         owner.setInspectionPanelLockedState(second, true);

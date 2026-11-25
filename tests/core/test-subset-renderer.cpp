@@ -5,8 +5,11 @@
 #include "../support/scalar-schema.h"
 #include "erdblick/gpu-render-packet.h"
 #include "erdblick/gpu-render-records.h"
+#include "erdblick/parser.h"
+#include "erdblick/style-filter-plan.h"
 #include "erdblick/subset-renderer.h"
 #include "mapget/model/info.h"
+#include "mapget/model/mapschema.h"
 #include "mapget/model/stringpool.h"
 #include "mapget/model/subsetlayer.h"
 
@@ -17,6 +20,11 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -242,6 +250,18 @@ public:
             result.push_back(string(
                 read<uint32_t>(record + 32U),
                 read<uint32_t>(record + 36U)));
+        }
+        return result;
+    }
+
+    /** Read the packet pick shared by each label and the marker at its vertex. */
+    [[nodiscard]] std::vector<uint32_t> labelPickIndices() const
+    {
+        auto const table = read<uint32_t>(112U);
+        auto const count = read<uint32_t>(116U);
+        std::vector<uint32_t> result;
+        for (uint32_t index = 0; index < count; ++index) {
+            result.push_back(read<uint32_t>(table + index * 176U + 4U));
         }
         return result;
     }
@@ -505,6 +525,280 @@ FeatureLayerStyle rendererStyle(std::string_view source)
 }
 
 } // namespace
+
+TEST_CASE(
+    "Shape-point markers and labels retain their source vertex across coincident geometries",
+    "[erdblick.subset-renderer][shapepoint]")
+{
+    auto strings = std::make_shared<mapget::StringPool>("RoadSnapshot");
+    auto subset = std::make_shared<mapget::TileSubsetLayer>(
+        mapget::TileId::fromWgs84(11, 48, 13), "RoadSnapshot",
+        "TestMap", rendererLayerInfo(), strings, "measurements", 1);
+    subset->setGeometryAnchor({11, 48, 0});
+    auto const source = mapget::MapPartitionKey(
+        mapget::LayerType::Features, "TestMap", "Road", subset->partitionId());
+    const std::string sourceId = GENERATE("survey", "");
+    subset->setDependencies({{source, 1, sourceId}});
+
+    // The style planner wraps a host filter in any(...) to produce a boolean.
+    // Curvature and grade label slots belong to individual vertices and can
+    // be missing independently.
+    std::vector<std::string> const featureFields{"any(isOpen)"};
+    std::vector<std::string> const entryFields{"curvature", "gradeLabel"};
+    auto const typeMask = (1U << static_cast<unsigned>(mapget::GeomType::Line)) |
+        (1U << static_cast<unsigned>(mapget::GeomType::Points));
+    auto channel = subset->newChannel(
+        "style-rule:0", mapget::Scope::ShapePoint, typeMask, {}, featureFields, entryFields);
+    // In a mixed contribution the point-cloud worker can release the source
+    // bytes. Its pick table must retain the identities of ordinary vertices too.
+    subset->newChannel("style-rule:1", mapget::Scope::Feature,
+        1U << static_cast<unsigned>(mapget::GeomType::Points), {});
+    auto const featureId = subset->newFeatureId("Road", {{"roadId", int64_t{7}}});
+    auto isOpen = subset->newArray();
+    isOpen->append(true);
+    auto const host = channel->newShapePointHost(
+        featureId, std::array<simfil::ModelNode::Ptr, 1>{isOpen});
+    auto const adas = channel->newShapePointGeometry(host, 1, mapget::GeomType::Line, "ADAS");
+    auto const centerline = channel->newShapePointGeometry(host, 0, mapget::GeomType::Line, "centerline");
+    auto const surveyPoints = channel->newShapePointGeometry(host, 2, mapget::GeomType::Points, "ADAS");
+    simfil::ModelNode::Ptr const missing = subset->newArray();
+    auto const curved = std::array{projectedScalar(*subset, -0.15296), missing};
+    auto const straight = std::array{projectedScalar(*subset, 0.), projectedScalar(*subset, "0%")};
+    auto const gradeOnly = std::array{missing, projectedScalar(*subset, "-2.6%")};
+    channel->newShapePointEntry(adas, 1, {11, 48, 0}, curved);
+    channel->newShapePointEntry(centerline, 1, {11, 48, 0}, curved);
+    channel->newShapePointEntry(adas, 7, {11.001, 48, 15}, straight);
+    channel->newShapePointEntry(adas, 31, {11.002, 48, 20}, gradeOnly);
+    channel->newShapePointEntry(surveyPoints, 1, {11, 48, 0}, curved);
+
+    auto style = rendererStyle(R"yaml(
+name: Road measurements
+version: 2
+rules:
+  - scope: shapepoint
+    type: Road
+    filter: isOpen
+    geometry: line
+    width: 6
+    first-of:
+      - geometry-name: centerline
+        color: "#112233"
+      - geometry-name: ADAS
+        color-scale:
+          mode: linear
+          expression: curvature
+          stops: [[-0.15296, "#2166ac"], [0, "#f7f7f7"]]
+          fallback: "#808080"
+        label-text-expression: gradeLabel
+  - type: Road
+    geometry: point
+    point-cloud: true
+)yaml");
+    REQUIRE(style.isValid());
+    TileSubsetLayerRenderer renderer(0, subset->id().toString(), style,
+        static_cast<int>(FeatureStyleRule::NoHighlight), FeatureStyleRule::kMaximumLod);
+    TileSubsetLayer layer(subset);
+    installSubset(renderer, layer);
+    renderer.run();
+    RendererPacketView packet(renderer);
+    REQUIRE(packet.issues().empty());
+    REQUIRE(packet.streams(GpuPrimitiveKind::PathSegment).empty());
+    REQUIRE(packet.labelTexts() == std::vector<std::string>{"0%", "-2.6%"});
+
+    // The first-of gate chooses the leaf using the source line. The equally
+    // named standalone point set emits nothing. Measured zero and missing
+    // curvature use different colours. Either vertex can have a grade label.
+    auto points = packet.streams(GpuPrimitiveKind::Point);
+    std::map<uint32_t, std::array<uint8_t, 3>> colorsByPick;
+    for (auto const& stream : points) {
+        for (uint32_t i = 0; i < stream.count; ++i) {
+            auto const record = stream.dataOffset + stream.stride * i;
+            REQUIRE(packet.read<float>(record + 12) == 3.F);
+            colorsByPick[packet.read<uint32_t>(record + 32)] = {
+                packet.read<uint8_t>(record + 20), packet.read<uint8_t>(record + 21),
+                packet.read<uint8_t>(record + 22)};
+        }
+    }
+    REQUIRE(colorsByPick.size() == 4);
+    CHECK(colorsByPick.at(0) == std::array<uint8_t, 3>{0x21, 0x66, 0xac});
+    CHECK(colorsByPick.at(1) == std::array<uint8_t, 3>{0x11, 0x22, 0x33});
+    CHECK(colorsByPick.at(2) == std::array<uint8_t, 3>{0xf7, 0xf7, 0xf7});
+    CHECK(colorsByPick.at(3) == std::array<uint8_t, 3>{0x80, 0x80, 0x80});
+    CHECK(packet.labelPickIndices() == std::vector<uint32_t>{2, 3});
+
+    auto const picks = packet.picks();
+    REQUIRE(picks.size() == 4);
+    for (auto const& pick : picks) {
+        auto const resolved = layer.resolvePick(pick.channelOrdinal, pick.entryOrdinal, pick.endpointRole);
+        REQUIRE(resolved.at("scope") == "shapepoint");
+        CHECK(resolved.at("sourceId") == sourceId);
+        CHECK(resolved.at("geometryOrdinal") == (pick.entryOrdinal == 1 ? 0U : 1U));
+        auto const reverse = layer.findShapePointPickReferences(
+            "Road.7", resolved.at("geometryOrdinal"), resolved.at("pointIndex"), sourceId);
+        REQUIRE(reverse.size() == 1);
+        CHECK(reverse.front().at("entryOrdinal") == pick.entryOrdinal);
+    }
+    auto const original = layer.resolvePick(0, 0, 0);
+    CHECK(original.at("featureId") == "Road.7");
+    CHECK(original.at("geometryOrdinal") == 1);
+    CHECK(original.at("pointIndex") == 1);
+    CHECK(renderer.renderBridgeResult().at("pointCloudPicks").at(0) == original);
+    CHECK_FALSE(layer.resolvePick(0, 8, 0).contains("featureId"));
+    CHECK(layer.findShapePointPickReferences("Road.7", 1, 1, sourceId.empty() ? "survey" : "").empty());
+    CHECK(layer.findShapePointPickReferences("Road.8", 1, 1, sourceId).empty());
+    CHECK(layer.findShapePointPickReferences("Road.7", 3, 1, sourceId).empty());
+    CHECK(layer.findShapePointPickReferences("Road.7", 1, 32, sourceId).empty());
+    auto rows = layer.entryRange(0, 3, 1, true);
+    REQUIRE(rows.size() == 1);
+    CHECK(rows.front().at("pointIndex") == 31);
+    CHECK(rows.front().at("values").at(1) == nlohmann::json::array({"-2.6%"}));
+    CHECK(rows.front().contains("position"));
+}
+
+TEST_CASE(
+    "The native renderer draws the lane ADAS curvature from the shared mapget wire fixture",
+    "[erdblick.subset-renderer][shapepoint][wire]")
+{
+    auto fixture = [](char const* name) {
+        auto const path = std::filesystem::path(ERDBLICK_TEST_FIXTURES_DIRECTORY) / "shape-points" / name;
+        std::ifstream input(path, std::ios::binary);
+        REQUIRE(input.is_open());
+        return SharedUint8Array(std::string(std::istreambuf_iterator<char>(input), {}));
+    };
+    auto const expected = nlohmann::json::parse(fixture("expected.json").toString());
+    TileLayerParser parser;
+    parser.installMapSchema(fixture("schema.bin"), expected.at("schemaId"));
+    parser.setDataSourceInfo(fixture("catalog.json"));
+    parser.readFieldDictUpdate(fixture("dictionary.frame"));
+    const auto bytes = fixture("subset.bin");
+    auto subset = parser.readTileSubsetLayer(bytes);
+    auto metadata = parser.readTileSubsetLayerMetadata(bytes);
+    REQUIRE(metadata.dependencies == subset.dependencies());
+    REQUIRE(metadata.dependencies.size() == 1);
+    CHECK(metadata.dependencies.at(0).at("sourceId") == expected.at("sourceId"));
+    CHECK(parser.readTileLayerMetadata(fixture("selected.bin")).sourceId == expected.at("sourceId").get<std::string>());
+
+    auto style = rendererStyle(R"yaml(
+name: Lane ADAS curvature
+version: 2
+rules:
+  - scope: shapepoint
+    type: Lane
+    geometry: line
+    geometry-name: ADAS
+    width: 6
+    color-scale:
+      mode: linear
+      expression: $attributes.LaneAdasLayerWithGeo.CURVATURE.*.curvature
+      stops: [[-0.15296, "#2166ac"], [0, "#f7f7f7"]]
+      fallback: "#808080"
+    label-text-expression: $attributes.LaneAdasLayerWithGeo.SLOPE_ARRAY.*.slope
+)yaml");
+    REQUIRE(style.isValid());
+    TileSubsetLayerRenderer renderer(0, subset.id(), style,
+        static_cast<int>(FeatureStyleRule::NoHighlight), FeatureStyleRule::kMaximumLod);
+    installSubset(renderer, subset);
+    renderer.run();
+    RendererPacketView packet(renderer);
+    REQUIRE(packet.issues().empty());
+    REQUIRE(packet.labelTexts().empty());
+    auto points = packet.streams(GpuPrimitiveKind::Point);
+    REQUIRE(points.size() == 1);
+    REQUIRE(points.front().count == 1);
+    auto const record = points.front().dataOffset;
+    CHECK(packet.read<uint8_t>(record + 20) == 0x21);
+    CHECK(packet.read<uint8_t>(record + 21) == 0x66);
+    CHECK(packet.read<uint8_t>(record + 22) == 0xac);
+    auto const pick = packet.picks().at(packet.read<uint32_t>(record + 32));
+    auto const hit = subset.resolvePick(pick.channelOrdinal, pick.entryOrdinal, pick.endpointRole);
+    CHECK(hit.at("featureId") == expected.at("row").at("featureId"));
+    CHECK(hit.at("geometryOrdinal") == 1);
+    CHECK(hit.at("pointIndex") == 1);
+    CHECK(hit.at("sourceId") == expected.at("sourceId"));
+}
+
+TEST_CASE(
+    "A planned shape-point style renders a filtered source line and picks a label without an icon",
+    "[erdblick.subset-renderer][shapepoint]")
+{
+    auto const info = rendererLayerInfo();
+    auto strings = std::make_shared<mapget::StringPool>("Survey");
+    auto source = std::make_shared<mapget::PartitionFeatureLayer>(
+        mapget::TileId::fromWgs84(11, 48, 13), "Survey", "TestMap", info, strings);
+    auto road = source->newFeature("Road", {{"roadId", int64_t{8}}});
+    for (auto name : {"centerline", "ADAS"}) {
+        auto line = source->newGeometry(mapget::GeomType::Line, 3);
+        line->setName(name);
+        line->append({11, 48, 0});
+        line->append({11.001, 48, 5});
+        line->append({11.002, 48, 10});
+        road->addGeometry(line);
+    }
+    source->setSourceId("survey");
+
+    auto style = rendererStyle(R"yaml(
+name: Number the survey points
+version: 2
+rules:
+  - scope: shapepoint
+    type: Road
+    geometry: line
+    geometry-name: ADAS
+    icon-url: survey.svg
+    color-scale:
+      mode: categorical
+      expression: $pointIndex
+      stops: [[0, "#0000ff"], [1, "#ff0000"]]
+    label-text-expression: $pointIndex as string
+)yaml");
+    auto plan = planStyleFilter(style, *info, FeatureStyleRule::NoHighlight, FeatureStyleRule::kMaximumLod);
+    REQUIRE(plan.valid);
+    mapget::FeatureLayerFilterRequest request{.filterId_ = "survey", .generation_ = 1, .channels_ = plan.channels};
+    auto filtered = request.filter(*source);
+    REQUIRE(filtered);
+    REQUIRE((*filtered)->issues().empty());
+
+    // Cross the same binary boundary used by the browser. The source catalog,
+    // field dictionary and point rows travel separately and meet in its parser.
+    auto schema = info->schemaOwner();
+    std::ostringstream artifact, dictionary, payload;
+    REQUIRE(schema->write(artifact));
+    REQUIRE(strings->write(dictionary, 0));
+    REQUIRE((*filtered)->write(payload));
+    nlohmann::json catalog = {
+        {"mapId", "TestMap"}, {"stringPoolId", "Survey"}, {"schemaId", schema->schemaId()},
+        {"layers", {{"Road", info->toJson()}}}
+    };
+    TileLayerParser parser;
+    parser.installMapSchema(SharedUint8Array(artifact.str()), std::string(schema->schemaId()));
+    parser.setDataSourceInfo(SharedUint8Array(nlohmann::json::array({catalog}).dump()));
+    parser.addFieldDict(SharedUint8Array(dictionary.str()));
+    auto subset = parser.readTileSubsetLayer(SharedUint8Array(payload.str()));
+    REQUIRE(subset.numEntries() == 3);
+    TileSubsetLayerRenderer renderer(0, subset.id(), style,
+        static_cast<int>(FeatureStyleRule::NoHighlight), FeatureStyleRule::kMaximumLod);
+    installSubset(renderer, subset);
+    renderer.addGpuIconResource("survey.svg", 0, 0, 0, 1, 1, 8, 8);
+    renderer.run();
+    RendererPacketView packet(renderer);
+    REQUIRE(packet.issues().empty());
+    REQUIRE(packet.labelTexts() == std::vector<std::string>{"0", "1", "2"});
+    auto const icons = packet.streams(GpuPrimitiveKind::Icon);
+    REQUIRE(icons.size() == 1);
+    CHECK(icons.front().count == 2);
+    CHECK(packet.streams(GpuPrimitiveKind::Point).empty());
+    CHECK(packet.streams(GpuPrimitiveKind::PathSegment).empty());
+
+    auto const labelPick = packet.labelPickIndices().at(2);
+    auto const picks = packet.picks();
+    REQUIRE(labelPick < picks.size());
+    auto const& pick = picks[labelPick];
+    auto vertex = subset.resolvePick(pick.channelOrdinal, pick.entryOrdinal, pick.endpointRole);
+    CHECK(vertex.at("featureId") == "Road.8");
+    CHECK(vertex.at("geometryOrdinal") == 1);
+    CHECK(vertex.at("pointIndex") == 2);
+    CHECK(vertex.at("sourceId") == "survey");
+}
 
 TEST_CASE(
     "TileSubsetLayerRenderer preserves distinct point clusters within one feature",

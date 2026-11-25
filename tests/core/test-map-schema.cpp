@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 
 #include "../support/scalar-schema.h"
 #include "erdblick/inspection.h"
@@ -7,6 +8,7 @@
 #include "erdblick/parser.h"
 #include "erdblick/rule.h"
 #include "mapget/model/mapschema.h"
+#include "mapget/model/pointseries.h"
 #include "mapget/model/sourcedata.h"
 #include "mapget/model/subsetlayer.h"
 
@@ -62,6 +64,128 @@ erdblick::SharedUint8Array schemaBytes(mapget::MapSchema const& graph)
 }
 
 }  // namespace
+
+TEST_CASE("Finishing style completion releases its point projection on cache eviction",
+          "[erdblick.schema][shapepoint]")
+{
+    const auto first = schemaFixture("first");
+    erdblick::TileLayerParser parser;
+    const std::string id(first->schemaId());
+    parser.installMapSchema(schemaBytes(*first), id);
+    parser.setDataSourceInfo(sourceFixture("First", id));
+    const std::string prefix = "$pointInd";
+    const auto candidates = parser.completeSearchQuery(prefix, static_cast<int>(prefix.size()), {{"scope", "shapepoint"}});
+    REQUIRE(candidates.dump().find("$pointIndex") != std::string::npos);
+
+    auto layer = parser.info_.at("First").layers_.at("Road")->layerSchema();
+    auto completed = layer->shapePointQueryType("Road").pool()->weak_from_this();
+    REQUIRE_FALSE(completed.expired());
+    const auto second = schemaFixture("second");
+    const auto third = schemaFixture("third");
+    REQUIRE(second->layer("Road")->shapePointQueryType("Road"));
+    REQUIRE(third->layer("Road")->shapePointQueryType("Road"));
+    CHECK(completed.expired());
+}
+
+TEST_CASE("The same named geometry supplies style completions and vertex inspection with raw links",
+          "[erdblick.schema][erdblick.inspection][shapepoint]")
+{
+    using Kind = simfil::SchemaType::Kind;
+    auto graph = std::make_shared<mapget::MapSchema>();
+    auto layer = graph->newLayer("Road", mapget::LayerType::Features);
+    auto road = layer->newFeature(mapget::FeatureTypeInfo::fromJson(
+        {{"name", "Road"}, {"uniqueIdCompositions", {{{{"partId", "roadId"}, {"datatype", "U32"}}}}}}));
+    layer->setRootSchema(road.id());
+    auto attr = graph->newAttribute("grades", "Grades");
+    auto direction = graph->newEnumType();
+    direction.setTypeName("Grades.Direction");
+    direction.addSymbol("UPHILL");
+    attr.addField("direction", direction);
+    auto codes = graph->schemaType(layer->addSchema(Kind::Array));
+    codes.asArray().addElement(graph->schemaType(graph->primitive(Kind::Int)));
+    attr.addField("codes", codes);
+    layer->bindAttribute(attr, "Road", "Adas", "GRADE");
+    mapget::PointSeries series;
+    series.featureType_ = "Road";
+    series.attributeLayer_ = "Adas";
+    series.attribute_ = "GRADE";
+    series.geometryName_ = "profile";
+    series.omittedValidityCovers_ = true;
+    series.records_ = {"codes"};
+    series.markerTag_ = "grade-station";
+    series.fields_ = {{.name_ = "slope", .unit_ = "%", .codec_ = "fifths"}};
+    layer->addPointCodec("fifths", {.scale_ = .2});
+    layer->addPointSeries(std::move(series));
+    graph->finalize();
+
+    erdblick::TileLayerParser parser;
+    auto id = std::string(graph->schemaId());
+    parser.installMapSchema(schemaBytes(*graph), id);
+    parser.setDataSourceInfo(sourceFixture("Profiles", id));
+    const std::string prefix = "$attributes.Adas.GRADE.*.slo";
+    auto hints = parser.completeSearchQuery(prefix, static_cast<int>(prefix.size()), {{"scope", "shapepoint"}});
+    CHECK(hints.dump().find("slope") != std::string::npos);
+    // Ordinary feature completion between two vertex requests uses a different
+    // schema pool. The enum literal must still be completed on the grade occurrence.
+    parser.completeSearchQuery("i", 1, {{"scope", "feature"}});
+    const std::string enumPrefix = "$attributes.Adas.GRADE.*.direction == \"UP";
+    auto enumHints = parser.completeSearchQuery(enumPrefix, static_cast<int>(enumPrefix.size()), {{"scope", "shapepoint"}});
+    CHECK(enumHints.dump().find("UPHILL") != std::string::npos);
+
+    auto tile = std::make_shared<mapget::TileFeatureLayer>(mapget::TileId::fromWgs84(11., 48., 13),
+        "Profiles", "Profiles", parser.info_.at("Profiles").layers_.at("Road"), std::make_shared<mapget::StringPool>("Profiles"));
+    auto feature = tile->newFeature("Road", {{"roadId", 1}});
+    for (std::string_view name : {"centerline", "profile"}) {
+        auto geom = tile->newGeometry(mapget::GeomType::Line);
+        geom->setName(name);
+        geom->append({11., 48., 0.});
+        geom->append({11.001, 48., 0.});
+        feature->addGeometry(geom);
+    }
+    auto occurrence = feature->attributeLayers()->newLayer("Adas")->newAttribute("GRADE");
+    occurrence->setPointSeriesGeometry(1);
+    occurrence->validity()->newGeomName("profile", mapget::Validity::Positive);
+    auto values = tile->newArray();
+    values->append(int64_t{0});
+    values->append(int64_t{-13});
+    REQUIRE(occurrence->addField("codes", values));
+    auto inspect = [&](uint32_t geometry, uint32_t point) {
+        return *erdblick::InspectionConverter().convertAtShapePoint(feature, geometry, point, tile->sourceId());
+    };
+    auto children = [](nlohmann::json const& parent, nlohmann::json const& key) -> nlohmann::json const& {
+        auto const& rows = parent.is_array() ? parent : parent.at("children");
+        auto found = std::ranges::find_if(rows, [&](auto const& row) { return row.at("key") == key; });
+        REQUIRE(found != rows.end());
+        return *found;
+    };
+    auto readPoint = [&](auto const& tree, uint32_t geometry, uint32_t point) -> nlohmann::json const& {
+        return children(children(children(children(tree, "Geometry"), geometry), point), "Point attributes");
+    };
+    auto reading = inspect(1, 1);
+    const auto& output = children(readPoint(reading, 1, 1), "Adas.GRADE");
+    CHECK(children(output, "slope").at("value").get<double>() == Catch::Approx(-2.6));
+    const auto& sample = children(children(children(output, "Measurements"), "slope"), 0);
+    CHECK(children(sample, "unit").at("value") == "%");
+    const auto& record = children(children(sample, "contributors"), 0);
+    CHECK(children(record, "raw").at("value") == -13);
+    const auto& rawOccurrence = children(children(children(reading, "Attribute Layers"), "Adas"), "GRADE");
+    CHECK(record.at("sourceNodeId") == children(children(rawOccurrence, "codes"), 1).at("nodeId"));
+    const auto& validities = children(rawOccurrence, "validity");
+    REQUIRE(validities.at("children").size() == 3);
+    CHECK(children(children(validities, 0), "direction").at("value") == "POSITIVE");
+    const auto& station = children(validities, 2);
+    CHECK(station.at("hoverId") == "Road.1:attribute#0:validity#2");
+    CHECK(children(station, "tag").at("value") == "grade-station");
+    CHECK_FALSE(station.contains("pointIndex"));
+    const auto& marker = children(children(children(station, "Measurements"), "slope"), 0);
+    CHECK(children(marker, "value").at("value").get<double>() == Catch::Approx(-2.6));
+    CHECK(children(children(marker, "contributors"), 0).at("sourceNodeId") == record.at("sourceNodeId"));
+    CHECK(rawOccurrence.dump().find("_mapgetPointSeriesGeometry") == std::string::npos);
+    auto zero = inspect(1, 0);
+    CHECK(children(children(readPoint(zero, 1, 0), "Adas.GRADE"), "slope").at("value") == 0);
+    auto centerline = inspect(0, 1);
+    CHECK(readPoint(centerline, 0, 1).at("value") == "No attributes cover this vertex.");
+}
 
 TEST_CASE(
     "Schema installation validates supplied bytes even with a warm graph cache",
@@ -273,27 +397,50 @@ TEST_CASE("Invalid metadata replacement preserves the previous bound graph", "[e
 }
 
 TEST_CASE(
-    "Scalar metadata preserves enum ordinals separately from logical labels",
-    "[erdblick.schema]")
+    "Enum metadata and inspection preserve exact ordinals separately from logical values",
+    "[erdblick.schema][erdblick.inspection]")
 {
     auto graph = std::make_shared<mapget::MapSchema>();
     auto layer = graph->newLayer("Raw", mapget::LayerType::SourceData);
-    auto type = graph->newScalarType(simfil::SchemaType::Kind::String);
+    using Type = simfil::SchemaType;
+    using namespace std::string_view_literals;
+    auto type = graph->newCompositionType(Type::Composition::AnyOf);
+    type.addAlternative(graph->newScalarType(Type::Kind::String));
+    type.addAlternative(graph->newScalarType(Type::Kind::Int));
     layer->setRootSchema(type.id());
     type.addNamedValue({.name = "LOW", .value = std::string_view{"LOW"}, .rawValue = int64_t{-1}});
     type.addNamedValue({.name = "HIGH", .value = std::string_view{"HIGH"}, .rawValue = UINT64_MAX});
     type.addNamedValue({.name = "PLAIN", .value = std::string_view{"PLAIN"}});
+    type.addNamedValue({.name = "ZERO", .value = "ZERO"sv, .rawValue = uint64_t{0}});
+    type.addNamedValue({.name = "FIRST", .value = "shared"sv, .rawValue = int64_t{1}});
+    type.addNamedValue({.name = "SECOND", .value = "shared"sv, .rawValue = int64_t{2}});
     graph->finalize();
 
     auto metadata = erdblick::JsValue::fromSchema(type);
     auto const& values = (*metadata).at("namedValues");
-    REQUIRE(values.size() == 3);
+    REQUIRE(values.size() == 6);
     CHECK((*metadata).at("typeId") == type.id());
     CHECK(values[0].at("value") == "LOW");
     CHECK(values[0].at("rawValue") == -1);
     CHECK(values[1].at("value") == "HIGH");
     CHECK(values[1].at("rawValue") == "18446744073709551615");
     CHECK_FALSE(values[2].contains("rawValue"));
+
+    auto checkLabel = [&](auto raw, std::string_view expected) {
+        CAPTURE(raw);
+        erdblick::InspectionConverter::InspectionNode node;
+        REQUIRE(node.setScalarValue(simfil::Value::make(raw).withSchemaType(type)));
+        CHECK(*node.value_ == raw);
+        CHECK(node.displayValue_ == expected);
+    };
+    checkLabel("LOW"sv, "-1 (LOW)");
+    checkLabel("HIGH"sv, "18446744073709551615 (HIGH)");
+    checkLabel("ZERO"sv, "0 (ZERO)");
+    checkLabel("PLAIN"sv, "");
+    checkLabel("shared"sv, "shared (FIRST, SECOND)");
+    checkLabel(int64_t{-1}, "-1 (LOW)"); // Must not also match UINT64_MAX.
+    checkLabel(int64_t{0}, "0 (ZERO)");
+    checkLabel(int64_t{42}, "");
 }
 
 TEST_CASE(
@@ -545,16 +692,17 @@ TEST_CASE(
     Node unlimited;
     REQUIRE(unlimited.setScalarValue(fixture.number(255, fixture.speed)));
     CHECK(*unlimited.value_ == 255);
-    CHECK(unlimited.displayValue_.find("UNLIMITED") != std::string::npos);
-    CHECK(unlimited.displayValue_.find("km/h") == std::string::npos);
+    CHECK(unlimited.displayValue_ == "255 (UNLIMITED)");
     Node ordinary;
     REQUIRE(ordinary.setScalarValue(fixture.number(0, fixture.classicSpeed)));
-    CHECK(ordinary.displayValue_.find("UNDEFINED") == std::string::npos);
+    CHECK(ordinary.displayValue_.empty());
+    Node measured;
+    REQUIRE(measured.setScalarValue(fixture.number(80, fixture.speed)));
+    CHECK(measured.displayValue_ == "80 km/h");
     Node width;
     REQUIRE(width.setScalarValue(fixture.number(12, fixture.width)));
     CHECK(*width.value_ == 12);
-    CHECK(width.displayValue_.find(" m") != std::string::npos);
-    CHECK(width.displayValue_.find("raw 12") != std::string::npos);
+    CHECK(width.displayValue_ == "1.2 m (raw 12)");
     Node computed;
     REQUIRE(computed.setScalarValue(simfil::Value(int64_t{255})));
     CHECK(computed.displayValue_.empty());

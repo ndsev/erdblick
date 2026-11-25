@@ -83,6 +83,7 @@ public:
     struct TileLayerMetadata {
         std::string id;
         std::string stringPoolId;
+        std::string sourceId;
         std::string mapName;
         std::string layerName;
         /** Tagged partition identity; object ids remain decimal strings. */

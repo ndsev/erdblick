@@ -1,0 +1,45 @@
+{
+  "attribute": "CURVATURE",
+  "attributeLayer": "LaneAdasLayerWithGeo",
+  "channelOrdinal": 0,
+  "entryOrdinal": 0,
+  "partitionKey": "Features:PointFixture:Lane:545555028",
+  "raw": 7,
+  "recordIndex": 0,
+  "recordPath": [
+    "records",
+    0,
+    "code"
+  ],
+  "row": {
+    "featureId": "Lane.545555028.2",
+    "geometryName": "ADAS",
+    "geometryOrdinal": 1,
+    "hostValueErrors": [],
+    "hostValues": [
+      [
+        2
+      ]
+    ],
+    "pointIndex": 1,
+    "position": [
+      11.566627986729145,
+      48.167783975601196,
+      0.0
+    ],
+    "sourceGeometryType": "line",
+    "type": "ShapePointEntry",
+    "valueErrors": [],
+    "values": [
+      [
+        -0.15296
+      ],
+      [
+        null
+      ]
+    ]
+  },
+  "schemaId": "mapget-schema:sha256:931891b2386a05f7d28d5560db46a36575bb28899b8fd7b13eff12a4d16f2f73",
+  "sourceId": "shape-point-test-source",
+  "unit": "m^-1"
+}

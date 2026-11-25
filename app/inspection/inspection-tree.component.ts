@@ -10,7 +10,6 @@ import {
     input,
     output
 } from "@angular/core";
-import { toObservable } from "@angular/core/rxjs-interop";
 import { DomSanitizer } from "@angular/platform-browser";
 import { MenuItem, TreeNode, TreeTableNode } from "primeng/api";
 import { Menu } from "primeng/menu";
@@ -27,6 +26,7 @@ import type { FeatureSearchMapLayerRef } from "../search/search-definition.model
 import { InfoMessageService } from "../diagnostics/info.service";
 import {
     isFeatureInspectionSubTarget,
+    formatFeatureInspectionTarget,
     parseFeatureInspectionTarget,
     stripFeatureInspectionTarget
 } from "./feature-identity.model";
@@ -70,7 +70,7 @@ export class FeatureFilterOptions {
                      [resizableColumns]="true"
                      [rowHover]="true"
                      [virtualScroll]="true"
-                     [virtualScrollItemSize]="'1.5em'"
+                     [virtualScrollItemSize]="rowHeightPx"
                      [tableStyle]="{'min-height': '1px', 'padding': '0px'}"
                      [globalFilterFields]="filterFields">
             <ng-template pTemplate="caption">
@@ -195,6 +195,28 @@ export class FeatureFilterOptions {
                                     }
                                     @if (col.key === "key" && rowData["incomingLoading"]) {
                                         <i class="pi pi-spinner pi-spin" role="status" aria-label="Loading incoming relations"></i>
+                                    }
+                                    @if (col.key === "value" && rowData["pointTarget"] && !rowData["pointSelected"]) {
+                                        <button type="button" class="inspection-value-action" data-testid="inspect-shape-point"
+                                                aria-label="Inspect vertex" title="Inspect vertex measurements"
+                                                (click)="inspectPointRow($event, rowData)"><i class="pi pi-search"></i></button>
+                                    }
+                                    @if (col.key === "value" && rowData["pointRange"]; as range) {
+                                        <span (click)="$event.stopPropagation()">
+                                            <input #vertex type="number" aria-label="Vertex index" placeholder="Vertex index"
+                                                   min="0" [max]="range.count - 1" step="1" style="width: 8em"
+                                                   (keydown.enter)="inspectVertexIndex($event, rowData, vertex)"/>
+                                            <button type="button" (click)="inspectVertexIndex($event, rowData, vertex)">Inspect</button>
+                                        </span>
+                                    }
+                                    @if (col.key === "value" && rowData["sourceNodeId"]) {
+                                        <button type="button" class="inspection-value-action" aria-label="Open source record"
+                                                title="Open source record"
+                                                (click)="onValueBubbleClick($event, {targetNodeId: rowData['sourceNodeId']})">
+                                            <i class="pi pi-arrow-up-right"></i></button>
+                                    }
+                                    @if (col.key === "value" && rowData["reopenPointTarget"]; as target) {
+                                        <button type="button" (click)="inspectPointRow($event, target)">Open current feature</button>
                                     }
                                     @if (col.key === "key" && rowData["retryIncoming"]) {
                                         <button type="button" aria-label="Reload incoming relations"
@@ -367,7 +389,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private static readonly DOCK_RESIZE_PAUSE_START_EVENT = "erdblick-dock-resize-start";
     private static readonly DOCK_RESIZE_PAUSE_END_EVENT = "erdblick-dock-resize-end";
     private activeSoftHoverGroupId?: string;
-    private activeStrongHoverGroupId?: string;
+    private activeStrongHoverGroupIds?: ReadonlySet<string>;
     private activeFeatureIdNodeId?: string;
     private foreignReferenceHover: AbortController | null = null;
     private foreignReferenceSelection: AbortController | null = null;
@@ -383,7 +405,8 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     columns = input.required<Column[]>();
     panelId = input.required<number>();
     firstHighlightedItemIndex = input<number>();
-    firstHighlightedItemIndex$ = toObservable(this.firstHighlightedItemIndex);
+    /** Initial estimate until a visible row can be measured at the user's font size. */
+    protected rowHeightPx = 22;
     subscriptions: Subscription[] = [];
     filterOptions = input<FeatureFilterOptions>();
     filterText = input<string | undefined>();
@@ -534,9 +557,6 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             this.suppressFilterEmit = false;
             this.cdr.markForCheck();
         });
-        this.subscriptions.push(this.firstHighlightedItemIndex$.subscribe(index => {
-            this.scrollToHighlightedIndex(index);
-        }));
         this.subscriptions.push(this.inspectionState.state.inspectionTreeExpandByDefaultState.subscribe(expandByDefault => {
             if (!this.data.length) {
                 return;
@@ -688,6 +708,15 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             return;
         }
 
+        // PrimeNG takes a pixel count for virtual scrolling. A CSS length falls
+        // back to 28 px, which can put a selected vertex hundreds of rows away.
+        const host = this.table.el.nativeElement as HTMLElement;
+        const row = host.querySelector(".p-treetable-tbody > tr[data-inspection-node-id]");
+        const height = row?.getBoundingClientRect().height;
+        if (height && height !== this.rowHeightPx) {
+            this.rowHeightPx = height;
+            this.cdr.detectChanges();
+        }
         scroller.setSpacerSize?.();
         scroller.setSize?.();
         scroller.calculateOptions?.();
@@ -771,10 +800,34 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             return;
         }
         const node: TreeNode = rowNode.node;
+        if (node.data?.pointTarget && !node.data.pointSelected) {
+            this.inspectPointRow(event, node.data);
+            return;
+        }
         node.expanded = !node.expanded;
         this.data = [...this.data];
         this.refreshLayout();
         this.cdr.markForCheck();
+    }
+
+    /** The geometry row and the rendered marker select the same physical vertex. */
+    protected inspectPointRow(event: MouseEvent, row: {mapTileKey: string; inspectedFeatureId: string; pointTarget: string}): void {
+        event.stopPropagation();
+        this.inspectionState.openInspectionTarget(this.panelId(), row.mapTileKey, row.inspectedFeatureId, row.pointTarget);
+    }
+
+    /** Jump directly to an original vertex outside the point cloud's bounded coordinate preview. */
+    protected inspectVertexIndex(event: Event, row: any, input: HTMLInputElement): void {
+        event.stopPropagation();
+        const index = input.valueAsNumber;
+        if (!Number.isInteger(index) || index < 0 || index >= row.pointRange.count) {
+            input.setCustomValidity(`Enter a vertex index from 0 to ${row.pointRange.count - 1}.`);
+            input.reportValidity();
+            input.setCustomValidity("");
+            return;
+        }
+        const target = formatFeatureInspectionTarget({scope: "shapepoint", ...row.pointRange, pointIndex: index});
+        this.inspectionState.openInspectionTarget(this.panelId(), row.mapTileKey, row.inspectedFeatureId, target);
     }
 
     /** Opens feature-id navigation from the value column while preserving text-selection behavior. */
@@ -1240,21 +1293,23 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             if (this.inspectionMenuItems.length) {
                 this.inspectionMenuItems.push({ separator: true });
             }
-            const targetLabel = parseFeatureInspectionTarget(inspectionTarget)
-                .scope === "relation"
-                ? "Relation/Validity"
-                : "Attr/Validity";
+            const scope = parseFeatureInspectionTarget(inspectionTarget).scope;
+            const targetLabel = scope === "shapepoint" ? "vertex" : scope === "relation" ? "Relation/Validity" : "Attr/Validity";
             const baseId = stripFeatureInspectionTarget(inspectionTarget);
             const ownedByPanel = this.inspectionState.state.selection.find(panel => panel.id === this.panelId())
                 ?.features.some(feature => feature.mapTileKey === mapTileKey
                     && stripFeatureInspectionTarget(feature.featureId) === baseId);
             this.inspectionMenuItems.push({
-                label: !ownedByPanel ? "Inspect source relation" : this.isInspectionTargetHighlighted(mapTileKey, inspectionTarget)
+                label: !ownedByPanel ? (scope === "shapepoint" ? "Inspect vertex" : "Inspect source relation") : this.isInspectionTargetHighlighted(mapTileKey, inspectionTarget)
                     ? `Unhighlight ${targetLabel}`
                     : `Highlight ${targetLabel}`,
                 icon: 'pi pi-bullseye',
                 command: () => {
-                    if (ownedByPanel) {
+                    if (ownedByPanel && scope === "shapepoint" && rowData["inspectedFeatureId"]) {
+                        const current = rowData["inspectedFeatureId"];
+                        this.inspectionState.openInspectionTarget(this.panelId(), mapTileKey, current,
+                            current === inspectionTarget ? baseId : inspectionTarget);
+                    } else if (ownedByPanel) {
                         this.inspectionState.toggleInspectionFeatureHighlight(this.panelId(), mapTileKey, inspectionTarget);
                     } else {
                         this.inspectionState.setSelection([{ mapTileKey, featureId: inspectionTarget }]);
@@ -1415,12 +1470,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Activates row-based soft or strong hover highlighting while the pointer is over a row. */
     onRowHover(rowData: any) {
         this.claimMapHover(this.rowHoverOwner(rowData));
-        this.activeSoftHoverGroupId = typeof rowData?.["softHoverGroupId"] === "string"
+        const referenceIds: string[] | undefined = rowData?.referenceHoverIds;
+        this.activeSoftHoverGroupId = !referenceIds && typeof rowData?.["softHoverGroupId"] === "string"
             ? rowData["softHoverGroupId"]
             : undefined;
-        this.activeStrongHoverGroupId = typeof rowData?.["strongHoverGroupId"] === "string"
-            ? rowData["strongHoverGroupId"]
-            : undefined;
+        this.activeStrongHoverGroupIds = referenceIds ? new Set(referenceIds)
+            : rowData?.strongHoverGroupId ? new Set([rowData.strongHoverGroupId]) : undefined;
         this.activeFeatureIdNodeId = undefined;
         this.highlightRowHoverTarget(rowData);
     }
@@ -1431,16 +1486,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.deferMapHoverTransition(owner, () => {
             this.activeMapHoverOwner = undefined;
             this.activeSoftHoverGroupId = undefined;
-            this.activeStrongHoverGroupId = undefined;
+            this.activeStrongHoverGroupIds = undefined;
             this.activeFeatureIdNodeId = undefined;
-            if (!rowData.hasOwnProperty("type") &&
-                !rowData.hasOwnProperty("hoverId") &&
-                !rowData.hasOwnProperty("softHoverGroupId")) {
-                return;
-            }
-            if (rowData["type"] === this.InspectionValueType.FEATUREID.value ||
+            if (rowData.referenceHoverIds ||
                 rowData["hoverId"] ||
-                rowData["softHoverGroupId"]) {
+                rowData["softHoverGroupId"] ||
+                (rowData.type !== undefined && rowData.type === this.InspectionValueType.FEATUREID.value)) {
                 this.mapService.setHoveredFeatures([]);
             }
         }, true);
@@ -1471,23 +1522,16 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         });
     }
 
-    /** Chooses the strongest available hover target annotation for a tree row and forwards it to the map. */
+    /** Dispatch exact property slots together so the local mask or authored hover rule draws them all. */
     private highlightRowHoverTarget(rowData: any) {
-        const hoverId = typeof rowData["strongHoverGroupId"] === "string"
-            ? String(rowData["strongHoverGroupId"])
-            : typeof rowData["softHoverGroupId"] === "string"
-                ? String(rowData["softHoverGroupId"])
-                : typeof rowData["hoverId"] === "string"
-                    ? String(rowData["hoverId"])
-                    : "";
-        const mapTileKey = typeof rowData["mapTileKey"] === "string"
-            ? rowData["mapTileKey"]
-            : undefined;
-        if (!mapTileKey || !hoverId) {
+        const mapTileKey = rowData.mapTileKey;
+        const inherited = rowData.strongHoverGroupId ?? rowData.softHoverGroupId ?? rowData.hoverId;
+        const ids: string[] = rowData.referenceHoverIds ?? (inherited ? [inherited] : []);
+        if (!mapTileKey || !ids.length) {
             this.mapService.setHoveredFeatures([]);
             return;
         }
-        this.mapService.setHoveredFeatures([{ mapTileKey, featureId: hoverId }], true);
+        this.mapService.setHoveredFeatures(ids.map(featureId => ({mapTileKey, featureId})), true);
     }
 
     /** Highlights a referenced feature locally when present and permits the authored remote fallback otherwise. */
@@ -1626,8 +1670,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             "inspection-selection-strong": rowData?.["selectionHighlight"] === "strong",
             "inspection-hover-soft": !!this.activeSoftHoverGroupId &&
                 softHoverGroupId === this.activeSoftHoverGroupId,
-            "inspection-hover-strong": !!this.activeStrongHoverGroupId &&
-                strongHoverGroupId === this.activeStrongHoverGroupId
+            "inspection-hover-strong": !!this.activeStrongHoverGroupIds?.has(
+                rowData?.referenceHoverIds?.length === 1 ? rowData.referenceHoverIds[0] : strongHoverGroupId ?? ""
+            )
         };
     }
 

@@ -792,6 +792,24 @@ TEST_CASE("FeatureInspection preserves external feature-reference map ids", "[er
     }
 }
 
+TEST_CASE("Undeclared pointValidities remains an ordinary producer field in inspection", "[erdblick.inspection][shapepoint]")
+{
+    auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    auto attr = feature->attributeLayers()->newLayer("Survey")->newAttribute("counts");
+    auto counts = tile->newArray();
+    counts->append(int64_t{7});
+    REQUIRE(attr->addField("pointValidities", counts));
+    const auto tree = InspectionConverter().convert(feature);
+    const auto* row = findInspectionNodeByKey(*tree, "counts");
+    REQUIRE(row);
+    const auto& children = row->at("children");
+    REQUIRE(std::ranges::count_if(children, [](auto const& child) { return child.at("key") == "pointValidities"; }) == 1);
+    const auto* field = findInspectionNodeByKey(*row, "pointValidities");
+    REQUIRE(field);
+    CHECK(field->at("children").at(0).at("value") == 7);
+}
+
 TEST_CASE("FeatureInspection exposes traversal-based attribute hover ids", "[erdblick.inspection]")
 {
     auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));
@@ -827,6 +845,61 @@ TEST_CASE("FeatureInspection exposes traversal-based attribute hover ids", "[erd
             hoverIds.begin(),
             hoverIds.end(),
             "Way.1:attribute#1:validity#0") != hoverIds.end());
+}
+
+TEST_CASE(
+    "Property references preserve stored validity slots, coordinates and provenance",
+    "[erdblick.inspection][validity-reference]")
+{
+    auto tile = makeExternalReferenceInspectionTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    auto attr = feature->attributeLayers()->newLayer("survey")->newAttribute("stations");
+    attr->validity()->newDirection(mapget::Validity::Positive);
+    auto observations = tile->newArray();
+    auto position = tile->newGeometry(mapget::GeomType::Points);
+    position->append({42.015625, 11.03125, 17.});
+    position->setSourceDataReferences(makeInspectionSourceDataRefs(*tile, "survey-bits", 48));
+    for (uint32_t index : {1u, 2u}) {
+        attr->validity()->newGeometry(position)->setTag("survey-position");
+        auto row = tile->newObject();
+        REQUIRE(row->addField("rawReading", int64_t(100 + index)));
+        REQUIRE(row->addField("station", tile->newValidityReference(attr, index)));
+        observations->append(row);
+    }
+    // The same enumerable JSON shape in an ordinary object is not a reference.
+    auto lookalike = tile->newObject();
+    REQUIRE(lookalike->addField("$mapgetValidity", int64_t(1)));
+    observations->append(lookalike);
+    REQUIRE(attr->addField("observations", observations));
+
+    auto tree = InspectionConverter().convert(feature);
+    auto const* list = findInspectionNodeByKey(*tree, "observations");
+    REQUIRE(list);
+    auto const& rows = list->at("children");
+    REQUIRE(rows.size() == 3);
+    for (uint32_t index : {1u, 2u}) {
+        auto const& row = rows.at(index - 1);
+        auto const* raw = findInspectionNodeByKey(row, "rawReading");
+        REQUIRE(raw);
+        CHECK(raw->at("value") == 100 + index);
+        auto const* ref = findInspectionNodeByKey(row, "station");
+        REQUIRE(ref);
+        CHECK(ref->at("referenceHoverId") == "Way.1:attribute#1:validity#" + std::to_string(index));
+        auto const* ordinal = findInspectionNodeByKey(*ref, "$mapgetValidity");
+        REQUIRE(ordinal);
+        CHECK(ordinal->at("value") == index);
+        CHECK(
+            ref->at("sourceDataReferences")
+                .at(0)
+                .at("mapTileKey")
+                .get<std::string>()
+                .find("survey-bits") != std::string::npos);
+        auto const stored = position->pointAt(0);
+        CHECK(ref->at("value") == nlohmann::json::array({stored.x, stored.y, stored.z}));
+        CHECK_FALSE(ref->contains("pointIndex"));
+        CHECK_FALSE(ref->contains("valueBubbles"));
+    }
+    CHECK_FALSE(rows.at(2).contains("referenceHoverId"));
 }
 
 TEST_CASE("FeatureInspection copies canonical array search paths", "[erdblick.inspection]")
@@ -891,8 +964,54 @@ TEST_CASE("FeatureInspection bounds point previews across clusters without trunc
     REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[2].coordinates[56]"));
     REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[3].coordinates[0]"));
     REQUIRE((*inspection).dump().find("Showing 0 of 200 coordinates") != std::string::npos);
+    REQUIRE(tile->sourceId().empty());
+    const auto picked = InspectionConverter().convertAtShapePoint(feature, 3, 150, "");
+    auto vertex = findInspectionNodeByGeoJsonPath(*picked, "geometry.geometries[3].coordinates[150]");
+    REQUIRE(vertex);
+    REQUIRE(vertex->at("geometryOrdinal") == 3);
+    REQUIRE(vertex->at("pointIndex") == 150);
+    REQUIRE(findInspectionNodeByKey(*vertex, "Point attributes"));
+    REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*picked, "geometry.geometries[3].coordinates[149]"));
     REQUIRE(feature->geom()->toJson() == exported);
     REQUIRE(exported.at("geometries").at(3).at("coordinates").size() == 200);
+}
+
+TEST_CASE("Shape-point inspection and focus use the current provider's feature and vertex bounds",
+          "[erdblick.inspection][shapepoint]")
+{
+    auto load = [](std::vector<mapget::Point> const& points) {
+        auto tile = std::make_shared<mapget::TileFeatureLayer>(
+            mapget::TileId::fromWgs84(42., 11., 13), "point-pool", "Map", lineTestLayerInfo(),
+            std::make_shared<mapget::StringPool>("point-pool"));
+        tile->setSourceId("survey");
+        tile->newFeature("Way", {{"wayId", 1}})->addLine(points);
+        return tile;
+    };
+    const auto previous = load({{42, 11, 0}, {42, 11, 10}, {42, 11, 20}});
+    const auto current = load({{42, 11, 0}, {42, 11, 35}});
+    const auto oldFeature = previous->find("Way.1");
+    const auto feature = current->find("Way.1");
+    REQUIRE(oldFeature);
+    REQUIRE(feature);
+    CHECK((*InspectionConverter::shapePointPosition(oldFeature, 0, 1, "survey")).at("z") == 10);
+    CHECK((*InspectionConverter::shapePointPosition(feature, 0, 1, "survey")).at("z") == 35);
+    auto selected = InspectionConverter().convertAtShapePoint(feature, 0, 1, "survey");
+    CHECK(findInspectionNodeByKey(*selected, "Point attributes"));
+
+    auto unavailable = [](auto const& selectedFeature, uint32_t geometry, uint32_t index, std::string const& source) {
+        CAPTURE(geometry, index, source);
+        auto tree = InspectionConverter().convertAtShapePoint(selectedFeature, geometry, index, source);
+        auto row = findInspectionNodeByKey(*tree, "Shape point unavailable");
+        REQUIRE(row);
+        CHECK(row->at("reopenFeature") == true);
+        CHECK_FALSE(findInspectionNodeByKey(*tree, "Point attributes"));
+        CHECK((*InspectionConverter::shapePointPosition(selectedFeature, geometry, index, source)).is_null());
+    };
+    unavailable(feature, 0, 2, "survey"); // This vertex existed in the previous feature.
+    unavailable(feature, 1, 0, "survey");
+    unavailable(feature, 0, 1, "another-provider");
+    unavailable(feature, 0, 1, ""); // An unspecified provider is not a wildcard.
+    unavailable(current->find("Way.2"), 0, 1, "survey");
 }
 
 TEST_CASE("FeatureInspection copies geometry search paths", "[erdblick.inspection]")

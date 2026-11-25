@@ -26,6 +26,30 @@ describe("inspectionSearchNumberLiteral", () => {
 });
 
 describe("expandPathToFirstHighlightedRow", () => {
+    it("opens measurements on a formerly collapsed coordinate and counts expanded rows before it", () => {
+        const field: TreeTableNode = {data: {key: "curvature"}, expanded: false};
+        const measurements: TreeTableNode = {data: {key: "Measurements"}, children: [field]};
+        const occurrence: TreeTableNode = {data: {key: "LaneAdasLayerWithGeo.CURVATURE"}, children: [measurements]};
+        const restriction: TreeTableNode = {data: {key: "PROHIBITED_PASSAGE"}, expanded: false};
+        const attributes: TreeTableNode = {data: {key: "Point attributes"}, children: [restriction, occurrence]};
+        const point: TreeTableNode = {
+            data: {key: 31, inspectionFocus: true, pointSelected: true},
+            expanded: false, children: [attributes]
+        };
+        const geometry: TreeTableNode = {data: {key: "Geometry"}, expanded: false, children: [point]};
+        const relations: TreeTableNode = {
+            data: {key: "Relations"}, expanded: true,
+            children: Array.from({length: 200}, (_, key) => ({data: {key}}))
+        };
+
+        expect(expandPathToFirstHighlightedRow([relations, geometry])).toBe(202);
+        expect([geometry, point, attributes, occurrence, measurements].map(row => row.expanded))
+            .toEqual([true, true, true, true, true]);
+        expect(attributes.children).toEqual([occurrence, restriction]);
+        expect(restriction.expanded).toBe(false);
+        expect(field.expanded).toBe(false);
+    });
+
     it("reopens a restored collapsed path and returns the resulting visible index", () => {
         const highlighted: TreeTableNode = {
             data: { key: "target", styleClass: "source-data-field highlight" }

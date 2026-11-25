@@ -17,6 +17,28 @@ const target = (featureId: string, mapTileKey = "Map/Layer/42") => ({
 });
 
 describe("tile feature interaction identity", () => {
+    it("restores the original vertex and datasource through a URL round trip", () => {
+        const point = {scope: "shapepoint" as const, baseFeatureId: "Lane.545555028.2", geometryOrdinal: 1,
+            pointIndex: 0, sourceId: "source/@南~1"};
+        const encoded = formatFeatureInspectionTarget(point);
+        expect(encoded).not.toContain("~");
+        const url = new URLSearchParams({selection: encoded}).toString();
+        expect(parseFeatureInspectionTarget(new URLSearchParams(url).get("selection")!)).toEqual(point);
+        expect(stripFeatureInspectionTarget(encoded)).toBe(point.baseFeatureId);
+        expect(stripFeatureInspectionValidity(encoded)).toBe(encoded);
+        expect(hasFeatureInspectionValidity(encoded)).toBe(false);
+        expect(formatFeatureInspectionTarget({...point, geometryOrdinal: 0})).not.toBe(encoded);
+        expect(formatFeatureInspectionTarget({...point, sourceId: ""})).not.toBe(encoded);
+        const standalone = {...point, sourceId: ""};
+        expect(parseFeatureInspectionTarget(formatFeatureInspectionTarget(standalone))).toEqual(standalone);
+    });
+
+    it("does not reinterpret extra suffix fields or out-of-range ordinals as a vertex", () => {
+        for (const id of ["Road.7:shapepoint#0.2@survey@extra", "Road.7:shapepoint#0.4294967296@survey"]) {
+            expect(parseFeatureInspectionTarget(id)).toEqual({scope: "feature", baseFeatureId: id});
+        }
+    });
+
     it("writes named foreign parts without losing integer precision, names or string types", () => {
         const reference = {
             mapId: "Target / map", typeId: "Road",

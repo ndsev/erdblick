@@ -5,8 +5,65 @@ import {
     vi
 } from "vitest";
 import {FeaturePanelComponent} from "../../../app/inspection/feature-panel.component";
+import {InspectionTreeComponent} from "../../../app/inspection/inspection-tree.component";
+
+describe("property validity hover", () => {
+    it("dispatches exactly the referenced attribute slots, independent of names, coordinates and visible rows", async () => {
+        const panel = Object.create(FeaturePanelComponent.prototype) as any;
+        const mapTileKey = "F:map:layer:42";
+        panel.selectedFeatures = [{featureId: "Way.1", mapTileKey, featureTile: {mapName: "map"}}];
+        const coordinates = [11.566950012345, 48.16831, 0];
+        const station = (index: number) => ({key: "observation", children: [
+            {key: "raw", value: 23},
+            {key: "binding", type: 129, referenceHoverId: "Way.1:attribute#4:validity#" + index, value: coordinates}
+        ]});
+        const [section] = panel.getFeatureTreeDataFromModel([[{key: "Attribute Layers", children: [
+            {key: "survey", hoverId: "Way.1:attribute#4", children: [
+                {key: "readings", type: 128, children: [station(0),
+                    {key: "unbound", children: [{key: "$mapgetValidity", value: 0}]},
+                    station(2), station(0)]}
+            ]}
+        ]}]]);
+        const attribute = section.children[0];
+        const readings = attribute.children[0];
+        const [first, unbound, second] = readings.children;
+        expect(first.children[1].data.value).toBe("11.56695001, 48.16831, 0");
+        expect(coordinates).toEqual([11.566950012345, 48.16831, 0]);
+        const tree = Object.create(InspectionTreeComponent.prototype) as any;
+        tree.mapService = {setHoveredFeatures: vi.fn()};
+        tree.cdr = {markForCheck: vi.fn()};
+        tree.mapHoverEpoch = 0;
+        const target = (slot: number) => ({mapTileKey, featureId: "Way.1:attribute#4:validity#" + slot});
+        tree.onRowHover(readings.data);
+        expect(tree.mapService.setHoveredFeatures).toHaveBeenLastCalledWith([target(0), target(2)], true);
+        tree.onRowHover(first.children[0].data);
+        expect(tree.mapService.setHoveredFeatures).toHaveBeenLastCalledWith([target(0)], true);
+        tree.onRowHover(second.data);
+        expect(tree.mapService.setHoveredFeatures).toHaveBeenLastCalledWith([target(2)], true);
+        tree.onRowHover(unbound.children[0].data);
+        expect(tree.mapService.setHoveredFeatures).toHaveBeenLastCalledWith([]);
+        tree.onRowHover(attribute.data);
+        expect(tree.mapService.setHoveredFeatures).toHaveBeenLastCalledWith([{mapTileKey, featureId: attribute.data.hoverId}], true);
+        tree.onRowHover(readings.data);
+        tree.onRowHoverExit(readings.data);
+        await Promise.resolve();
+        expect(tree.mapService.setHoveredFeatures).toHaveBeenLastCalledWith([]);
+    });
+});
 
 describe("point cloud selection and export", () => {
+    it("opens the current host at the picked geometry and vertex ordinals", () => {
+        const model = vi.fn(() => []);
+        const component = Object.create(FeaturePanelComponent.prototype) as any;
+        component.treeData = [];
+        component.incoming = new Map();
+        component.panel = () => ({id: 1, features: [{featureId: "Lane.2:shapepoint#1.0@feed",
+            mapTileKey: "Features:Map:Lane:42", featureTile: {sourceId: "feed"},
+            peek: (cb: any) => cb({inspectionModelAtShapePoint: model})}]});
+        component.getFeatureTreeDataFromModel = () => [];
+        component.rebuildInspectionTree();
+        expect(model).toHaveBeenCalledWith(1, 0, "feed");
+    });
     it("rebuilds inspection without exporting geometry and exports all coordinates on demand", () => {
         const coordinates = Array.from({length: 1000}, (_, i) => [8.7, 47.4, i]);
         const native = {
@@ -28,8 +85,28 @@ describe("point cloud selection and export", () => {
 
     it("does not put empty comma-separated entries into exports when a wrapper is unavailable", () => {
         const component = Object.create(FeaturePanelComponent.prototype) as any;
-        component.selectedFeatures = [{peek: () => null}, {peek: () => '{"type":"Feature"}'}];
+        component.selectedFeatures = [
+            {featureId: "Road.1", peek: () => null},
+            {featureId: "Road.2", peek: () => '{"type":"Feature"}'}
+        ];
         expect(JSON.parse(component.exportGeoJson()).features).toEqual([{type: "Feature"}]);
+    });
+
+    it("exports a vertex host only when its datasource and original indices still match", () => {
+        const component = Object.create(FeaturePanelComponent.prototype) as any;
+        const tile = {sourceId: "feed"};
+        const native = {shapePointPosition: vi.fn().mockReturnValueOnce({x: 0, y: 0, z: 0}).mockReturnValue(null),
+            geojson: vi.fn(() => '{"type":"Feature","id":"Lane.2"}')};
+        const peek = vi.fn(callback => callback(native));
+        component.selectedFeatures = [{featureId: "Lane.2:shapepoint#1.0@feed", featureTile: tile, peek}];
+        expect(JSON.parse(component.exportGeoJson()).features).toEqual([{type: "Feature", id: "Lane.2"}]);
+        tile.sourceId = "other";
+        expect(JSON.parse(component.exportGeoJson()).features).toEqual([]);
+        tile.sourceId = "feed";
+        expect(JSON.parse(component.exportGeoJson()).features).toEqual([]);
+        expect(peek).toHaveBeenCalledTimes(2);
+        expect(native.shapePointPosition).toHaveBeenCalledWith(1, 0, "feed");
+        expect(native.geojson).toHaveBeenCalledTimes(1);
     });
 });
 

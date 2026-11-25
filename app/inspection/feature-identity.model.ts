@@ -1,9 +1,10 @@
 /**
  * Feature identity schemas and compact inspection-target encoding.
- * These value operations keep feature, attribute and validity targets consistent
+ * These value operations keep feature, vertex, attribute and validity targets consistent
  * across inspection, selection, hover and search without loading a feature.
  */
 import { z } from "zod";
+import { encodeUrlToken } from "../appstate/url-state-codec.util";
 import { identifierSchema, indexSchema } from "../action/action.model";
 
 const count = indexSchema;
@@ -77,6 +78,11 @@ export const featureIdentitySchema = z.union([
     z.strictObject({
         ...inspectionTargetFields,
         mapTileKey: identifierSchema,
+        shapePoint: z.strictObject({
+            geometryOrdinal: indexSchema.max(0xffffffff),
+            pointIndex: indexSchema.max(0xffffffff),
+            sourceId: z.string().max(4096)
+        }).optional().describe("Datasource and original geometry and vertex ordinals on the current feature."),
         featureId: identifierSchema.describe("Full feature ID, including its feature-type prefix; copy an observed ID, not only its numeric parts.")
     }),
     z.strictObject({
@@ -110,6 +116,13 @@ export type FeatureInspectionTarget =
         baseFeatureId: string;
         relationIndex: number;
         validityIndex?: number;
+    }
+    | {
+        scope: "shapepoint";
+        baseFeatureId: string;
+        geometryOrdinal: number;
+        pointIndex: number;
+        sourceId: string;
     };
 
 const COMPACT_TILE_FEATURE_ID_PREFIX = "tfid:";
@@ -173,6 +186,19 @@ export function normalizeTileFeatureId(value: TileFeatureIdLike | string | null 
  * This parses syntax only; callers validate index range and target existence.
  */
 export function parseFeatureInspectionTarget(targetId: string): FeatureInspectionTarget {
+    const point = /^(.*):shapepoint#(\d+)\.(\d+)@([^@]*)$/.exec(targetId);
+    if (point) {
+        const geometryOrdinal = Number(point[2]);
+        const pointIndex = Number(point[3]);
+        if (geometryOrdinal <= 0xffffffff && pointIndex <= 0xffffffff) {
+            try {
+                return {scope: "shapepoint", baseFeatureId: point[1], geometryOrdinal, pointIndex,
+                    sourceId: decodeURIComponent(point[4])};
+            } catch {
+                // A feature ID can itself contain punctuation or an incomplete URL escape.
+            }
+        }
+    }
     const match = targetId.match(
         /^(.*):(attribute|relation)#(\d+)(?:(?::|,)validity#(\d+))?$/
     );
@@ -207,6 +233,10 @@ export function formatFeatureInspectionTarget(
     if (target.scope === "feature") {
         return target.baseFeatureId;
     }
+    if (target.scope === "shapepoint") {
+        return `${target.baseFeatureId}:shapepoint#${target.geometryOrdinal}.${target.pointIndex}`
+            + `@${encodeUrlToken(target.sourceId)}`;
+    }
     const entryIndex = target.scope === "attribute"
         ? target.attributeIndex
         : target.relationIndex;
@@ -216,7 +246,7 @@ export function formatFeatureInspectionTarget(
     return `${target.baseFeatureId}:${target.scope}#${entryIndex}${validitySuffix}`;
 }
 
-/** Returns true when an id addresses an attribute or relation inspection row. */
+/** Returns true when an ID selects a vertex, attribute, relation or validity on its host. */
 export function isFeatureInspectionSubTarget(targetId: string): boolean {
     return parseFeatureInspectionTarget(targetId).scope !== "feature";
 }
@@ -224,13 +254,13 @@ export function isFeatureInspectionSubTarget(targetId: string): boolean {
 /** Returns true when an id addresses one exact validity row. */
 export function hasFeatureInspectionValidity(targetId: string): boolean {
     const target = parseFeatureInspectionTarget(targetId);
-    return target.scope !== "feature" && target.validityIndex !== undefined;
+    return (target.scope === "attribute" || target.scope === "relation") && target.validityIndex !== undefined;
 }
 
 /** Removes only the validity suffix and retains its attribute or relation row. */
 export function stripFeatureInspectionValidity(targetId: string): string {
     const target = parseFeatureInspectionTarget(targetId);
-    if (target.scope === "feature" || target.validityIndex === undefined) {
+    if (target.scope === "feature" || target.scope === "shapepoint" || target.validityIndex === undefined) {
         return targetId;
     }
     return target.scope === "attribute"
@@ -260,7 +290,11 @@ export function tileFeatureInteractionTargetsEqual(
         first.featureId === second.featureId;
 }
 
-/** Removes inspection sub-target suffixes while preserving the base feature id for display. */
-export function displayFeatureId(featureId: string): string {
-    return stripFeatureInspectionTarget(featureId);
+/** Human-facing vertex labels keep both original ordinals without printing the datasource identifier. */
+export function displayFeatureId(featureId: string, includeEntrySuffix = false): string {
+    const target = parseFeatureInspectionTarget(featureId);
+    if (target.scope === "shapepoint") {
+        return `${target.baseFeatureId} · geometry ${target.geometryOrdinal}, vertex ${target.pointIndex}`;
+    }
+    return includeEntrySuffix ? featureId : target.baseFeatureId;
 }

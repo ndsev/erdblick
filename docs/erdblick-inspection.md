@@ -121,7 +121,18 @@ already-suffixed identity supplied with mapTileKey is returned unchanged. The re
 loading inspection panel and does not certify that an arbitrary supplied index exists or that
 validity geometry has finished rendering.
 
-When you hover validity-aware nodes in the tree, erdblick tries to highlight the most specific validity that matches the hovered attribute or subnode. If no single validity is the right match, it falls back to showing all validities attached to that node.
+Hover an attribute to highlight its validities, or hover a validity row to highlight
+just that entry. If a property contains a validity reference, hovering the property
+highlights the referenced location. Hover its enclosing list to highlight the set
+of locations referenced inside that list, without including unreferenced assignment geometry
+or locations from another list. Two references to different entries remain
+distinct even if their positions coincide. A field name or tag alone is not a reference.
+
+The property retains its raw fields. A reference to an explicit point also shows
+its original coordinates and any SourceData link on the point geometry. The
+corresponding entry under **validity** shows its producer-defined tag. For a
+measurement marker, expand **Measurements** there to inspect its values and
+follow the contributors back to their raw records.
 
 `COMPLETE` means the attribute applies to the complete referenced geometry or feature scope.
 

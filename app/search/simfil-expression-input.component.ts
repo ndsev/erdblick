@@ -20,7 +20,8 @@ import { debounceTime, distinctUntilChanged, Subject, Subscription } from "rxjs"
 import { currentInlineCodeMirrorTheme } from "../editor/codemirror-theme.extension";
 import { FeatureSearchSchemaService } from "./feature-search-schema.service";
 import { SearchCompletionPopupComponent } from "./search-completion-popup.component";
-import { FeatureSearchMapLayerRef, FeatureSearchScope } from "./search-definition.model";
+import { FeatureSearchMapLayerRef } from "./search-definition.model";
+import type { ExpressionCompletionScope } from "./search-session.model";
 import { CompletionCandidate } from "./search.model";
 import { simfilHighlightStyle, simfilLanguage } from "./simfil-language.extension";
 
@@ -54,7 +55,7 @@ export class SimfilExpressionInputComponent implements AfterViewInit, OnChanges,
     @Input() submitOnEnter = false;
     @Input() completionEnabled = true;
     @Input() completionOwnerId = "";
-    @Input() completionScope?: FeatureSearchScope;
+    @Input() completionScope?: ExpressionCompletionScope;
     @Input() completionMapLayers: FeatureSearchMapLayerRef[] = [];
     @Input() completionDelay = 150;
     @Input() completionZIndex = 30050;

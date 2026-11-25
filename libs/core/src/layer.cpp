@@ -823,6 +823,7 @@ NativeJsValue TileSubsetLayer::dependencies() const
             {"layerId", JsValue(dependency.sourceTileKey_.layerId_)},
             {"partition", JsValue::fromPartition(dependency.sourceTileKey_.partitionId_)},
             {"sourceFeatureCount", JsValue(dependency.sourceFeatureCount_)},
+            {"sourceId", JsValue(dependency.sourceId_)},
         }));
     }
     return *result;
@@ -899,10 +900,8 @@ NativeJsValue TileSubsetLayer::entryRange(
                       mapget::model_ptr<mapget::GeometryCollection> const& geometry,
                       mapget::model_ptr<mapget::Array> const& values,
                       std::vector<mapget::ProjectedValueError> const& valueErrors,
-                      std::optional<uint32_t> attributeIndex = std::nullopt,
-                      std::optional<bool> hasValidity = std::nullopt,
-                      uint32_t validityIndex = 0,
-                      uint32_t validityCount = 1) {
+                      mapget::model_ptr<mapget::AttributeValidityEntry> const& attribute = {},
+                      mapget::model_ptr<mapget::ShapePointEntry> const& point = {}) {
         if (index < begin || index >= end || !featureId) {
             return;
         }
@@ -925,7 +924,8 @@ NativeJsValue TileSubsetLayer::entryRange(
         }
         entry.set("valueErrors", errors);
         if (includePosition) {
-            if (auto center = subsetGeometryCenter(geometry)) {
+            auto const center = point ? std::optional{point->position()} : subsetGeometryCenter(geometry);
+            if (center) {
                 auto const cartesian =
                     wgsToCartesian<mapget::Point>(*center);
                 entry.set("position", JsValue::Dict({
@@ -934,13 +934,17 @@ NativeJsValue TileSubsetLayer::entryRange(
                 }));
             }
         }
-        if (attributeIndex) {
-            entry.set("attributeIndex", JsValue(*attributeIndex));
+        if (attribute) {
+            if (auto attributeIndex = attribute->attributeIndex()) {
+                entry.set("attributeIndex", JsValue(*attributeIndex));
+            }
+            entry.set("hasValidity", JsValue(attribute->hasValidity()));
+            entry.set("validityIndex", JsValue(attribute->validityIndex()));
+            entry.set("validityCount", JsValue(attribute->validityCount()));
         }
-        if (hasValidity) {
-            entry.set("hasValidity", JsValue(*hasValidity));
-            entry.set("validityIndex", JsValue(validityIndex));
-            entry.set("validityCount", JsValue(validityCount));
+        if (point) {
+            entry.set("geometryOrdinal", JsValue(point->geometryOrdinal()));
+            entry.set("pointIndex", JsValue(point->pointIndex()));
         }
         entries.push(entry);
     };
@@ -969,13 +973,15 @@ NativeJsValue TileSubsetLayer::entryRange(
                     current,
                     entry->featureId(),
                     entry->geometry(),
-                    entry->values(), entry->valueErrors(),
-                    entry->attributeIndex(),
-                    entry->hasValidity(),
-                    entry->validityIndex(),
-                    entry->validityCount());
+                    entry->values(), entry->valueErrors(), entry);
                 return index < end;
             });
+        break;
+    case mapget::Scope::ShapePoint:
+        for (auto row = begin; row < end; ++row) {
+            auto const entry = channel->shapePointEntryAt(row);
+            append(row, entry->featureId(), {}, entry->values(), entry->valueErrors(), {}, entry);
+        }
         break;
     case mapget::Scope::Relation:
         channel->forEachRelationEntry(
@@ -1055,6 +1061,12 @@ NativeJsValue TileSubsetLayer::valueSummaries(
         break;
     case mapget::Scope::Attribute:
         channel->forEachAttributeValidityEntry([&](auto const& entry) {
+            summarize(entry->values());
+            return true;
+        });
+        break;
+    case mapget::Scope::ShapePoint:
+        channel->forEachShapePointEntry([&](auto const& entry) {
             summarize(entry->values());
             return true;
         });
@@ -1171,6 +1183,18 @@ NativeJsValue TileSubsetLayer::resolvePick(
                 result.set("validityCount", JsValue(entry->validityCount()));
                 return false;
             });
+        break;
+    }
+    case mapget::Scope::ShapePoint: {
+        auto const entry = channel->shapePointEntryAt(entryOrdinal);
+        auto const* source = model_->localSourceDependency();
+        if (entry && source) {
+            setFeatureId(entry->featureId());
+            result.set("scope", JsValue("shapepoint"));
+            result.set("geometryOrdinal", JsValue(entry->geometryOrdinal()));
+            result.set("pointIndex", JsValue(entry->pointIndex()));
+            result.set("sourceId", JsValue(source->sourceId_));
+        }
         break;
     }
     case mapget::Scope::Relation: {
@@ -1305,6 +1329,9 @@ NativeJsValue TileSubsetLayer::findPickReferences(
                         });
                 }
                 break;
+            case mapget::Scope::ShapePoint:
+                // The dedicated reverse lookup also checks the provider and vertex ordinals.
+                break;
             case mapget::Scope::Relation:
                 channel->forEachRelationEntry(
                     [&](mapget::model_ptr<mapget::RelationEntry> const& entry) {
@@ -1384,6 +1411,46 @@ NativeJsValue TileSubsetLayer::findPickReferences(
             }
             return true;
         });
+    return *result;
+}
+
+NativeJsValue TileSubsetLayer::findShapePointPickReferences(
+    std::string const& featureId,
+    uint32_t geometryOrdinal,
+    uint32_t pointIndex,
+    std::string const& sourceId) const
+{
+    auto result = JsValue::List();
+    auto const* source = model_->localSourceDependency();
+    if (!source || source->sourceId_ != sourceId) {
+        return *result;
+    }
+    uint32_t channelOrdinal = 0U;
+    model_->forEachChannel([&](auto const& channel) {
+        auto const currentChannel = channelOrdinal++;
+        if (channel->scope() != mapget::Scope::ShapePoint) {
+            return true;
+        }
+        uint32_t row = 0U;
+        channel->forEachShapePointEntry([&](auto const& entry) {
+            auto const currentRow = row++;
+            if (entry->geometryOrdinal() != geometryOrdinal || entry->pointIndex() != pointIndex) {
+                return true;
+            }
+            auto const id = entry->featureId();
+            if (!id || id->externalMapId() || id->toString() != featureId) {
+                return true;
+            }
+            result.push(JsValue::Dict({
+                {"channelOrdinal", JsValue(currentChannel)},
+                {"entryOrdinal", JsValue(currentRow)},
+                {"endpointRole", JsValue(0U)},
+            }));
+            // Each channel emits a given original vertex at most once.
+            return false;
+        });
+        return true;
+    });
     return *result;
 }
 

@@ -64,9 +64,12 @@ export function firstParamValue(params: Params, key: string): string | undefined
     return Array.isArray(value) ? String(value[0] ?? "") : String(value);
 }
 
-/** Encodes one grammar component without encoding structural separators around it. */
-function encodeToken(value: string): string {
-    return encodeURIComponent(value);
+/**
+ * Encode one compact URL component. JavaScript leaves '~' untouched in a URI,
+ * but the selection and style formats use it to separate neighbouring values.
+ */
+export function encodeUrlToken(value: string): string {
+    return encodeURIComponent(value).replaceAll("~", "%7E");
 }
 
 /** Decodes one grammar component and keeps malformed legacy strings intact. */
@@ -91,7 +94,7 @@ function primitiveToken(value: UrlV2Primitive | undefined): string {
     if (value === undefined || value === null) {
         return "";
     }
-    return encodeToken(String(value));
+    return encodeUrlToken(String(value));
 }
 
 /** Checks whether a token can safely participate in run-length encoding. */
@@ -191,7 +194,7 @@ function commonSuffix(values: string[]): string {
 
 /** Computes the encoded literal form for a sequence of map names. */
 function literalMapEncoding(values: string[]): string {
-    return values.map(encodeToken).join("~");
+    return values.map(encodeUrlToken).join("~");
 }
 
 /** Encodes map names with adjacent prefix/suffix compression when it saves space. */
@@ -199,7 +202,7 @@ export function encodeMapNamesV2(mapNames: string[]): string {
     const groups: string[] = [];
     let index = 0;
     while (index < mapNames.length) {
-        let bestEncoded = encodeToken(mapNames[index]);
+        let bestEncoded = encodeUrlToken(mapNames[index]);
         let bestLength = 1;
         let bestSavings = 0;
 
@@ -209,7 +212,7 @@ export function encodeMapNamesV2(mapNames: string[]): string {
             const prefix = commonPrefix(window);
             if (prefix.length) {
                 const suffixes = window.map(value => value.slice(prefix.length));
-                const encoded = `${encodeToken(prefix)}:${suffixes.map(encodeToken).join(",")}`;
+                const encoded = `${encodeUrlToken(prefix)}:${suffixes.map(encodeUrlToken).join(",")}`;
                 const savings = literal.length - encoded.length;
                 if (savings > bestSavings || (savings === bestSavings && savings > 0 && window.length > bestLength)) {
                     bestEncoded = encoded;
@@ -221,7 +224,7 @@ export function encodeMapNamesV2(mapNames: string[]): string {
             const suffix = commonSuffix(window);
             if (suffix.length) {
                 const prefixes = window.map(value => value.slice(0, value.length - suffix.length));
-                const encoded = `${prefixes.map(encodeToken).join(",")}:${encodeToken(suffix)}`;
+                const encoded = `${prefixes.map(encodeUrlToken).join(",")}:${encodeUrlToken(suffix)}`;
                 const savings = literal.length - encoded.length;
                 if (savings > bestSavings || (savings === bestSavings && savings > 0 && window.length > bestLength)) {
                     bestEncoded = encoded;
@@ -299,7 +302,7 @@ export function encodeLayerNamesV2(layerNames: string[], extraMapIds: string[] =
     let currentMapIndices: string[] = [];
     const flush = () => {
         if (currentLayerId) {
-            groups.push(`${encodeToken(currentLayerId)}:${currentMapIndices.join(",")}`);
+            groups.push(`${encodeUrlToken(currentLayerId)}:${currentMapIndices.join(",")}`);
         }
     };
 
@@ -478,7 +481,7 @@ export function encodeSelectionsV2(
             const suffix = parsed.layerId.startsWith("SourceData-")
                 ? parsed.layerId.slice("SourceData-".length)
                 : parsed.layerId;
-            fields.push(`SD:${mapIndex}:${encodeToken(suffix)}:${parsed.tileId}`);
+            fields.push(`SD:${mapIndex}:${encodeUrlToken(suffix)}:${parsed.tileId}`);
             fields.push(panel.sourceData.address === undefined ? "" : String(panel.sourceData.address));
             fields.push(encodeLayout(panel.size));
             fields.push(encodeColor(panel.color, defaultColors));
@@ -498,7 +501,7 @@ export function encodeSelectionsV2(
                 continue;
             }
             fields.push(`F:${layerIndex}:${parsed.tileId}`);
-            fields.push(encodeToken(feature.featureId));
+            fields.push(encodeUrlToken(feature.featureId));
         }
         if (fields.length <= 2) {
             continue;
@@ -700,8 +703,8 @@ export function encodeStyleOptionsV2(
             optionBodies.push(perViewBodies.every(body => body === firstBody) ? firstBody : perViewBodies.join(":"));
         }
         const compactOptionIds = optionIds.map(optionId =>
-            optionId.startsWith("show") && optionId.length > 4 ? `.${encodeToken(optionId.slice(4))}` : encodeToken(optionId));
-        result[`${encodeToken(shortStyleId)}~${layerIndices.join("-")}~${compactOptionIds.join("~")}`] = optionBodies.join("~");
+            optionId.startsWith("show") && optionId.length > 4 ? `.${encodeUrlToken(optionId.slice(4))}` : encodeUrlToken(optionId));
+        result[`${encodeUrlToken(shortStyleId)}~${layerIndices.join("-")}~${compactOptionIds.join("~")}`] = optionBodies.join("~");
     }
     return result;
 }

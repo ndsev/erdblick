@@ -9,6 +9,7 @@ import {
     vi
 } from "vitest";
 import { MapTileStreamService } from "../../../app/mapdata/map-tile-stream.service";
+import { InspectionFeatureTile } from "../../../app/mapdata/feature-inspection.adapter";
 import type {SourceCatalogRefreshResult} from "../../../app/mapdata/source-catalog.model";
 import { TileDeliveryError } from "../../../app/mapdata/tile-diagnostics.model";
 import { MapgetLayer } from "../../../app/mapdata/mapget-layer.model";
@@ -55,6 +56,68 @@ function serviceHarness(mapInfo: object = {}): MapTileStreamService {
 }
 
 describe("MapTileStreamService request failures", () => {
+    it("accepts a structured vertex selector only in its observed feature partition", async () => {
+        const service = serviceHarness();
+        const locate = vi.spyOn(service, "locateFeature");
+        const shapePoint = {geometryOrdinal: 1, pointIndex: 0, sourceId: "provider"};
+        const mapTileKey = coreLib.createMapTileKey("Features", "Map", "Lane", "545555028");
+        const featureId = "Lane.2:shapepoint#1.0@provider";
+        try {
+            expect(await service.resolveFeatureIdentities([{featureId: "Lane.2", mapTileKey, shapePoint}]))
+                .toEqual([{mapTileKey, featureId}]);
+            await expect(service.resolveFeatureIdentities([{featureId, mapId: "Map"}])).rejects.toThrow("original mapTileKey");
+            await expect(service.resolveFeatureIdentities([{featureId: "Lane.2", mapTileKey, shapePoint, attributeIndex: 0}]))
+                .rejects.toThrow("base feature ID");
+            expect(locate).not.toHaveBeenCalled();
+        } finally {
+            service.ngOnDestroy();
+        }
+    });
+
+    it("requests the picked source and original host only, and keeps a missing vertex out of locate", async () => {
+        const service = serviceHarness();
+        const send = vi.spyOn(MapTileStreamClientTiles.prototype, "request").mockResolvedValue(undefined);
+        const locate = vi.spyOn(service as any, "locateCanonicalFeatures");
+        try {
+            const mapTileKey = coreLib.createMapTileKey("Features", "Map", "Lane", "545555028");
+            const rows = await service.loadFeatures([{mapTileKey, featureId: "Lane.2:shapepoint#1.0@provider"}]);
+            expect(rows).toEqual([]);
+            expect(send.mock.calls[0][0]).toMatchObject([{sourceId: "provider", mapId: "Map", layerId: "Lane",
+                featureIds: [{ids: ["Lane.2"]}]}]);
+            expect(locate).not.toHaveBeenCalled();
+        } finally {
+            send.mockRestore();
+            service.ngOnDestroy();
+        }
+    });
+
+    it("uses the current host in the selected source even when another source delivers first", async () => {
+        const mapTileKey = coreLib.createMapTileKey("Features", "Map", "Lane", "545555028");
+        const sources = ["other", "", "provider"];
+        let received = 0;
+        const service = serviceHarness({tileLayerParser: {
+            readTileLayerMetadata: () => ({
+                id: mapTileKey, partition: tilePartition(545555028), numFeatures: 1, sourceId: sources[received++]
+            })
+        }});
+        const hasHost = vi.spyOn(InspectionFeatureTile.prototype, "contains").mockImplementation(id => id === "Lane.2");
+        const send = vi.spyOn(MapTileStreamClientTiles.prototype, "request")
+            .mockImplementation(async function (this: MapTileStreamClientTiles) {
+                sources.forEach(() => this.onFeatures?.(Uint8Array.of(0)));
+            });
+        try {
+            const featureIds = ["Lane.2", "Lane.2:shapepoint#1.0@provider", "Lane.2:shapepoint#1.0@",
+                "Lane.9:shapepoint#1.0@provider", "Lane.2:shapepoint#1.0@missing"];
+            const features = await service.loadFeatures(featureIds.map(featureId => ({mapTileKey, featureId})));
+            expect(features.map(feature => feature.featureId)).toEqual(featureIds.slice(0, 3));
+            expect(features.map(feature => feature.featureTile.sourceId)).toEqual(["other", "provider", ""]);
+        } finally {
+            send.mockRestore();
+            hasHost.mockRestore();
+            service.ngOnDestroy();
+        }
+    });
+
     it("cancels an inspection synchronously only when its datasource retires", async () => {
         const changes = new Subject<readonly string[]>();
         const service = serviceHarness({dataSourceInfoChanged: changes});

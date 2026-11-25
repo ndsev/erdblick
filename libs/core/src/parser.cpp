@@ -109,14 +109,23 @@ std::string completionTypeHint(std::vector<std::string> typeNames)
 simfil::CompletionCandidate enrichCompletionCandidate(
     simfil::CompletionCandidate candidate,
     simfil::model_ptr<mapget::LayerSchema> const& registry,
-    simfil::TypeId rootSchema)
+    simfil::SchemaType const& root)
 {
     if (!registry || !candidate.hint.empty() || candidate.type != simfil::CompletionCandidate::Type::CONSTANT) {
         return candidate;
     }
 
     auto const symbolName = completionConstantSymbol(candidate.text);
-    candidate.hint = completionTypeHint(registry->constantTypeNames(rootSchema, symbolName));
+    if (root.pool() == registry->mapSchema().get()) {
+        candidate.hint = completionTypeHint(registry->constantTypeNames(root.id(), symbolName));
+    } else {
+        // A vertex query has its own typed projection. Its local IDs must
+        // only be used with the pool that declared these measurement fields.
+        std::vector<std::string> names;
+        for (auto id : root.symbolTypes(symbolName))
+            names.emplace_back(root.pool()->schemaType(id).typeName());
+        candidate.hint = completionTypeHint(std::move(names));
+    }
     return candidate;
 }
 
@@ -1708,6 +1717,7 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
     return {
         tileLayer.id().toString(),
         tileLayer.stringPoolId(),
+        tileLayer.sourceId(),
         tileLayer.id().mapId_,
         tileLayer.id().layerId_,
         *JsValue::fromPartition(tileLayer.partitionId()),
@@ -1741,6 +1751,7 @@ TileLayerParser::TileSubsetLayerMetadata TileLayerParser::readTileSubsetLayerMet
             {"layerId", JsValue(dependency.sourceTileKey_.layerId_)},
             {"partition", JsValue::fromPartition(dependency.sourceTileKey_.partitionId_)},
             {"sourceFeatureCount", JsValue(dependency.sourceFeatureCount_)},
+            {"sourceId", JsValue(dependency.sourceId_)},
         }));
     }
     auto issues = JsValue::List();
@@ -1960,8 +1971,9 @@ NativeJsValue TileLayerParser::completeSearchQuery(
     if (options.has("scope")) {
         scope = options["scope"].as<std::string>();
     }
-    auto const includeFeatureScope = scope != "attribute";
-    auto const includeAttributeScope = scope != "feature";
+    auto const pointScope = scope == "shapepoint";
+    auto const includeFeatureScope = !pointScope && scope != "attribute";
+    auto const includeAttributeScope = !pointScope && scope != "feature";
     // A feature's shorthand index already includes all owned attribute fields
     // and enum symbols. Scanning every attribute again for a bare keyword
     // spends the full completion budget returning duplicates. Paths and the
@@ -1994,8 +2006,6 @@ NativeJsValue TileLayerParser::completeSearchQuery(
             binding = std::make_shared<SchemaCompletionBinding>();
             binding->strings = std::make_shared<mapget::StringPool>("SearchCompletion");
             binding->environment = mapget::makeEnvironment(binding->strings);
-            // The environment retains its canonical graph once and caches
-            // dictionary translation. No per-type adapter graph is installed.
             binding->environment->setSchema(registry->rootType());
         }
         auto remaining = opts;
@@ -2007,13 +2017,16 @@ NativeJsValue TileLayerParser::completeSearchQuery(
             }
             remaining.timeoutMs = opts.timeoutMs - elapsed;
         }
+        // SIMFIL walks and retains this exact pool for the duration of completion.
+        // The longer-lived per-layer environment must not pin a vertex query
+        // view after the user switches to another map.
         auto candidates = simfil::complete(*binding->environment, query, point, rootSchema, remaining);
         if (candidates) {
             for (auto candidate : *candidates) {
                 candidate =
-                    enrichCompletionCandidate(std::move(candidate), registry, rootSchema.id());
+                    enrichCompletionCandidate(std::move(candidate), registry, rootSchema);
                 bool qualified = false;
-                if (candidate.location.offset == 0 && candidate.location.size == query.size()) {
+                if (!pointScope && candidate.location.offset == 0 && candidate.location.size == query.size()) {
                     auto const symbol = completionConstantSymbol(candidate.text);
                     auto const exact = symbol == completionConstantSymbol(query);
                     if (candidate.type == simfil::CompletionCandidate::Type::FIELD) {
@@ -2085,6 +2098,17 @@ NativeJsValue TileLayerParser::completeSearchQuery(
                 continue;
             }
 
+            // A style expression at a vertex uses the same contextual schema as
+            // the native filter. Whole-query enum rewrites belong to feature search.
+            if (pointScope) {
+                for (auto const& featureType : registry->featureTypes()) {
+                    auto root = registry->shapePointQueryType(featureType);
+                    if (root)
+                        addCandidates(registry, root);
+                    if (completionBudgetExhausted()) break;
+                }
+                continue;
+            }
             auto const attributeOwners = registry->attributeScopes();
             for (auto const& featureType : registry->featureTypes()) {
                 auto const featureSchema = registry->featureSchema(featureType);

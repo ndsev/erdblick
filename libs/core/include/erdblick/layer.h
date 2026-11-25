@@ -262,6 +262,16 @@ struct TileSubsetLayer
         int64_t entryIndex,
         int64_t validityIndex) const;
 
+    /**
+     * Find rows for this provider, feature and vertex across the partition's
+     * current style channels. A missing row or different provider yields no picks.
+     */
+    NativeJsValue findShapePointPickReferences(
+        std::string const& featureId,
+        uint32_t geometryOrdinal,
+        uint32_t pointIndex,
+        std::string const& sourceId) const;
+
     /** Return a compact JSON representation for diagnostics and tests. */
     std::string toJson() const;
 

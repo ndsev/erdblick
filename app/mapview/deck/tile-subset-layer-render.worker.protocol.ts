@@ -129,7 +129,11 @@ export interface TileSubsetGltfPickProxyBuffers {
 
 /** Pick identity retained only for the temporary GLTF bridge. */
 export interface TileSubsetPickResult {
+    scope?: string;
     featureId?: string;
+    geometryOrdinal?: number;
+    pointIndex?: number;
+    sourceId?: string;
     featureReference?: NamedFeatureReference;
     attributeIndex?: number;
     hasValidity?: boolean;

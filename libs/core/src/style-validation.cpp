@@ -29,6 +29,7 @@ namespace {
 enum class RuleValidationContext {
     TopLevel,
     Branch,
+    ShapePointBranch,
     RelationFeatureStyle,
     RelationFeatureBranch
 };
@@ -1559,6 +1560,23 @@ bool validateStyleRuleYamlImpl(
     };
 
     markInvalid(validateGeometry(ruleYaml, rulePath, report, sourceRuleIndex));
+    auto const scope = ruleYaml["scope"];
+    const bool pointScope = context == RuleValidationContext::ShapePointBranch ||
+        (context == RuleValidationContext::TopLevel && scope.IsDefined() && scope.IsScalar() &&
+         scope.Scalar() == "shapepoint");
+    if (pointScope) {
+        for (auto const& item : ruleYaml) {
+            if (!item.first.IsScalar()) continue;
+            auto const& property = item.first.Scalar();
+            if (property.starts_with("attribute-") || property.starts_with("relation-")) {
+                rejectRemoved(property, property + " belongs to an attribute or relation rule. "
+                              "Read the measurements at this vertex through $attributes.");
+            }
+        }
+    }
+    else {
+        rejectRemoved("point-filter", "point-filter requires scope: shapepoint.");
+    }
     markInvalid(validateLodRange(ruleYaml, rulePath, report, sourceRuleIndex));
     for (auto const& [property, field] : styleAuthoringSchema().at("records").at("rule").items()) {
         auto const kind = field.at("kind").get<std::string>();
@@ -1932,6 +1950,7 @@ bool validateStyleRuleYamlImpl(
     // between independently valid properties. Check those before nested styles.
     markInvalid(validateExpression(ruleYaml, "filter", true, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "attribute-filter", false, rulePath, source, report, sourceRuleIndex));
+    markInvalid(validateExpression(ruleYaml, "point-filter", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "color-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "arrow-expression", false, rulePath, source, report, sourceRuleIndex));
     markInvalid(validateExpression(ruleYaml, "min-lod-expression", false, rulePath, source, report, sourceRuleIndex));
@@ -2021,7 +2040,7 @@ bool validateStyleRuleYamlImpl(
                 context == RuleValidationContext::RelationFeatureStyle ||
                 context == RuleValidationContext::RelationFeatureBranch
                     ? RuleValidationContext::RelationFeatureBranch
-                    : RuleValidationContext::Branch;
+                    : pointScope ? RuleValidationContext::ShapePointBranch : RuleValidationContext::Branch;
             markInvalid(validateBranchRules(
                 ruleYaml,
                 "first-of",

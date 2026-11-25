@@ -1,7 +1,7 @@
 import {Component, EventEmitter, Input, OnChanges, OnDestroy, Output} from "@angular/core";
 import {FormsModule} from "@angular/forms";
 import {ColorPickerModule} from "primeng/colorpicker";
-import {StyleField} from "./style-authoring-schema.adapter";
+import {StyleField, StyleRuleScope} from "./style-authoring-schema.adapter";
 import {stylePickerColor} from "./style-color.util";
 import {parseStyleNumber, StyleDocumentEdit, StyleDocumentModel, StylePath} from "./style-document.model";
 import {SimfilExpressionInputComponent} from "../search/simfil-expression-input.component";
@@ -16,7 +16,7 @@ export interface StyleInputProblem {path: string; message: string;}
         @switch (kind) {
             @case ('expression') {
                 <simfil-expression-input [value]="text()" (valueChange)="set($event)"
-                    [completionScope]="scope === 'attribute' && path.at(-1) !== 'filter' ? 'attribute' : 'feature'"
+                    [completionScope]="completionScope"
                     [completionEnabled]="scope !== 'relation'"
                     [completionOwnerId]="id" [completionZIndex]="31050"/>
             }
@@ -131,10 +131,16 @@ export class StyleFieldInputComponent implements OnChanges, OnDestroy {
     @Input({required: true}) model!: StyleDocumentModel;
     @Input({required: true}) path: StylePath = [];
     @Input({required: true}) field!: StyleField;
-    @Input() scope: "feature" | "attribute" | "relation" = "feature";
+    @Input() scope: StyleRuleScope = "feature";
     @Output() edit = new EventEmitter<StyleDocumentEdit>();
     @Output() problem = new EventEmitter<StyleInputProblem>();
     private numericInputs = new Map<string, {path: StylePath; text: string; sourceValue: string; message: string}>();
+
+    /** The filter selects the host feature. A marker's color, size and label read its entry. */
+    get completionScope(): "attribute" | "shapepoint" | "feature" {
+        if (this.path.at(-1) === "filter" || this.scope === "relation") return "feature";
+        return this.scope;
+    }
 
     get error(): string { return [...this.numericInputs.values()].find(input => input.message)?.message ?? ""; }
     get id(): string { return this.path.join("."); }

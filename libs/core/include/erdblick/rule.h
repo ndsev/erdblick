@@ -87,11 +87,12 @@ public:
      */
     FeatureStyleRule(FeatureStyleRule const& other, bool resetNonInheritableAttrs=false);
 
-    /** Selects whether the rule runs against whole features, relations, or attributes. */
+    /** Selects the source object supplying a rule's presentation expressions. */
     enum Scope {
         Feature,
         Relation,
-        Attribute
+        Attribute,
+        ShapePoint
     };
 
     /** Restricts the rule to the regular render pass or one of the highlight passes. */
@@ -181,6 +182,10 @@ public:
         std::optional<std::string_view> attributeName;
         std::optional<std::string_view> attributeLayer;
         std::optional<bool> hasValidity;
+        // A shape-point row identifies exactly one original geometry. Its type
+        // and optional name participate in selecting the matching branch.
+        std::optional<mapget::GeomType> sourceGeometryType;
+        std::optional<std::string_view> sourceGeometryName;
     };
 
     /**
@@ -188,7 +193,7 @@ public:
      * returning whether any callback ran. FirstOf stops at the first matching
      * child; AllOf visits all. Host filters use featureEvalFun when supplied,
      * while attribute filters use entryEvalFun. Scope, highlight mode, LOD and
-     * geometry gates remain the caller's responsibility.
+     * geometry gates for geometry collections remain the caller's responsibility.
      */
     bool forEachMatchingRule(
         MatchContext const& context,
@@ -391,8 +396,8 @@ public:
     /** Return the original attribute-name regex transported to mapget. */
     [[nodiscard]] std::optional<std::string> const& attributeTypePattern() const;
 
-    /** Return the optional simfil filter applied inside matched attributes. */
-    [[nodiscard]] std::optional<std::string> const& attributeFilter() const;
+    /** The optional predicate evaluated on an attribute occurrence or original vertex. */
+    [[nodiscard]] std::optional<std::string> const& entryFilter() const;
 
     /** Return the regex used to filter attribute layer names, if any. */
     [[nodiscard]] std::optional<std::regex> const& attributeLayerType() const;
@@ -654,7 +659,7 @@ private:
 
     std::optional<std::regex> attributeType_;
     std::optional<std::string> attributeTypePattern_;
-    std::optional<std::string> attributeFilter_;
+    std::optional<std::string> entryFilter_;
     std::optional<std::regex> attributeLayerType_;
     std::optional<std::string> attributeLayerTypePattern_;
     std::optional<bool> attributeValidityGeometry_;

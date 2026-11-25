@@ -22,7 +22,7 @@ import type { FeatureWrapper } from "../mapdata/feature-inspection.adapter";
 import type { MapTreeNode } from "../mapdata/map-tree.controller";
 import { parseMapPartitionKey } from "../mapdata/partition.model";
 import { InfoMessageService } from "../diagnostics/info.service";
-import { stripFeatureInspectionTarget } from "./feature-identity.model";
+import { stripFeatureInspectionTarget, tileFeatureInteractionTargetsEqual } from "./feature-identity.model";
 import { boundedUnicodeString } from "../utils/unicode-string.util";
 import { AppStateService } from "../appstate/appstate.service";
 import {
@@ -293,8 +293,21 @@ export class InspectionPanelService implements AppActionContributor {
         return;
     }
 
-    /** Toggles one inspection panel between base-feature and attribute/validity-highlight pseudo-feature ids. */
+    /** Toggle a feature row's detail highlight from its context menu. */
     toggleInspectionFeatureHighlight(panelId: number, mapTileKey: string, targetFeatureId: string): void {
+        const base = stripFeatureInspectionTarget(targetFeatureId);
+        this.updateFeatureTargets(panelId, mapTileKey, current => {
+            if (stripFeatureInspectionTarget(current) !== base) return current;
+            return current === targetFeatureId ? base : targetFeatureId;
+        });
+    }
+
+    /** Change the selected row only. A panel can hold several vertices on the same feature. */
+    openInspectionTarget(panelId: number, mapTileKey: string, currentId: string, targetId: string): void {
+        this.updateFeatureTargets(panelId, mapTileKey, id => id === currentId ? targetId : id);
+    }
+
+    private updateFeatureTargets(panelId: number, mapTileKey: string, nextId: (current: string) => string): void {
         this.persistence.transaction(() => {
             const allPanels = structuredClone(this.state.selectionState.getValue());
             const panelIndex = allPanels.findIndex(
@@ -304,21 +317,14 @@ export class InspectionPanelService implements AppActionContributor {
                 return;
             }
 
-            const targetBaseFeatureId = stripFeatureInspectionTarget(targetFeatureId);
             const panel = allPanels[panelIndex];
             let changed = false;
             const nextFeatures = panel.features.map((feature) => {
-                if (
-                    feature.mapTileKey !== mapTileKey ||
-                    stripFeatureInspectionTarget(feature.featureId) !== targetBaseFeatureId
-                ) {
-                    return feature;
-                }
+                if (feature.mapTileKey !== mapTileKey) return feature;
+                const featureId = nextId(feature.featureId);
+                if (featureId === feature.featureId) return feature;
                 changed = true;
-                return {
-                    ...feature,
-                    featureId: feature.featureId === targetFeatureId ? targetBaseFeatureId : targetFeatureId
-                };
+                return {...feature, featureId};
             });
             if (!changed) {
                 return;
@@ -327,7 +333,8 @@ export class InspectionPanelService implements AppActionContributor {
             const nextPanels = allPanels.slice();
             nextPanels[panelIndex] = {
                 ...panel,
-                features: nextFeatures
+                features: nextFeatures.filter((feature, index) =>
+                    nextFeatures.findIndex(other => tileFeatureInteractionTargetsEqual(feature, other)) === index)
             };
             this.state.selectionState.next(nextPanels);
             if (!panel.undocked) {
@@ -927,22 +934,22 @@ export class InspectionPanelService implements AppActionContributor {
         };
     }
 
-    /**
-     * Validate the docked/locked invariant before changing any panel fields, then
-     * publish the complete edit in one persistence transaction.
-     */
+    /** Apply one presentation edit. Only moving a floating panel into the dock locks and resizes it. */
     setPanelPresentation(
         panelId: number,
         value: { locked: boolean; undocked: boolean; focused: boolean; color: string }
     ): void {
-        this.panelPresentation(panelId);
-        if (!value.undocked && !value.locked)
-            rejectAction("Docked inspections are locked", "invalid_arguments");
+        const previous = this.panelPresentation(panelId);
+        const moving = previous.undocked !== value.undocked;
+        if (moving && !value.undocked && !value.locked)
+            rejectAction("Docking an inspection locks it", "invalid_arguments");
         this.persistence.transaction(() => {
-            this.setInspectionPanelUndockedState(panelId, value.undocked);
-            this.setInspectionPanelLockedState(panelId, value.locked);
-            this.setInspectionPanelColor(panelId, value.color);
-            if (value.focused || this.focusedInspectionPanelId === panelId)
+            // Map picks open in unlocked docked panels. Recoloring one must keep
+            // its size, the user's active dock tab and the currently focused panel.
+            if (moving) this.setInspectionPanelUndockedState(panelId, value.undocked);
+            if (previous.locked !== value.locked) this.setInspectionPanelLockedState(panelId, value.locked);
+            if (previous.color !== value.color) this.setInspectionPanelColor(panelId, value.color);
+            if ((this.focusedInspectionPanelId === panelId) !== value.focused)
                 this.setFocusedInspectionPanel(value.focused ? panelId : undefined);
         });
     }

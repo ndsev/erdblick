@@ -815,10 +815,7 @@ export class MapTileStreamService implements OnDestroy {
         }
     }
 
-    /**
-     * Fetches complete models only for the explicitly requested feature IDs.
-     * The returned wrappers own their response blobs; this service retains none.
-     */
+    /** Fetch the current models from their declared partitions, in selection order. */
     async loadFeatures(
         tileFeatureIds: (TileFeatureId | null)[],
         signal?: AbortSignal
@@ -842,12 +839,10 @@ export class MapTileStreamService implements OnDestroy {
             return [];
         }
         const direct = await this.loadFeaturesFromDeclaredTiles(requested, signal);
-        const directByKey = new Map(direct.map(feature => [
-            this.featureIdentityKey(feature),
-            feature
-        ]));
+        const directByKey = new Map(direct.map(feature => [this.featureIdentityKey(feature), feature]));
         const missing = requested.filter(feature =>
-            !directByKey.has(this.featureIdentityKey(feature))
+            !directByKey.has(this.featureIdentityKey(feature)) &&
+            parseFeatureInspectionTarget(feature.featureId).scope !== "shapepoint"
         );
         if (!missing.length) {
             return requested.flatMap(feature => {
@@ -899,6 +894,7 @@ export class MapTileStreamService implements OnDestroy {
         const groups = new Map<string, {
             mapId: string;
             layerId: string;
+            sourceId?: string;
             partitions: Map<string, {
                 partition: PartitionId;
                 ids: string[];
@@ -910,10 +906,12 @@ export class MapTileStreamService implements OnDestroy {
                 continue;
             }
             const [mapId, layerId, partition] = parsed;
-            const groupKey = `${mapId}\n${layerId}`;
+            const target = parseFeatureInspectionTarget(feature.featureId);
+            const sourceId = target.scope === "shapepoint" ? target.sourceId : undefined;
+            const groupKey = JSON.stringify([mapId, layerId, sourceId]);
             let group = groups.get(groupKey);
             if (!group) {
-                group = { mapId, layerId, partitions: new Map() };
+                group = { mapId, layerId, sourceId, partitions: new Map() };
                 groups.set(groupKey, group);
             }
             const key = partitionKey(partition);
@@ -922,7 +920,7 @@ export class MapTileStreamService implements OnDestroy {
                 entry = { partition, ids: [] };
                 group.partitions.set(key, entry);
             }
-            const baseId = stripFeatureInspectionTarget(feature.featureId);
+            const baseId = target.baseFeatureId;
             if (!entry.ids.includes(baseId)) {
                 entry.ids.push(baseId);
             }
@@ -945,13 +943,15 @@ export class MapTileStreamService implements OnDestroy {
         );
         transport.onFields = () =>
             this.mapInfo.invalidateFieldDictBlobCache();
-        const tiles = new Map<string, InspectionFeatureTile>();
+        const tiles = new Map<string, InspectionFeatureTile[]>();
         transport.onFeatures = blob => {
             const tile = new InspectionFeatureTile(
                 this.mapInfo.tileLayerParser,
                 blob
             );
-            tiles.set(tile.mapTileKey, tile);
+            const snapshots = tiles.get(tile.mapTileKey) ?? [];
+            snapshots.push(tile);
+            tiles.set(tile.mapTileKey, snapshots);
             for (const warning of tile.warnings) console.warn(`Tile warning (${tile.mapTileKey}): ${warning}`);
             if (tile.legalInfo) {
                 this.mapInfo.setLegalInfo(tile.mapName, tile.legalInfo);
@@ -960,6 +960,7 @@ export class MapTileStreamService implements OnDestroy {
         const requests = [...groups.values()].map(group => ({
             mapId: group.mapId,
             layerId: group.layerId,
+            ...(group.sourceId ? {sourceId: group.sourceId} : {}),
             partitions: [...group.partitions.values()].map(entry =>
                 partitionJson(entry.partition)
             ),
@@ -1001,10 +1002,11 @@ export class MapTileStreamService implements OnDestroy {
                 timeoutPromise,
                 cancelled
             ]);
-            if (tiles.size < distinctPartitionCount) {
+            const received = [...tiles.values()].reduce((count, snapshots) => count + snapshots.length, 0);
+            if (received < distinctPartitionCount) {
                 console.warn(
                     "Inspection feature request returned fewer partitions than requested.",
-                    { requested: distinctPartitionCount, received: tiles.size }
+                    { requested: distinctPartitionCount, received }
                 );
             }
         } finally {
@@ -1017,10 +1019,12 @@ export class MapTileStreamService implements OnDestroy {
         }
 
         return requested.flatMap(feature => {
-            const tile = tiles.get(feature.mapTileKey);
-            return tile?.contains(feature.featureId)
-                ? [new FeatureWrapper(feature.featureId, tile)]
-                : [];
+            const target = parseFeatureInspectionTarget(feature.featureId);
+            const snapshots = tiles.get(feature.mapTileKey) ?? [];
+            const tile = snapshots.find(candidate =>
+                (target.scope !== "shapepoint" || candidate.sourceId === target.sourceId) &&
+                candidate.contains(target.baseFeatureId));
+            return tile ? [new FeatureWrapper(feature.featureId, tile)] : [];
         });
     }
 
@@ -1074,7 +1078,7 @@ export class MapTileStreamService implements OnDestroy {
                 }>>;
             };
             let validIndex = 0;
-            return requests.map((request): TileFeatureId | null => {
+            return requests.map((request, index): TileFeatureId | null => {
                 if (!request) {
                     return null;
                 }
@@ -1100,8 +1104,10 @@ export class MapTileStreamService implements OnDestroy {
                 }
                 return {
                     mapTileKey,
-                    featureId: candidate.canonicalFeatureId ??
-                        request.featureId
+                    featureId: formatFeatureInspectionTarget({
+                        ...parseFeatureInspectionTarget(requested[index].featureId),
+                        baseFeatureId: candidate.canonicalFeatureId ?? request.featureId
+                    })
                 };
             });
         } catch (error) {
@@ -1207,7 +1213,7 @@ export class MapTileStreamService implements OnDestroy {
     }
 
     private featureIdentityKey(feature: TileFeatureId): string {
-        return `${feature.mapTileKey}\n${stripFeatureInspectionTarget(feature.featureId)}`;
+        return JSON.stringify([feature.mapTileKey, feature.featureId]);
     }
 
     parseMapTileKeySafe(tileKey: string): [string, string, number] | null {
@@ -1940,7 +1946,13 @@ export class MapTileStreamService implements OnDestroy {
         for (const feature of features) {
             signal?.throwIfAborted();
             let featureId = feature.featureId;
-            if (feature.attributeIndex !== undefined || feature.relationIndex !== undefined || feature.validityIndex !== undefined) {
+            const numericEntry = feature.attributeIndex !== undefined || feature.relationIndex !== undefined || feature.validityIndex !== undefined;
+            const point = "mapTileKey" in feature ? feature.shapePoint : undefined;
+            if (point) {
+                if (numericEntry || parseFeatureInspectionTarget(featureId).scope !== "feature")
+                    rejectAction("Supply shapePoint with the base feature ID and its partition.", "invalid_arguments");
+                featureId = formatFeatureInspectionTarget({scope: "shapepoint", baseFeatureId: featureId, ...point});
+            } else if (numericEntry) {
                 if (feature.attributeIndex !== undefined && feature.relationIndex !== undefined) rejectAction("attributeIndex and relationIndex are mutually exclusive", "invalid_arguments");
                 if (feature.attributeIndex === undefined && feature.relationIndex === undefined) rejectAction("validityIndex requires attributeIndex or relationIndex", "invalid_arguments");
                 const target = parseFeatureInspectionTarget(featureId);
@@ -1953,6 +1965,8 @@ export class MapTileStreamService implements OnDestroy {
                 if (!this.parseMapPartitionKeySafe(feature.mapTileKey) || !feature.mapTileKey.startsWith("Features:")) rejectAction("Invalid feature partition key", "invalid_arguments");
                 result.push({ mapTileKey: feature.mapTileKey, featureId });
             } else {
+                if (parseFeatureInspectionTarget(featureId).scope === "shapepoint")
+                    rejectAction("A saved vertex requires its original mapTileKey.", "invalid_arguments");
                 const matches = await this.locateFeature(feature.mapId, featureId, feature.layerId, signal);
                 signal?.throwIfAborted();
                 if (matches.length !== 1) rejectAction(matches.length ? "Feature identity is ambiguous; supply its partition" :

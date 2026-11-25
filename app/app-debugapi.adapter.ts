@@ -6,6 +6,8 @@
 import { AppActionRegistry } from "./action/action-registry.service";
 import { Cartographic } from "./integrations/geo.adapter";
 import { coreLib, ErdblickCore_ } from "./integrations/wasm.adapter";
+import { parseFeatureInspectionTarget } from "./inspection/feature-identity.model";
+import { readFeatureInspectionModel } from "./mapdata/feature-inspection.adapter";
 import { MapTileStreamService } from "./mapdata/map-tile-stream.service";
 import {
     TileSubsetLayerRenderService,
@@ -127,7 +129,8 @@ export class ErdblickDebugApi {
         if (!wrapper) {
             return { error: `Feature ${featureId} was not found in ${mapTileKey}.` };
         }
-        const root = wrapper.peek(feature => feature.inspectionModel());
+        const target = parseFeatureInspectionTarget(featureId);
+        const root = wrapper.peek(feature => readFeatureInspectionModel(feature, target));
         return Array.isArray(root) ? root : {
             error: `Feature ${featureId} could not be parsed.`
         };

@@ -1,11 +1,12 @@
-import {describe, expect, it} from "vitest";
+import {describe, expect, it, vi} from "vitest";
 import {
     GPU_RENDER_PACKET_ABI_VERSION,
     GPU_RENDER_PACKET_HEADER_BYTES,
     GPU_RENDER_PACKET_MAX_BYTES,
     GpuMaterialFlag,
     GpuPrimitiveKind,
-    GpuRenderPacketView
+    GpuRenderPacketView,
+    GpuRetainedPickTable
 } from "../../../../app/mapview/deck/gpu-render-packet.model";
 
 /** Build the smallest valid packet for parser boundary tests. */
@@ -77,6 +78,31 @@ function ownedPacket(): Uint8Array {
 }
 
 describe("GpuRenderPacketView", () => {
+    it.each([true, false])("finds every matching packed row and endpoint (source order: %s)", ordered => {
+        // Two style passes can reference the same row and endpoint. Other
+        // roles of that row and similarly numbered entries in another channel
+        // must stay separate. Local pick indices continue across fragments.
+        const rows = [[0, 8, 0], [1, 4, 2], [1, 4, 1], [1, 4, 2], [1, 8, 0], [2, 4, 2]];
+        if (!ordered) rows.push(rows.shift()!);
+        const bytes = new Uint8Array(rows.length * 32);
+        const view = new DataView(bytes.buffer);
+        rows.forEach(([channel, entry, role], index) => {
+            const offset = index * 32;
+            view.setUint32(offset + 4, 100 + index, true);
+            view.setUint32(offset + 8, channel, true);
+            view.setUint32(offset + 12, entry, true);
+            view.setUint32(offset + 16, role, true);
+        });
+        const table = new GpuRetainedPickTable(bytes);
+        const decoded = vi.spyOn(table, "record");
+        const lookup = (channelOrdinal: number, entryOrdinal: number, endpointRole: number) =>
+            [...table.matchingRecords({channelOrdinal, entryOrdinal, endpointRole})].map(row => row.localPickIndex);
+        expect(lookup(1, 4, 2)).toEqual(ordered ? [101, 103] : [100, 102]);
+        expect(lookup(1, 4, 1)).toEqual(ordered ? [102] : [101]);
+        expect(lookup(0, 9, 0)).toEqual([]);
+        expect(lookup(3, 4, 2)).toEqual([]);
+        expect(decoded).toHaveBeenCalledTimes(3);
+    });
     it("accepts an empty, explicitly versioned packet", () => {
         const packet = new GpuRenderPacketView(emptyPacket());
         expect(packet.streams).toEqual([]);

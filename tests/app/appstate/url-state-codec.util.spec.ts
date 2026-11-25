@@ -88,6 +88,9 @@ describe("URL state v2 codec", () => {
                 features: [{
                     mapTileKey: "Features:MapA:Lane:606830446",
                     featureId: "Lane.545379780.24:attribute#1,validity#0",
+                }, {
+                    mapTileKey: "Features:MapA:Lane:606830446",
+                    featureId: "Lane.545379780.branch~24:shapepoint#1.0@source%7E%40a",
                 }],
                 locked: false,
                 size: [30, 20] as [number, number],
@@ -127,6 +130,9 @@ describe("URL state v2 codec", () => {
                 features: [{
                     mapTileKey: "Features:MapA:Lane:606830446",
                     featureId: "Lane.545379780.24:attribute#1,validity#0",
+                }, {
+                    mapTileKey: "Features:MapA:Lane:606830446",
+                    featureId: "Lane.545379780.branch~24:shapepoint#1.0@source%7E%40a",
                 }],
                 locked: true,
                 size: [30, 20],

@@ -4,12 +4,13 @@
  * are needed; incoming-context requests use the ordinary tile-stream client.
  */
 import type {
+    Feature,
     TileFeatureLayer,
     TileLayerParser
 } from "../../build/libs/core/erdblick-core";
 import type { TileFeatureId } from "../inspection/inspection.model";
 import { coreLib, uint8ArrayToWasm } from "../integrations/wasm.adapter";
-import { stripFeatureInspectionTarget } from "../inspection/feature-identity.model";
+import { stripFeatureInspectionTarget, type FeatureInspectionTarget } from "../inspection/feature-identity.model";
 import {
     parsePartition,
     partitionKey,
@@ -22,6 +23,13 @@ import {
     MAP_TILE_STREAM_TYPE_INCOMING_RELATIONS,
     MAP_TILE_STREAM_TYPE_STATUS
 } from "./map-tile-stream.protocol";
+
+/** UI and automation use the same coordinate, source check and detached inspection rows. */
+export function readFeatureInspectionModel(feature: Feature, target: FeatureInspectionTarget) {
+    return target.scope === "shapepoint" ? feature.inspectionModelAtShapePoint(
+        target.geometryOrdinal, target.pointIndex, target.sourceId
+    ) : feature.inspectionModel();
+}
 
 /** Completed incoming context; rows and associations were validated by the native feature model. */
 export interface IncomingInspectionResult {
@@ -46,6 +54,7 @@ export interface IncomingInspectionResult {
  */
 export class InspectionFeatureTile {
     readonly mapTileKey: string;
+    readonly sourceId: string;
     readonly stringPoolId: string;
     readonly mapName: string;
     readonly layerName: string;
@@ -74,6 +83,7 @@ export class InspectionFeatureTile {
         ) as unknown as {
             id: string;
             stringPoolId: string;
+            sourceId: string;
             mapName: string;
             layerName: string;
             partition: unknown;
@@ -87,6 +97,7 @@ export class InspectionFeatureTile {
         };
         this.warnings = metadata.warnings ?? [];
         this.mapTileKey = metadata.id;
+        this.sourceId = metadata.sourceId;
         this.stringPoolId = metadata.stringPoolId;
         this.mapName = metadata.mapName;
         this.layerName = metadata.layerName;
@@ -208,7 +219,7 @@ export class InspectionFeatureTile {
         }
     }
 
-    /** Test the owning feature, stripping attribute/relation suffixes from its ID. */
+    /** Resolve the host ID for a feature, attribute, relation or shape-point selection. */
     contains(featureId: string): boolean {
         return this.peek(layer => {
             const feature = layer.find(stripFeatureInspectionTarget(featureId));

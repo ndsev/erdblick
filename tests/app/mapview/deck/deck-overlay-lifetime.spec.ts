@@ -16,6 +16,52 @@ function frames() {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("Deck overlay schedules", () => {
+    it("keeps the grid lines and allocates a state raster only while a cell has a color", () => {
+        const frame = frames();
+        const registry = new DeckLayerRegistry(null, () => 1, () => {});
+        const images: Uint8ClampedArray[] = [];
+        vi.stubGlobal("ImageData", class {
+            constructor(readonly data: Uint8ClampedArray, readonly width: number, readonly height: number) {
+                images.push(data);
+            }
+        });
+        let occupancy = "non-empty";
+        const overlay = new DeckTileOverlay(registry, () => ({
+            viewport: {
+                west: 11.6, south: 48.2, width: 0.001, height: 0.001,
+                camPosLon: 11.6, camPosLat: 48.2, orientation: 0
+            },
+            mode: "nds", level: 13, autoLevel: false,
+            lineColor: [255, 255, 255, 255], altitude: 1000, tileLimit: 512,
+            layers: [{mapId: "Munich", layerId: "Road", level: 13}]
+        }), () => occupancy);
+
+        const redraw = () => {
+            overlay.scheduleUpdate();
+            frame.flush();
+        };
+        redraw();
+        expect(images).toHaveLength(0);
+        expect(registry.size).toBe(1);
+
+        const fills = {empty: [122, 126, 133, 64], error: [225, 45, 45, 105]};
+        for (const [state, color] of Object.entries(fills)) {
+            occupancy = state;
+            redraw();
+            const pixels = images.at(-1)!;
+            const alpha = pixels.findIndex((value, index) => index % 4 === 3 && value !== 0);
+            expect(alpha).toBeGreaterThanOrEqual(3);
+            expect(Array.from(pixels.slice(alpha - 3, alpha + 1))).toEqual(color);
+            expect(registry.size).toBe(2);
+        }
+
+        occupancy = "unknown";
+        redraw();
+        expect(images).toHaveLength(2);
+        expect(registry.size).toBe(1);
+        overlay.destroy();
+    });
+
     it("coalesces search refreshes and cancels both frame and debounce work on retirement", () => {
         vi.useFakeTimers();
         const frame = frames();

@@ -19,7 +19,7 @@ export interface FilterChannelDefinition {
     channelId: string;
     /** Exact schema used to prepare this search predicate. */
     schemaId?: string;
-    scope: "feature" | "attribute" | "relation" | "auto";
+    scope: "feature" | "attribute" | "relation" | "shapepoint" | "auto";
     rewrite: boolean;
     featureTypes: string[];
     featureFields: string[];
@@ -80,6 +80,7 @@ export interface TileSubsetDelivery {
         layerId: string;
         partition: PartitionId;
         sourceFeatureCount: number;
+        sourceId?: string;
     }>;
     readonly error?: string | null;
     readonly warnings?: readonly string[];

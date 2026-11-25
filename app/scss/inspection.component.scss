@@ -419,7 +419,8 @@ inspection-tree {
     background: color-mix(in srgb, var(--p-primary-color) 24%, transparent);
   }
 
-  .inspection-row-actions {
+  .inspection-row-actions,
+  .inspection-value-action {
     align-items: center;
     background: color-mix(in srgb, var(--p-content-background) 82%, var(--p-primary-color) 18%);
     border: 1px solid color-mix(in srgb, var(--p-content-border-color) 72%, var(--p-primary-color) 28%);
@@ -429,11 +430,20 @@ inspection-tree {
     cursor: pointer;
     font-size: 0.75rem;
     height: 1.1rem;
-    left: -0.15rem;
     line-height: 1;
     min-width: 1.1rem;
-    opacity: 0;
     padding: 0;
+
+    &:hover {
+      background: color-mix(in srgb, var(--p-content-background) 70%, var(--p-primary-color) 30%);
+      border-color: color-mix(in srgb, var(--p-content-border-color) 58%, var(--p-primary-color) 42%);
+      color: var(--p-content-color);
+    }
+  }
+
+  .inspection-row-actions {
+    left: -0.15rem;
+    opacity: 0;
     pointer-events: none;
     position: absolute;
     top: 50%;
@@ -441,12 +451,15 @@ inspection-tree {
     transition: opacity 120ms ease;
     visibility: hidden;
     z-index: 1;
+  }
 
-    &:hover {
-      background: color-mix(in srgb, var(--p-content-background) 70%, var(--p-primary-color) 30%);
-      border-color: color-mix(in srgb, var(--p-content-border-color) 58%, var(--p-primary-color) 42%);
-      color: var(--p-content-color);
-    }
+  // The vertex and source links stay inside their value cell, including when
+  // the table scrolls horizontally or when the user reaches them with Tab.
+  .inspection-value-action {
+    align-self: center;
+    display: inline-flex;
+    flex: 0 0 auto;
+    justify-content: center;
   }
 
   .inspection-row-toggle {

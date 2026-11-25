@@ -76,7 +76,8 @@ export class StyledMapgetLayer {
         private readonly tileStream: MapTileStreamService,
         readonly highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
         readonly plannedLod: number = MAX_STYLE_LOD,
-        filterPlan?: StyleFilterPlan
+        filterPlan?: StyleFilterPlan,
+        private readonly pointSourceId?: string
     ) {
         this.ownerId = [
             identity.viewIndex,
@@ -383,6 +384,11 @@ export class StyledMapgetLayer {
         }
         const state = this.tileStates.get(delivery.partitionKey);
         if (!state) {
+            return {status: "superseded"};
+        }
+        // Vertex ordinals address the requested provider's host, not a peer's copy of the partition.
+        if (this.pointSourceId !== undefined && !delivery.dependencies.some(dependency =>
+            dependency.sourceTileKey === state.mapTileKey && dependency.sourceId === this.pointSourceId)) {
             return {status: "superseded"};
         }
         if (!state.install(delivery, remainsPending)) {

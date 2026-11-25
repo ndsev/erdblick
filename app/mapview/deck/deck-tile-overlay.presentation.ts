@@ -222,7 +222,9 @@ export class DeckTileOverlay {
                 continue;
             }
 
-            const pixels = new Uint8ClampedArray(extent.width * extent.height * 4);
+            // Only empty and failed cells have a fill. Most pans over populated
+            // Road tiles need the grid lines alone, without a texture upload.
+            let pixels: Uint8ClampedArray<ArrayBuffer> | undefined;
             const visibleTileIds = coreLib.getTileIds(viewport, level, tileLimitPerView) as number[];
             for (const tileId of visibleTileIds) {
                 const stateKind = this.tileStateKindForTile(tileId, visibleLayers);
@@ -234,19 +236,15 @@ export class DeckTileOverlay {
                     continue;
                 }
                 const pixelIndex = (cell.row * extent.width + cell.col) * 4;
-                if (stateKind === TILE_STATE_KIND_ERROR) {
-                    pixels[pixelIndex + 0] = DeckTileOverlay.TILE_STATE_ERROR_COLOR[0];
-                    pixels[pixelIndex + 1] = DeckTileOverlay.TILE_STATE_ERROR_COLOR[1];
-                    pixels[pixelIndex + 2] = DeckTileOverlay.TILE_STATE_ERROR_COLOR[2];
-                    pixels[pixelIndex + 3] = DeckTileOverlay.TILE_STATE_ERROR_COLOR[3];
-                } else if (stateKind === TILE_STATE_KIND_EMPTY) {
-                    pixels[pixelIndex + 0] = DeckTileOverlay.TILE_STATE_EMPTY_COLOR[0];
-                    pixels[pixelIndex + 1] = DeckTileOverlay.TILE_STATE_EMPTY_COLOR[1];
-                    pixels[pixelIndex + 2] = DeckTileOverlay.TILE_STATE_EMPTY_COLOR[2];
-                    pixels[pixelIndex + 3] = DeckTileOverlay.TILE_STATE_EMPTY_COLOR[3];
-                }
+                pixels ??= new Uint8ClampedArray(extent.width * extent.height * 4);
+                pixels.set(stateKind === TILE_STATE_KIND_ERROR
+                    ? DeckTileOverlay.TILE_STATE_ERROR_COLOR
+                    : DeckTileOverlay.TILE_STATE_EMPTY_COLOR, pixelIndex);
             }
 
+            if (!pixels) {
+                continue;
+            }
             const imageData = new ImageData(pixels, extent.width, extent.height);
             const layerKey = `${DeckTileOverlay.TILE_STATE_LAYER_KEY}/${level}`;
             const overlayGeometry = this.tileStateOverlayGeometry(extent);

@@ -34,8 +34,11 @@ export interface CompletionOwnerState {
     requestSerial: number;
 }
 
+/** Shape points are an explicit style context. Search inference considers features and attributes. */
+export type ExpressionCompletionScope = FeatureSearchScope | "shapepoint";
+
 export interface FeatureSearchCompletionOptions {
-    scope?: FeatureSearchScope;
+    scope?: ExpressionCompletionScope;
     selectedMapLayers?: FeatureSearchMapLayerRef[];
     timeoutMs?: number;
 }

@@ -21,7 +21,7 @@ import { MapViewService } from "../mapview/mapview.service";
 import { MapViewState } from "../mapview/mapview.state";
 import { InfoMessageService } from "../diagnostics/info.service";
 import { KeyboardService } from "../keyboard/keyboard.service";
-import { tileFeatureInteractionTargetsEqual } from "./feature-identity.model";
+import { parseFeatureInspectionTarget, tileFeatureInteractionTargetsEqual } from "./feature-identity.model";
 import { boundedUnicodeString } from "../utils/unicode-string.util";
 import { deepEquals } from "../appstate/appstate.model";
 import { AppStateService } from "../appstate/appstate.service";
@@ -179,9 +179,8 @@ export class InspectionSelectionService implements AppActionContributor {
                         continue;
                     }
                     const resolved = resolvedByPanelId.get(selection.id);
-                    if (resolved?.features.length) {
-                        convertedSelections.push(this.runtimePanel(selection, resolved.features));
-                    }
+                    const panel = this.runtimePanel(selection, resolved?.features ?? []);
+                    if (panel.features.length || panel.unavailablePoints?.length) convertedSelections.push(panel);
                 }
 
                 // Restricted feature loading can complete from a transport
@@ -226,12 +225,18 @@ export class InspectionSelectionService implements AppActionContributor {
         features: FeatureWrapper[],
         loading = false
     ): InspectionPanelModel<FeatureWrapper> {
+        const unavailablePoints = loading ? [] : selection.features.flatMap(id => {
+            const target = parseFeatureInspectionTarget(id.featureId);
+            if (target.scope !== "shapepoint" || features.some(feature => tileFeatureInteractionTargetsEqual(feature, id))) return [];
+            return [`Could not open vertex ${target.pointIndex} of ${target.baseFeatureId}. Its source partition is unavailable.`];
+        });
         return {
             id: selection.id,
             locked: selection.locked,
             focused: selection.focused,
             size: selection.size,
             features,
+            ...(unavailablePoints.length ? {unavailablePoints} : {}),
             sourceData: selection.sourceData,
             color: selection.color,
             undocked: selection.undocked ?? false,
@@ -423,9 +428,8 @@ export class InspectionSelectionService implements AppActionContributor {
         for (const { panelId, feature } of values) {
             const tile = feature.featureTile;
             const key = `${panelId}:${tile.mapTileKey}`;
-            const rawExpiry = Number(tile.expiresAtMs);
-            const expiresAtMs = Number.isFinite(rawExpiry)
-                ? rawExpiry
+            const expiresAtMs = Number.isFinite(tile.expiresAtMs)
+                ? tile.expiresAtMs
                 : null;
             const tileId = tile.partitionKey;
             let group = grouped.get(key);
@@ -482,7 +486,7 @@ export class InspectionSelectionService implements AppActionContributor {
         }
     }
 
-    /** Reloads one retained panel/tile group; missing refreshed features keep their existing wrappers. */
+    /** Renew this panel's tile. A vanished point source leaves a notice in the open panel. */
     private async renewInspectionOwner(
         owner: InspectionExpiryOwner,
         tokens: ReadonlyArray<{
@@ -514,7 +518,8 @@ export class InspectionSelectionService implements AppActionContributor {
             );
             return;
         }
-        if (this.inspectionExpiryOwners.get(owner.key) !== owner) {
+        if (this.inspectionExpiryOwners.get(owner.key) !== owner ||
+            !tokens.some(token => token.valueVersion === owner.epoch)) {
             return;
         }
         const replacementById = new Map(replacements.map(feature => [
@@ -522,19 +527,20 @@ export class InspectionSelectionService implements AppActionContributor {
             feature
         ]));
         this.ngZone.run(() => {
-            const currentPanels = this.selectionTopic.getValue();
-            const nextPanels = currentPanels.map(panel =>
-                panel.id !== owner.panelId
-                    ? panel
-                    : {
-                        ...panel,
-                        features: panel.features.map(feature =>
-                            feature.featureTile.mapTileKey === owner.mapTileKey
-                                ? replacementById.get(feature.featureId) ?? feature
-                                : feature
-                        )
-                    }
-            );
+            const selected = this.inspectionState.state.selection;
+            const selection = selected.find(panel => panel.id === owner.panelId);
+            if (!selection) return;
+            const nextPanels = this.selectionTopic.getValue().map(panel => {
+                if (panel.id !== owner.panelId) return panel;
+                const features = panel.features.flatMap(feature => {
+                    if (feature.featureTile.mapTileKey !== owner.mapTileKey) return [feature];
+                    const replacement = replacementById.get(feature.featureId);
+                    if (replacement) return [replacement];
+                    return parseFeatureInspectionTarget(feature.featureId).scope === "shapepoint" ? [] : [feature];
+                });
+                return this.runtimePanel(selection, features);
+            });
+            this.selectionIdsTopic.next(this.selectionIdsForRuntime(selected, nextPanels));
             this.selectionTopic.next(nextPanels);
         });
     }
@@ -614,6 +620,11 @@ export class InspectionSelectionService implements AppActionContributor {
      */
     featureSetZoomTarget(features: readonly FeatureWrapper[]): Wgs84Point | undefined {
         const spheres = features.flatMap(wrapper => wrapper.peek((feature: Feature) => {
+            const target = parseFeatureInspectionTarget(wrapper.featureId);
+            if (target.scope === "shapepoint") {
+                const center = feature.shapePointPosition(target.geometryOrdinal, target.pointIndex, target.sourceId);
+                return center && this.isFiniteWgs84Point(center) ? [{center, radius: 0}] : [];
+            }
             const center = feature.center() as Wgs84Point;
             return this.isFiniteWgs84Point(center)
                 ? [{ center, radius: this.featureBoundingRadiusMeters(center, feature.boundingRadiusEndPoint()) }] : [];
@@ -722,7 +733,8 @@ export class InspectionSelectionService implements AppActionContributor {
                 description:
                     "Open feature/entity inspections in the ordinary UI. For an attribute validity, copy the base " +
                     "featureId plus attributeIndex and validityIndex from native extraction or search results. " +
-                    "relationIndex similarly addresses a relation. Existing suffixed IDs remain supported; do not " +
+                    "relationIndex similarly addresses a relation. To open an original geometry vertex, supply " +
+                    "the base featureId, mapTileKey and shapePoint (sourceId, geometryOrdinal, pointIndex). Existing suffixed IDs remain supported; do not " +
                     "combine a suffix with numeric selectors. Returns panel IDs immediately; loading remains " +
                     "observable via app.selections. panelId must address an unlocked feature panel; newPanel opens " +
                     "one grouped panel. To distinguish groups (e.g. predecessors versus successors), call " +
