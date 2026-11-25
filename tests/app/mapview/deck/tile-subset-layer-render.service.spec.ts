@@ -41,6 +41,16 @@ const EMPTY_SCENE = {
     }]
 };
 
+it("reserves one reusable preview worker independently of ordinary pool credit", () => {
+    const service = new TileSubsetLayerRenderService();
+    const preview = service.previewRenderer();
+    expect(service.previewRenderer()).toBe(preview);
+    expect(preview.activeWorkerCount()).toBe(1);
+    expect(preview.availableWorkerSlots()).toBe(1);
+    expect(preview).not.toBe(service);
+    service.ngOnDestroy();
+});
+
 function completedTile(
     service: TileSubsetLayerRenderService,
     current = true,

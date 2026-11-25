@@ -1,5 +1,19 @@
 ### Dependencies via CPM
 
+# The small C implementation supplies robust inverse/direct geodesics without
+# pulling projection databases, filesystem support, or the full GeographicLib.
+if (NOT TARGET erdblick-geodesic)
+  CPMAddPackage(
+    NAME erdblick-geodesic-source
+    GITHUB_REPOSITORY geographiclib/geographiclib-c
+    GIT_TAG v2.2
+    DOWNLOAD_ONLY YES)
+  add_library(erdblick-geodesic STATIC
+    "${erdblick-geodesic-source_SOURCE_DIR}/src/geodesic.c")
+  target_include_directories(erdblick-geodesic PUBLIC
+    "${erdblick-geodesic-source_SOURCE_DIR}/src")
+endif()
+
 set(ERDBLICK_MAPGET_SOURCE_DIR "" CACHE PATH
   "Local mapget source directory to use instead of fetching from Git.")
 

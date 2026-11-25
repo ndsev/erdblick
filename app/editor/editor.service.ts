@@ -2,14 +2,16 @@ import {Injectable} from '@angular/core';
 import {BehaviorSubject, Observable, Subject} from 'rxjs';
 
 /** Enumerates the editor modes supported by the shared code editor wrapper. */
-export type EditorLanguage = 'yaml' | 'json';
+export type EditorLanguage = 'yaml' | 'json' | 'text';
 
 /** Describes the initial state for one shared editor session. */
 export interface EditorSessionConfig {
     id: string;
     source: string;
     readOnly?: boolean;
+    styleCompletions?: boolean;
     language?: EditorLanguage;
+    preserveLineEndings?: boolean;
 }
 
 /** Line-oriented navigation target for one shared editor session. */
@@ -32,6 +34,8 @@ export interface EditorSession {
     saveRequested$: Subject<void>;
     language: EditorLanguage;
     readOnly: boolean;
+    styleCompletions: boolean;
+    preserveLineEndings: boolean;
 }
 
 @Injectable()
@@ -45,6 +49,7 @@ export class EditorService {
     private readonly pendingRevealRequests = new Map<string, EditorRevealRequest>();
     private nextRevealRequestId = 0;
     readonly sessionChanged$ = new Subject<string>();
+    readonly readOnlyChanged$ = new Subject<string>();
     readonly revealRequested$ = new Subject<EditorRevealRequest>();
 
     /** Creates or replaces an editor session and broadcasts that the session set changed. */
@@ -59,6 +64,8 @@ export class EditorService {
             source$: new BehaviorSubject<string>(config.source),
             saveRequested$: new Subject<void>(),
             language: config.language ?? 'yaml',
+            styleCompletions: config.styleCompletions ?? false,
+            preserveLineEndings: config.preserveLineEndings ?? false,
             readOnly: config.readOnly ?? false
         };
         this.sessions.set(session.id, session);
@@ -79,6 +86,14 @@ export class EditorService {
     /** Returns the current source text for one editor session. */
     getSessionSource(id: string): string {
         return this.sessions.get(id)?.source$.getValue() ?? '';
+    }
+
+    /** Updates server capabilities without replacing the document's editing history. */
+    setReadOnly(id: string, readOnly: boolean): void {
+        const session = this.sessions.get(id);
+        if (!session || session.readOnly === readOnly) return;
+        session.readOnly = readOnly;
+        this.readOnlyChanged$.next(id);
     }
 
     /** Update an existing session, including read-only UI sessions; unchanged text is ignored. */

@@ -1,3 +1,12 @@
+import {DrawingEditorComponent} from "./drawing/drawing-editor.component";
+import {DrawingToolbarComponent} from './drawing/drawing-toolbar.component';
+import {DrawingWorkspaceComponent} from "./drawing/drawing-workspace.component";
+import {EditorWorkspaceComponent} from "./editor/editor-workspace.component";
+import {EditorSurfaceComponent} from "./editor/editor-surface.component";
+import {EditorDockComponent} from "./editor/editor-dock.component";
+import {EditorContentOutletDirective} from "./editor/editor-content-outlet.directive";
+import {StyleEditorDocumentComponent} from "./mapstyle/style-editor-document.component";
+import {MapPresetEditorComponent} from "./mapstyle/map-preset-editor.component";
 import {environment} from "./environments/environment";
 import { provideHttpClient, withFetch } from "@angular/common/http";
 import { inject, Injector, NgModule, provideAppInitializer } from "@angular/core";
@@ -106,6 +115,7 @@ import { SourceDataPanelComponent } from "./inspection/sourcedata-panel.componen
 import { SourceDataLayerSelectionDialogComponent } from "./inspection/sourcedata-selection-dialog.component";
 import { TreeTableFilterPatchDirective } from "./inspection/treetablefilter-patch.directive";
 import { initializeLibrary } from "./integrations/wasm.adapter";
+import { DrawingDocumentsService } from "./drawing/drawing-documents.service";
 import { KeyboardComponent } from "./keyboard/keyboard.component";
 import { OnEnterClickDirective } from "./keyboard/keyboard.service";
 import { AppDialogComponent } from "./layout/app-dialog.component";
@@ -203,6 +213,7 @@ export const initializeServices = () => {
     inject(GeolocationService);
     const urlState = inject(AppUrlStateService);
     const jumps = inject(JumpTargetService);
+    const drawingDocuments = inject(DrawingDocumentsService);
 
     return (async () => {
         updateGlobalSpinner('Loading app config');
@@ -226,6 +237,8 @@ export const initializeServices = () => {
         mapPresetService.initialize();
         updateGlobalSpinner('Initializing map data');
         await tileStream.initialize();
+        // Large local documents restore in the worker without blocking the viewer shell.
+        void drawingDocuments.restore();
         jumps.initialize();
         inspectionSelection.initialize();
         featureSearch.initialize();
@@ -239,6 +252,14 @@ export const initializeServices = () => {
 
 @NgModule({
     declarations: [
+        DrawingEditorComponent, DrawingWorkspaceComponent, DrawingToolbarComponent,
+        EditorWorkspaceComponent,
+        EditorSurfaceComponent,
+        EditorDockComponent,
+        EditorContentOutletDirective,
+        StyleEditorDocumentComponent,
+        MapPresetEditorComponent,
+
         AppComponent,
         OmnibarComponent,
         MapPanelComponent,

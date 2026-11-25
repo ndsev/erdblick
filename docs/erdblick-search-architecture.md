@@ -245,8 +245,9 @@ The save dialog emits an action-bearing immutable request. Both **Save** and
 **Save and Open** import through the same transactional style lifecycle and use
 the checkbox value for both YAML `default` and initial runtime visibility.
 Only after a successful import and dialog close does the latter dispatch the
-ordinary style-editor request; editor refusal due to another dirty session does
-not roll back a completed save.
+ordinary style-editor request. The editor workspace opens or focuses that style
+independently of drafts in other editors; the completed import remains a separate
+operation.
 
 ## Result identity
 

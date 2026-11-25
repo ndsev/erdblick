@@ -2,6 +2,12 @@
 @import "@fontsource-variable/inter/index.css";
 @import "@fontsource/inter/index.css";
 
+// PrimeNG positions the overlay wrapper. Keep the themed panel in its layout so
+// the wrapper can measure its full size and flip/clamp it at viewport edges.
+.p-overlay .p-colorpicker-panel {
+  position: relative;
+}
+
 /* Translucent surfaces used in UI (light/dark specific) */
 :root {
   --erdblick-card-bg: rgba(255, 255, 255, 0.87);

@@ -103,6 +103,7 @@ export class TileSubsetLayerVisualization {
     private readonly failedIconUris = new Set<string>();
     private pickSubset: GpuPickSubset | null = null;
     private pickSubsetValueVersion = -1;
+    private readonly nativeOriginId = crypto.randomUUID();
 
     /** Retain one immutable tile subset and its stable scene contribution identity. */
     constructor(
@@ -284,13 +285,19 @@ export class TileSubsetLayerVisualization {
             this.pointCloud ? [] : undefined;
         const reservation = scene.prepareRender(
             `${this.viewIndex}:${nativeOrigin
-                ? this.state.mapTileKey
+                ? this.owner.mapgetLayer.origin === "virtual"
+                    // A local edit can move the anchor, and recreated filter states restart
+                    // valueVersion. Scope immutable origins to this visualization's lifetime
+                    // so still-retiring geometry cannot collide with a new owner's value.
+                    ? `local:${this.nativeOriginId}:${valueVersion}`
+                    : this.state.mapTileKey
                 : this.renderKey}`,
             nativeOrigin ? null : renderOrigin,
             [{
                 identity: this.contributionIdentity(this.state),
                 mapTileKey: this.state.mapTileKey,
                 styleOrder: this.owner.styleOrder,
+                presentationDomain: this.owner.mapgetLayer.origin === "virtual" ? "drawing" : "map",
                 lod: this.lod,
                 resolvePick: reference =>
                     this.resolveGpuPick(reference, pointCloudPicks),

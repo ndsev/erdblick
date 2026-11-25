@@ -1,3 +1,6 @@
+import {DrawingDocumentsService} from "../drawing/drawing-documents.service";
+import {DrawingToolsService} from "../drawing/drawing-tools.service";
+import {EditorWorkspaceService} from "../editor/editor-workspace.service";
 import {
     AfterViewInit,
     Component,
@@ -13,7 +16,6 @@ import { environment } from '../environments/environment';
 import {
     ABOUT_DIALOG_LAYOUT_ID,
     CACHE_RESET_DIALOG_LAYOUT_ID,
-    DATASOURCES_EDITOR_DIALOG_LAYOUT_ID,
     KEYBOARD_DIALOG_LAYOUT_ID,
     LEGAL_INFO_DIALOG_LAYOUT_ID,
     PREFERENCES_DIALOG_LAYOUT_ID,
@@ -153,7 +155,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
      * Initialize responsive menu state and rebuild action groups when views, searches
      * or styles change; dock visibility updates the mobile menu layout.
      */
-    constructor(public mapService: MapDataService,
+    constructor(private readonly drawingDocuments: DrawingDocumentsService, private readonly drawingTools: DrawingToolsService, private readonly editorWorkspace: EditorWorkspaceService, public mapService: MapDataService,
         public stateService: AppStateService,
         private mapViewState: MapViewService,
         private diagnostics: DiagnosticsFacadeService,
@@ -260,7 +262,7 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
 
     /** Opens the datasource editor dialog. */
     private openDatasources() {
-        this.layout.openDialog(DATASOURCES_EDITOR_DIALOG_LAYOUT_ID);
+        this.editorWorkspace.open('datasources');
     }
 
     /** Opens the styles dialog. */
@@ -533,6 +535,18 @@ export class MainBarComponent implements AfterViewInit, OnDestroy {
                 name: 'File',
                 icon: 'folder_open',
                 items: [
+                    {
+                        name: 'New GeoJSON', icon: 'add', command: () => this.drawingDocuments.begin('geojson')
+                    },
+                    {
+                        name: 'New coordinates', icon: 'add_location', command: () => this.drawingDocuments.begin('coordinates')
+                    },
+                    {
+                        name: 'Drawing tools', icon: 'draw', command: () => this.drawingTools.start()
+                    },
+                    {
+                        name: 'Measure distance', icon: 'straighten', command: () => this.drawingTools.select('distance')
+                    },
                     {
                         name: 'Import Search',
                         icon: 'manage_search',

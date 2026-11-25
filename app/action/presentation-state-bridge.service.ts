@@ -10,6 +10,7 @@ import { featureSearchDefinitionFromImportPayload } from "../search/feature-sear
 import { SearchService } from "../search/search.service";
 import { AppStateService } from "../appstate/appstate.service";
 import { MapStyleService } from "../mapstyle/mapstyle.service";
+import { EDITOR_PRESENTATION_RESET_EVENT } from "../editor/editor-document.model";
 
 export const PRESENTATION_BRIDGE_PROTOCOL_VERSION = 2;
 export const PRESENTATION_BRIDGE_READY = "erdblick:presentation:ready";
@@ -313,6 +314,9 @@ export class PresentationStateBridgeService implements OnDestroy {
                         for (const id of this.importedSearchIds) this.searchService?.closeSearch(id);
                         this.importedSearchIds.clear();
                         this.searchService?.dismissForPresentation();
+                        if (request.kind === "snapshot" || request.reset) {
+                            this.browserWindow.dispatchEvent(new Event(EDITOR_PRESENTATION_RESET_EVENT));
+                        }
                     }
                     this.styleService.reconcilePresentationStyles();
                     if (request.kind === "url" && this.searchService) {

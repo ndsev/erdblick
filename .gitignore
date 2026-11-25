@@ -11,7 +11,10 @@ static-visualization-only
 .angular
 app/action/generated/
 node_modules
-/config/
+/config/*
+!/config/styles/
+/config/styles/*
+!/config/styles/drawing-style.yaml
 out-tsc
 config/config.json
 dist

@@ -1489,14 +1489,6 @@ search-style-rule-editor {
   }
 }
 
-.feature-search-colorpicker-overlay {
-  // PrimeNG writes an inline transform on the body-appended overlay root, so shift the panel itself.
-  // The search visualization color pickers sit near the right dock edge and need the panel to open leftward.
-  .p-colorpicker-panel {
-    transform: translateX(calc(-100% + 1.75rem));
-  }
-}
-
 .p-colorpicker {
   input {
     height: 1em;

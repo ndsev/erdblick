@@ -36,6 +36,7 @@ import {
     TileSubsetDelivery
 } from "./filter-subscription.model";
 import { MapDataService } from "./mapdata.service";
+import { VirtualSourceService } from "../drawing/virtual-source.service";
 import type { MapgetLayer } from "./mapget-layer.model";
 import {
     parseMapPartitionKey,
@@ -206,14 +207,16 @@ export class MapTileStreamService implements OnDestroy {
         private readonly mapInfo: MapDataService,
         private readonly messageService: InfoMessageService,
         private readonly ngZone: NgZone,
-        public readonly state: MapDataState
+        public readonly state: MapDataState,
+        private readonly virtualSources?: VirtualSourceService
     ) {
         this.retryPolicy = this.state.connectionRetryPolicy;
         this.stateSubscriptions.add(this.state.connectionRetryPolicyChanges.subscribe(() => this.applyRetryPolicy()));
         this.stateSubscriptions.add(this.state.tilePullCompressionEnabledState.subscribe(enabled =>
             this.tileStream?.setPullCompressionEnabled(enabled)
         ));
-        this.stateSubscriptions.add(this.mapInfo.dataSourceInfoChanged.subscribe(() => {
+        this.stateSubscriptions.add(this.mapInfo.dataSourceInfoChanged.subscribe(mapIds => {
+            if (mapIds.length && mapIds.every(mapId => this.virtualSources?.owns(mapId))) return;
             this.ngZone.runOutsideAngular(() => {
                 this.tileStream?.resetAfterDataSourceInfoChange();
                 this.scheduleUpdate();
@@ -232,7 +235,8 @@ export class MapTileStreamService implements OnDestroy {
     async initialize(): Promise<void> {
         this.tileStream = new MapTileStreamClientInteractive(
             "/interactive",
-            this.mapInfo.tileLayerParser
+            this.mapInfo.tileLayerParser,
+            stringPoolId => !this.virtualSources?.owns(stringPoolId)
         );
         this.tileStream.onClientId = clientId => this.actionClientId$.next(clientId);
         this.tileStream.onActionControl = (payload, receivedAt) => this.actionControlReceived.next({ payload, receivedAt });
@@ -402,6 +406,9 @@ export class MapTileStreamService implements OnDestroy {
         callbacks: FilterSubscriptionCallbacks,
         filterId?: string
     ): FilterSubscriptionRef {
+        if (this.virtualSources?.owns(definition.mapId)) {
+            return this.virtualSources.subscribe(definition, coverage, callbacks);
+        }
         const resolvedId = filterId?.trim() ||
             `erdblick-filter-${++this.nextFilterSubscriptionId}`;
         if (this.filterSubscriptionsById.has(resolvedId)) {
@@ -433,6 +440,12 @@ export class MapTileStreamService implements OnDestroy {
         layer: MapgetLayer,
         discoveryTileIds: readonly number[]
     ): Promise<ObjectDiscoveryCoverage> {
+        if (layer.origin === "virtual") {
+            return {
+                associations: [{partition: {kind: "object", id: "0"}, discoveryTileId: 0}],
+                expiresAtMs: null
+            };
+        }
         if (layer.partitionKind !== "object" ||
             layer.tileAssociationLevel === null) {
             throw new Error(
@@ -825,7 +838,19 @@ export class MapTileStreamService implements OnDestroy {
     ): Promise<FeatureWrapper[]> {
         const finishLoading = this.beginInspectionLoad();
         try {
-            return await this.loadFeaturesOnce(tileFeatureIds, signal);
+            const requested = tileFeatureIds.filter((value): value is TileFeatureId => !!value);
+            const local = requested.filter(value => this.virtualSources?.ownsKey(value.mapTileKey));
+            const remote = requested.filter(value => !this.virtualSources?.ownsKey(value.mapTileKey));
+            const [localResults, remoteResults] = await Promise.all([
+                local.length ? this.virtualSources!.loadFeatures(local, signal) : [],
+                remote.length ? this.loadFeaturesOnce(remote, signal) : []
+            ]);
+            const resolved = new Map([...localResults, ...remoteResults].map(feature =>
+                [this.featureIdentityKey(feature), feature]));
+            return requested.flatMap(feature => {
+                const result = resolved.get(this.featureIdentityKey(feature));
+                return result ? [result] : [];
+            });
         } finally {
             finishLoading();
         }
@@ -941,7 +966,8 @@ export class MapTileStreamService implements OnDestroy {
 
         const transport = new MapTileStreamClientTiles(
             "/tiles",
-            this.mapInfo.tileLayerParser
+            this.mapInfo.tileLayerParser,
+            stringPoolId => !this.virtualSources?.owns(stringPoolId)
         );
         transport.onFields = () =>
             this.mapInfo.invalidateFieldDictBlobCache();
@@ -949,7 +975,7 @@ export class MapTileStreamService implements OnDestroy {
         transport.onFeatures = blob => {
             const tile = new InspectionFeatureTile(
                 this.mapInfo.tileLayerParser,
-                blob
+                blob, "remote", stringPoolId => !this.virtualSources?.owns(stringPoolId)
             );
             tiles.set(tile.mapTileKey, tile);
             for (const warning of tile.warnings) console.warn(`Tile warning (${tile.mapTileKey}): ${warning}`);
@@ -1034,7 +1060,7 @@ export class MapTileStreamService implements OnDestroy {
     ): Promise<Array<TileFeatureId | null>> {
         const requests = requested.map(feature => {
             const parsed = this.parseMapPartitionKeySafe(feature.mapTileKey);
-            return parsed
+            return parsed && !this.virtualSources?.owns(parsed[0])
                 ? {
                     mapId: parsed[0],
                     layerId: parsed[1],
@@ -1113,6 +1139,7 @@ export class MapTileStreamService implements OnDestroy {
 
     /** Resolves a canonical feature string using the backend schema, preserving ambiguous matches for callers. */
     async locateFeature(mapId: string, featureId: string, layerId?: string, signal?: AbortSignal): Promise<TileFeatureId[]> {
+        if (this.virtualSources?.owns(mapId)) return [];
         const canonicalId = stripFeatureInspectionTarget(featureId);
         return this.locateFeatureRequest(JSON.stringify({ requests: [{
             mapId, ...(layerId ? {layerId} : {}), featureId: canonicalId
@@ -1122,6 +1149,7 @@ export class MapTileStreamService implements OnDestroy {
     /** Resolve named foreign parts only against the target map, without importing its schema into the source. */
     async locateFeatureReference(reference: NamedFeatureReference, signal?: AbortSignal): Promise<TileFeatureId[]> {
         signal?.throwIfAborted();
+        if (this.virtualSources?.owns(reference.mapId)) return [];
         const referenceJson = namedFeatureReferenceJson(reference);
         const key = this.mapInfo.schemaScopeSignature([reference.mapId]) + "\n" + referenceJson;
         const cached = this.locatedFeatureReferences.get(key);
@@ -1727,6 +1755,7 @@ export class MapTileStreamService implements OnDestroy {
         },
         signal: AbortSignal
     ): Promise<TileAttachmentValue | null> {
+        if (this.virtualSources?.owns(request.mapId)) return null;
         const query = new URLSearchParams({
             mapId: request.mapId,
             layerId: request.layerId,

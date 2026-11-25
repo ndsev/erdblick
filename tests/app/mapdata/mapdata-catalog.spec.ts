@@ -1,3 +1,4 @@
+import {coreLib} from '../../../app/integrations/wasm.adapter';
 import { testPersistence, stateOwners } from "../../support/state-owners";
 import "@angular/compiler";
 import { HttpClient, HttpErrorResponse, HttpHeaders, HttpResponse } from "@angular/common/http";
@@ -18,6 +19,7 @@ import type { MapPresetService } from "../../../app/mapstyle/map-preset.service"
 import { InfoMessageService } from "../../../app/diagnostics/info.service";
 import { MapTileStreamService } from "../../../app/mapdata/map-tile-stream.service";
 import { MapTileStreamClientInteractive } from "../../../app/mapdata/map-tile-stream.client";
+import { DrawingRuntime } from "../../../app/drawing/drawing-runtime.adapter";
 
 /** Minimal valid catalog entry; each refresh below crosses a real JSON boundary. */
 function source(mapId: string, configIndex: number, status = "ready"): MapInfoItem {
@@ -66,6 +68,29 @@ function fixture(messages: InfoMessageService = {showError: vi.fn()} as unknown 
 }
 
 describe("MapDataService incremental catalog startup", () => {
+    it("retains local catalogs and view preferences through remote refresh and failure", async () => {
+        const {service, owners, state, get, reload, dispose} = fixture();
+        const runtime = new DrawingRuntime();
+        const report = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+            await reload([source('Remote', 0)]);
+            const local = runtime.execute({type: 'create', mapId: 'drawing-catalog', text: coreLib.drawingCoordinatesToGeoJson('0 0 local\n')});
+            service.registerVirtualSource({...local.summary!.metadata, displayName: 'local.txt'},
+                {schemaId: local.summary!.metadata.schemaId!, bytes: local.schema!}, local.dictionary!);
+            owners.layerState.setMapLayerConfig('drawing-catalog', 'Drawing', [{visible: false, autoLevel: true, level: 0}]);
+            await reload([source('Replacement', 0)]);
+            expect(service.mapgetLayer('drawing-catalog', 'Drawing')?.origin).toBe('virtual');
+            expect(owners.layerState.mapLayerConfig('drawing-catalog', 'Drawing')[0].visible).toBe(false);
+            get.mockReturnValueOnce(throwError(() => new HttpErrorResponse({status: 503})));
+            expect(await service.reloadDataSources()).toBe(false);
+            expect(service.maps.maps.has('drawing-catalog')).toBe(true);
+            expect(JSON.stringify(state.exportSnapshot())).not.toContain('drawing-catalog');
+            service.removeVirtualSource('drawing-catalog');
+            expect(service.maps.maps.has('Replacement')).toBe(true);
+            expect(service.maps.maps.has('drawing-catalog')).toBe(false);
+        } finally {report.mockRestore(); runtime.destroy(); dispose();}
+    });
+
     it("retains configuration health separately from source readiness and clears it on recovery", async () => {
         const {service, get, reload, dispose} = fixture();
         const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});

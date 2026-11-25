@@ -1,3 +1,5 @@
+import {coreLib} from "../integrations/wasm.adapter";
+import {parseMapPartitionKey} from "../mapdata/partition.model";
 /**
  * Saved inspection panels, selected feature references and display preferences.
  * URL decoding and normalization operate on plain panel descriptions here.
@@ -23,6 +25,24 @@ import {
 
 @Injectable({ providedIn: "root" })
 export class InspectionState {
+    /** Tombstones keep local feature references out of durable panel snapshots. */
+    private readonly sessionMaps = new Set<string>();
+    /** Register browser-owned identity before a pick can create an inspection panel. */
+    registerSessionMap(mapId: string): void { this.sessionMaps.add(mapId); }
+    /** Resolve ownership through the native partition-key contract after WASM startup. */
+    private isSessionFeature(feature: TileFeatureId): boolean {
+        if (!this.sessionMaps.size) return false;
+        try { return this.sessionMaps.has(parseMapPartitionKey(coreLib, feature.mapTileKey)[0]); }
+        catch { return false; }
+    }
+    /** Share the same local-reference exclusion between snapshots and the compact URL codec. */
+    persistableSelection(value = this.selection): InspectionPanelModel<TileFeatureId>[] {
+        return value.map(state => ({...state,
+            features: state.features.filter(feature => !this.isSessionFeature(feature)),
+            sourceData: state.sourceData && this.isSessionFeature({...state.sourceData, featureId: ''}) ? undefined : state.sourceData
+        })).filter((state, index) => state.features.length || state.sourceData ||
+            (!value[index].features.length && !value[index].sourceData));
+    }
     constructor(private readonly persistence: AppStateService) {}
 
     /** Returns the default inspection panel size. */
@@ -43,7 +63,8 @@ export class InspectionState {
         defaultValue: [],
         schema: z.array(z.string()),
         toStorage: (value: InspectionPanelModel<TileFeatureId>[]) => {
-            return value.map((state) => {
+            return this.persistableSelection(value)
+                .map((state) => {
                 let s = `${state.id}~${state.locked ? 1 : 0}${state.focused ? "f" : ""}~`;
                 if (state.sourceData) {
                     s += `${state.sourceData.mapTileKey}~${state.sourceData.address ?? ""}~`;

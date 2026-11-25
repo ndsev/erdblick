@@ -77,6 +77,7 @@ interface FeatureSearchSavedStyleOption {
                                                        [overlayOptions]="featureSearchColorPickerOverlayOptions"
                                                        pTooltip="Density and pin color"
                                                        tooltipPosition="bottom"
+                                                       (onChange)="$event.originalEvent.preventDefault()"
                                                        (ngModelChange)="onSearchColorChange($event)">
                                         </p-colorpicker>
                                     </div>
@@ -176,6 +177,7 @@ interface FeatureSearchSavedStyleOption {
                                                            [overlayOptions]="featureSearchColorPickerOverlayOptions"
                                                            pTooltip="Density and pin color"
                                                            tooltipPosition="bottom"
+                                                           (onChange)="$event.originalEvent.preventDefault()"
                                                            (ngModelChange)="onSearchColorChange($event)">
                                             </p-colorpicker>
                                         </div>

@@ -80,6 +80,7 @@ import {
 } from "./deck-semantic-z-index.visualization";
 import { clippedGeographicBounds } from "./deck-viewport-coverage.util";
 import { createErdblickVectorLayers, ErdblickVectorLayer } from "./erdblick-vector.layer";
+import {DrawingLayer} from "./drawing.layer";
 import { gpuIconAtlas } from "./gpu-icon-atlas.visualization";
 import { GpuSceneMaskController } from "./gpu-scene-mask.controller";
 import { GpuScene } from "./gpu-scene.visualization";
@@ -136,6 +137,7 @@ interface DeckGestureEventLike {
     srcEvent?: {
         button?: number;
         ctrlKey?: boolean;
+        shiftKey?: boolean;
         pointerType?: string;
     };
 }
@@ -191,6 +193,7 @@ export abstract class DeckMapView implements IRenderView {
     private gpuVectorLayers: readonly ErdblickVectorLayer[] = [];
     private readonly gpuVectorDisabledPickIndices = new Set<number>();
     private gpuTextLayerHost: GpuTextLayerHost | null = null;
+    private gpuDrawingLayers: DrawingLayer[] = [];
     private gpuMaskController: GpuSceneMaskController | null = null;
     protected readonly subscriptions: Subscription[] = [];
     protected viewState: DeckCameraState = {
@@ -261,13 +264,22 @@ export abstract class DeckMapView implements IRenderView {
     private liveCameraSyncRaf: number | null = null;
     private cameraStatePushPending = false;
     private retiringForViewRemoval = false;
+    private drawingPointer?: number;
     private readonly deckCanvasPointerEnter = () => {
         this.picking.pointerEnter();
     };
     private readonly deckCanvasPointerMove = (event: PointerEvent) => {
         this.onCanvasPointerMove(event);
+        if (this.drawingPointer === event.pointerId) { event.preventDefault(); event.stopImmediatePropagation(); }
     };
     private readonly deckCanvasPointerDown = (event: PointerEvent) => {
+        const point = environment.visualizationOnly ? undefined : this.pickCartographic({x: event.offsetX, y: event.offsetY});
+        if (event.button === 0 && !event.ctrlKey && point &&
+            this.mapViewState.drawingInput?.down(this.viewId, [point.lon, point.lat], event.shiftKey)) {
+            this.drawingPointer = event.pointerId;
+            (event.currentTarget as HTMLCanvasElement).setPointerCapture(event.pointerId);
+            event.preventDefault(); event.stopImmediatePropagation(); return;
+        }
         this.picking.pointerDown();
         if (!this.allowPitchAndBearing || this.firstPersonSession) {
             return;
@@ -276,10 +288,24 @@ export abstract class DeckMapView implements IRenderView {
             event.preventDefault();
         }
     };
+    private readonly deckCanvasPointerUp = (event: PointerEvent) => {
+        if (event.pointerId !== this.drawingPointer) return;
+        const point = this.pickCartographic({x: event.offsetX, y: event.offsetY});
+        this.mapViewState.drawingInput?.up(this.viewId, point ? [point.lon, point.lat] : undefined);
+        this.drawingPointer = undefined;
+        (event.currentTarget as HTMLCanvasElement).releasePointerCapture(event.pointerId);
+        event.preventDefault(); event.stopImmediatePropagation();
+    };
+    private readonly deckCanvasPointerCancel = () => {
+        if (this.drawingPointer !== undefined) this.mapViewState.drawingInput?.cancel();
+        this.drawingPointer = undefined;
+    };
     private readonly deckCanvasPointerLeave = (event: PointerEvent) => {
+        if (this.drawingPointer !== undefined) return;
         const preserveInspectionHover = event.relatedTarget instanceof Element
             && event.relatedTarget.closest("inspection-container") !== null;
         this.picking.pointerLeave(preserveInspectionHover);
+        this.mapViewState.drawingInput?.leave(this.viewId);
     };
     private readonly deckCanvasContextMenu = (event: MouseEvent) => {
         event.preventDefault();
@@ -423,7 +449,10 @@ export abstract class DeckMapView implements IRenderView {
         container.innerHTML = "";
         const canvas = this.createDeckCanvas(container);
         canvas.addEventListener("pointerenter", this.deckCanvasPointerEnter);
-        canvas.addEventListener("pointermove", this.deckCanvasPointerMove);
+        canvas.addEventListener("pointermove", this.deckCanvasPointerMove, true);
+        canvas.addEventListener("pointerup", this.deckCanvasPointerUp, true);
+        canvas.addEventListener("pointercancel", this.deckCanvasPointerCancel);
+        canvas.addEventListener("lostpointercapture", this.deckCanvasPointerCancel);
         // Cancel deferred hover work before Mjolnir begins classifying the gesture.
         // The controller's synchronous provider owns target acquisition.
         canvas.addEventListener("pointerdown", this.deckCanvasPointerDown, true);
@@ -596,6 +625,22 @@ export abstract class DeckMapView implements IRenderView {
             this.gpuScene,
             this.sceneMode === SceneMode.SCENE2D
         );
+        this.gpuDrawingLayers = (["geometry", "interaction", "labels"] as const).map(drawingPass =>
+            new DrawingLayer({
+                id: `builtin/drawing-${this._viewIndex}-${drawingPass}`,
+                data: [],
+                scene: this.gpuScene!,
+                flattenZ: this.sceneMode === SceneMode.SCENE2D,
+                drawingPass,
+                disabledPickIndices: this.gpuVectorDisabledPickIndices,
+                pickable: true,
+                drillPickEligible: true,
+                navigationAnchorEligible: false
+            })
+        );
+        this.gpuDrawingLayers.forEach((layer, index) =>
+            this.layerRegistry.upsert(layer.id, layer, [450, 4_002, 476][index])
+        );
         this.gpuMaskController = new GpuSceneMaskController(
             this.deckDevice!,
             this.gpuScene,
@@ -663,6 +708,8 @@ export abstract class DeckMapView implements IRenderView {
         if (this.gpuTextLayerHost) {
             this.layerRegistry.remove(this.gpuTextLayerHost.id);
         }
+        for (const layer of this.gpuDrawingLayers) this.layerRegistry.remove(layer.id);
+        this.gpuDrawingLayers = [];
         this.layerRegistry.destroy();
         if (this.deck) {
             this.deck.props._framebuffer = null;
@@ -686,8 +733,13 @@ export abstract class DeckMapView implements IRenderView {
             );
             this.deck.getCanvas()?.removeEventListener(
                 "pointermove",
-                this.deckCanvasPointerMove
+                this.deckCanvasPointerMove,
+                true
             );
+            this.deckCanvasPointerCancel();
+            this.deck.getCanvas()?.removeEventListener("pointerup", this.deckCanvasPointerUp, true);
+            this.deck.getCanvas()?.removeEventListener("pointercancel", this.deckCanvasPointerCancel);
+            this.deck.getCanvas()?.removeEventListener("lostpointercapture", this.deckCanvasPointerCancel);
             this.deck.getCanvas()?.removeEventListener(
                 "pointerdown",
                 this.deckCanvasPointerDown,
@@ -811,6 +863,7 @@ export abstract class DeckMapView implements IRenderView {
             layer.sceneChanged();
         }
         this.gpuTextLayerHost?.sceneChanged();
+        for (const layer of this.gpuDrawingLayers) layer.sceneChanged();
         this.gpuMaskController?.sceneChanged();
         this.semanticZIndex.sceneChanged();
         // Keep the previous lookup generation alive through one complete
@@ -1765,6 +1818,7 @@ export abstract class DeckMapView implements IRenderView {
             const cartographic = this.firstPersonSession
                 ? undefined
                 : this.pickCartographic(position);
+            this.mapViewState.drawingInput?.move(this.viewId, cartographic ? [cartographic.lon, cartographic.lat] : undefined, event.shiftKey);
             if (cartographic) {
                 this.coordinatesService.mouseMoveCoordinates.next(
                     Cartographic.fromDegrees(cartographic.lon, cartographic.lat, cartographic.alt)
@@ -1793,6 +1847,9 @@ export abstract class DeckMapView implements IRenderView {
         }
 
         const screenPosition = { x: info.x, y: info.y };
+        const toolPoint = this.pickCartographic(screenPosition);
+        if (toolPoint && !srcEvent?.ctrlKey &&
+            this.mapViewState.drawingInput?.click(this.viewId, [toolPoint.lon, toolPoint.lat], srcEvent?.shiftKey)) return;
         const deck = this.deck;
         // Selection arrays can change in place while foreign identity is being
         // resolved. Observe publication rather than comparing array identities.

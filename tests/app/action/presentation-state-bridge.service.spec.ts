@@ -11,6 +11,7 @@ import type { MapStyleService } from "../../../app/mapstyle/mapstyle.service";
 import type { AppStateService } from "../../../app/appstate/appstate.service";
 import type { MapViewService } from "../../../app/mapview/mapview.service";
 import type { SearchService } from "../../../app/search/search.service";
+import {EDITOR_PRESENTATION_RESET_EVENT} from '../../../app/editor/editor-document.model';
 import {
     PRESENTATION_BRIDGE_APPLY,
     PRESENTATION_BRIDGE_APPLY_URL_STATE,
@@ -52,6 +53,7 @@ function framedWindow(search = "?embed=presentation"): FramedWindowFixture {
         parent,
         location: { search },
         document,
+        dispatchEvent: vi.fn(() => true),
         addEventListener: vi.fn((type: string, callback: EventListener) => {
             if (type === "message") {
                 listener = callback as (event: MessageEvent<unknown>) => void;
@@ -124,6 +126,7 @@ describe("PresentationStateBridgeService", () => {
         });
         await flushMicrotasks();
         expect(calls).toEqual(["state", "dismiss"]);
+        expect(fixture.host.dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({type: EDITOR_PRESENTATION_RESET_EVENT}));
         ready();
         await flushMicrotasks();
         expect(calls).toEqual(["state", "dismiss", "import"]);

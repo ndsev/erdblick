@@ -65,6 +65,7 @@ export class GpuTextLayerHost extends CompositeLayer<LayerProps & {
     scene: GpuScene;
     flattenZ: boolean;
     drillPickEligible?: boolean;
+    presentationDomain?: "map" | "drawing";
 }> {
     static override layerName = "GpuTextLayerHost";
 
@@ -95,7 +96,7 @@ export class GpuTextLayerHost extends CompositeLayer<LayerProps & {
 
     /** Materialize one TextLayer per low-cardinality compatibility key, never per tile. */
     override renderLayers(): TextLayer<GpuTextDatum>[] {
-        return this.buckets(this.props.scene.labels())
+        return this.buckets(this.props.scene.labels(this.props.presentationDomain ?? "map"))
             .sort((left, right) => left.styleOrder - right.styleOrder ||
                 left.renderOrder - right.renderOrder ||
                 left.key.localeCompare(right.key))
@@ -150,7 +151,7 @@ export class GpuTextLayerHost extends CompositeLayer<LayerProps & {
                 ],
                 getZIndexOffset: (label: GpuTextDatum) => label.zIndexOffset,
                 collisionEnabled: bucket.collision,
-                collisionGroup: `${this.props.id}-labels`,
+                collisionGroup: `gpu-scene-${this.props.scene.generation}-labels`,
                 getCollisionPriority: (label: GpuTextDatum) =>
                     label.collisionPriority,
                 characterSet: "auto",
@@ -285,7 +286,8 @@ export class GpuTextLayerHost extends CompositeLayer<LayerProps & {
 
 /** Returns whether a root layer belongs in the final, post-compositor text pass. */
 export function isDeckTextOverlayLayer(layer: Layer): boolean {
-    return layer instanceof GpuTextLayerHost || layer instanceof TextLayer;
+    return layer instanceof GpuTextLayerHost || layer instanceof TextLayer ||
+        (layer.props as {drawingPass?: string}).drawingPass === "labels";
 }
 
 /**
@@ -348,12 +350,14 @@ export class DeckTextOverlayService implements Effect {
 export function createGpuTextLayerHost(
     id: string,
     scene: GpuScene,
-    flattenZ: boolean
+    flattenZ: boolean,
+    presentationDomain: "map" | "drawing" = "map"
 ): GpuTextLayerHost {
     return new GpuTextLayerHost({
         id,
         data: [],
         scene,
+        presentationDomain,
         flattenZ,
         // Deck evaluates layerFilter against the root composite layer. Keep
         // the host pickable so its eligible TextLayer children participate in

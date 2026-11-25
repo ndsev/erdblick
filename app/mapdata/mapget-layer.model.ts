@@ -21,7 +21,9 @@ export class MapgetLayer {
         readonly stringPoolId: string,
         readonly mapId: string,
         readonly layerId: string,
-        readonly info: Readonly<LayerInfoItem>
+        readonly info: Readonly<LayerInfoItem>,
+        readonly origin: "remote" | "virtual" = "remote",
+        readonly renderLane?: "drawing-preview"
     ) {
         this.key = `${mapId}/${layerId}`;
         Object.freeze(this);

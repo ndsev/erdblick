@@ -1,5 +1,6 @@
 name: DefaultStyle
 version: 2
+layer: '^(?!Drawing$).*'
 options:
   - label: Show Meshes/Polygons
     id: showMesh

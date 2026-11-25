@@ -289,6 +289,7 @@ import type {SearchStyleProjectionWarning} from "./search-style-sheet.converter"
                                                            [ngModel]="rule.labelBackgroundColor"
                                                            appendTo="body"
                                                            [overlayOptions]="colorPickerOverlayOptions"
+                                                           (onChange)="$event.originalEvent.preventDefault()"
                                                            (ngModelChange)="setLabelBackgroundColor(rule, $event)">
                                             </p-colorpicker>
                                         </div>

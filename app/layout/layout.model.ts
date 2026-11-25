@@ -39,6 +39,7 @@ export const SOURCE_DATA_SELECTION_DIALOG_LAYOUT_ID = 'source-data-selection-dia
 export const INSPECTION_DOCK_TAB_ID = 'inspection';
 
 export const SEARCH_DOCK_TAB_ID = 'search';
+export const EDITORS_DOCK_TAB_ID = 'editors';
 
 /** Persisted top-left dialog position in viewport pixels. */
 export interface AppDialogPosition {

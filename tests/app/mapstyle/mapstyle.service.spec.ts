@@ -9,7 +9,7 @@ import {
     afterEach,
     vi
 } from 'vitest';
-import { of, BehaviorSubject } from 'rxjs';
+import { of, BehaviorSubject, Subject } from 'rxjs';
 
 import { MapStyleService } from '../../../app/mapstyle/mapstyle.service';
 
@@ -135,6 +135,31 @@ describe('MapStyleService', () => {
         expect(service.getBuiltinBaselineSource('TestStyle')).toBe(
             'name: TestStyle\nrules:\n  - geometry: [line]');
         expect(JSON.parse(localStorage.getItem('builtinStyleData') ?? '[]')).toEqual([]);
+    });
+
+    it('acknowledges only the submitted source when a newer edit appears during PUT', async () => {
+        const {service, httpClient} = createService({styles: [{url: 'base.yaml'}], serverConfig: {
+            styleEditingEnabled: true, styleEditingDirectory: '/styles'
+        }});
+        const response = new Subject<string>();
+        httpClient.get.mockReturnValue(of('name: TestStyle'));
+        httpClient.put.mockReturnValue(response);
+        vi.spyOn(service as any, 'parseWasmStyle').mockReturnValue([{
+            name: () => 'TestStyle', defaultEnabled: () => true, delete: vi.fn()
+        }, []]);
+        vi.spyOn(service, 'reapplyStyle').mockImplementation(() => {});
+        await service.initializeStyles();
+        const submitted = 'name: TestStyle\nrules: []';
+        const newer = submitted + '\n# newer edit';
+        service.setStyleSource('TestStyle', submitted);
+        const saving = service.saveStyleToSource('TestStyle');
+        service.setStyleSource('TestStyle', newer);
+        response.next('Saved'); response.complete();
+        expect(await saving).toBe(true);
+        expect(httpClient.put.mock.calls[0][1]).toBe(submitted);
+        expect(service.getBuiltinBaselineSource('TestStyle')).toBe(submitted);
+        expect(service.styles.get('TestStyle')?.source).toBe(newer);
+        expect(service.styles.get('TestStyle')?.modified).toBe(true);
     });
 
     it('keeps embedded layer presets with their owning style lifecycle', async () => {

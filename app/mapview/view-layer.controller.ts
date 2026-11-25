@@ -1820,9 +1820,24 @@ export class ViewLayerController {
         if (!this.sceneHandle) {
             return;
         }
+        // A busy map/file render pool must not hold up the bounded cursor tail.
+        const previewLayers = [...this.styledLayers.values()].filter(owned =>
+            owned.layer?.mapgetLayer.renderLane === "drawing-preview");
+        const previewRenders = [...this.pendingVisualizationRenders].filter(item =>
+            item.owner?.mapgetLayer.renderLane === "drawing-preview");
+        if (previewLayers.length || previewRenders.length) {
+            const renderer = this.renderService.previewRenderer();
+            while (renderer.availableWorkerSlots() > 0) {
+                const rerender = previewRenders.shift();
+                if (rerender) {
+                    this.pendingVisualizationRenders.delete(rerender);
+                    this.startVisualizationRender(rerender);
+                } else if (!previewLayers.some(owned => this.dispatchOnePendingTile(owned))) break;
+            }
+        }
         while (this.renderService.availableWorkerSlots() > 0) {
-            const rerender = this.pendingVisualizationRenders.values()
-                .next().value as TileSubsetLayerVisualization | undefined;
+            const rerender = [...this.pendingVisualizationRenders].find(item =>
+                item.owner?.mapgetLayer.renderLane !== "drawing-preview");
             if (rerender) {
                 this.pendingVisualizationRenders.delete(rerender);
                 this.startVisualizationRender(rerender);
@@ -1836,7 +1851,8 @@ export class ViewLayerController {
 
     /** Dispatches one tile while rotating fairly across all active styled layers. */
     private dispatchOnePendingStyledLayerTile(): boolean {
-        const layers = [...this.styledLayers.values()];
+        const layers = [...this.styledLayers.values()].filter(owned =>
+            owned.layer?.mapgetLayer.renderLane !== "drawing-preview");
         if (!layers.length) {
             this.nextStyledLayerDispatchIndex = 0;
             return false;
@@ -1880,7 +1896,8 @@ export class ViewLayerController {
                 pending.state,
                 visualizationKey,
                 coordinateOrigin,
-                this.renderService,
+                owned.layer.mapgetLayer.renderLane === "drawing-preview"
+                    ? this.renderService.previewRenderer() : this.renderService,
                 this.styleValidationReports,
                 pending.lod,
                 pending.lineSimplificationToleranceMeters,
@@ -2119,6 +2136,7 @@ export class ViewLayerController {
     private objectPartitionsForViewport(
         layer: MapgetLayer
     ): readonly PartitionId[] {
+        if (layer.origin === "virtual") return [{kind: "object", id: "0"}];
         const level = layer.tileAssociationLevel;
         if (level === null) {
             return [];

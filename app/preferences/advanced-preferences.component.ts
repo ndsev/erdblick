@@ -1,262 +1,104 @@
-import {
-    Component,
-    ElementRef,
-    HostListener,
-    ViewChild
-} from '@angular/core';
-import { Subscription } from 'rxjs';
-import { AppDialogComponent } from '../layout/app-dialog.component';
-import { ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID } from "../layout/layout.model";
-import { LayoutService } from "../layout/layout.service";
-import { AppStateService } from "../appstate/appstate.service";
-import { DialogStackService } from '../layout/dialog-stack.service';
-import { EditorService } from '../editor/editor.service';
+import {Component, Inject, OnDestroy, OnInit} from '@angular/core';
+import {Subscription} from 'rxjs';
+import {AppStateService} from '../appstate/appstate.service';
+import {EDITOR_DOCUMENT} from '../editor/editor-workspace.service';
+import {EditorDocumentController, EditorDocumentRef} from '../editor/editor-document.model';
+import {EditorService} from '../editor/editor.service';
 
 @Component({
-    selector: 'advanced-preferences',
+    selector: 'advanced-preferences', standalone: false,
     template: `
-        <app-dialog header="Advanced Preferences"
-                    class="editor-dialog advanced-preferences-dialog"
-                    [(visible)]="dialogVisible"
-                    [modal]="false"
-                    [closable]="false"
-                    [closeOnEscape]="false"
-                    [persistLayout]="true"
-                    [layoutId]="dialogLayoutId"
-                    #advancedPreferencesDialog
-                    (onShow)="onDialogShow()"
-                    (onHide)="onDialogHide()">
-            @if (validationError.length > 0) {
-                <div class="advanced-preferences-validation-error">{{ validationError }}</div>
-            }
-            <editor [sessionId]="advancedPreferencesEditorSessionId"></editor>
-            <div class="advanced-preferences-actions">
-                <div class="advanced-preferences-actions-left">
-                    <p-button (click)="saveSnapshot()"
-                              label="Save"
-                              icon="pi pi-check"
-                              [disabled]="!dirty"></p-button>
-                    <p-button (click)="triggerImport()"
-                              label="Import"
-                              icon="pi pi-file-import"></p-button>
-                    <p-button (click)="exportSnapshot()"
-                              label="Export"
-                              icon="pi pi-file-export"></p-button>
-                    <input #snapshotFileInput
-                           type="file"
-                           accept=".json,application/json"
-                           style="display: none;"
-                           (change)="onImportFileSelected($event)">
-                </div>
-                <p-button (click)="closeDialog($event)"
-                          [label]="dirty ? 'Discard' : 'Close'"
-                          icon="pi pi-times"></p-button>
-            </div>
-        </app-dialog>
-        <app-dialog header="Warning!"
-                    [(visible)]="discardWarningVisible"
-                    [modal]="true"
-                    [closeOnEscape]="false"
-                    #discardWarningDialog
-                    (onShow)="onDiscardWarningShow()">
-            <p>You have unsaved advanced preference changes. Do you want to save before closing?</p>
-            <div style="margin: 0.5em 0; display: flex; flex-direction: row; align-content: center; gap: 0.5em;">
-                <p-button (click)="saveSnapshot(true)" label="Save"></p-button>
-                <p-button (click)="discardWarningVisible = false" label="Cancel"></p-button>
-                <p-button (click)="discardAndClose()" label="Discard"></p-button>
-            </div>
-        </app-dialog>
-    `,
-    standalone: false
+        @if (error) { <div class="editor-document-error advanced-preferences-validation-error" role="alert">{{ error }}</div> }
+        <editor [sessionId]="document.id"/>
+        <div class="editor-actions advanced-preferences-actions">
+            <p-button [label]="saveLabel" icon="pi pi-check" [disabled]="!saveEnabled" (click)="save()"/>
+            <p-button label="Import" icon="pi pi-file-import" (click)="snapshotFileInput.click()"/>
+            <p-button label="Export" icon="pi pi-file-export" (click)="exportSnapshot()"/>
+            <p-button [label]="dirty ? 'Discard' : 'Close'" (click)="document.close($event)"/>
+            <input #snapshotFileInput type="file" accept=".json,application/json" hidden (change)="importFile($event)">
+        </div>
+    `
 })
-/** Provides the advanced preferences JSON editor dialog. */
-export class AdvancedPreferencesComponent {
-    readonly dialogLayoutId = ADVANCED_PREFERENCES_DIALOG_LAYOUT_ID;
-    readonly advancedPreferencesEditorSessionId = 'advanced-preferences-editor';
-    dirty = false;
-    discardWarningVisible = false;
-    validationError = '';
+/** Edits a detached snapshot without persisting its own draft inside application state. */
+export class AdvancedPreferencesComponent implements EditorDocumentController, OnInit, OnDestroy {
+    readonly title = 'Advanced Preferences';
+    busy = false;
+    error = '';
+    private baseline = '';
+    private baselineState: Record<string, unknown> = {};
+    private reviewToken = '';
+    private destroyed = false;
+    private fileGeneration = 0;
+    private readonly subscriptions = new Subscription();
 
-    @ViewChild('advancedPreferencesDialog') advancedPreferencesDialog?: AppDialogComponent;
-    @ViewChild('discardWarningDialog') discardWarningDialog?: AppDialogComponent;
-    @ViewChild('snapshotFileInput') snapshotFileInput?: ElementRef<HTMLInputElement>;
+    /** Keeps application-state mutation in the existing persistence owner. */
+    constructor(@Inject(EDITOR_DOCUMENT) public readonly document: EditorDocumentRef,
+                private readonly state: AppStateService, private readonly editors: EditorService) {}
 
-    private baselineSnapshotText = '';
-    private sourceSubscription: Subscription = new Subscription();
-    private saveSubscription: Subscription = new Subscription();
+    get dirty(): boolean { return this.editors.getSessionSource(this.document.id).trimEnd() !== this.baseline.trimEnd(); }
+    get saveLabel(): string { return this.reviewToken ? 'Apply reviewed snapshot' : 'Save'; }
+    get saveEnabled(): boolean { return this.dirty && !this.busy; }
 
-    constructor(public readonly stateService: AppStateService,
-        private readonly editorService: EditorService,
-        private readonly dialogStack: DialogStackService,
-        public readonly layout: LayoutService) { }
-
-    get dialogVisible(): boolean {
-        return this.layout.isDialogOpen(this.dialogLayoutId);
+    /** Captures the baseline exactly once, independent of surface visibility. */
+    ngOnInit(): void {
+        this.baselineState = this.state.exportSnapshot();
+        this.baseline = JSON.stringify(this.baselineState, null, 2);
+        const session = this.editors.createSession({id: this.document.id, source: this.baseline, language: 'json'});
+        this.subscriptions.add(session.source$.subscribe(() => { this.reviewToken = ''; this.document.changed(); }));
+        this.subscriptions.add(session.saveRequested$.subscribe(() => { void this.save(); }));
     }
 
-    set dialogVisible(visible: boolean) {
-        this.layout.setDialogOpen(this.dialogLayoutId, visible);
-    }
-
-    /**
-     * Seed a JSON editor session from the current snapshot and subscribe to local
-     * edits/save requests; keep the baseline text for dirty-state comparison.
-     */
-    onDialogShow() {
-        const snapshotText = JSON.stringify(this.stateService.exportSnapshot(), null, 2);
-        this.baselineSnapshotText = snapshotText;
-        this.validationError = '';
-        this.dirty = false;
-        this.editorService.createSession({
-            id: this.advancedPreferencesEditorSessionId,
-            source: snapshotText,
-            language: 'json',
-            readOnly: false
-        });
-        const session = this.editorService.getSession(this.advancedPreferencesEditorSessionId);
-        if (session) {
-            this.sourceSubscription.unsubscribe();
-            this.sourceSubscription = session.source$.subscribe(source => {
-                this.dirty = source.trimEnd() !== this.baselineSnapshotText.trimEnd();
-            });
-            this.saveSubscription.unsubscribe();
-            this.saveSubscription = this.editorService.onSaveRequested(this.advancedPreferencesEditorSessionId)?.subscribe(() => {
-                this.saveSnapshot();
-            }) ?? new Subscription();
+    /** Reviews stale values and applies a validated snapshot as one existing transaction. */
+    async save(): Promise<boolean> {
+        if (!this.saveEnabled) return false;
+        const text = this.editors.getSessionSource(this.document.id);
+        let parsed: Record<string, unknown>;
+        try { parsed = JSON.parse(text); } catch { this.error = 'Advanced preferences JSON syntax is invalid.'; this.document.changed(); return false; }
+        const errors = this.state.validateSnapshot(parsed);
+        if (errors.length) { this.error = errors[0]; this.document.changed(); return false; }
+        const blockers = this.document.conflictingEditors(parsed);
+        if (blockers.length) { this.error = `Save or close these unsaved editors before replacing their workspace: ${blockers.join(', ')}.`; this.document.changed(); return false; }
+        const live = this.state.exportSnapshot();
+        const changed = Object.keys(parsed).filter(key => JSON.stringify(live[key]) !== JSON.stringify(this.baselineState[key]) && JSON.stringify(live[key]) !== JSON.stringify(parsed[key]));
+        const token = JSON.stringify([text, changed.map(key => [key, live[key]])]);
+        if (changed.length && this.reviewToken !== token) {
+            this.reviewToken = token;
+            this.error = `The following state changed since this snapshot was opened and will be replaced: ${changed.join(', ')}. Review it, then choose Apply reviewed snapshot.`;
+            this.document.changed(); return false;
         }
-        this.dialogStack.bringToFront(this.advancedPreferencesDialog);
-    }
-
-    /** Release this dialog's editor subscriptions/session and clear unsaved UI state. */
-    onDialogHide() {
-        this.sourceSubscription.unsubscribe();
-        this.saveSubscription.unsubscribe();
-        this.sourceSubscription = new Subscription();
-        this.saveSubscription = new Subscription();
-        this.editorService.closeSession(this.advancedPreferencesEditorSessionId);
-        this.validationError = '';
-        this.dirty = false;
-        this.discardWarningVisible = false;
-    }
-
-    closeDialog(event: Event) {
-        event.stopPropagation();
-        if (this.dirty) {
-            this.discardWarningVisible = true;
-            return;
-        }
-        this.dialogVisible = false;
-    }
-
-    /** Validates and imports the edited application-state snapshot. */
-    saveSnapshot(closeAfterSave: boolean = false) {
-        const editorText = this.editorService.getSessionSource(this.advancedPreferencesEditorSessionId);
-        let parsed: unknown;
+        this.busy = true; this.document.changed();
         try {
-            parsed = JSON.parse(editorText);
-        } catch {
-            this.validationError = 'Advanced preferences JSON syntax is invalid.';
-            return;
-        }
-
-        const errors = this.stateService.importSnapshot(parsed);
-        if (errors.length) {
-            this.validationError = errors[0];
-            return;
-        }
-
-        const nextText = JSON.stringify(this.stateService.exportSnapshot(), null, 2);
-        this.baselineSnapshotText = nextText;
-        this.editorService.updateSessionSource(this.advancedPreferencesEditorSessionId, nextText);
-        this.validationError = '';
-        this.dirty = false;
-        this.discardWarningVisible = false;
-        if (closeAfterSave) {
-            this.dialogVisible = false;
-        }
+            const result = this.state.importSnapshot(parsed);
+            if (result.length) { this.error = result[0]; return false; }
+            this.baselineState = this.state.exportSnapshot();
+            this.baseline = JSON.stringify(this.baselineState, null, 2);
+            this.editors.updateSessionSource(this.document.id, this.baseline);
+            this.error = ''; this.reviewToken = ''; return true;
+        } finally { this.busy = false; this.document.changed(); }
     }
 
-    /** Opens the hidden file input used to import a snapshot. */
-    triggerImport() {
-        this.snapshotFileInput?.nativeElement.click();
-    }
-
-    /** Reads a selected snapshot file into the editor. */
-    async onImportFileSelected(event: Event) {
-        const input = event.target as HTMLInputElement;
-        const file = input.files?.[0];
-        if (!file) {
-            return;
-        }
-        const limits = this.stateService.getSnapshotImportLimits();
-        if (file.size > limits.maxFileSizeBytes) {
-            this.validationError = `Advanced preferences file exceeds ${limits.maxFileSizeBytes} bytes.`;
-            input.value = '';
-            return;
-        }
-        const text = await file.text();
-        this.editorService.updateSessionSource(this.advancedPreferencesEditorSessionId, text);
-        this.validateSnapshotText(text);
-        input.value = '';
-    }
-
-    /** Downloads the current snapshot editor contents as JSON. */
-    exportSnapshot() {
-        const source = this.editorService.getSessionSource(this.advancedPreferencesEditorSessionId);
-        const blob = new Blob([source], { type: 'application/json;charset=utf-8' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `mv_state_${this.snapshotTimestamp()}.json`;
-        link.click();
-        URL.revokeObjectURL(link.href);
-    }
-
-    discardAndClose() {
-        this.discardWarningVisible = false;
-        this.validationError = '';
-        this.dialogVisible = false;
-    }
-
-    /**
-     * Handle Escape inside this dialog: dismiss a discard warning first, otherwise
-     * use the ordinary close flow so dirty edits still require a decision.
-     */
-    @HostListener('window:keydown', ['$event'])
-    onWindowKeyDown(event: KeyboardEvent) {
-        if (event.key !== 'Escape' || !this.dialogVisible) {
-            return;
-        }
-        event.preventDefault();
-        event.stopPropagation();
-        if (this.discardWarningVisible) {
-            this.discardWarningVisible = false;
-            return;
-        }
-        this.closeDialog(event);
-    }
-
-    onDiscardWarningShow() {
-        this.dialogStack.bringToFront(this.discardWarningDialog);
-    }
-
-    /**
-     * Report JSON syntax errors separately from snapshot-schema validation, showing
-     * the first actionable error without importing the candidate snapshot.
-     */
-    private validateSnapshotText(source: string) {
-        let parsed: unknown;
+    /** Loads a bounded file into this draft; a late read cannot replace newer input. */
+    async importFile(event: Event): Promise<void> {
+        const input = event.target as HTMLInputElement, file = input.files?.[0];
+        if (!file) return;
+        const generation = ++this.fileGeneration;
+        const before = this.editors.getSessionSource(this.document.id);
+        if (file.size > this.state.getSnapshotImportLimits().maxFileSizeBytes) { this.error = 'The snapshot file exceeds the import size limit.'; input.value = ''; this.document.changed(); return; }
         try {
-            parsed = JSON.parse(source);
-        } catch {
-            this.validationError = 'Advanced preferences JSON syntax is invalid.';
-            return;
-        }
-        const errors = this.stateService.validateSnapshot(parsed);
-        this.validationError = errors.length ? errors[0] : '';
+            const source = await file.text();
+            if (this.destroyed || generation !== this.fileGeneration) return;
+            if (this.editors.getSessionSource(this.document.id) !== before) { this.error = 'The draft changed while the file was loading. Import again to replace it.'; return; }
+            this.editors.updateSessionSource(this.document.id, source); this.error = '';
+        } catch { if (!this.destroyed) this.error = 'Could not read the snapshot file.'; }
+        finally { input.value = ''; if (!this.destroyed) this.document.changed(); }
     }
 
-    /** Formats the current time for exported snapshot filenames. */
-    private snapshotTimestamp(): string {
-        return new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '_');
+    /** Downloads the actual draft without applying it to the running viewer. */
+    exportSnapshot(): void {
+        const url = URL.createObjectURL(new Blob([this.editors.getSessionSource(this.document.id)], {type: 'application/json;charset=utf-8'}));
+        const link = document.createElement('a'); link.href = url; link.download = `mv_state_${new Date().toISOString().replace(/[:.]/g, '-')}.json`; link.click(); URL.revokeObjectURL(url);
     }
+
+    /** Retires file reads and source subscriptions only on final document closure. */
+    ngOnDestroy(): void { this.destroyed = true; this.fileGeneration++; this.subscriptions.unsubscribe(); this.editors.closeSession(this.document.id); }
 }

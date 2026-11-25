@@ -23,6 +23,7 @@ afterEach(() => cleanup.splice(0).reverse().forEach(destroy => destroy()));
 function fixture() {
     const persistence = testPersistence();
     const owners = stateOwners(persistence);
+    owners.layerState.groupLocalRemoteSources.next(false);
     owners.viewSettings.importViews(["0"]);
     owners.layerState.setMapLayerConfig("Map", "Roads", [{ visible: false, level: 8, autoLevel: false }]);
     owners.layerState.setStyleOptionValues("Map", "Roads", "roads", "details", [true]);
@@ -68,7 +69,7 @@ function fixture() {
     maps.maps$.next(tree);
     cleanup.push(() => tree.destroy());
     const panel = new MapPanelComponent(
-        maps, views, {} as never, persistence, { registerShortcut: vi.fn() } as never,
+        {documents: new Map()} as never, maps, views, {} as never, persistence, { registerShortcut: vi.fn() } as never,
         owners.configService, {} as never, owners.searchService, {} as never, {} as never,
         presets, styles, owners.layerState, owners.layout.state, owners.inspectionState, owners.viewSettings
     );

@@ -81,9 +81,13 @@ export class MapPresetService {
         return this.configService.snapshot.mapPresetConfig.configured;
     }
 
+    get revision(): string { return this.configService.snapshot.mapPresetConfig.revision ?? ''; }
+
     get canWrite(): boolean {
-        return this.configured && this.configService.snapshot.mapPresetConfig.write && !this.writePending;
+        return this.writable && !this.writePending;
     }
+
+    get writable(): boolean { return this.configured && this.configService.snapshot.mapPresetConfig.write; }
 
     get writePending(): boolean {
         return this.writePendingSubject.getValue();
@@ -211,18 +215,18 @@ export class MapPresetService {
     }
 
     /** Transactionally activates a complete GUI/raw-editor definitions list. */
-    async applyDefinitions(definitions: unknown): Promise<boolean> {
+    async applyDefinitions(definitions: unknown, expectedRevision?: string): Promise<boolean> {
         const result = parseMapPresetDefinitions(definitions);
         if (result.issues.length || !Array.isArray(definitions)
             || result.presets.length !== definitions.length) {
             this.issuesSubject.next(result.issues);
             return false;
         }
-        return this.persistDefinitions(result.presets);
+        return this.persistDefinitions(result.presets, expectedRevision);
     }
 
     /** Parses a GUI raw-editor buffer as a YAML list, never as an external document URL. */
-    async applyOverrideSource(source: string): Promise<boolean> {
+    async applyOverrideSource(source: string, expectedRevision?: string): Promise<boolean> {
         let parsed: unknown;
         try {
             parsed = jsyaml.load(source);
@@ -232,7 +236,7 @@ export class MapPresetService {
             }]);
             return false;
         }
-        return this.applyDefinitions(parsed);
+        return this.applyDefinitions(parsed, expectedRevision);
     }
 
     async addPreset(preset: MapPresetDefinition): Promise<boolean> {
@@ -274,8 +278,12 @@ export class MapPresetService {
     }
 
     /** Writes one complete catalog under the current config revision. */
-    private async persistDefinitions(definitions: readonly MapPresetDefinition[]): Promise<boolean> {
+    private async persistDefinitions(definitions: readonly MapPresetDefinition[], expectedRevision?: string): Promise<boolean> {
         const status = this.configService.snapshot.mapPresetConfig;
+        if (expectedRevision !== undefined && expectedRevision !== status.revision) {
+            this.issuesSubject.next([{message: 'The catalog changed since this draft was opened. Review and reload before applying.'}]);
+            return false;
+        }
         const parsed = parseMapPresetDefinitions(definitions);
         if (parsed.issues.length || parsed.presets.length !== definitions.length) {
             this.issuesSubject.next(parsed.issues.length

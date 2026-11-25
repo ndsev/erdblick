@@ -83,6 +83,25 @@ export class MapDataState {
         });
     }
 
+    /** Browser-owned layer preferences never enter URL, storage, or snapshot codecs. */
+    private readonly virtualMaps = new Set<string>();
+    private readonly virtualLayers = new Map<string, Map<string, LayerViewConfig>>();
+    private readonly virtualOptions = new Map<string, Map<string, string | number | boolean>>();
+
+    /** Register ownership before tree defaults are materialized. */
+    registerVirtualMap(mapId: string): void { this.virtualMaps.add(mapId); }
+    /** Release session state after the local source leaves the catalog. */
+    removeVirtualMap(mapId: string): void {
+        this.virtualMaps.delete(mapId);
+        for (const key of this.virtualLayers.keys()) if (key.startsWith(mapId + '/')) this.virtualLayers.delete(key);
+        for (const key of this.virtualOptions.keys()) if (key.startsWith(mapId + '/')) this.virtualOptions.delete(key);
+    }
+
+    /** Presentation preference shared by map accordions and persisted with viewer configuration. */
+    readonly groupLocalRemoteSources = this.persistence.registerState<boolean>({
+        name: "groupLocalRemoteSources", defaultValue: true, schema: Boolish
+    });
+
     hasAuthoritativeUrlLayerList = false;
 
     readonly layerSyncOptionsState = this.persistence.registerPerViewState<boolean>(
@@ -184,6 +203,11 @@ export class MapDataState {
         fallbackLevel = 13
     ): LayerViewConfig[] {
         if (isSourceOrMetaData(layerId)) return [];
+        if (this.virtualMaps.has(mapId)) {
+            const stored = this.virtualLayers.get(mapId + '/' + layerId);
+            return this.viewSettings.viewIds.map(id => ({...(stored?.get(id) ??
+                {visible: fallbackVisibility, level: fallbackLevel, autoLevel: true})}));
+        }
         const index = this.layerNames.indexOf(`${mapId}/${layerId}`);
         const visible = index < 0 && this.hasAuthoritativeUrlLayerList ? false : fallbackVisibility;
         return this.viewSettings.viewIds.map((_, viewIndex) => ({
@@ -234,6 +258,10 @@ export class MapDataState {
             return;
         }
         const mapLayerId = `${mapId}/${layerId}`;
+        if (this.virtualMaps.has(mapId)) {
+            this.virtualLayers.set(mapLayerId, new Map(this.viewSettings.viewIds.map((id, index) => [id, {...viewConfig[index]}])));
+            return;
+        }
         const names = this.layerNames;
         let layerIndex = names.findIndex((ml) => ml === mapLayerId);
         if (layerIndex === -1) {
@@ -272,7 +300,9 @@ export class MapDataState {
         defaultValue: string | number | boolean
     ): (string | number | boolean)[] {
         const key = this.stylesState.styleOptionKey(mapId, layerId, shortStyleId, optionId);
-        const values = this.styles.get(key);
+        const local = this.virtualOptions.get(key);
+        const values = this.virtualMaps.has(mapId)
+            ? this.viewSettings.viewIds.map(id => local?.get(id) ?? defaultValue) : this.styles.get(key);
         return this.viewSettings.viewIds.map((_, index) =>
             this.stylesState.coerceOptionValue(values?.[index] ?? defaultValue, optionType)
         );
@@ -331,7 +361,7 @@ export class MapDataState {
         }
         for (const update of updates) {
             const mapLayerId = `${update.mapId}/${update.layerId}`;
-            if (!this.layerNames.includes(mapLayerId)) {
+            if (!this.virtualMaps.has(update.mapId) && !this.layerNames.includes(mapLayerId)) {
                 throw new Error(
                     `[AppStateService] Unknown map layer '${mapLayerId}' when writing style option values`
                 );
@@ -354,7 +384,9 @@ export class MapDataState {
             } else if (nextValues.length > views) {
                 nextValues = nextValues.slice(0, views);
             }
-            nextStyles.set(key, nextValues);
+            if (this.virtualMaps.has(update.mapId)) {
+                this.virtualOptions.set(key, new Map(this.viewSettings.viewIds.map((id, index) => [id, nextValues[index]])));
+            } else nextStyles.set(key, nextValues);
         }
         this.stylesState.replacePositional(nextStyles);
     }

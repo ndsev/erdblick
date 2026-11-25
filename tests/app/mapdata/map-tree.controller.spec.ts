@@ -658,3 +658,29 @@ describe("map presets in the map tree", () => {
         expect(renderedMap.children?.[0].children?.map(child => child.id)).toEqual(["layer-preset"]);
     });
 });
+
+
+describe('Local and Remote presentation groups', () => {
+    it('groups only visible sources, hides the internal Drawing layer, and retains its style controls', () => {
+        const local = new MapTreeNode({...source('drawing-local'), origin: 'virtual', displayName: 'points.geojson',
+            layers: {Drawing: featureLayer('Drawing')}});
+        local.visible = [true, false];
+        const drawing = local.layers.get('Drawing')!;
+        drawing.children = [new StyleOptionNode(local.id, drawing.id, styleOption('drawingColor', 'Drawing color'), 'drawing', 'drawing', true)];
+        const remote = new MapTreeNode({...source('RemoteMap'), layers: {Drawing: featureLayer('Drawing')}});
+        remote.visible = [false, true];
+        const preview = new MapTreeNode({...source('cursor'), origin: 'virtual', transient: true});
+        const nodes = [remote, preview, local];
+        const grouped = filterMapTreeNodes(nodes, '', 0, true);
+        expect(grouped.map(node => node.label)).toEqual(['Local', 'Remote']);
+        expect(grouped.map(node => node.mapIds)).toEqual([['drawing-local'], ['RemoteMap']]);
+        expect(grouped[0].visible).toEqual([true, false]);
+        expect(grouped[0].children![0].children!.map(node => node.id)).toEqual(['drawingColor']);
+        expect(grouped[1].children![0].children!.map(node => node.id)).toEqual(['Drawing']);
+        expect(local.children).toEqual([drawing]); // Native/control tree is unchanged.
+        expect(filterMapTreeNodes(nodes, '', 0, false).map(node => node.id)).toEqual(['RemoteMap', 'drawing-local']);
+        expect(filterMapTreeNodes(nodes, 'local', 0, true).map(node => node.label)).toEqual(['Local']);
+        expect(filterMapTreeNodes(nodes, 'points.geojson', 0, true)[0].mapIds).toEqual(['drawing-local']);
+        expect(filterMapTreeNodes(nodes, '', 0, true, {'origin:local': false})[0].expanded).toBe(false);
+    });
+});
