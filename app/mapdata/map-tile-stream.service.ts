@@ -815,27 +815,21 @@ export class MapTileStreamService implements OnDestroy {
         }
     }
 
-    /**
-     * Fetches the requested feature models, in selection order. A selection
-     * can supply point wrappers it already owns from the exact picked snapshot.
-     * Those remain available when other members need a fresh /tiles or /locate.
-     */
+    /** Fetch the current models from their declared partitions, in selection order. */
     async loadFeatures(
         tileFeatureIds: (TileFeatureId | null)[],
-        signal?: AbortSignal,
-        retainedPoints: readonly FeatureWrapper[] = []
+        signal?: AbortSignal
     ): Promise<FeatureWrapper[]> {
         const finishLoading = this.beginInspectionLoad();
         try {
-            return await this.loadFeaturesOnce(tileFeatureIds, signal, retainedPoints);
+            return await this.loadFeaturesOnce(tileFeatureIds, signal);
         } finally {
             finishLoading();
         }
     }
 
     private async loadFeaturesOnce(
-        tileFeatureIds: (TileFeatureId | null)[], signal: AbortSignal | undefined,
-        retainedPoints: readonly FeatureWrapper[]
+        tileFeatureIds: (TileFeatureId | null)[], signal?: AbortSignal
     ): Promise<FeatureWrapper[]> {
         signal?.throwIfAborted();
         const requested = tileFeatureIds.filter(
@@ -844,13 +838,8 @@ export class MapTileStreamService implements OnDestroy {
         if (!requested.length) {
             return [];
         }
-        const directByKey = new Map(retainedPoints.map(point => [this.featureIdentityKey(point), point]));
-        const toLoad = requested.filter(feature => !directByKey.has(this.featureIdentityKey(feature)));
-        if (toLoad.length) {
-            for (const feature of await this.loadFeaturesFromDeclaredTiles(toLoad, signal)) {
-                directByKey.set(this.featureIdentityKey(feature), feature);
-            }
-        }
+        const direct = await this.loadFeaturesFromDeclaredTiles(requested, signal);
+        const directByKey = new Map(direct.map(feature => [this.featureIdentityKey(feature), feature]));
         const missing = requested.filter(feature =>
             !directByKey.has(this.featureIdentityKey(feature)) &&
             parseFeatureInspectionTarget(feature.featureId).scope !== "shapepoint"
@@ -1032,18 +1021,9 @@ export class MapTileStreamService implements OnDestroy {
         return requested.flatMap(feature => {
             const target = parseFeatureInspectionTarget(feature.featureId);
             const snapshots = tiles.get(feature.mapTileKey) ?? [];
-            const hasHost = (candidate: InspectionFeatureTile) => candidate.contains(target.baseFeatureId);
-            let tile: InspectionFeatureTile | undefined;
-            if (target.scope === "shapepoint") {
-                // A feature request and a point request can return different revisions
-                // of the same partition in either order. Only the picked revision can
-                // explain this vertex. A newer host can still offer "Open current feature".
-                const fromSource = snapshots.filter(candidate => candidate.sourceId === target.sourceId);
-                tile = fromSource.find(candidate => candidate.sourceRevision === target.sourceRevision && hasHost(candidate))
-                    ?? fromSource.find(candidate => candidate.sourceRevision !== target.sourceRevision && hasHost(candidate));
-            } else {
-                tile = snapshots.find(hasHost);
-            }
+            const tile = snapshots.find(candidate =>
+                (target.scope !== "shapepoint" || candidate.sourceId === target.sourceId) &&
+                candidate.contains(target.baseFeatureId));
             return tile ? [new FeatureWrapper(feature.featureId, tile)] : [];
         });
     }

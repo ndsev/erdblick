@@ -21,7 +21,7 @@ import { MapViewService } from "../mapview/mapview.service";
 import { MapViewState } from "../mapview/mapview.state";
 import { InfoMessageService } from "../diagnostics/info.service";
 import { KeyboardService } from "../keyboard/keyboard.service";
-import { parseFeatureInspectionTarget, stripFeatureInspectionTarget, tileFeatureInteractionTargetsEqual } from "./feature-identity.model";
+import { parseFeatureInspectionTarget, tileFeatureInteractionTargetsEqual } from "./feature-identity.model";
 import { boundedUnicodeString } from "../utils/unicode-string.util";
 import { deepEquals } from "../appstate/appstate.model";
 import { AppStateService } from "../appstate/appstate.service";
@@ -276,23 +276,6 @@ export class InspectionSelectionService implements AppActionContributor {
 
     /** Shares one in-flight restricted load for the same unordered feature identities across rapid panel-state emissions. */
     private loadFeaturesOnce(featureIds: TileFeatureId[]): Promise<FeatureWrapper[]> {
-        // Clicking a coordinate already displayed in Geometry can reuse that exact
-        // feature snapshot. A saved pick on a newer tile goes through /tiles and
-        // native inspection verifies its revision before showing any measurements.
-        const panels = this.selectionTopic.getValue();
-        const reusable = featureIds.map(id => {
-            const target = parseFeatureInspectionTarget(id.featureId);
-            if (target.scope !== "shapepoint") return undefined;
-            for (const panel of panels) {
-                const host = panel.features.find(feature =>
-                    feature.mapTileKey === id.mapTileKey && stripFeatureInspectionTarget(feature.featureId) === target.baseFeatureId &&
-                    feature.featureTile.sourceId === target.sourceId && feature.featureTile.sourceRevision === target.sourceRevision);
-                if (host) return new FeatureWrapper(id.featureId, host.featureTile);
-            }
-            return undefined;
-        });
-        const retainedPoints = reusable.filter((feature): feature is FeatureWrapper => feature !== undefined);
-        if (retainedPoints.length === featureIds.length) return Promise.resolve(retainedPoints);
         const key = this.featureLoadKey(featureIds);
         const pending = this.pendingFeatureLoads.get(key);
         if (pending) {
@@ -301,7 +284,7 @@ export class InspectionSelectionService implements AppActionContributor {
         this.pendingFeatureLoadControllers.get(key)?.abort();
         const controller = new AbortController();
         this.pendingFeatureLoadControllers.set(key, controller);
-        const request = this.tileStream.loadFeatures(featureIds, controller.signal, retainedPoints).finally(() => {
+        const request = this.tileStream.loadFeatures(featureIds, controller.signal).finally(() => {
             if (this.pendingFeatureLoads.get(key) === request) {
                 this.pendingFeatureLoads.delete(key);
                 // Keep terminal diagnostics owned by this selection until it
@@ -639,7 +622,7 @@ export class InspectionSelectionService implements AppActionContributor {
         const spheres = features.flatMap(wrapper => wrapper.peek((feature: Feature) => {
             const target = parseFeatureInspectionTarget(wrapper.featureId);
             if (target.scope === "shapepoint") {
-                const center = feature.shapePointPosition(target.geometryOrdinal, target.pointIndex, target.sourceId, target.sourceRevision);
+                const center = feature.shapePointPosition(target.geometryOrdinal, target.pointIndex, target.sourceId);
                 return center && this.isFiniteWgs84Point(center) ? [{center, radius: 0}] : [];
             }
             const center = feature.center() as Wgs84Point;
@@ -751,7 +734,7 @@ export class InspectionSelectionService implements AppActionContributor {
                     "Open feature/entity inspections in the ordinary UI. For an attribute validity, copy the base " +
                     "featureId plus attributeIndex and validityIndex from native extraction or search results. " +
                     "relationIndex similarly addresses a relation. To open an original geometry vertex, supply " +
-                    "the base featureId, mapTileKey and shapePoint from its source snapshot. Existing suffixed IDs remain supported; do not " +
+                    "the base featureId, mapTileKey and shapePoint (sourceId, geometryOrdinal, pointIndex). Existing suffixed IDs remain supported; do not " +
                     "combine a suffix with numeric selectors. Returns panel IDs immediately; loading remains " +
                     "observable via app.selections. panelId must address an unlocked feature panel; newPanel opens " +
                     "one grouped panel. To distinguish groups (e.g. predecessors versus successors), call " +

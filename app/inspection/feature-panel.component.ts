@@ -135,16 +135,20 @@ export class FeaturePanelComponent implements OnDestroy {
             ...(this.selectedFeatures ?? []).flatMap(feature => feature.featureTile.warnings)])];
     }
 
-    /** A point selection exports its host from the revision that supplied the vertex. */
+    /** A point selection exports its current host from the selected datasource. */
     private exportGeoJson(): string {
         const features = (this.selectedFeatures ?? []).flatMap(wrapper => {
             const target = parseFeatureInspectionTarget(wrapper.featureId);
             if (target.scope === "shapepoint" &&
-                (wrapper.featureTile.sourceId !== target.sourceId || wrapper.featureTile.sourceRevision !== target.sourceRevision)) {
+                wrapper.featureTile.sourceId !== target.sourceId) {
                 return [];
             }
             const snapshot = target.scope === "shapepoint" ? wrapper : this.inspectionFeature(wrapper);
-            const json = snapshot.peek(feature => feature.geojson() as string);
+            const json = snapshot.peek(feature => {
+                if (target.scope === "shapepoint" &&
+                    !feature.shapePointPosition(target.geometryOrdinal, target.pointIndex, target.sourceId)) return null;
+                return feature.geojson() as string;
+            });
             return json === null ? [] : [json];
         });
         return `{"type":"FeatureCollection","features":[${features.join(",")}]}`;
@@ -622,19 +626,19 @@ export class FeaturePanelComponent implements OnDestroy {
                 }
                 if (data.sourceNodeId) node.data["sourceNodeId"] = context.nodeIdPrefix + data.sourceNodeId;
                 const feature = context.feature;
-                if (feature?.featureTile.sourceRevision && data.pointGeometryOrdinal !== undefined && data.originalPointCount) {
+                if (feature && data.pointGeometryOrdinal !== undefined && data.originalPointCount) {
                     node.data["inspectedFeatureId"] = feature.featureId;
                     node.data["pointRange"] = {
                         count: data.originalPointCount, geometryOrdinal: data.pointGeometryOrdinal,
                         baseFeatureId: stripFeatureInspectionTarget(feature.featureId),
-                        sourceId: feature.featureTile.sourceId, sourceRevision: feature.featureTile.sourceRevision
+                        sourceId: feature.featureTile.sourceId
                     };
                 }
-                if (data.geometryOrdinal !== undefined && data.pointIndex !== undefined && feature?.featureTile.sourceRevision) {
+                if (data.geometryOrdinal !== undefined && data.pointIndex !== undefined && feature) {
                     const target = formatFeatureInspectionTarget({
                         scope: "shapepoint", baseFeatureId: stripFeatureInspectionTarget(feature.featureId),
                         geometryOrdinal: data.geometryOrdinal, pointIndex: data.pointIndex,
-                        sourceId: feature.featureTile.sourceId, sourceRevision: feature.featureTile.sourceRevision
+                        sourceId: feature.featureTile.sourceId
                     });
                     node.data["hoverId"] = target;
                     node.data["pointTarget"] = target;

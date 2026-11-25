@@ -178,15 +178,16 @@ public:
     /** Converts a non-null feature on a fresh converter, including identifiers, attributes, relations and geometry. */
     JsValue convert(mapget::model_ptr<mapget::Feature> const& featurePtr);
 
-    /** Open one vertex against the snapshot that supplied the pick or saved Geometry row. */
+    /** Open the current vertex on the selected feature, or return a row explaining why it is unavailable.
+     * An empty sourceId matches only a feature without a catalog provider. */
     JsValue convertAtShapePoint(mapget::model_ptr<mapget::Feature> const& feature,
                                 uint32_t geometryOrdinal, uint32_t pointIndex,
-                                std::string const& sourceId, std::string const& sourceRevision);
+                                std::string const& sourceId);
 
-    /** Camera focus uses the vertex coordinate without evaluating any of its attributes. */
+    /** Return the current coordinate without evaluating attributes, or null on a provider or bounds mismatch. */
     static JsValue shapePointPosition(mapget::model_ptr<mapget::Feature> const& feature,
                                       uint32_t geometryOrdinal, uint32_t pointIndex,
-                                      std::string const& sourceId, std::string const& sourceRevision);
+                                      std::string const& sourceId);
 
     /** Push an already prepared node onto the conversion stack. */
     InspectionNodeScope push(InspectionNode* node);

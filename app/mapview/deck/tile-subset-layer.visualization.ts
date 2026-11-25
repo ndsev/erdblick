@@ -75,8 +75,7 @@ interface GpuPickSubset {
         featureId: string,
         geometryOrdinal: number,
         pointIndex: number,
-        sourceId: string,
-        sourceRevision: string
+        sourceId: string
     ): GpuScenePickReference[];
     delete(): void;
 }
@@ -852,8 +851,7 @@ export class TileSubsetLayerVisualization {
                 target.baseFeatureId,
                 target.geometryOrdinal,
                 target.pointIndex,
-                target.sourceId,
-                target.sourceRevision
+                target.sourceId
             )) ?? [];
         }
         const entryIndex = target.scope === "attribute"
@@ -925,7 +923,7 @@ export class TileSubsetLayerVisualization {
         }
         if (result.scope === "shapepoint") {
             if (result.geometryOrdinal === undefined || result.pointIndex === undefined ||
-                result.sourceId === undefined || !result.sourceRevision) {
+                result.sourceId === undefined) {
                 return undefined;
             }
             return formatFeatureInspectionTarget({
@@ -933,8 +931,7 @@ export class TileSubsetLayerVisualization {
                 baseFeatureId: result.featureId,
                 geometryOrdinal: result.geometryOrdinal,
                 pointIndex: result.pointIndex,
-                sourceId: result.sourceId,
-                sourceRevision: result.sourceRevision
+                sourceId: result.sourceId
             });
         }
         let featureId = result.featureId;

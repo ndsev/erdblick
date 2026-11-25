@@ -1147,17 +1147,10 @@ BubblePropagation buildPropagatedValueBubbles(InspectionNode& node, std::string_
 
 }
 
-namespace {
-bool matchesPointSnapshot(Feature const& feature, std::string const& sourceId, std::string const& revision)
-{
-    return !revision.empty() && feature.model().sourceId() == sourceId && feature.model().sourceRevision() == revision;
-}
-}
-
 JsValue InspectionConverter::shapePointPosition(model_ptr<Feature> const& feature, uint32_t geometry,
-                                               uint32_t index, std::string const& sourceId, std::string const& revision)
+                                               uint32_t index, std::string const& sourceId)
 {
-    if (matchesPointSnapshot(*feature, sourceId, revision)) {
+    if (feature && feature->model().sourceId() == sourceId) {
         if (auto point = feature->shapePoints(geometry).at(index)) {
             const auto position = point->position();
             return JsValue::Dict({{"x", JsValue(position.x)}, {"y", JsValue(position.y)}, {"z", JsValue(position.z)}});
@@ -1168,7 +1161,7 @@ JsValue InspectionConverter::shapePointPosition(model_ptr<Feature> const& featur
 
 JsValue InspectionConverter::convertAtShapePoint(model_ptr<Feature> const& feature,
                                                 uint32_t geometryOrdinal, uint32_t pointIndex,
-                                                std::string const& sourceId, std::string const& revision)
+                                                std::string const& sourceId)
 {
     auto unavailable = [](std::string_view reason) {
         return JsValue::List({JsValue::Dict({
@@ -1176,8 +1169,10 @@ JsValue InspectionConverter::convertAtShapePoint(model_ptr<Feature> const& featu
             {"value", JsValue(std::string(reason))}, {"reopenFeature", JsValue(true)}
         })});
     };
-    if (!matchesPointSnapshot(*feature, sourceId, revision))
-        return unavailable("The source has changed. Open the current feature or pick the vertex again.");
+    if (!feature)
+        return unavailable("The selected feature is unavailable.");
+    if (feature->model().sourceId() != sourceId)
+        return unavailable("The selected feature belongs to a different provider.");
     auto point = feature->shapePoints(geometryOrdinal).at(pointIndex);
     if (!point)
         return unavailable("This geometry or vertex is missing from the selected feature.");

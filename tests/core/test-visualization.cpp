@@ -964,19 +964,54 @@ TEST_CASE("FeatureInspection bounds point previews across clusters without trunc
     REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[2].coordinates[56]"));
     REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*inspection, "geometry.geometries[3].coordinates[0]"));
     REQUIRE((*inspection).dump().find("Showing 0 of 200 coordinates") != std::string::npos);
-    auto const revision = tile->sourceRevision();
-    const auto picked = InspectionConverter().convertAtShapePoint(feature, 3, 150, tile->sourceId(), revision);
+    REQUIRE(tile->sourceId().empty());
+    const auto picked = InspectionConverter().convertAtShapePoint(feature, 3, 150, "");
     auto vertex = findInspectionNodeByGeoJsonPath(*picked, "geometry.geometries[3].coordinates[150]");
     REQUIRE(vertex);
     REQUIRE(vertex->at("geometryOrdinal") == 3);
     REQUIRE(vertex->at("pointIndex") == 150);
     REQUIRE(findInspectionNodeByKey(*vertex, "Point attributes"));
     REQUIRE_FALSE(findInspectionNodeByGeoJsonPath(*picked, "geometry.geometries[3].coordinates[149]"));
-    auto stale = InspectionConverter().convertAtShapePoint(feature, 3, 150, tile->sourceId(), "previous");
-    REQUIRE(findInspectionNodeByKey(*stale, "Shape point unavailable"));
-    REQUIRE_FALSE(findInspectionNodeByKey(*stale, "Point attributes"));
     REQUIRE(feature->geom()->toJson() == exported);
     REQUIRE(exported.at("geometries").at(3).at("coordinates").size() == 200);
+}
+
+TEST_CASE("Shape-point inspection and focus use the current provider's feature and vertex bounds",
+          "[erdblick.inspection][shapepoint]")
+{
+    auto load = [](std::vector<mapget::Point> const& points) {
+        auto tile = std::make_shared<mapget::TileFeatureLayer>(
+            mapget::TileId::fromWgs84(42., 11., 13), "point-pool", "Map", lineTestLayerInfo(),
+            std::make_shared<mapget::StringPool>("point-pool"));
+        tile->setSourceId("survey");
+        tile->newFeature("Way", {{"wayId", 1}})->addLine(points);
+        return tile;
+    };
+    const auto previous = load({{42, 11, 0}, {42, 11, 10}, {42, 11, 20}});
+    const auto current = load({{42, 11, 0}, {42, 11, 35}});
+    const auto oldFeature = previous->find("Way.1");
+    const auto feature = current->find("Way.1");
+    REQUIRE(oldFeature);
+    REQUIRE(feature);
+    CHECK((*InspectionConverter::shapePointPosition(oldFeature, 0, 1, "survey")).at("z") == 10);
+    CHECK((*InspectionConverter::shapePointPosition(feature, 0, 1, "survey")).at("z") == 35);
+    auto selected = InspectionConverter().convertAtShapePoint(feature, 0, 1, "survey");
+    CHECK(findInspectionNodeByKey(*selected, "Point attributes"));
+
+    auto unavailable = [](auto const& selectedFeature, uint32_t geometry, uint32_t index, std::string const& source) {
+        CAPTURE(geometry, index, source);
+        auto tree = InspectionConverter().convertAtShapePoint(selectedFeature, geometry, index, source);
+        auto row = findInspectionNodeByKey(*tree, "Shape point unavailable");
+        REQUIRE(row);
+        CHECK(row->at("reopenFeature") == true);
+        CHECK_FALSE(findInspectionNodeByKey(*tree, "Point attributes"));
+        CHECK((*InspectionConverter::shapePointPosition(selectedFeature, geometry, index, source)).is_null());
+    };
+    unavailable(feature, 0, 2, "survey"); // This vertex existed in the previous feature.
+    unavailable(feature, 1, 0, "survey");
+    unavailable(feature, 0, 1, "another-provider");
+    unavailable(feature, 0, 1, ""); // An unspecified provider is not a wildcard.
+    unavailable(current->find("Way.2"), 0, 1, "survey");
 }
 
 TEST_CASE("FeatureInspection copies geometry search paths", "[erdblick.inspection]")

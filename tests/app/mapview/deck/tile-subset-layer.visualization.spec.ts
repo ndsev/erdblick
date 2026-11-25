@@ -162,7 +162,6 @@ describe("TileSubsetLayerVisualization", () => {
             // A single byte identifies each simulated native subset. Both use
             // row zero, but that row names a different original source vertex.
             const pointIndex = coreLib.HEAPU8[Number(buffer.getPointer())];
-            const sourceRevision = `r${pointIndex}`;
             return {
                 delete: releaseSubset,
                 findPickReferences,
@@ -171,14 +170,13 @@ describe("TileSubsetLayerVisualization", () => {
                     featureId: "Road.7",
                     geometryOrdinal: 1,
                     pointIndex,
-                    sourceId: "survey",
-                    sourceRevision
+                    sourceId: "survey"
                 }),
                 findShapePointPickReferences: (
-                    id: string, geometry: number, vertex: number, source: string, revision: string
+                    id: string, geometry: number, vertex: number, source: string
                 ) => {
                     const matches = id === "Road.7" && geometry === 1 && vertex === pointIndex &&
-                        source === "survey" && revision === sourceRevision;
+                        source === "survey";
                     return matches ? [reference] : [];
                 }
             };
@@ -202,8 +200,8 @@ describe("TileSubsetLayerVisualization", () => {
         visualization.state.subsetBlob = Uint8Array.of(2);
         visualization.state.valueVersion++;
         const next = visualization.render(sceneHandle);
-        const firstTarget = "Road.7:shapepoint#1.1@survey@r1";
-        const secondTarget = "Road.7:shapepoint#1.2@survey@r2";
+        const firstTarget = "Road.7:shapepoint#1.1@survey";
+        const secondTarget = "Road.7:shapepoint#1.2@survey";
         expect(contributions[0].resolvePick!(reference)).toBe(firstTarget);
         expect(contributions[0].findPickReferences!(firstTarget)).toEqual([reference]);
         expect(contributions[0].findPickReferences!(secondTarget)).toEqual([]);
@@ -249,11 +247,11 @@ describe("TileSubsetLayerVisualization", () => {
         expect(visualization.resolveGpuPick({...reference, entryOrdinal: 4}, firstPicks)).toBeUndefined();
         expect(visualization.resolveGpuPick(reference, [])).toBeUndefined();
         const vertex = {...reference, scope: "shapepoint", featureId: "Road.7",
-            geometryOrdinal: 0, pointIndex: 1, sourceId: "survey", sourceRevision: "r1"};
-        const target = "Road.7:shapepoint#0.1@survey@r1";
+            geometryOrdinal: 0, pointIndex: 1, sourceId: "survey"};
+        const target = "Road.7:shapepoint#0.1@survey";
         expect(visualization.resolveGpuPick(reference, [vertex])).toBe(target);
         expect(visualization.findGpuPickReferences(target, [vertex])).toEqual([vertex]);
-        expect(visualization.findGpuPickReferences("Road.7:shapepoint#0.1@survey@r2", [vertex])).toEqual([]);
+        expect(visualization.findGpuPickReferences("Road.7:shapepoint#0.1@other", [vertex])).toEqual([]);
         expect(visualization.withGpuPickSubset).not.toHaveBeenCalled();
     });
 

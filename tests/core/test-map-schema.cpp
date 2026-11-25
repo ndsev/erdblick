@@ -150,7 +150,7 @@ TEST_CASE("The same named geometry supplies style completions and vertex inspect
     values->append(int64_t{-13});
     REQUIRE(occurrence->addField("codes", values));
     auto inspect = [&](uint32_t geometry, uint32_t point) {
-        return *erdblick::InspectionConverter().convertAtShapePoint(feature, geometry, point, tile->sourceId(), tile->sourceRevision());
+        return *erdblick::InspectionConverter().convertAtShapePoint(feature, geometry, point, tile->sourceId());
     };
     auto children = [](nlohmann::json const& parent, nlohmann::json const& key) -> nlohmann::json const& {
         auto const& rows = parent.is_array() ? parent : parent.at("children");

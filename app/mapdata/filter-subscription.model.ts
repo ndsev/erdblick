@@ -50,12 +50,6 @@ export interface FilterSubscriptionDefinition {
     bindings?: Record<string, FilterBindingValue>;
 }
 
-/** Geometry and vertex ordinals in a pick belong to one published feature partition. */
-export interface SourceSnapshot {
-    sourceId: string;
-    sourceRevision: string;
-}
-
 /** Mutable output demand for one filter definition. Order is significant. */
 export interface FilterSubscriptionCoverage {
     partitions: PartitionId[];
@@ -87,7 +81,6 @@ export interface TileSubsetDelivery {
         partition: PartitionId;
         sourceFeatureCount: number;
         sourceId?: string;
-        sourceRevision?: string;
     }>;
     readonly error?: string | null;
     readonly warnings?: readonly string[];

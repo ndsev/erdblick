@@ -1713,7 +1713,7 @@ describe("GpuScene contribution lifecycle", () => {
 
   it("highlights an already-picked vertex in every authored channel and drops retired rows", () => {
     const { scene } = createScene();
-    const target = {mapTileKey: "Features:Map:Layer:1:0", featureId: "Lane.2:shapepoint#1.0@survey@r1"};
+    const target = {mapTileKey: "Features:Map:Layer:1:0", featureId: "Lane.2:shapepoint#1.0@survey"};
     const identities = new Set(["tile"]);
     const input = [{identity: "tile", mapTileKey: target.mapTileKey, styleOrder: 0, lod: 7}];
     const initial = scene.prepareRender("origin", [11, 48, 0], input);

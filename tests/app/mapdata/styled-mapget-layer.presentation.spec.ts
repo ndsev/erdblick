@@ -10,6 +10,24 @@ import {StyledMapgetLayer} from "../../../app/mapdata/styled-mapget-layer.presen
 import {partitionKey, tilePartition} from "../../../app/mapdata/partition.model";
 
 describe("StyledMapgetLayer presentation refs", () => {
+    it.each(["", "survey"])("installs point highlights only for the requested source and partition: %j", sourceId => {
+        const key = "Features:map:layer:42";
+        const state = {mapTileKey: key, install: vi.fn(() => true), valueVersion: 1};
+        const layer = Object.assign(Object.create(StyledMapgetLayer.prototype), {
+            pointSourceId: sourceId, filterRef: {generation: 1},
+            tileStates: new Map([["tile", state]]), events: new Subject()
+        });
+        const deliver = (sourceTileKey: string, deliveredSource: string) => layer.acceptTile({
+            generation: 1, partitionKey: "tile",
+            dependencies: [{sourceTileKey, sourceId: deliveredSource}]
+        }, false);
+        expect(deliver(key, "other")).toEqual({status: "superseded"});
+        expect(deliver("Features:map:layer:43", sourceId)).toEqual({status: "superseded"});
+        expect(state.install).not.toHaveBeenCalled();
+        expect(deliver(key, sourceId)).toEqual({status: "accepted", valueVersion: 1});
+        expect(state.install).toHaveBeenCalledOnce();
+    });
+
     it("publishes one removal event for a complete coverage delta", () => {
         const layer = Object.create(StyledMapgetLayer.prototype) as any;
         const first = new FilterTileState(

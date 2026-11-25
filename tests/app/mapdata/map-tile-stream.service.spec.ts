@@ -9,7 +9,7 @@ import {
     vi
 } from "vitest";
 import { MapTileStreamService } from "../../../app/mapdata/map-tile-stream.service";
-import { FeatureWrapper, InspectionFeatureTile } from "../../../app/mapdata/feature-inspection.adapter";
+import { InspectionFeatureTile } from "../../../app/mapdata/feature-inspection.adapter";
 import type {SourceCatalogRefreshResult} from "../../../app/mapdata/source-catalog.model";
 import { TileDeliveryError } from "../../../app/mapdata/tile-diagnostics.model";
 import { MapgetLayer } from "../../../app/mapdata/mapget-layer.model";
@@ -59,9 +59,9 @@ describe("MapTileStreamService request failures", () => {
     it("accepts a structured vertex selector only in its observed feature partition", async () => {
         const service = serviceHarness();
         const locate = vi.spyOn(service, "locateFeature");
-        const shapePoint = {geometryOrdinal: 1, pointIndex: 0, sourceId: "provider", sourceRevision: "r1"};
+        const shapePoint = {geometryOrdinal: 1, pointIndex: 0, sourceId: "provider"};
         const mapTileKey = coreLib.createMapTileKey("Features", "Map", "Lane", "545555028");
-        const featureId = "Lane.2:shapepoint#1.0@provider@r1";
+        const featureId = "Lane.2:shapepoint#1.0@provider";
         try {
             expect(await service.resolveFeatureIdentities([{featureId: "Lane.2", mapTileKey, shapePoint}]))
                 .toEqual([{mapTileKey, featureId}]);
@@ -80,7 +80,7 @@ describe("MapTileStreamService request failures", () => {
         const locate = vi.spyOn(service as any, "locateCanonicalFeatures");
         try {
             const mapTileKey = coreLib.createMapTileKey("Features", "Map", "Lane", "545555028");
-            const rows = await service.loadFeatures([{mapTileKey, featureId: "Lane.2:shapepoint#1.0@provider@r1"}]);
+            const rows = await service.loadFeatures([{mapTileKey, featureId: "Lane.2:shapepoint#1.0@provider"}]);
             expect(rows).toEqual([]);
             expect(send.mock.calls[0][0]).toMatchObject([{sourceId: "provider", mapId: "Map", layerId: "Lane",
                 featureIds: [{ids: ["Lane.2"]}]}]);
@@ -91,36 +91,26 @@ describe("MapTileStreamService request failures", () => {
         }
     });
 
-    it("matches each picked point to its source revision when restricted responses arrive out of order", async () => {
+    it("uses the current host in the selected source even when another source delivers first", async () => {
         const mapTileKey = coreLib.createMapTileKey("Features", "Map", "Lane", "545555028");
-        const snapshots = [
-            {sourceId: "other", sourceRevision: "r1"},
-            {sourceId: "provider", sourceRevision: "r2"},
-            {sourceId: "provider", sourceRevision: "r1"}
-        ];
+        const sources = ["other", "", "provider"];
         let received = 0;
         const service = serviceHarness({tileLayerParser: {
             readTileLayerMetadata: () => ({
-                id: mapTileKey, partition: tilePartition(545555028), numFeatures: 1,
-                ...snapshots[received++]
+                id: mapTileKey, partition: tilePartition(545555028), numFeatures: 1, sourceId: sources[received++]
             })
         }});
-        const hasHost = vi.spyOn(InspectionFeatureTile.prototype, "contains").mockReturnValue(true);
+        const hasHost = vi.spyOn(InspectionFeatureTile.prototype, "contains").mockImplementation(id => id === "Lane.2");
         const send = vi.spyOn(MapTileStreamClientTiles.prototype, "request")
             .mockImplementation(async function (this: MapTileStreamClientTiles) {
-                snapshots.forEach(() => this.onFeatures?.(Uint8Array.of(0)));
+                sources.forEach(() => this.onFeatures?.(Uint8Array.of(0)));
             });
         try {
-            const point = "Lane.2:shapepoint#1.0@provider@";
-            const retained = new FeatureWrapper(point + "retained", {
-                mapTileKey, sourceId: "provider", sourceRevision: "retained"
-            } as InspectionFeatureTile);
-            const features = await service.loadFeatures(
-                ["Lane.2", retained.featureId, point + "r1", point + "missing"].map(featureId => ({mapTileKey, featureId})),
-                undefined, [retained]);
-            expect(features[1]).toBe(retained);
-            expect(features.map(feature => [feature.featureTile.sourceId, feature.featureTile.sourceRevision]))
-                .toEqual([["other", "r1"], ["provider", "retained"], ["provider", "r1"], ["provider", "r2"]]);
+            const featureIds = ["Lane.2", "Lane.2:shapepoint#1.0@provider", "Lane.2:shapepoint#1.0@",
+                "Lane.9:shapepoint#1.0@provider", "Lane.2:shapepoint#1.0@missing"];
+            const features = await service.loadFeatures(featureIds.map(featureId => ({mapTileKey, featureId})));
+            expect(features.map(feature => feature.featureId)).toEqual(featureIds.slice(0, 3));
+            expect(features.map(feature => feature.featureTile.sourceId)).toEqual(["other", "provider", ""]);
         } finally {
             send.mockRestore();
             hasHost.mockRestore();

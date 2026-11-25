@@ -37,22 +37,22 @@ describe("native shape-point streams in the browser WASM", () => {
                 const hit = subset.resolvePick(expected.channelOrdinal, expected.entryOrdinal, 0);
                 const {featureId, geometryOrdinal, pointIndex} = expected.row;
                 expect(hit).toMatchObject({scope: "shapepoint", featureId, geometryOrdinal, pointIndex,
-                    sourceId: expected.sourceId, sourceRevision: expected.sourceRevision});
+                    sourceId: expected.sourceId});
                 expect(subset.findShapePointPickReferences(featureId, geometryOrdinal, pointIndex,
-                    expected.sourceId, expected.sourceRevision)).toHaveLength(1);
+                    expected.sourceId)).toHaveLength(1);
                 expect(subset.findShapePointPickReferences(featureId, 0, pointIndex,
-                    expected.sourceId, expected.sourceRevision)).toEqual([]);
+                    expected.sourceId)).toEqual([]);
                 expect(subset.findShapePointPickReferences(featureId, geometryOrdinal, pointIndex,
-                    expected.sourceId, "stale")).toEqual([]);
+                    "other-source")).toEqual([]);
                 for (const [file, count] of [["source.bin", 2], ["selected.bin", 1]] as const) {
                     const bytes = fixture(file);
                     const meta = uint8ArrayToWasmOrThrow(data => parser.readTileLayerMetadata(data), bytes);
-                    expect(meta).toMatchObject({numFeatures: count, sourceId: expected.sourceId, sourceRevision: expected.sourceRevision});
+                    expect(meta).toMatchObject({numFeatures: count, sourceId: expected.sourceId});
                     const tile = uint8ArrayToWasmOrThrow(data => parser.readTileFeatureLayer(data), bytes);
                     try {
                         const feature = tile.find(featureId);
                         try {
-                            const tree = feature.inspectionModelAtShapePoint(geometryOrdinal, pointIndex, hit.sourceId, hit.sourceRevision);
+                            const tree = feature.inspectionModelAtShapePoint(geometryOrdinal, pointIndex, hit.sourceId);
                             const vertex = child(child(child(tree, "Geometry"), geometryOrdinal), pointIndex);
                             const occurrence = child(child(vertex, "Point attributes"), `${expected.attributeLayer}.${expected.attribute}`);
                             const sample = child(child(child(occurrence, "Measurements"), "curvature"), 0);
@@ -62,8 +62,10 @@ describe("native shape-point streams in the browser WASM", () => {
                             expect(child(record, "raw").value).toBe(expected.raw);
                             const raw = child(child(child(tree, "Attribute Layers"), expected.attributeLayer), expected.attribute);
                             expect(record.sourceNodeId).toBe(expected.recordPath.reduce(child, raw).nodeId);
-                            const stale = feature.inspectionModelAtShapePoint(geometryOrdinal, pointIndex, hit.sourceId, "stale");
-                            expect(child(stale, "Shape point unavailable").value).toMatch(/source has changed/i);
+                            const missing = feature.inspectionModelAtShapePoint(geometryOrdinal, 0xffffffff, hit.sourceId);
+                            expect(child(missing, "Shape point unavailable")).toBeDefined();
+                            expect(feature.shapePointPosition(geometryOrdinal, 0xffffffff, hit.sourceId)).toBeFalsy();
+                            expect(feature.shapePointPosition(geometryOrdinal, pointIndex, "other-source")).toBeFalsy();
                         } finally { feature.delete(); }
                     } finally { tile.delete(); }
                 }

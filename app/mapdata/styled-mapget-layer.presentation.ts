@@ -30,7 +30,6 @@ import {
     filterSubscriptionCoverageEqual,
     type FilterChannelDefinition,
     type FilterTileInstallResult,
-    type SourceSnapshot,
     type TileSubsetDelivery
 } from "./filter-subscription.model";
 import {
@@ -78,7 +77,7 @@ export class StyledMapgetLayer {
         readonly highlightMode: HighlightMode = coreLib.HighlightMode.NO_HIGHLIGHT,
         readonly plannedLod: number = MAX_STYLE_LOD,
         filterPlan?: StyleFilterPlan,
-        private readonly sourceSnapshot?: SourceSnapshot
+        private readonly pointSourceId?: string
     ) {
         this.ownerId = [
             identity.viewIndex,
@@ -387,14 +386,9 @@ export class StyledMapgetLayer {
         if (!state) {
             return {status: "superseded"};
         }
-        if (this.sourceSnapshot && !delivery.dependencies.some(dependency =>
-            dependency.sourceTileKey === delivery.mapTileKey &&
-            dependency.sourceId === this.sourceSnapshot!.sourceId &&
-            dependency.sourceRevision === this.sourceSnapshot!.sourceRevision)) {
-            if (state.subsetBlob) {
-                state.dispose();
-                this.events.next({type: "tiles-removed", states: [state]});
-            }
+        // Vertex ordinals address the requested provider's host, not a peer's copy of the partition.
+        if (this.pointSourceId !== undefined && !delivery.dependencies.some(dependency =>
+            dependency.sourceTileKey === state.mapTileKey && dependency.sourceId === this.pointSourceId)) {
             return {status: "superseded"};
         }
         if (!state.install(delivery, remainsPending)) {

@@ -52,13 +52,13 @@ describe("property validity hover", () => {
 });
 
 describe("point cloud selection and export", () => {
-    it("opens the exact picked revision and leaves replacement incoming snapshots out of the point tree", () => {
+    it("opens the current host at the picked geometry and vertex ordinals", () => {
         const model = vi.fn(() => []);
         const component = Object.create(FeaturePanelComponent.prototype) as any;
         component.treeData = [];
         component.incoming = new Map();
-        component.panel = () => ({id: 1, features: [{featureId: "Lane.2:shapepoint#1.0@feed@r1",
-            mapTileKey: "Features:Map:Lane:42", featureTile: {sourceId: "feed", sourceRevision: "r2"},
+        component.panel = () => ({id: 1, features: [{featureId: "Lane.2:shapepoint#1.0@feed",
+            mapTileKey: "Features:Map:Lane:42", featureTile: {sourceId: "feed"},
             peek: (cb: any) => cb({inspectionModelAtShapePoint: model})}]});
         component.getFeatureTreeDataFromModel = () => [];
         component.rebuildInspectionTree();
@@ -92,18 +92,21 @@ describe("point cloud selection and export", () => {
         expect(JSON.parse(component.exportGeoJson()).features).toEqual([{type: "Feature"}]);
     });
 
-    it("exports a point's host only while its original datasource and revision match", () => {
+    it("exports a vertex host only when its datasource and original indices still match", () => {
         const component = Object.create(FeaturePanelComponent.prototype) as any;
-        const tile = {sourceId: "feed", sourceRevision: "r1"};
-        const peek = vi.fn(() => '{"type":"Feature","id":"Lane.2"}');
-        component.selectedFeatures = [{featureId: "Lane.2:shapepoint#1.0@feed@r1", featureTile: tile, peek}];
+        const tile = {sourceId: "feed"};
+        const native = {shapePointPosition: vi.fn().mockReturnValueOnce({x: 0, y: 0, z: 0}).mockReturnValue(null),
+            geojson: vi.fn(() => '{"type":"Feature","id":"Lane.2"}')};
+        const peek = vi.fn(callback => callback(native));
+        component.selectedFeatures = [{featureId: "Lane.2:shapepoint#1.0@feed", featureTile: tile, peek}];
         expect(JSON.parse(component.exportGeoJson()).features).toEqual([{type: "Feature", id: "Lane.2"}]);
-        tile.sourceId = "another feed";
+        tile.sourceId = "other";
         expect(JSON.parse(component.exportGeoJson()).features).toEqual([]);
         tile.sourceId = "feed";
-        tile.sourceRevision = "r2";
         expect(JSON.parse(component.exportGeoJson()).features).toEqual([]);
-        expect(peek).toHaveBeenCalledTimes(1);
+        expect(peek).toHaveBeenCalledTimes(2);
+        expect(native.shapePointPosition).toHaveBeenCalledWith(1, 0, "feed");
+        expect(native.geojson).toHaveBeenCalledTimes(1);
     });
 });
 

@@ -1718,7 +1718,6 @@ TileLayerParser::TileLayerMetadata TileLayerParser::readTileLayerMetadata(const 
         tileLayer.id().toString(),
         tileLayer.stringPoolId(),
         tileLayer.sourceId(),
-        tileLayer.sourceRevision(),
         tileLayer.id().mapId_,
         tileLayer.id().layerId_,
         *JsValue::fromPartition(tileLayer.partitionId()),
@@ -1753,7 +1752,6 @@ TileLayerParser::TileSubsetLayerMetadata TileLayerParser::readTileSubsetLayerMet
             {"partition", JsValue::fromPartition(dependency.sourceTileKey_.partitionId_)},
             {"sourceFeatureCount", JsValue(dependency.sourceFeatureCount_)},
             {"sourceId", JsValue(dependency.sourceId_)},
-            {"sourceRevision", JsValue(dependency.sourceRevision_)},
         }));
     }
     auto issues = JsValue::List();

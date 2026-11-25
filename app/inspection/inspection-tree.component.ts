@@ -810,7 +810,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.cdr.markForCheck();
     }
 
-    /** The geometry row and the rendered marker select the same revision-bound vertex. */
+    /** The geometry row and the rendered marker select the same physical vertex. */
     protected inspectPointRow(event: MouseEvent, row: {mapTileKey: string; inspectedFeatureId: string; pointTarget: string}): void {
         event.stopPropagation();
         this.inspectionState.openInspectionTarget(this.panelId(), row.mapTileKey, row.inspectedFeatureId, row.pointTarget);

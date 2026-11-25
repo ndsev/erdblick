@@ -20,8 +20,8 @@ function createFixture() {
 describe("InspectionPanelService completed edits", () => {
     it("opens the current host for one expired vertex while retaining another vertex on that host", () => {
         const {owner} = createFixture();
-        const a = {mapTileKey, featureId: "Road.1:shapepoint#1.2@feed@old"};
-        const b = {mapTileKey, featureId: "Road.1:shapepoint#0.2@feed@old"};
+        const a = {mapTileKey, featureId: "Road.1:shapepoint#1.2@feed"};
+        const b = {mapTileKey, featureId: "Road.1:shapepoint#0.2@feed"};
         const panelId = owner.setSelection([a, b], undefined, true, true)!;
         owner.openInspectionTarget(panelId, mapTileKey, a.featureId, "Road.1");
         expect(owner.state.selection.find(panel => panel.id === panelId)?.features)

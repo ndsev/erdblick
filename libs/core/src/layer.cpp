@@ -824,7 +824,6 @@ NativeJsValue TileSubsetLayer::dependencies() const
             {"partition", JsValue::fromPartition(dependency.sourceTileKey_.partitionId_)},
             {"sourceFeatureCount", JsValue(dependency.sourceFeatureCount_)},
             {"sourceId", JsValue(dependency.sourceId_)},
-            {"sourceRevision", JsValue(dependency.sourceRevision_)},
         }));
     }
     return *result;
@@ -1189,13 +1188,12 @@ NativeJsValue TileSubsetLayer::resolvePick(
     case mapget::Scope::ShapePoint: {
         auto const entry = channel->shapePointEntryAt(entryOrdinal);
         auto const* source = model_->localSourceDependency();
-        if (entry && source && !source->sourceRevision_.empty()) {
+        if (entry && source) {
             setFeatureId(entry->featureId());
             result.set("scope", JsValue("shapepoint"));
             result.set("geometryOrdinal", JsValue(entry->geometryOrdinal()));
             result.set("pointIndex", JsValue(entry->pointIndex()));
             result.set("sourceId", JsValue(source->sourceId_));
-            result.set("sourceRevision", JsValue(source->sourceRevision_));
         }
         break;
     }
@@ -1332,8 +1330,7 @@ NativeJsValue TileSubsetLayer::findPickReferences(
                 }
                 break;
             case mapget::Scope::ShapePoint:
-                // The dedicated reverse lookup verifies the original datasource
-                // and geometry revision before it compares vertex ordinals.
+                // The dedicated reverse lookup also checks the provider and vertex ordinals.
                 break;
             case mapget::Scope::Relation:
                 channel->forEachRelationEntry(
@@ -1421,13 +1418,11 @@ NativeJsValue TileSubsetLayer::findShapePointPickReferences(
     std::string const& featureId,
     uint32_t geometryOrdinal,
     uint32_t pointIndex,
-    std::string const& sourceId,
-    std::string const& sourceRevision) const
+    std::string const& sourceId) const
 {
     auto result = JsValue::List();
     auto const* source = model_->localSourceDependency();
-    if (!source || sourceRevision.empty() || source->sourceRevision_ != sourceRevision ||
-        source->sourceId_ != sourceId) {
+    if (!source || source->sourceId_ != sourceId) {
         return *result;
     }
     uint32_t channelOrdinal = 0U;

@@ -41,6 +41,5 @@
   },
   "schemaId": "mapget-schema:sha256:931891b2386a05f7d28d5560db46a36575bb28899b8fd7b13eff12a4d16f2f73",
   "sourceId": "shape-point-test-source",
-  "sourceRevision": "sha256:9ed64a1947a3aa8d6f1e84faa7a50d37f5b943689acfd748dadf8d5713f69acd",
   "unit": "m^-1"
 }

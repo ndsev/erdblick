@@ -4,7 +4,7 @@
  * selection and view owners decide when to open the corresponding subscriptions.
  */
 import type { TileFeatureId } from "../inspection/inspection.model";
-import type { FilterChannelDefinition, SourceSnapshot } from "../mapdata/filter-subscription.model";
+import type { FilterChannelDefinition } from "../mapdata/filter-subscription.model";
 import {
     partitionKey,
     type PartitionId
@@ -25,7 +25,7 @@ export interface RemoteInteractionHighlightPlan {
     plan: StyleFilterPlan;
     partitions: PartitionId[];
     roots: Array<{ partition: PartitionId; featureId: string }>;
-    sourceSnapshot?: SourceSnapshot;
+    sourceId?: string;
 }
 
 /** Exact targets already represented by regular/search scene geometry. */
@@ -212,18 +212,17 @@ export function planRemoteInteractionHighlights(
                 }))));
         targetGroups = [wholeFeatures, exactRows];
     }
-    // A selection can contain two versions of a partition or the same feature ID
-    // in different partitions. Each point group has its own delivery check.
-    const pointsBySnapshot = new Map<string, ResolvedInteractionTarget[]>();
+    // Vertex ordinals are local to a host in one datasource and partition.
+    const pointsByPartitionAndSource = new Map<string, ResolvedInteractionTarget[]>();
     for (const target of targets) {
         const point = target.inspectionTarget;
         if (point.scope !== "shapepoint") continue;
-        const key = JSON.stringify([target.mapTileKey, point.sourceId, point.sourceRevision]);
-        const group = pointsBySnapshot.get(key) ?? [];
+        const key = JSON.stringify([target.mapTileKey, point.sourceId]);
+        const group = pointsByPartitionAndSource.get(key) ?? [];
         group.push(target);
-        pointsBySnapshot.set(key, group);
+        pointsByPartitionAndSource.set(key, group);
     }
-    targetGroups.push(...pointsBySnapshot.values());
+    targetGroups.push(...pointsByPartitionAndSource.values());
     return targetGroups.flatMap(group => {
         const plan = planRemoteInteractionHighlight(rawPlan, group, options);
         return plan ? [plan] : [];
@@ -288,10 +287,7 @@ function planRemoteInteractionHighlight(
     return {
         plan,
         partitions,
-        ...(admittedTargets[0].inspectionTarget.scope === "shapepoint" ? {sourceSnapshot: {
-            sourceId: admittedTargets[0].inspectionTarget.sourceId,
-            sourceRevision: admittedTargets[0].inspectionTarget.sourceRevision
-        }} : {}),
+        ...(admittedTargets[0].inspectionTarget.scope === "shapepoint" ? {sourceId: admittedTargets[0].inspectionTarget.sourceId} : {}),
         roots: [...roots.values()]
     };
 }

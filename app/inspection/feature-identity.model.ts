@@ -81,9 +81,8 @@ export const featureIdentitySchema = z.union([
         shapePoint: z.strictObject({
             geometryOrdinal: indexSchema.max(0xffffffff),
             pointIndex: indexSchema.max(0xffffffff),
-            sourceId: z.string().max(4096),
-            sourceRevision: identifierSchema
-        }).optional().describe("Original geometry and vertex ordinals and the source snapshot reported by a shape-point result."),
+            sourceId: z.string().max(4096)
+        }).optional().describe("Datasource and original geometry and vertex ordinals on the current feature."),
         featureId: identifierSchema.describe("Full feature ID, including its feature-type prefix; copy an observed ID, not only its numeric parts.")
     }),
     z.strictObject({
@@ -124,7 +123,6 @@ export type FeatureInspectionTarget =
         geometryOrdinal: number;
         pointIndex: number;
         sourceId: string;
-        sourceRevision: string;
     };
 
 const COMPACT_TILE_FEATURE_ID_PREFIX = "tfid:";
@@ -188,14 +186,14 @@ export function normalizeTileFeatureId(value: TileFeatureIdLike | string | null 
  * This parses syntax only; callers validate index range and target existence.
  */
 export function parseFeatureInspectionTarget(targetId: string): FeatureInspectionTarget {
-    const point = /^(.*):shapepoint#(\d+)\.(\d+)@([^@]*)@([^@]+)$/.exec(targetId);
+    const point = /^(.*):shapepoint#(\d+)\.(\d+)@([^@]*)$/.exec(targetId);
     if (point) {
         const geometryOrdinal = Number(point[2]);
         const pointIndex = Number(point[3]);
         if (geometryOrdinal <= 0xffffffff && pointIndex <= 0xffffffff) {
             try {
                 return {scope: "shapepoint", baseFeatureId: point[1], geometryOrdinal, pointIndex,
-                    sourceId: decodeURIComponent(point[4]), sourceRevision: decodeURIComponent(point[5])};
+                    sourceId: decodeURIComponent(point[4])};
             } catch {
                 // A feature ID can itself contain punctuation or an incomplete URL escape.
             }
@@ -237,7 +235,7 @@ export function formatFeatureInspectionTarget(
     }
     if (target.scope === "shapepoint") {
         return `${target.baseFeatureId}:shapepoint#${target.geometryOrdinal}.${target.pointIndex}`
-            + `@${encodeUrlToken(target.sourceId)}@${encodeUrlToken(target.sourceRevision)}`;
+            + `@${encodeUrlToken(target.sourceId)}`;
     }
     const entryIndex = target.scope === "attribute"
         ? target.attributeIndex
@@ -292,7 +290,7 @@ export function tileFeatureInteractionTargetsEqual(
         first.featureId === second.featureId;
 }
 
-/** Human-facing vertex labels keep both original ordinals without printing the source digest. */
+/** Human-facing vertex labels keep both original ordinals without printing the datasource identifier. */
 export function displayFeatureId(featureId: string, includeEntrySuffix = false): string {
     const target = parseFeatureInspectionTarget(featureId);
     if (target.scope === "shapepoint") {

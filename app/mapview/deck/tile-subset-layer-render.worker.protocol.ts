@@ -134,7 +134,6 @@ export interface TileSubsetPickResult {
     geometryOrdinal?: number;
     pointIndex?: number;
     sourceId?: string;
-    sourceRevision?: string;
     featureReference?: NamedFeatureReference;
     attributeIndex?: number;
     hasValidity?: boolean;

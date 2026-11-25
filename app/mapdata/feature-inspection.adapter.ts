@@ -27,7 +27,7 @@ import {
 /** UI and automation use the same coordinate, source check and detached inspection rows. */
 export function readFeatureInspectionModel(feature: Feature, target: FeatureInspectionTarget) {
     return target.scope === "shapepoint" ? feature.inspectionModelAtShapePoint(
-        target.geometryOrdinal, target.pointIndex, target.sourceId, target.sourceRevision
+        target.geometryOrdinal, target.pointIndex, target.sourceId
     ) : feature.inspectionModel();
 }
 
@@ -55,7 +55,6 @@ export interface IncomingInspectionResult {
 export class InspectionFeatureTile {
     readonly mapTileKey: string;
     readonly sourceId: string;
-    readonly sourceRevision: string;
     readonly stringPoolId: string;
     readonly mapName: string;
     readonly layerName: string;
@@ -85,7 +84,6 @@ export class InspectionFeatureTile {
             id: string;
             stringPoolId: string;
             sourceId: string;
-            sourceRevision: string;
             mapName: string;
             layerName: string;
             partition: unknown;
@@ -100,7 +98,6 @@ export class InspectionFeatureTile {
         this.warnings = metadata.warnings ?? [];
         this.mapTileKey = metadata.id;
         this.sourceId = metadata.sourceId;
-        this.sourceRevision = metadata.sourceRevision;
         this.stringPoolId = metadata.stringPoolId;
         this.mapName = metadata.mapName;
         this.layerName = metadata.layerName;

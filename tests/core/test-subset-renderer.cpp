@@ -537,7 +537,8 @@ TEST_CASE(
     subset->setGeometryAnchor({11, 48, 0});
     auto const source = mapget::MapPartitionKey(
         mapget::LayerType::Features, "TestMap", "Road", subset->partitionId());
-    subset->setDependencies({{source, 1, "survey", "revision-1"}});
+    const std::string sourceId = GENERATE("survey", "");
+    subset->setDependencies({{source, 1, sourceId}});
 
     // The style planner wraps a host filter in any(...) to produce a boolean.
     // Curvature and grade label slots belong to individual vertices and can
@@ -630,11 +631,10 @@ rules:
     for (auto const& pick : picks) {
         auto const resolved = layer.resolvePick(pick.channelOrdinal, pick.entryOrdinal, pick.endpointRole);
         REQUIRE(resolved.at("scope") == "shapepoint");
-        CHECK(resolved.at("sourceId") == "survey");
-        CHECK(resolved.at("sourceRevision") == "revision-1");
+        CHECK(resolved.at("sourceId") == sourceId);
         CHECK(resolved.at("geometryOrdinal") == (pick.entryOrdinal == 1 ? 0U : 1U));
         auto const reverse = layer.findShapePointPickReferences(
-            "Road.7", resolved.at("geometryOrdinal"), resolved.at("pointIndex"), "survey", "revision-1");
+            "Road.7", resolved.at("geometryOrdinal"), resolved.at("pointIndex"), sourceId);
         REQUIRE(reverse.size() == 1);
         CHECK(reverse.front().at("entryOrdinal") == pick.entryOrdinal);
     }
@@ -644,8 +644,10 @@ rules:
     CHECK(original.at("pointIndex") == 1);
     CHECK(renderer.renderBridgeResult().at("pointCloudPicks").at(0) == original);
     CHECK_FALSE(layer.resolvePick(0, 8, 0).contains("featureId"));
-    CHECK(layer.findShapePointPickReferences("Road.7", 1, 1, "survey", "revision-2").empty());
-    CHECK(layer.findShapePointPickReferences("Road.7", 1, 1, "other-source", "revision-1").empty());
+    CHECK(layer.findShapePointPickReferences("Road.7", 1, 1, sourceId.empty() ? "survey" : "").empty());
+    CHECK(layer.findShapePointPickReferences("Road.8", 1, 1, sourceId).empty());
+    CHECK(layer.findShapePointPickReferences("Road.7", 3, 1, sourceId).empty());
+    CHECK(layer.findShapePointPickReferences("Road.7", 1, 32, sourceId).empty());
     auto rows = layer.entryRange(0, 3, 1, true);
     REQUIRE(rows.size() == 1);
     CHECK(rows.front().at("pointIndex") == 31);
@@ -668,7 +670,13 @@ TEST_CASE(
     parser.installMapSchema(fixture("schema.bin"), expected.at("schemaId"));
     parser.setDataSourceInfo(fixture("catalog.json"));
     parser.readFieldDictUpdate(fixture("dictionary.frame"));
-    auto subset = parser.readTileSubsetLayer(fixture("subset.bin"));
+    const auto bytes = fixture("subset.bin");
+    auto subset = parser.readTileSubsetLayer(bytes);
+    auto metadata = parser.readTileSubsetLayerMetadata(bytes);
+    REQUIRE(metadata.dependencies == subset.dependencies());
+    REQUIRE(metadata.dependencies.size() == 1);
+    CHECK(metadata.dependencies.at(0).at("sourceId") == expected.at("sourceId"));
+    CHECK(parser.readTileLayerMetadata(fixture("selected.bin")).sourceId == expected.at("sourceId").get<std::string>());
 
     auto style = rendererStyle(R"yaml(
 name: Lane ADAS curvature
@@ -706,7 +714,7 @@ rules:
     CHECK(hit.at("featureId") == expected.at("row").at("featureId"));
     CHECK(hit.at("geometryOrdinal") == 1);
     CHECK(hit.at("pointIndex") == 1);
-    CHECK(hit.at("sourceRevision") == expected.at("sourceRevision"));
+    CHECK(hit.at("sourceId") == expected.at("sourceId"));
 }
 
 TEST_CASE(
@@ -726,7 +734,7 @@ TEST_CASE(
         line->append({11.002, 48, 10});
         road->addGeometry(line);
     }
-    source->publishSourceSnapshot("survey", "edit-3");
+    source->setSourceId("survey");
 
     auto style = rendererStyle(R"yaml(
 name: Number the survey points
@@ -790,7 +798,6 @@ rules:
     CHECK(vertex.at("geometryOrdinal") == 1);
     CHECK(vertex.at("pointIndex") == 2);
     CHECK(vertex.at("sourceId") == "survey");
-    CHECK(vertex.at("sourceRevision") == source->sourceRevision());
 }
 
 TEST_CASE(

@@ -8,7 +8,6 @@ import type {
 import type { InspectionPanelModel, TileFeatureId } from "../inspection/inspection.model";
 import { coreLib } from "../integrations/wasm.adapter";
 import type { FilterTileState } from "../mapdata/filter-tile-state.model";
-import type { SourceSnapshot } from "../mapdata/filter-subscription.model";
 import type { HoverDetailService } from "../mapdata/hover-detail.service";
 import type { MapDataService } from "../mapdata/mapdata.service";
 import type { MapTileStreamService } from "../mapdata/map-tile-stream.service";
@@ -1051,7 +1050,7 @@ export class ViewLayerController {
             plan: StyleFilterPlan;
             partitions: PartitionId[];
             roots: Array<{ partition: PartitionId; featureId: string }>;
-            sourceSnapshot?: SourceSnapshot;
+            pointSourceId?: string;
             styleOrder: number;
             plannedLod: number;
         }>();
@@ -1219,12 +1218,12 @@ export class ViewLayerController {
                     // must therefore replace the remote owner even when the
                     // interaction targets and style options did not change.
                     for (const remotePlan of remotePlans) {
-                        if (remotePlan.sourceSnapshot && remotePlan.sourceSnapshot.sourceId !== mapgetLayer.sourceId) continue;
+                        if (remotePlan.sourceId !== undefined && remotePlan.sourceId !== mapgetLayer.sourceId) continue;
                         const identitySignature = sipHash64Hex(JSON.stringify({
                             filterPlan: remotePlan.plan,
                             partitions: remotePlan.partitions,
                             roots: remotePlan.roots,
-                            sourceSnapshot: remotePlan.sourceSnapshot,
+                            sourceId: remotePlan.sourceId,
                             options
                         }));
                         const presentationId = [
@@ -1248,7 +1247,7 @@ export class ViewLayerController {
                             plan: remotePlan.plan,
                             partitions: remotePlan.partitions,
                             roots: remotePlan.roots,
-                            sourceSnapshot: remotePlan.sourceSnapshot,
+                            pointSourceId: remotePlan.sourceId,
                             styleOrder: styleIndex +
                                 (group.kind === "hover"
                                     ? INTERACTION_STYLE_ORDER_BASE + 1_000
@@ -1295,7 +1294,7 @@ export class ViewLayerController {
                         next.mode,
                         next.plannedLod,
                         next.plan,
-                        next.sourceSnapshot
+                        next.pointSourceId
                     );
                     owned = {
                         layer,

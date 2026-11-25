@@ -72,18 +72,18 @@ describe("InspectionSelectionService multi-inspection", () => {
         expect(service.featureSetZoomTarget([wrapper(10), wrapper(NaN)])).toBeUndefined();
     });
 
-    it("uses a selected vertex for camera focus and refuses to zoom an expired pick", () => {
+    it("uses a selected vertex for camera focus and does not zoom a missing vertex", () => {
         const {service} = createHarness(3);
         const position = vi.fn().mockReturnValueOnce({x: 12, y: 48, z: 100}).mockReturnValueOnce(null);
-        const picked = {featureId: "Road.7:shapepoint#2.3@feed@r1",
+        const picked = {featureId: "Road.7:shapepoint#2.3@feed",
             peek: (cb: (v: unknown) => unknown) => cb({shapePointPosition: position})} as unknown as FeatureWrapper;
         expect(service.featureSetZoomTarget([picked])).toEqual({x: 12, y: 48, z: 200});
-        expect(position).toHaveBeenCalledWith(2, 3, "feed", "r1");
+        expect(position).toHaveBeenCalledWith(2, 3, "feed");
         expect(service.featureSetZoomTarget([picked])).toBeUndefined();
     });
 
     it("keeps the saved vertex visible as unavailable when its partition vanishes on refresh", async () => {
-        const id = feature("Lane.7:shapepoint#1.2@feed@r1", "Features:Map:Lane:42");
+        const id = feature("Lane.7:shapepoint#1.2@feed", "Features:Map:Lane:42");
         const tile = {mapTileKey: id.mapTileKey, partitionKey: "42", expiresAtMs: 1234};
         const wrapper = {...id, featureTile: tile, key: () => id} as FeatureWrapper;
         const load = vi.fn<() => Promise<FeatureWrapper[]>>()
@@ -98,6 +98,26 @@ describe("InspectionSelectionService multi-inspection", () => {
         await vi.waitFor(() => expect(service.selectionTopic.value[0].features).toEqual([]));
         expect(service.selectionTopic.value[0].unavailablePoints?.[0]).toContain("vertex 2 of Lane.7");
         expect(panels()[0].features).toEqual([id]);
+    });
+
+    it("resolves a newly selected vertex against the current host instead of reusing an open host", async () => {
+        const key = "Features:Map:Road:42";
+        const host = feature("Road.7", key);
+        const point = feature("Road.7:shapepoint#1.2@feed", key);
+        const tile = {mapTileKey: key, sourceId: "feed", expiresAtMs: null} as FeatureWrapper["featureTile"];
+        const oldHost = new FeatureWrapper(host.featureId, tile);
+        const currentPoint = new FeatureWrapper(point.featureId, {...tile} as FeatureWrapper["featureTile"]);
+        const load = vi.fn<() => Promise<FeatureWrapper[]>>()
+            .mockResolvedValueOnce([oldHost]).mockResolvedValueOnce([currentPoint]);
+        const {service} = createHarness(2, [{
+            id: 0, features: [host], locked: false, focused: true, size: [30, 20], color: "#fff", undocked: false
+        }], load);
+        service.initialize();
+        await vi.waitFor(() => expect(service.selectionTopic.value[0].features[0]).toBe(oldHost));
+        service.inspectFeatureIds([point]);
+        await vi.waitFor(() => expect(service.selectionTopic.value[0].features[0]).toBe(currentPoint));
+        expect(load).toHaveBeenCalledTimes(2);
+        expect(load).toHaveBeenLastCalledWith([point], expect.any(AbortSignal));
     });
 
     it("publishes loading panel shells and starts independent feature loads concurrently", async () => {
