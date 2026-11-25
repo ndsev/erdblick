@@ -58,6 +58,8 @@ interface DeckScene {
 }
 
 interface GpuPickSubset {
+    numEntries(): number;
+    channelSchema(ordinal: number): {scope: string; entryCount: number} | undefined;
     resolvePick(
         channelOrdinal: number,
         entryOrdinal: number,
@@ -84,6 +86,9 @@ interface SubsetPickSnapshot {
     readonly blob: Uint8Array;
     readonly valueVersion: number;
     readonly catalogRevision: number;
+    /** False for foreign or mixed rows; classify local subsets only when picked. */
+    singleLocalFeatureChannel?: boolean;
+    lastFeatureRow?: {featureId: string; reference: GpuScenePickReference};
 }
 
 // A point-cloud worker can release the full subset after supplying compact pick identities.
@@ -302,8 +307,11 @@ export class TileSubsetLayerVisualization {
         const startedAt = performance.now();
         // The old packet stays interactive while its replacement is being prepared.
         // Its row ordinals continue to address the snapshot that produced it.
+        const dependencies = this.state.dependencies;
         let pickSource: GpuPickSource = this.pointCloud ? [] : {
-            blob: subsetBlob, valueVersion, catalogRevision
+            blob: subsetBlob, valueVersion, catalogRevision,
+            singleLocalFeatureChannel: dependencies.length === 1 &&
+                dependencies[0].sourceTileKey === this.state.mapTileKey ? undefined : false
         };
         const picksAvailable = () => !this.gpuPicksRetired &&
             catalogRevision === this.owner.mapInfo.mapMetadataGeneration(this.state.mapId);
@@ -790,15 +798,24 @@ export class TileSubsetLayerVisualization {
                 pick.entryOrdinal === reference.entryOrdinal &&
                 pick.endpointRole === reference.endpointRole));
         }
-        return this.withGpuPickSubset(source, subset =>
-            this.featureIdsForPickResult(subset.resolvePick(
-                reference.channelOrdinal,
-                reference.entryOrdinal,
-                reference.endpointRole
-            )));
+        return this.withGpuPickSubset(source, subset => {
+            const identity = this.featureIdsForPickResult(subset.resolvePick(
+                reference.channelOrdinal, reference.entryOrdinal, reference.endpointRole));
+            if (typeof identity === "string" && reference.endpointRole === 0 && source.singleLocalFeatureChannel !== false) {
+                // /filter visits each local host once per feature channel. If this channel owns
+                // every row, its pointer tuple is the complete reverse lookup for that host.
+                if (source.singleLocalFeatureChannel === undefined) {
+                    const channel = subset.channelSchema(reference.channelOrdinal);
+                    source.singleLocalFeatureChannel = channel?.scope === "feature" &&
+                        channel.entryCount < 0xffffffff && channel.entryCount === subset.numEntries();
+                }
+                if (source.singleLocalFeatureChannel) source.lastFeatureRow = {featureId: identity, reference};
+            }
+            return identity;
+        });
     }
 
-    /** Locate packet tuples for one restored semantic target without scanning strings. */
+    /** Find all source rows for a mask; a restored target may need a full semantic lookup. */
     private findGpuPickReferences(
         targetFeatureId: string,
         source: GpuPickSource
@@ -827,6 +844,9 @@ export class TileSubsetLayerVisualization {
             });
         }
         const target = parseFeatureInspectionTarget(targetFeatureId);
+        if (target.scope === "feature" && source.lastFeatureRow?.featureId === targetFeatureId) {
+            return [source.lastFeatureRow.reference];
+        }
         if (target.scope === "shapepoint") {
             return this.withGpuPickSubset(source, subset => subset.findShapePointPickReferences(
                 target.baseFeatureId,

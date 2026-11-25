@@ -39,7 +39,7 @@ function renderFixture() {
         gltfPresentation: {destroy: vi.fn()}, pickSubset: {delete: vi.fn()},
         pendingIconUris: new Set(), failedIconUris: new Set(),
         state: {status: "ready", subsetBlob: new Uint8Array(1), valueVersion: 1,
-            mapId: "Map", mapTileKey: "cloud", partition: {kind: "object"}},
+            mapId: "Map", mapTileKey: "cloud", partition: {kind: "object"}, dependencies: []},
         owner: {
             releaseTileState: vi.fn(),
             mapInfo: {
@@ -95,6 +95,49 @@ describe("TileSubsetLayerVisualization", () => {
         expect(await pending).toBe(false);
         expect(scene.applyPacket).not.toHaveBeenCalled();
         expect(finishRender).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+        {sources: ["cloud"], scope: "feature", channelEntries: 2200, reusable: true},
+        {sources: ["cloud"], scope: "feature", channelEntries: 2199, reusable: false},
+        {sources: ["cloud"], scope: "relation", channelEntries: 2200, reusable: false},
+        {sources: ["cloud", "other"], scope: "feature", channelEntries: 2200, reusable: false},
+        {sources: ["other"], scope: "feature", channelEntries: 2200, reusable: false}
+    ])("reuses a pointer row only for a single local feature channel: %o", async test => {
+        const {visualization, scene, sceneHandle, renderService} = renderFixture();
+        const reference = {channelOrdinal: 1, entryOrdinal: 5, endpointRole: 0};
+        const peer = {...reference, channelOrdinal: 2};
+        const find = vi.fn(() => [reference, peer]);
+        const schema = vi.fn(() => ({scope: test.scope, entryCount: test.channelEntries}));
+        visualization.state.dependencies = test.sources.map(sourceTileKey => ({sourceTileKey}));
+        const subset = {
+            resolvePick: (_channel: number, entry: number) => ({featureId: `Road.${entry}`}),
+            numEntries: () => 2200, channelSchema: schema, findPickReferences: find
+        };
+        visualization.withGpuPickSubset = (_: unknown, read: (value: typeof subset) => unknown) => read(subset);
+        const contributions: GpuSceneContributionInput[] = [];
+        const prepare = scene.prepareRender.getMockImplementation()!;
+        scene.prepareRender.mockImplementation((...args: unknown[]) => {
+            contributions.push(...args[2] as GpuSceneContributionInput[]);
+            return prepare();
+        });
+        scene.applyPacket.mockReturnValue({});
+        visualization.applyResult = vi.fn(async () => []);
+        visualization.installRenderStats = vi.fn();
+        visualization.recordRuntimeStyleIssues = vi.fn();
+        renderService.render.mockImplementationOnce(async (_request, accept) => { accept({}); return {}; });
+        expect(await visualization.render(sceneHandle)).toBe(true);
+        const picks = contributions[0];
+        // Restored selections without a pointer still do a complete native lookup.
+        expect(picks.findPickReferences!("Road.5")).toEqual([reference, peer]);
+        for (const entryOrdinal of [5, 6]) {
+            const row = {...reference, entryOrdinal};
+            const id = `Road.${entryOrdinal}`;
+            expect(picks.resolvePick!(row)).toBe(id);
+            expect(picks.findPickReferences!(id)).toEqual(test.reusable ? [row] : [reference, peer]);
+        }
+        expect(find).toHaveBeenCalledTimes(test.reusable ? 1 : 3);
+        expect(schema.mock.calls.length).toBeLessThanOrEqual(1);
     });
 
     it.each([false, true])("picks the visible packet until retirement (preserve contribution: %s)", async preserve => {
