@@ -397,27 +397,50 @@ TEST_CASE("Invalid metadata replacement preserves the previous bound graph", "[e
 }
 
 TEST_CASE(
-    "Scalar metadata preserves enum ordinals separately from logical labels",
-    "[erdblick.schema]")
+    "Enum metadata and inspection preserve exact ordinals separately from logical values",
+    "[erdblick.schema][erdblick.inspection]")
 {
     auto graph = std::make_shared<mapget::MapSchema>();
     auto layer = graph->newLayer("Raw", mapget::LayerType::SourceData);
-    auto type = graph->newScalarType(simfil::SchemaType::Kind::String);
+    using Type = simfil::SchemaType;
+    using namespace std::string_view_literals;
+    auto type = graph->newCompositionType(Type::Composition::AnyOf);
+    type.addAlternative(graph->newScalarType(Type::Kind::String));
+    type.addAlternative(graph->newScalarType(Type::Kind::Int));
     layer->setRootSchema(type.id());
     type.addNamedValue({.name = "LOW", .value = std::string_view{"LOW"}, .rawValue = int64_t{-1}});
     type.addNamedValue({.name = "HIGH", .value = std::string_view{"HIGH"}, .rawValue = UINT64_MAX});
     type.addNamedValue({.name = "PLAIN", .value = std::string_view{"PLAIN"}});
+    type.addNamedValue({.name = "ZERO", .value = "ZERO"sv, .rawValue = uint64_t{0}});
+    type.addNamedValue({.name = "FIRST", .value = "shared"sv, .rawValue = int64_t{1}});
+    type.addNamedValue({.name = "SECOND", .value = "shared"sv, .rawValue = int64_t{2}});
     graph->finalize();
 
     auto metadata = erdblick::JsValue::fromSchema(type);
     auto const& values = (*metadata).at("namedValues");
-    REQUIRE(values.size() == 3);
+    REQUIRE(values.size() == 6);
     CHECK((*metadata).at("typeId") == type.id());
     CHECK(values[0].at("value") == "LOW");
     CHECK(values[0].at("rawValue") == -1);
     CHECK(values[1].at("value") == "HIGH");
     CHECK(values[1].at("rawValue") == "18446744073709551615");
     CHECK_FALSE(values[2].contains("rawValue"));
+
+    auto checkLabel = [&](auto raw, std::string_view expected) {
+        CAPTURE(raw);
+        erdblick::InspectionConverter::InspectionNode node;
+        REQUIRE(node.setScalarValue(simfil::Value::make(raw).withSchemaType(type)));
+        CHECK(*node.value_ == raw);
+        CHECK(node.displayValue_ == expected);
+    };
+    checkLabel("LOW"sv, "-1 (LOW)");
+    checkLabel("HIGH"sv, "18446744073709551615 (HIGH)");
+    checkLabel("ZERO"sv, "0 (ZERO)");
+    checkLabel("PLAIN"sv, "");
+    checkLabel("shared"sv, "shared (FIRST, SECOND)");
+    checkLabel(int64_t{-1}, "-1 (LOW)"); // Must not also match UINT64_MAX.
+    checkLabel(int64_t{0}, "0 (ZERO)");
+    checkLabel(int64_t{42}, "");
 }
 
 TEST_CASE(
@@ -669,16 +692,17 @@ TEST_CASE(
     Node unlimited;
     REQUIRE(unlimited.setScalarValue(fixture.number(255, fixture.speed)));
     CHECK(*unlimited.value_ == 255);
-    CHECK(unlimited.displayValue_.find("UNLIMITED") != std::string::npos);
-    CHECK(unlimited.displayValue_.find("km/h") == std::string::npos);
+    CHECK(unlimited.displayValue_ == "255 (UNLIMITED)");
     Node ordinary;
     REQUIRE(ordinary.setScalarValue(fixture.number(0, fixture.classicSpeed)));
-    CHECK(ordinary.displayValue_.find("UNDEFINED") == std::string::npos);
+    CHECK(ordinary.displayValue_.empty());
+    Node measured;
+    REQUIRE(measured.setScalarValue(fixture.number(80, fixture.speed)));
+    CHECK(measured.displayValue_ == "80 km/h");
     Node width;
     REQUIRE(width.setScalarValue(fixture.number(12, fixture.width)));
     CHECK(*width.value_ == 12);
-    CHECK(width.displayValue_.find(" m") != std::string::npos);
-    CHECK(width.displayValue_.find("raw 12") != std::string::npos);
+    CHECK(width.displayValue_ == "1.2 m (raw 12)");
     Node computed;
     REQUIRE(computed.setScalarValue(simfil::Value(int64_t{255})));
     CHECK(computed.displayValue_.empty());

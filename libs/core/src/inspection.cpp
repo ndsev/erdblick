@@ -2231,6 +2231,9 @@ bool InspectionConverter::InspectionNode::setScalarValue(simfil::Value const& va
     std::vector<std::string> names;
     uint64_t knownBits = 0;
     bool special = false;
+    auto matchesInteger = [&](auto code) {
+        return value.type == NativeType::Int && std::cmp_equal(value.as<NativeType::Int>(), code);
+    };
     type.forEachNamedValue(
         [&](simfil::SchemaType::NamedValue const& named)
         {
@@ -2251,24 +2254,34 @@ bool InspectionConverter::InspectionNode::setScalarValue(simfil::Value const& va
                         }
                         return false;
                     }
-                    if constexpr (std::is_same_v<T, int64_t>)
-                        return value.type == NativeType::Int && value.as<NativeType::Int>() == raw;
-                    if constexpr (std::is_same_v<T, uint64_t>)
-                        return value.type == NativeType::Int && value.as<NativeType::Int>() >= 0 &&
-                            uint64_t(value.as<NativeType::Int>()) == raw;
+                    if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, uint64_t>)
+                        return matchesInteger(raw);
                     if constexpr (std::is_same_v<T, double>)
                         return value.type == NativeType::Float &&
                             value.as<NativeType::Float>() == raw;
                     if constexpr (std::is_same_v<T, bool>)
                         return value.type == NativeType::Bool &&
                             value.as<NativeType::Bool>() == raw;
-                    if constexpr (std::is_same_v<T, std::string_view>)
-                        return value.type == NativeType::String &&
-                            value.as<NativeType::String>() == raw;
+                    if constexpr (std::is_same_v<T, std::string_view>) {
+                        if (value.type == NativeType::String)
+                            return value.as<NativeType::String>() == raw;
+                        return named.rawValue && std::visit(matchesInteger, *named.rawValue);
+                    }
                     return false;
                 },
                 named.value);
             if (matches) {
+                if (value.type == NativeType::String) {
+                    // The model keeps the logical string. Display an ordinal only
+                    // when every declaration matching that string agrees on it.
+                    auto ordinal = named.rawValue ?
+                        std::visit([](auto code) { return std::to_string(code); }, *named.rawValue) :
+                        std::string{};
+                    if (names.empty())
+                        displayValue_ = std::move(ordinal);
+                    else if (displayValue_ != ordinal)
+                        displayValue_.clear();
+                }
                 names.emplace_back(named.name);
                 special |= named.role == simfil::SchemaType::NamedValue::Role::Special;
             }
@@ -2304,6 +2317,8 @@ bool InspectionConverter::InspectionNode::setScalarValue(simfil::Value const& va
                 displayValue_ += " (raw " + value_.toString() + ")";
         }
     }
+    if (!names.empty() && value.type == NativeType::String && displayValue_.empty())
+        std::erase(names, value.as<NativeType::String>()); // The row already shows this symbol.
     if (!names.empty()) {
         if (displayValue_.empty())
             displayValue_ = value_.toString();
