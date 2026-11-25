@@ -1,6 +1,6 @@
 {
   "name": "erdblick",
-  "version": "2026.5.0",
+  "version": "2026.6.0",
   "scripts": {
     "ng": "ng",
     "generate:viewer-actions": "node tools/build-viewer-actions.mjs",
