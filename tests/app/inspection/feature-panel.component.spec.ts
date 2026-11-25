@@ -5,6 +5,51 @@ import {
     vi
 } from "vitest";
 import {FeaturePanelComponent} from "../../../app/inspection/feature-panel.component";
+import {InspectionTreeComponent} from "../../../app/inspection/inspection-tree.component";
+
+describe("property validity hover", () => {
+    it("dispatches exactly the referenced attribute slots, independent of names, coordinates and visible rows", async () => {
+        const panel = Object.create(FeaturePanelComponent.prototype) as any;
+        const mapTileKey = "F:map:layer:42";
+        panel.selectedFeatures = [{featureId: "Way.1", mapTileKey, featureTile: {mapName: "map"}}];
+        const coordinates = [11.566950012345, 48.16831, 0];
+        const station = (index: number) => ({key: "observation", children: [
+            {key: "raw", value: 23},
+            {key: "binding", type: 129, referenceHoverId: "Way.1:attribute#4:validity#" + index, value: coordinates}
+        ]});
+        const [section] = panel.getFeatureTreeDataFromModel([[{key: "Attribute Layers", children: [
+            {key: "survey", hoverId: "Way.1:attribute#4", children: [
+                {key: "readings", type: 128, children: [station(0),
+                    {key: "unbound", children: [{key: "$mapgetValidity", value: 0}]},
+                    station(2), station(0)]}
+            ]}
+        ]}]]);
+        const attribute = section.children[0];
+        const readings = attribute.children[0];
+        const [first, unbound, second] = readings.children;
+        expect(first.children[1].data.value).toBe("11.56695001, 48.16831, 0");
+        expect(coordinates).toEqual([11.566950012345, 48.16831, 0]);
+        const tree = Object.create(InspectionTreeComponent.prototype) as any;
+        tree.mapService = {setHoveredFeatures: vi.fn()};
+        tree.cdr = {markForCheck: vi.fn()};
+        tree.mapHoverEpoch = 0;
+        const target = (slot: number) => ({mapTileKey, featureId: "Way.1:attribute#4:validity#" + slot});
+        tree.onRowHover(readings.data);
+        expect(tree.mapService.setHoveredFeatures).toHaveBeenLastCalledWith([target(0), target(2)], true);
+        tree.onRowHover(first.children[0].data);
+        expect(tree.mapService.setHoveredFeatures).toHaveBeenLastCalledWith([target(0)], true);
+        tree.onRowHover(second.data);
+        expect(tree.mapService.setHoveredFeatures).toHaveBeenLastCalledWith([target(2)], true);
+        tree.onRowHover(unbound.children[0].data);
+        expect(tree.mapService.setHoveredFeatures).toHaveBeenLastCalledWith([]);
+        tree.onRowHover(attribute.data);
+        expect(tree.mapService.setHoveredFeatures).toHaveBeenLastCalledWith([{mapTileKey, featureId: attribute.data.hoverId}], true);
+        tree.onRowHover(readings.data);
+        tree.onRowHoverExit(readings.data);
+        await Promise.resolve();
+        expect(tree.mapService.setHoveredFeatures).toHaveBeenLastCalledWith([]);
+    });
+});
 
 describe("point cloud selection and export", () => {
     it("opens the exact picked revision and leaves replacement incoming snapshots out of the point tree", () => {

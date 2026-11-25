@@ -62,6 +62,8 @@ public:
         std::optional<JsValue> featureReference_;
         ValueType type_ = ValueType::Null;
         std::string hoverId_;  // For highlight attribs/relations on hovering.
+        /** Exact validity target of a native reference in an attribute's raw payload. */
+        std::string referenceHoverId_;
         std::string info_;
         std::deque<InspectionNode> children_;
         JsValue direction_;
@@ -255,12 +257,14 @@ public:
     /** Convert a field using an already translated key. */
     void convertField(JsValue const& fieldName, simfil::ModelNode::Ptr const& value);
 
-    /** Convert a field using independent display and path metadata. */
+    /** Convert a raw field; only an enclosing attribute can qualify a validity reference ordinal.
+     */
     void convertField(
         JsValue const& fieldName,
         FieldOrIndex const& path,
         simfil::ModelNode::Ptr const& value,
-        simfil::SchemaType type = {});
+        simfil::SchemaType type = {},
+        std::string_view attributeHoverId = {});
 
     /**
      * Store one referenced feature id as inspection node payload.

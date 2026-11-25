@@ -389,7 +389,7 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     private static readonly DOCK_RESIZE_PAUSE_START_EVENT = "erdblick-dock-resize-start";
     private static readonly DOCK_RESIZE_PAUSE_END_EVENT = "erdblick-dock-resize-end";
     private activeSoftHoverGroupId?: string;
-    private activeStrongHoverGroupId?: string;
+    private activeStrongHoverGroupIds?: ReadonlySet<string>;
     private activeFeatureIdNodeId?: string;
     private foreignReferenceHover: AbortController | null = null;
     private foreignReferenceSelection: AbortController | null = null;
@@ -1470,12 +1470,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
     /** Activates row-based soft or strong hover highlighting while the pointer is over a row. */
     onRowHover(rowData: any) {
         this.claimMapHover(this.rowHoverOwner(rowData));
-        this.activeSoftHoverGroupId = typeof rowData?.["softHoverGroupId"] === "string"
+        const referenceIds: string[] | undefined = rowData?.referenceHoverIds;
+        this.activeSoftHoverGroupId = !referenceIds && typeof rowData?.["softHoverGroupId"] === "string"
             ? rowData["softHoverGroupId"]
             : undefined;
-        this.activeStrongHoverGroupId = typeof rowData?.["strongHoverGroupId"] === "string"
-            ? rowData["strongHoverGroupId"]
-            : undefined;
+        this.activeStrongHoverGroupIds = referenceIds ? new Set(referenceIds)
+            : rowData?.strongHoverGroupId ? new Set([rowData.strongHoverGroupId]) : undefined;
         this.activeFeatureIdNodeId = undefined;
         this.highlightRowHoverTarget(rowData);
     }
@@ -1486,16 +1486,12 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         this.deferMapHoverTransition(owner, () => {
             this.activeMapHoverOwner = undefined;
             this.activeSoftHoverGroupId = undefined;
-            this.activeStrongHoverGroupId = undefined;
+            this.activeStrongHoverGroupIds = undefined;
             this.activeFeatureIdNodeId = undefined;
-            if (!rowData.hasOwnProperty("type") &&
-                !rowData.hasOwnProperty("hoverId") &&
-                !rowData.hasOwnProperty("softHoverGroupId")) {
-                return;
-            }
-            if (rowData["type"] === this.InspectionValueType.FEATUREID.value ||
+            if (rowData.referenceHoverIds ||
                 rowData["hoverId"] ||
-                rowData["softHoverGroupId"]) {
+                rowData["softHoverGroupId"] ||
+                (rowData.type !== undefined && rowData.type === this.InspectionValueType.FEATUREID.value)) {
                 this.mapService.setHoveredFeatures([]);
             }
         }, true);
@@ -1526,23 +1522,16 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
         });
     }
 
-    /** Chooses the strongest available hover target annotation for a tree row and forwards it to the map. */
+    /** Dispatch exact property slots together so the local mask or authored hover rule draws them all. */
     private highlightRowHoverTarget(rowData: any) {
-        const hoverId = typeof rowData["strongHoverGroupId"] === "string"
-            ? String(rowData["strongHoverGroupId"])
-            : typeof rowData["softHoverGroupId"] === "string"
-                ? String(rowData["softHoverGroupId"])
-                : typeof rowData["hoverId"] === "string"
-                    ? String(rowData["hoverId"])
-                    : "";
-        const mapTileKey = typeof rowData["mapTileKey"] === "string"
-            ? rowData["mapTileKey"]
-            : undefined;
-        if (!mapTileKey || !hoverId) {
+        const mapTileKey = rowData.mapTileKey;
+        const inherited = rowData.strongHoverGroupId ?? rowData.softHoverGroupId ?? rowData.hoverId;
+        const ids: string[] = rowData.referenceHoverIds ?? (inherited ? [inherited] : []);
+        if (!mapTileKey || !ids.length) {
             this.mapService.setHoveredFeatures([]);
             return;
         }
-        this.mapService.setHoveredFeatures([{ mapTileKey, featureId: hoverId }], true);
+        this.mapService.setHoveredFeatures(ids.map(featureId => ({mapTileKey, featureId})), true);
     }
 
     /** Highlights a referenced feature locally when present and permits the authored remote fallback otherwise. */
@@ -1681,8 +1670,9 @@ export class InspectionTreeComponent implements AfterViewInit, OnDestroy {
             "inspection-selection-strong": rowData?.["selectionHighlight"] === "strong",
             "inspection-hover-soft": !!this.activeSoftHoverGroupId &&
                 softHoverGroupId === this.activeSoftHoverGroupId,
-            "inspection-hover-strong": !!this.activeStrongHoverGroupId &&
-                strongHoverGroupId === this.activeStrongHoverGroupId
+            "inspection-hover-strong": !!this.activeStrongHoverGroupIds?.has(
+                rowData?.referenceHoverIds?.length === 1 ? rowData.referenceHoverIds[0] : strongHoverGroupId ?? ""
+            )
         };
     }
 

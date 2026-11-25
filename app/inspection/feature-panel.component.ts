@@ -50,6 +50,7 @@ interface InspectionModelData {
     scalarType?: unknown;
     info?: string;
     hoverId?: string;
+    referenceHoverId?: string;
     geometryOrdinal?: number;
     pointIndex?: number;
     pointGeometryOrdinal?: number;
@@ -475,6 +476,33 @@ export class FeaturePanelComponent implements OnDestroy {
         applySelectionHighlight(nodes);
     }
 
+    /**
+     * A property container hovers the union of its references, not its whole attribute.
+     * Raw fields of a record with one location describe that location too.
+     * An unrelated list entry must never borrow a sibling's locations or the attribute fallback.
+     */
+    private groupPropertyReferences(node: TreeTableNode, model: InspectionModelData): void {
+        let targets = model.referenceHoverId ? new Set([model.referenceHoverId]) : undefined;
+        for (const child of node.children ?? []) {
+            for (const id of child.data?.referenceHoverIds ?? []) {
+                (targets ??= new Set()).add(id);
+            }
+        }
+        if (!targets) return;
+        const ids = [...targets];
+        node.data.referenceHoverIds = ids;
+        const isList = (model.type & coreLib.ValueType.ARRAY.value) !== 0;
+        const peerIds = model.referenceHoverId || (!isList && ids.length === 1) ? ids : [];
+        const bindRawFields = (child: TreeTableNode, inherited: string[]): void => {
+            if (child.data.hoverId || child.data.referenceHoverIds) return;
+            // A list without its own references cannot borrow other entries' slots.
+            const childIds = child.data.type === coreLib.ValueType.ARRAY.value ? [] : inherited;
+            child.data.referenceHoverIds = childIds;
+            child.children?.forEach(grandchild => bindRawFields(grandchild, childIds));
+        };
+        node.children?.forEach(child => bindRawFields(child, peerIds));
+    }
+
     /** Converts the WASM inspection model into PrimeNG tree nodes and annotates hover/highlight groups. */
     getFeatureTreeDataFromModel(inspectionModelsByFeature: InspectionModelData[][]) {
         interface HoverAnnotationContext {
@@ -552,15 +580,13 @@ export class FeaturePanelComponent implements OnDestroy {
                 } else if ((valueType & coreLib.ValueType.ARRAY.value)
                     && (valueType & coreLib.ValueType.NUMBER.value)
                     && Array.isArray(value)) {
-                    for (let i = 0; i < value.length; i++) {
-                        if (!Number.isInteger(value[i])) {
-                            const strValue = String(value[i]);
-                            const index = strValue.indexOf(".");
-                            if (index !== -1 && strValue.length - index - 1 > 8) {
-                                value[i] = Number(value[i]).toFixed(8);
-                            }
-                        }
-                    }
+                    // Round the cell text, not the coordinates in the native inspection model.
+                    value = value.map(coordinate => {
+                        const text = String(coordinate);
+                        const dot = text.indexOf(".");
+                        return dot !== -1 && text.length - dot - 1 > 8
+                            ? Number(coordinate).toFixed(8) : text;
+                    }).join(", ");
                 }
 
                 if (valueType & coreLib.ValueType.ARRAY.value) {
@@ -674,6 +700,11 @@ export class FeaturePanelComponent implements OnDestroy {
                     }
                 }
                 node.children = children;
+                // Stop at the attribute itself: its normal hover includes assignment
+                // geometry as well as tagged locations. Only raw property trees narrow it.
+                if (!hoverId && nextSoftHoverGroupId) {
+                    this.groupPropertyReferences(node, data);
+                }
                 treeNodes.push(node);
             }
             return treeNodes;

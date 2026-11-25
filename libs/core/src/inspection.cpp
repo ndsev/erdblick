@@ -1010,6 +1010,10 @@ std::string relationRowHoverId(model_ptr<Relation> const& relation, std::string 
 BubblePropagation buildPropagatedValueBubbles(InspectionNode& node, std::string_view parentKey = {})
 {
     node.valueBubbles_.clear();
+    // A point reference already displays its coordinates. Its enumerable ordinal
+    // is still expandable, but is not a better collapsed label than the location.
+    if (!node.referenceHoverId_.empty() && node.value_.type() == JsValue::Type::ObjectOrList)
+        return {};
     std::deque<ValueBubble> childContributions;
     auto remainingValues = static_cast<size_t>(kMaxAggregateValues);
     auto childContributionsTruncated = false;
@@ -1435,32 +1439,25 @@ void InspectionConverter::convertAttributeLayer(
 
         auto fieldName = fieldId ? convertString(fieldId).toString() : convertString(attr->name()).toString();
         auto attrScope = push(convertString(fieldId), fieldName, ValueType::Null);
+        attrScope->hoverId_ = fmt::format("{}:attribute#{}", featureId_, featureAttributeIndex);
         if (selectedPoint_)
             rawAttributes_.push_back(&*attrScope);
         convertSourceDataReferences(attr->sourceDataReferences(), *attrScope);
 
-        std::optional<mapget::AttributeValidityView> view;
-        auto markerDiagnostic = [&](mapget::PointQueryError const& error) {
-            push("Marker diagnostic", RawPath{""}, ValueType::String)->value_ = convertString(error.what());
-        };
-        try {
-            view = attr->validityView(feature, name);
-        } catch (mapget::PointQueryError const& error) {
-            markerDiagnostic(error);
-        }
-        const bool virtualPointMarkers = view && view->hasVirtualPointValidities();
         auto hasFields = false;
         attr->forEachField(
-            [this, &hasFields, &attr, virtualPointMarkers](auto const& fieldName, auto const& val)
+            [this, &hasFields, &attr, &attrScope](auto const& fieldName, auto const& val)
             {
-                if (fieldName == "_mapgetPointSeriesBranch" || fieldName == "_mapgetPointSeriesGeometry" ||
-                    (virtualPointMarkers && fieldName == "pointValidities")) return true;
+                if (fieldName == "_mapgetPointSeriesBranch" ||
+                    fieldName == "_mapgetPointSeriesGeometry")
+                    return true;
                 hasFields = true;
                 convertField(
                     convertString(fieldName),
                     std::string_view(fieldName),
                     val,
-                    simfil::Value::field(*attr, *val, stringPool_->get(fieldName)).schemaType());
+                    simfil::Value::field(*attr, *val, stringPool_->get(fieldName)).schemaType(),
+                    attrScope->hoverId_);
                 return true;
             });
 
@@ -1470,45 +1467,39 @@ void InspectionConverter::convertAttributeLayer(
         }
 
         attrScope->mapId_ = JsValue(tile_->mapId());
-        attrScope->hoverId_ = featureId_ + ":attribute#" +
-                              std::to_string(featureAttributeIndex);
-        if (!view) return true;
-        // Use the public validity indices also used by attribute filtering. An
-        // unrelated raw field named pointValidities was already displayed above.
-        auto appendView = [&](bool pointValidities) {
-            const auto count = pointValidities ? view->pointCount() : view->size();
-            if (!count && !pointValidities && !attr->validityOrNull()) return;
-            const char* key = pointValidities ? "pointValidities" : "validity";
-            auto collection = push(key, key);
-            auto append = [&](uint32_t i, InspectionNode& row) {
-                if (!pointValidities) row.hoverId_ = attrScope->hoverId_ + ":validity#" + std::to_string(i);
+        auto markerDiagnostic = [this](mapget::PointQueryError const& error)
+        {
+            push("Marker diagnostic", RawPath{""}, ValueType::String)->value_ =
+                JsValue(std::string(error.what()));
+        };
+        try {
+            // The same public ordinals identify stored validities and measurement
+            // markers in inspection, attribute filters, rendered picks and source links.
+            auto view = attr->validityView(feature, name);
+            const auto count = view.size();
+            if (!count && !attr->validityOrNull())
+                return true;
+            auto collection = push("validity", "validity");
+            for (uint32_t i = 0; i < count; ++i) {
+                auto row = count == 1 ? push(collection.node_) : push(JsValue(i), i);
+                row->hoverId_ = fmt::format("{}:validity#{}", attrScope->hoverId_, i);
                 try {
-                    auto validity = pointValidities ? view->pointAt(i) : view->at(i);
+                    auto validity = view.at(i);
                     if (validity) convertSingleValidity(*validity);
-                    else row.info_ = "This sample has no position on the selected geometry.";
+                    else
+                        row->info_ = "This sample has no position on the selected geometry.";
                 } catch (mapget::PointQueryError const& error) {
                     markerDiagnostic(error);
                 }
                 // A raw station can still be inspected when it has no corresponding position.
                 try {
-                    addMeasurements(row, view->markerSamples(i, pointValidities), &*attrScope);
+                    addMeasurements(*row, view.markerSamples(i), &*attrScope);
                 } catch (mapget::PointQueryError const& error) {
                     markerDiagnostic(error);
                 }
-            };
-            if (count == 1 && !pointValidities) {
-                append(0, *collection);
-                return;
             }
-            for (uint32_t i = 0; i < count; ++i) {
-                auto row = push(JsValue(i), i);
-                append(i, *row);
-            }
-        };
-        try {
-            appendView(false);
-            if (virtualPointMarkers) appendView(true);
-        } catch (mapget::PointQueryError const& error) {
+        }
+        catch (mapget::PointQueryError const& error) {
             markerDiagnostic(error);
         }
         return true;
@@ -1812,6 +1803,10 @@ void InspectionConverter::convertSingleValidity(Validity const& v)
     auto attrPointIndex = v.attrPointIndex();
     auto attrPointIndexRange = v.attrPointIndexRange();
 
+    if (auto tag = v.tag()) {
+        push("tag", "tag", ValueType::String)->value_ = convertString(*tag);
+    }
+
     if (auto direction = v.direction()) {
         auto dirScope = push("direction", "direction", ValueType::String);
         switch (direction) {
@@ -2065,7 +2060,8 @@ void InspectionConverter::convertField(
     const JsValue& fieldName,
     FieldOrIndex const& path,
     const simfil::ModelNode::Ptr& value,
-    simfil::SchemaType type)
+    simfil::SchemaType type,
+    std::string_view attributeHoverId)
 {
     if (value->addr().column() == TileFeatureLayer::ColumnId::RelationReferences) {
         auto relationRef = tile_->resolve<RelationReference>(*value);
@@ -2084,6 +2080,22 @@ void InspectionConverter::convertField(
     auto fieldScope = push(fieldName, path);
     bool isArray = false;
 
+    if (value->addr().column() == TileFeatureLayer::ColumnId::ValidityReferences) {
+        auto reference = tile_->resolve<ValidityReference>(*value);
+        if (!attributeHoverId.empty())
+            fieldScope->referenceHoverId_ =
+                fmt::format("{}:validity#{}", attributeHoverId, reference->index());
+        // Preview an authored point without projecting onto the host or consuming
+        // its vertex preview budget. Full validity geometry lives in the validity
+        // row; the ordinary traversal below retains the raw reference ordinal.
+        if (auto geometry = reference->validity()->simpleGeometry()) {
+            convertSourceDataReferences(geometry->sourceDataReferences(), *fieldScope);
+            if (geometry->geomType() == GeomType::Points && geometry->numPoints() == 1) {
+                fieldScope->type_ = ValueType::Number | ValueType::ArrayBit;
+                fieldScope->value_ = pointArrayValue(geometry->pointAt(0));
+            }
+        }
+    }
     if (value->addr().column() == TileFeatureLayer::ColumnId::FeatureIds ||
         value->addr().column() == TileFeatureLayer::ColumnId::ExternalFeatureIds)
     {
@@ -2108,14 +2120,16 @@ void InspectionConverter::convertField(
                 kk,
                 static_cast<uint32_t>(index),
                 v,
-                simfil::Value::at(*value, *v, index).schemaType());
+                simfil::Value::at(*value, *v, index).schemaType(),
+                attributeHoverId);
         }
         else {
             convertField(
                 kk,
                 std::string_view(keyPath),
                 v,
-                simfil::Value::field(*value, *v, k).schemaType());
+                simfil::Value::field(*value, *v, k).schemaType(),
+                attributeHoverId);
         }
         ++index;
     }
@@ -2317,6 +2331,8 @@ JsValue InspectionConverter::InspectionNode::toJsValue(std::string_view const& m
         newDict.set("scalarType", *scalarType_);
     if (!hoverId_.empty())
         newDict.set("hoverId", JsValue(hoverId_));
+    if (!referenceHoverId_.empty())
+        newDict.set("referenceHoverId", JsValue(referenceHoverId_));
     if (shapePoint_) {
         newDict.set("geometryOrdinal", JsValue(shapePoint_->first));
         newDict.set("pointIndex", JsValue(shapePoint_->second));

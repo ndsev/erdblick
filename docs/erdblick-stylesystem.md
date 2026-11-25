@@ -1100,6 +1100,11 @@ The renderer consumes explicit `GeometryCollection` values. Validity-required
 rules receive effective validity geometry; a one-element collection is still
 a collection.
 
+Tagged property positions and declared measurement markers use this same
+attribute scope and public validity indices. They locate values, not extra
+vertices of the host geometry. A tag neither widens assignment coverage nor
+turns on a `shapepoint` rule.
+
 Feature-transition validities additionally preserve their from/to feature
 IDs, connected ends, and a pivot index. Their one line contains the real
 incoming ten-metre road slice, an explicit intersection pivot, and the real

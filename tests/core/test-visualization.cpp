@@ -847,6 +847,61 @@ TEST_CASE("FeatureInspection exposes traversal-based attribute hover ids", "[erd
             "Way.1:attribute#1:validity#0") != hoverIds.end());
 }
 
+TEST_CASE(
+    "Property references preserve stored validity slots, coordinates and provenance",
+    "[erdblick.inspection][validity-reference]")
+{
+    auto tile = makeExternalReferenceInspectionTile(mapget::TileId::fromWgs84(42., 11., 13));
+    auto feature = tile->find("Way.1");
+    auto attr = feature->attributeLayers()->newLayer("survey")->newAttribute("stations");
+    attr->validity()->newDirection(mapget::Validity::Positive);
+    auto observations = tile->newArray();
+    auto position = tile->newGeometry(mapget::GeomType::Points);
+    position->append({42.015625, 11.03125, 17.});
+    position->setSourceDataReferences(makeInspectionSourceDataRefs(*tile, "survey-bits", 48));
+    for (uint32_t index : {1u, 2u}) {
+        attr->validity()->newGeometry(position)->setTag("survey-position");
+        auto row = tile->newObject();
+        REQUIRE(row->addField("rawReading", int64_t(100 + index)));
+        REQUIRE(row->addField("station", tile->newValidityReference(attr, index)));
+        observations->append(row);
+    }
+    // The same enumerable JSON shape in an ordinary object is not a reference.
+    auto lookalike = tile->newObject();
+    REQUIRE(lookalike->addField("$mapgetValidity", int64_t(1)));
+    observations->append(lookalike);
+    REQUIRE(attr->addField("observations", observations));
+
+    auto tree = InspectionConverter().convert(feature);
+    auto const* list = findInspectionNodeByKey(*tree, "observations");
+    REQUIRE(list);
+    auto const& rows = list->at("children");
+    REQUIRE(rows.size() == 3);
+    for (uint32_t index : {1u, 2u}) {
+        auto const& row = rows.at(index - 1);
+        auto const* raw = findInspectionNodeByKey(row, "rawReading");
+        REQUIRE(raw);
+        CHECK(raw->at("value") == 100 + index);
+        auto const* ref = findInspectionNodeByKey(row, "station");
+        REQUIRE(ref);
+        CHECK(ref->at("referenceHoverId") == "Way.1:attribute#1:validity#" + std::to_string(index));
+        auto const* ordinal = findInspectionNodeByKey(*ref, "$mapgetValidity");
+        REQUIRE(ordinal);
+        CHECK(ordinal->at("value") == index);
+        CHECK(
+            ref->at("sourceDataReferences")
+                .at(0)
+                .at("mapTileKey")
+                .get<std::string>()
+                .find("survey-bits") != std::string::npos);
+        auto const stored = position->pointAt(0);
+        CHECK(ref->at("value") == nlohmann::json::array({stored.x, stored.y, stored.z}));
+        CHECK_FALSE(ref->contains("pointIndex"));
+        CHECK_FALSE(ref->contains("valueBubbles"));
+    }
+    CHECK_FALSE(rows.at(2).contains("referenceHoverId"));
+}
+
 TEST_CASE("FeatureInspection copies canonical array search paths", "[erdblick.inspection]")
 {
     auto tile = makeLineTestTile(mapget::TileId::fromWgs84(42., 11., 13));

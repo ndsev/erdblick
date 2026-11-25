@@ -104,7 +104,6 @@ TEST_CASE("The same named geometry supplies style completions and vertex inspect
     auto codes = graph->schemaType(layer->addSchema(Kind::Array));
     codes.asArray().addElement(graph->schemaType(graph->primitive(Kind::Int)));
     attr.addField("codes", codes);
-    attr.addField("pointValidities", graph->schemaType(graph->builtin(mapget::MapSchema::Builtin::Validities)));
     layer->bindAttribute(attr, "Road", "Adas", "GRADE");
     mapget::PointSeries series;
     series.featureType_ = "Road";
@@ -113,7 +112,7 @@ TEST_CASE("The same named geometry supplies style completions and vertex inspect
     series.geometryName_ = "profile";
     series.omittedValidityCovers_ = true;
     series.records_ = {"codes"};
-    series.markers_ = mapget::PointSeries::Markers::PointValidities;
+    series.markerTag_ = "grade-station";
     series.fields_ = {{.name_ = "slope", .unit_ = "%", .codec_ = "fifths"}};
     layer->addPointCodec("fifths", {.scale_ = .2});
     layer->addPointSeries(std::move(series));
@@ -145,6 +144,7 @@ TEST_CASE("The same named geometry supplies style completions and vertex inspect
     }
     auto occurrence = feature->attributeLayers()->newLayer("Adas")->newAttribute("GRADE");
     occurrence->setPointSeriesGeometry(1);
+    occurrence->validity()->newGeomName("profile", mapget::Validity::Positive);
     auto values = tile->newArray();
     values->append(int64_t{0});
     values->append(int64_t{-13});
@@ -170,9 +170,14 @@ TEST_CASE("The same named geometry supplies style completions and vertex inspect
     CHECK(children(record, "raw").at("value") == -13);
     const auto& rawOccurrence = children(children(children(reading, "Attribute Layers"), "Adas"), "GRADE");
     CHECK(record.at("sourceNodeId") == children(children(rawOccurrence, "codes"), 1).at("nodeId"));
-    const auto& markers = children(rawOccurrence, "pointValidities");
-    REQUIRE(markers.at("children").size() == 2);
-    const auto& marker = children(children(children(children(markers, 1), "Measurements"), "slope"), 0);
+    const auto& validities = children(rawOccurrence, "validity");
+    REQUIRE(validities.at("children").size() == 3);
+    CHECK(children(children(validities, 0), "direction").at("value") == "POSITIVE");
+    const auto& station = children(validities, 2);
+    CHECK(station.at("hoverId") == "Road.1:attribute#0:validity#2");
+    CHECK(children(station, "tag").at("value") == "grade-station");
+    CHECK_FALSE(station.contains("pointIndex"));
+    const auto& marker = children(children(children(station, "Measurements"), "slope"), 0);
     CHECK(children(marker, "value").at("value").get<double>() == Catch::Approx(-2.6));
     CHECK(children(children(marker, "contributors"), 0).at("sourceNodeId") == record.at("sourceNodeId"));
     CHECK(rawOccurrence.dump().find("_mapgetPointSeriesGeometry") == std::string::npos);
