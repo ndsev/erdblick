@@ -62,7 +62,7 @@ describe("point cloud selection and export", () => {
             peek: (cb: any) => cb({inspectionModelAtShapePoint: model})}]});
         component.getFeatureTreeDataFromModel = () => [];
         component.rebuildInspectionTree();
-        expect(model).toHaveBeenCalledWith(1, 0, "feed", "r1");
+        expect(model).toHaveBeenCalledWith(1, 0, "feed");
     });
     it("rebuilds inspection without exporting geometry and exports all coordinates on demand", () => {
         const coordinates = Array.from({length: 1000}, (_, i) => [8.7, 47.4, i]);
