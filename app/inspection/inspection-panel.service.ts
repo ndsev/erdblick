@@ -934,22 +934,22 @@ export class InspectionPanelService implements AppActionContributor {
         };
     }
 
-    /**
-     * Validate the docked/locked invariant before changing any panel fields, then
-     * publish the complete edit in one persistence transaction.
-     */
+    /** Apply one presentation edit. Only moving a floating panel into the dock locks and resizes it. */
     setPanelPresentation(
         panelId: number,
         value: { locked: boolean; undocked: boolean; focused: boolean; color: string }
     ): void {
-        this.panelPresentation(panelId);
-        if (!value.undocked && !value.locked)
-            rejectAction("Docked inspections are locked", "invalid_arguments");
+        const previous = this.panelPresentation(panelId);
+        const moving = previous.undocked !== value.undocked;
+        if (moving && !value.undocked && !value.locked)
+            rejectAction("Docking an inspection locks it", "invalid_arguments");
         this.persistence.transaction(() => {
-            this.setInspectionPanelUndockedState(panelId, value.undocked);
-            this.setInspectionPanelLockedState(panelId, value.locked);
-            this.setInspectionPanelColor(panelId, value.color);
-            if (value.focused || this.focusedInspectionPanelId === panelId)
+            // Map picks open in unlocked docked panels. Recoloring one must keep
+            // its size, the user's active dock tab and the currently focused panel.
+            if (moving) this.setInspectionPanelUndockedState(panelId, value.undocked);
+            if (previous.locked !== value.locked) this.setInspectionPanelLockedState(panelId, value.locked);
+            if (previous.color !== value.color) this.setInspectionPanelColor(panelId, value.color);
+            if ((this.focusedInspectionPanelId === panelId) !== value.focused)
                 this.setFocusedInspectionPanel(value.focused ? panelId : undefined);
         });
     }
